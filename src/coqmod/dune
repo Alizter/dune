@@ -1,0 +1,7 @@
+(vendored_dirs csexp)
+
+(executable
+ (name coqmod)
+ (libraries stdune csexp))
+
+(ocamllex lexer)
