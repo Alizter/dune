@@ -8,4 +8,9 @@
 
 (cram
  (applies_to :whole_subtree)
- (deps %{bin:coqc} %{bin:coqdep}))
+ (deps %{bin:coqc} %{bin:coqdep} %{bin:coqmod}))
+
+(env
+ (_
+  (binaries
+   (../../../../src/coqmod/coqmod.exe as coqmod))))
