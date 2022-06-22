@@ -56,10 +56,7 @@ let theories_flags ~theories_deps =
     let dir = Coq_lib.src_root lib in
     let binding_flag = if Coq_lib.implicit lib then "-R" else "-Q" in
     Command.Args.S
-      [ A binding_flag
-      ; Path (Path.build dir)
-      ; A (Coq_lib.name lib |> Coq_lib_name.wrapper)
-      ]
+      [ A binding_flag; Path dir; A (Coq_lib.name lib |> Coq_lib_name.wrapper) ]
   in
   Resolve.Memo.args
     (let open Resolve.Memo.O in
@@ -105,10 +102,12 @@ let native_includes ~dir =
 
 let directories_of_lib ~sctx lib =
   let name = Coq_lib.name lib in
-  let dir = Coq_lib.src_root lib in
-  let* dir_contents = Dir_contents.get sctx ~dir in
-  let+ coq_sources = Dir_contents.coq dir_contents in
-  Coq_sources.directories coq_sources ~name
+  Path.as_in_build_dir (Coq_lib.src_root lib) |> function
+  | None -> Memo.return []
+  | Some dir ->
+    let* dir_contents = Dir_contents.get sctx ~dir in
+    let+ coq_sources = Dir_contents.coq dir_contents in
+    Coq_sources.directories coq_sources ~name
 
 let setup_native_theory_includes ~sctx ~theories_deps ~theory_dirs =
   Resolve.Memo.bind theories_deps ~f:(fun theories_deps ->
@@ -285,8 +284,7 @@ let parse_coqdep ~dir ~boot_type ~coq_module (lines : string list) =
     match boot_type with
     | `No_boot | `Bootstrap_prelude -> deps
     | `Bootstrap lib ->
-      Path.relative (Path.build (Coq_lib.src_root lib)) "Init/Prelude.vo"
-      :: deps)
+      Path.relative (Coq_lib.src_root lib) "Init/Prelude.vo" :: deps)
 
 let boot_type ~dir ~use_stdlib ~wrapper_name coq_module =
   let* scope = Scope.DB.find_by_dir dir in
@@ -475,12 +473,19 @@ let setup_coqc_rule ~loc ~dir ~sctx ~coqc_dir ~file_targets ~stanza_flags
     >>| Action.Full.add_sandbox Sandbox_config.no_sandboxing)
 
 let coq_modules_of_theory ~sctx lib =
+  (* TODO generalize to any coq library (even installed) *)
   Action_builder.of_memo
-    (let name = Coq_lib.name lib in
-     let dir = Coq_lib.src_root lib in
-     let* dir_contents = Dir_contents.get sctx ~dir in
-     let+ coq_sources = Dir_contents.coq dir_contents in
-     Coq_sources.library coq_sources ~name)
+  @@
+  let name = Coq_lib.name lib in
+  Path.as_in_build_dir (Coq_lib.src_root lib) |> function
+  | None ->
+    (* TODO for now we return no modules when the path of a theory is outside of
+       the build directory *)
+    Memo.return []
+  | Some dir ->
+    let* dir_contents = Dir_contents.get sctx ~dir in
+    let+ coq_sources = Dir_contents.coq dir_contents in
+    Coq_sources.library coq_sources ~name
 
 let source_rule ~sctx theories =
   (* sources for depending libraries coqdep requires all the files to be in the

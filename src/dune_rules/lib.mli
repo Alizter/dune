@@ -148,6 +148,15 @@ module DB : sig
   val resolve_when_exists :
     t -> Loc.t * Lib_name.t -> lib Resolve.t option Memo.t
 
+  (** Like [resolve], but will return the first library in a list that is found
+      and raise an error if none of them can be found. *)
+  val resolve_first : t -> (Loc.t * Lib_name.t) list -> lib Resolve.Memo.t
+
+  (* Like [resolve_first], but will return [None] instead of an error if we
+     are unable to find any of the libraries. *)
+  val resolve_first_when_exists :
+    t -> (Loc.t * Lib_name.t) list -> lib Resolve.t option Memo.t
+
   (** Resolve libraries written by the user in a [dune] file. The resulting list
       of libraries is transitively closed and sorted by the order of
       dependencies.

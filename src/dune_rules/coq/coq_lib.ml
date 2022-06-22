@@ -8,30 +8,25 @@ open Import
 module Id = struct
   module T = struct
     type t =
-      { path : Path.Build.t
+      { path : Path.t
       ; name : Coq_lib_name.t
       }
 
     let compare t { path; name } =
       let open Ordering.O in
-      let= () = Path.Build.compare t.path path in
+      let= () = Path.compare t.path path in
       Coq_lib_name.compare t.name name
 
     let to_dyn { path; name } =
-      Dyn.(
-        record
-          [ ("path", Path.Build.to_dyn path)
-          ; ("name", Coq_lib_name.to_dyn name)
-          ])
+      Dyn.record
+        [ ("path", Path.to_dyn path); ("name", Coq_lib_name.to_dyn name) ]
   end
 
   include T
 
   let pp { path; name } =
     Pp.concat ~sep:Pp.space
-      [ Pp.textf "theory %s in" (Coq_lib_name.to_string name)
-      ; Path.pp (Path.build path)
-      ]
+      [ Pp.textf "theory %s in" (Coq_lib_name.to_string name); Path.pp path ]
 
   let create ~path ~name = { path; name }
 
@@ -52,8 +47,8 @@ include struct
     ; implicit : bool (* Only useful for the stdlib *)
     ; use_stdlib : bool
           (* whether this theory uses the stdlib, eventually set to false for all libs *)
-    ; src_root : Path.Build.t
-    ; obj_root : Path.Build.t
+    ; src_root : Path.t
+    ; obj_root : Path.t
     ; theories : (Loc.t * t) list Resolve.t
     ; libraries : (Loc.t * Lib.t) list Resolve.t
     ; theories_closure : t list Resolve.t Lazy.t
@@ -154,6 +149,8 @@ module DB = struct
            Coq_lib_name.t
         -> [ `Redirect of t
            | `Theory of Lib.DB.t * Path.Build.t * Coq_stanza.Theory.t
+           | `Stdlib of lib
+           | `User_contrib of lib
            | `Not_found
            ]
     ; boot : (Loc.t * lib Resolve.t Memo.Lazy.t) option
@@ -274,12 +271,11 @@ module DB = struct
         }
       in
       let module Input = struct
-        type nonrec t = t * Lib.DB.t * Path.Build.t * Coq_stanza.Theory.t
+        type nonrec t = t * Lib.DB.t * Path.t * Coq_stanza.Theory.t
 
         let equal (coq_db, ml_db, path, stanza) (coq_db', ml_db', path', stanza')
             =
-          coq_db == coq_db' && ml_db == ml_db'
-          && Path.Build.equal path path'
+          coq_db == coq_db' && ml_db == ml_db' && Path.equal path path'
           && stanza == stanza'
 
         let hash = Poly.hash
@@ -297,34 +293,43 @@ module DB = struct
 
     let rec find coq_db name =
       match coq_db.resolve name with
-      | `Theory (db, dir, stanza) -> Some (db, dir, stanza)
+      | `Theory (db, dir, stanza) -> `Theory (db, dir, stanza)
       | `Redirect coq_db -> find coq_db name
+      | `Stdlib lib -> `Stdlib lib
+      | `User_contrib lib -> `User_contrib lib
       | `Not_found -> (
         match coq_db.parent with
-        | None -> None
+        | None -> `Not_found
         | Some parent -> find parent name)
 
     let find coq_db ~coq_lang_version name =
       match find coq_db name with
-      | None -> `Not_found
-      | Some (mldb, dir, stanza) when coq_lang_version >= (0, 4) ->
-        `Found (mldb, dir, stanza)
-      | Some (mldb, dir, stanza) -> (
+      | `Not_found -> `Not_found
+      (* Composing with installed theories should come past 0.8 *)
+      | (`Stdlib lib | `User_contrib lib) when coq_lang_version >= (0, 8) ->
+        `Found_lib lib
+      | `Stdlib _ | `User_contrib _ -> `Not_found
+      (* Composing with theories in the same project should come past 0.4 *)
+      | `Theory (mldb, dir, stanza) when coq_lang_version >= (0, 4) ->
+        `Found_stanza (mldb, dir, stanza)
+      | `Theory (mldb, dir, stanza) -> (
         match coq_db.resolve name with
         | `Not_found -> `Hidden
-        | `Theory _ | `Redirect _ -> `Found (mldb, dir, stanza))
+        | `Theory _ | `Redirect _ | `Stdlib _ | `User_contrib _ ->
+          `Found_stanza (mldb, dir, stanza))
 
     let resolve coq_db ~coq_lang_version (loc, name) =
       match find coq_db ~coq_lang_version name with
       | `Not_found -> Error.theory_not_found ~loc name
       | `Hidden -> Error.hidden_without_composition ~loc name
-      | `Found (db, dir, stanza) ->
+      | `Found_stanza (db, dir, stanza) ->
         let open Memo.O in
-        let+ theory = create_from_stanza coq_db db dir stanza in
+        let+ theory = create_from_stanza coq_db db (Path.build dir) stanza in
         let open Resolve.O in
         let* (_ : (Loc.t * Lib.t) list) = theory.libraries in
         let+ (_ : (Loc.t * lib) list) = theory.theories in
         theory
+      | `Found_lib lib -> Resolve.Memo.return lib
   end
 
   include R
@@ -407,6 +412,150 @@ module DB = struct
       Resolve.Memo.List.map theories ~f:(resolve ~coq_lang_version db)
     in
     Resolve.O.(theories >>= top_closure)
+
+  let empty_db =
+    let resolve _ = `Not_found in
+    { parent = None; resolve; boot = None }
+
+  let stdlib_lib ~coqlib =
+    let theories_dir =
+      Path.append_local coqlib (Path.Local.of_string "theories")
+    in
+    Memo.return
+    @@ { loc = Loc.none
+       ; boot = Resolve.return None
+       ; id = Id.create ~path:theories_dir ~name:(Coq_lib_name.of_string "Coq")
+       ; implicit = true (* TODO do we want to keep implicit for now? *)
+       ; use_stdlib = false
+       ; src_root = theories_dir
+       ; obj_root = theories_dir
+       ; theories = Resolve.return [] (* Stdlib has no theories deps *)
+       ; libraries =
+           (* Stdlib does have some libraries deps, but these can be ignored *)
+           Resolve.return []
+       ; theories_closure =
+           (* The closure of the theories deps is empty *)
+           lazy (Resolve.return [])
+       ; package =
+           None (* TODO: this should be the coq package (or coq-stdlib?) *)
+       }
+
+  (* This generates a map indexed by Coq_lib_names which pick out subdirectories
+     recursively using the coq_lib_name. This is used only for scanning
+     user-contrib and gernating "theories" from the existing directories. *)
+  let rec subdirectory_map name dir : Path.t Coq_lib_name.Map.t Memo.t =
+    (* Printf.printf "Making subdirectory map: %s %s\n" (Coq_lib_name.to_string name)
+       (Path.to_string_maybe_quoted dir); *)
+    let open Memo.O in
+    (* TODO using exn here; remove *)
+    let* dir_exists = Fs_memo.path_kind (Path.as_outside_build_dir_exn dir) in
+    match dir_exists with
+    | Ok Unix.S_DIR -> (
+      let* dir_contents =
+        Fs_memo.dir_contents (Path.as_outside_build_dir_exn dir)
+      in
+      match dir_contents with
+      | Ok x ->
+        let dir_files =
+          List.filter_map (Fs_cache.Dir_contents.to_list x)
+            ~f:(fun (file, kind) ->
+              match kind with
+              | Unix.S_DIR -> Some file
+              | _ -> None)
+        in
+        let prefix_entries = Coq_lib_name.Map.singleton name dir in
+        let+ subdirs_entries =
+          List.map dir_files ~f:(fun file ->
+              let name = Coq_lib_name.append name file in
+              let dir = Path.append_local dir (Path.Local.of_string file) in
+              subdirectory_map name dir)
+          |> Memo.all
+        in
+        List.fold_left
+          (prefix_entries :: subdirs_entries)
+          ~init:Coq_lib_name.Map.empty ~f:Coq_lib_name.Map.union_exn
+      | Error _ ->
+        (* TODO Ignore errors for now *)
+        Memo.return Coq_lib_name.Map.empty)
+    | Error x ->
+      User_error.raise
+        [ Pp.text "System error encountered when finding coqlib:"
+        ; Unix_error.Detailed.pp x
+        ]
+    | _ ->
+      Code_error.raise "subdirectory_map: dir does not exist"
+        [ ("name", Coq_lib_name.to_dyn name); ("dir", Path.to_dyn dir) ]
+
+  let lib_of_user_contrib_name name path : lib =
+    { loc = Loc.none
+    ; boot = Resolve.return None
+    ; id = Id.create ~name ~path
+    ; implicit = false
+    ; use_stdlib = false
+    ; src_root = path
+    ; obj_root = path
+    ; theories =
+        Resolve.return [] (* These may exist but we can't know about them *)
+    ; libraries =
+        Resolve.return [] (* These may exist but we can't know about them *)
+    ; theories_closure =
+        lazy (Resolve.return [])
+        (* These may exist but we can't know about them *)
+    ; package =
+        None
+        (* For now user-contrib entries will not be associated with a package *)
+    }
+
+  let from_coqlib ~coqlib =
+    let open Memo.O in
+    let* stdlib = stdlib_lib ~coqlib in
+    let* subdirs_map =
+      let user_contrib =
+        Path.append_local coqlib (Path.Local.of_string "user-contrib")
+      in
+      subdirectory_map Coq_lib_name.empty user_contrib
+    in
+    let resolve coq_lib_name =
+      let looking_for_stdlib =
+        Ordering.is_eq
+          (Coq_lib_name.compare coq_lib_name (Coq_lib_name.of_string "Coq"))
+      in
+      match looking_for_stdlib with
+      | true -> `Stdlib stdlib
+      | false -> (
+        Coq_lib_name.Map.find subdirs_map coq_lib_name |> function
+        | Some path ->
+          `User_contrib (lib_of_user_contrib_name coq_lib_name path)
+        | None -> `Not_found)
+    in
+    Memo.return { parent = None; resolve; boot = None }
+
+  let installed (context : Context.t) =
+    let open Memo.O in
+    (* First we find coqc so we can query it *)
+    Context.which context "coqc" >>= function
+    | None ->
+      (* If no coqc can be found then we cannot have any installed theories, so
+         we return an empty database *)
+      Memo.return empty_db
+    | Some coqc ->
+      (* Next we setup the query for coqc --config *)
+      let* coq_config = Coq_config.make ~coqc:(Ok coqc) in
+      (* Now we query for coqlib *)
+      let coqlib =
+        Coq_config.by_name coq_config "coqlib" |> function
+        | Some coqlib -> (
+          coqlib |> function
+          | Coq_config.Value.Path p -> p (* We have found a path for coqlib *)
+          | coqlib ->
+            (* This should never happen *)
+            Code_error.raise "coqlib is not a path"
+              [ ("coqlib", Coq_config.Value.to_dyn coqlib) ])
+        | None ->
+          (* This happens if the output of coqc --config doesn't include coqlib *)
+          User_error.raise [ Pp.text "coqlib not found from coqc --config" ]
+      in
+      from_coqlib ~coqlib
 end
 
 let theories_closure t = Lazy.force t.theories_closure

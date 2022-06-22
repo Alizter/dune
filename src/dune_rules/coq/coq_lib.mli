@@ -13,9 +13,9 @@ val implicit : t -> bool
 (** ml libraries *)
 val libraries : t -> (Loc.t * Lib.t) list Resolve.t
 
-val src_root : t -> Path.Build.t
+val src_root : t -> Path.t
 
-val obj_root : t -> Path.Build.t
+val obj_root : t -> Path.t
 
 val package : t -> Package.t option
 
@@ -56,4 +56,6 @@ module DB : sig
     -> (Loc.t * Coq_lib_name.t) list
     -> coq_lang_version:Dune_sexp.Syntax.Version.t
     -> lib list Resolve.Memo.t
+
+  val installed : Context.t -> t Memo.t
 end
