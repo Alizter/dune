@@ -9,6 +9,29 @@ open Memo.O
 
 open Coq_stanza
 
+let deps_kind = `Coqmod
+
+module Require_map_db = struct
+  (* merge all the maps *)
+  let impl (requires, buildable_map) =
+    Memo.return @@ Coq_require_map.merge_all (buildable_map :: requires)
+
+  let memo =
+    let module Input = struct
+      type t =
+        Coq_module.t Coq_require_map.t list * Coq_module.t Coq_require_map.t
+
+      let equal = ( == )
+
+      let hash = Poly.hash
+
+      let to_dyn = Dyn.opaque
+    end in
+    Memo.create "coq-require-map-db" ~input:(module Input) impl
+
+  let exec ~requires map = Memo.exec memo (requires, map)
+end
+
 module Coq_plugin = struct
   let meta_info ~coq_lang_version ~plugin_loc ~context (lib : Lib.t) =
     let debug = false in
@@ -303,7 +326,12 @@ module Context = struct
           in
           Resolve.return (Path.Build.Set.union_all (theory_dirs :: l)))
 
-  let create sctx ~dir ~theories_deps ~theory_dirs (buildable : Buildable.t) =
+  let create sctx ~dir ~theories_deps ~theory_dirs stanza =
+    let buildable =
+      match stanza with
+      | `Extraction (e : Extraction.t) -> e.buildable
+      | `Theory (t : Theory.t) -> t.buildable
+    in
     let context = Super_context.context sctx |> Context.name in
     let* scope = Scope.DB.find_by_dir dir in
     let lib_db = Scope.libs scope in
@@ -368,17 +396,186 @@ let parse_coqdep ~dir ~(boot_type : Bootstrap.t) ~coq_module
       Path.relative (Path.build (Coq_lib.src_root lib)) "Init/Prelude.vo"
       :: deps)
 
-let deps_of ~dir ~boot_type coq_module =
-  let stdout_to = Coq_module.dep_file coq_module in
-  let open Action_builder.O in
-  let* boot_type = boot_type in
-  Action_builder.map
-    (Action_builder.lines_of (Path.build stdout_to))
-    ~f:(parse_coqdep ~dir ~boot_type ~coq_module)
-  |> Action_builder.dyn_paths_unit
+let verbose = true
+(* DEBUG *)
 
-let setup_coqdep_rule ~sctx ~dir ~loc ~theories_deps ~wrapper_name ~use_stdlib
-    (cctx : _ Context.t) ~source_rule coq_module =
+let err_from_not_found ~loc from source =
+  User_error.raise ~loc
+  @@ (match Coqmod.From.prefix from with
+     | Some prefix ->
+       [ Pp.textf "could not find module %S with prefix %S"
+           (Coqmod.From.require from |> Coqmod.Module.name)
+           (prefix |> Coqmod.Module.name)
+       ]
+     | None ->
+       [ Pp.textf "could not find module %S."
+           (Coqmod.From.require from |> Coqmod.Module.name)
+       ])
+  @
+  if verbose then
+    [ Pp.textf "%s\n" @@ Dyn.to_string @@ Coq_require_map.to_dyn source ]
+  else []
+
+let err_from_ambiguous ~loc m _from source =
+  User_error.raise ~loc
+  @@ [ Pp.textf "TODO ambiguous paths:%s\n"
+       @@ Dyn.to_string
+       @@ Dyn.list Coq_module.to_dyn m
+     ]
+  @
+  if verbose then
+    [ Pp.textf "%s" @@ Dyn.to_string @@ Coq_require_map.to_dyn source ]
+  else []
+
+let err_undeclared_plugin ~loc libname =
+  User_error.raise ~loc
+    Pp.[ textf "TODO undelcared plugin %S" (Lib_name.to_string libname) ]
+
+let coq_require_map_of_theory ~sctx lib =
+  let name = Coq_lib.name lib in
+  let dir = Coq_lib.src_root lib in
+  let* dir_contents = Dir_contents.get sctx ~dir in
+  let+ coq_sources = Dir_contents.coq dir_contents in
+  Coq_sources.require_map coq_sources (`Theory name)
+
+module Deps = struct
+  let loc from_ coq_module =
+    let fname = Coq_module.source coq_module |> Path.Build.to_string in
+    Coqmod.From.require from_ |> Coqmod.Module.loc |> Coqmod.Loc.to_loc ~fname
+
+  let froms ~theories ~theory_rms ~sources ~coq_module t =
+    let f (from_ : Coqmod.From.t) =
+      let loc = loc from_ coq_module in
+      let prefix =
+        Option.map (Coqmod.From.prefix from_) ~f:(fun p ->
+            Coq_module.Path.of_string @@ Coqmod.Module.name p)
+      in
+      let suffix =
+        Coqmod.From.require from_ |> Coqmod.Module.name
+        |> Coq_module.Path.of_string
+      in
+      let open Memo.O in
+      let+ require_map =
+        let theories =
+          match prefix with
+          | Some prefix ->
+            List.filter theories ~f:(fun theory ->
+                Coq_module.Path.is_prefix ~prefix @@ Coq_lib.root_path theory)
+          | None ->
+            (* TODO this is incorrect, needs to include only current theory
+               and boot library if present *)
+            theories
+        in
+        let requires = List.map theories ~f:(Coq_lib.Map.find_exn theory_rms) in
+        Printf.printf "prefix: %s\t suffix: %s\t requires: %s\n"
+          (Dyn.option Coq_module.Path.to_dyn prefix |> Dyn.to_string)
+          (Coq_module.Path.to_dyn suffix |> Dyn.to_string)
+          (Dyn.list Coq_require_map.to_dyn requires |> Dyn.to_string);
+        Require_map_db.exec ~requires sources
+      in
+      let matches =
+        match prefix with
+        | Some prefix -> Coq_require_map.find_all ~prefix ~suffix require_map
+        | None ->
+          Coq_require_map.find_all ~prefix:Coq_module.Path.empty ~suffix
+            require_map
+      in
+      match matches with
+      | [] -> err_from_not_found ~loc from_ require_map
+      | [ m ] ->
+        (* TODO: vos support goes here *)
+        Path.build (Coq_module.vo_file m)
+      (* | m :: _ ->
+         (* For ambiguous froms we take the first match. There is no garantee that this is valid. *)
+         Path.build (Coq_module.vo_file m) *)
+      | m -> err_from_ambiguous ~loc m from_ require_map
+    in
+
+    Coqmod.froms t |> Memo.parallel_map ~f |> Action_builder.of_memo
+
+  let boot_deps ~boot_type =
+    let open Bootstrap in
+    let open Action_builder.O in
+    let+ boot_type = boot_type in
+    match boot_type with
+    | No_boot | Bootstrap_prelude -> []
+    | Bootstrap lib ->
+      [ Path.relative (Path.build (Coq_lib.src_root lib)) "Init/Prelude.vo" ]
+
+  let loads ~dir t =
+    Coqmod.loads t
+    |> List.rev_map ~f:(fun file ->
+           let fname = Coqmod.Load.path file in
+           Path.build (Path.Build.relative dir fname))
+
+  let extradeps t =
+    Coqmod.extradeps t
+    |> List.rev_map ~f:(fun file ->
+           let fname = Coqmod.ExtraDep.file file in
+           let path =
+             Coqmod.ExtraDep.from file |> Coqmod.Module.name
+             |> Dune_re.replace_string Re.(compile @@ char '.') ~by:"/"
+             |> Path.Local.of_string |> Path.Build.of_local
+           in
+           Path.build (Path.Build.relative path fname))
+
+  let coqmod_deps ~theories ~sources ~dir ~theory_rms ~boot_type coq_module =
+    let open Action_builder.O in
+    let* t = Coqmod_rules.deps_of coq_module in
+    (* convert [Coqmod.t] to a list of paths repping the deps *)
+    let+ froms = froms ~theories ~theory_rms ~sources ~coq_module t
+    and+ boot_deps = boot_deps ~boot_type in
+    (* Add prelude deps for when stdlib is in scope and we are not actually
+       compiling the prelude *)
+    (* TODO: plugin deps *)
+    ignore err_undeclared_plugin;
+    List.concat [ froms; loads ~dir t; extradeps t; boot_deps ]
+
+  let of_ ~sctx ~theories ~stanza ~dir ~boot_type coq_module =
+    Memo.return
+    @@
+    let open Action_builder.O in
+    match deps_kind with
+    | `Coqmod ->
+      let* sources =
+        Action_builder.of_memo
+        @@
+        let open Memo.O in
+        let* dir_contents = Dir_contents.get sctx ~dir in
+        let+ coq_sources = Dir_contents.coq dir_contents in
+        let what =
+          match stanza with
+          | `Extraction e -> `Extraction e
+          | `Theory (t : Theory.t) -> `Theory (snd t.name)
+        in
+        match stanza with
+        | `Extraction _ -> Coq_sources.require_map coq_sources what
+        | `Theory (t : Theory.t) ->
+          if t.boot then
+            Coq_sources.require_map ~skip_theory_prefix:true coq_sources what
+          else Coq_sources.require_map coq_sources what
+      in
+      let* theory_rms =
+        Action_builder.of_memo
+        @@ (Memo.parallel_map theories ~f:(fun theory ->
+                let open Memo.O in
+                let+ require_map = coq_require_map_of_theory ~sctx theory in
+                (theory, require_map))
+           |> Memo.map ~f:Coq_lib.Map.of_list_exn)
+      in
+      coqmod_deps ~theories ~sources ~dir ~theory_rms ~boot_type coq_module
+      |> Action_builder.dyn_paths_unit
+    | `Coqdep ->
+      let stdout_to = Coq_module.dep_file coq_module in
+      let* boot_type = boot_type in
+      Action_builder.map
+        (Action_builder.lines_of (Path.build stdout_to))
+        ~f:(parse_coqdep ~dir ~boot_type ~coq_module)
+      |> Action_builder.dyn_paths_unit
+end
+
+let coqdep_rule (cctx : _ Context.t) ~dir ~coqdep ~source_rule ~theories_deps
+    ~wrapper_name ~use_stdlib coq_module =
   (* coqdep needs the full source + plugin's mlpack to be present :( *)
   let source = Coq_module.source coq_module in
   let file_flags =
@@ -390,16 +587,11 @@ let setup_coqdep_rule ~sctx ~dir ~loc ~theories_deps ~wrapper_name ~use_stdlib
     ]
   in
   let stdout_to = Coq_module.dep_file coq_module in
-  let* coqdep =
-    Super_context.resolve_program sctx "coqdep" ~dir ~loc:(Some loc)
-      ~hint:"opam install coq"
-  in
   (* Coqdep has to be called in the stanza's directory *)
-  Super_context.add_rule ~loc sctx ~dir
-    (let open Action_builder.With_targets.O in
-    Action_builder.with_no_targets cctx.mlpack_rule
-    >>> Action_builder.(with_no_targets (goal source_rule))
-    >>> Command.run ~dir:(Path.build dir) ~stdout_to coqdep file_flags)
+  let open Action_builder.With_targets.O in
+  Action_builder.with_no_targets cctx.mlpack_rule
+  >>> Action_builder.(with_no_targets (goal source_rule))
+  >>> Command.run ~dir:(Path.build dir) ~stdout_to coqdep file_flags
 
 let coqc_rule (cctx : _ Context.t) ~coq_flags ~deps_of ~file_flags ~coqc
     ~coqc_dir ~mode ~file_targets ~obj_files_mode ~wrapper_name coq_module =
@@ -426,19 +618,35 @@ let coqc_rule (cctx : _ Context.t) ~coq_flags ~deps_of ~file_flags ~coqc
   >>| Action.Full.add_sandbox Sandbox_config.no_sandboxing
 
 let setup_coqc_rule ~loc ~dir ~sctx (cctx : _ Context.t) ~file_targets
-    ~stanza_flags ~theories_deps ~mode ~wrapper_name ~use_stdlib coq_module =
+    ~stanza_flags ~theories_deps ~mode ~source_rule ~wrapper_name ~use_stdlib
+    ~stanza coq_module =
   (* Process coqdep and generate rules *)
-  let deps_of =
-    let boot_type = boot_type ~dir ~use_stdlib ~wrapper_name coq_module in
-    deps_of ~dir ~boot_type coq_module
-  in
   let file_flags =
     Context.coqc_file_flags ~dir ~theories_deps ~wrapper_name ~use_stdlib cctx
       coq_module
   in
+  (match deps_kind with
+  | `Coqmod -> Coqmod_rules.add_rule sctx coq_module
+  | `Coqdep ->
+    let* coqdep =
+      Super_context.resolve_program sctx "coqdoc" ~dir ~loc:(Some loc)
+        ~hint:"opam install coq"
+    in
+    let rule =
+      coqdep_rule cctx ~dir ~coqdep ~source_rule ~theories_deps ~wrapper_name
+        ~use_stdlib coq_module
+    in
+    Super_context.add_rule ~loc ~dir sctx rule)
+  >>> (* Process deps and generate rules *)
+  let* deps_of =
+    let* theories = theories_deps in
+    let* theories = Resolve.read_memo theories in
+    let boot_type = boot_type ~dir ~use_stdlib ~wrapper_name coq_module in
+    Deps.of_ ~sctx ~theories ~stanza ~dir ~boot_type coq_module
+  in
   let* coqc = coqc ~loc ~dir ~sctx in
   let* expander = Super_context.expander sctx ~dir in
-  let coq_flags = coq_flags ~expander ~dir ~stanza_flags ~sctx in
+  let coq_flags = coq_flags ~dir ~stanza_flags ~expander ~sctx in
   let coqc_dir = (Super_context.context sctx).build_dir in
   match (mode : Coq_mode.t) with
   | Legacy | Native | VoOnly ->
@@ -460,13 +668,6 @@ let setup_coqc_rule ~loc ~dir ~sctx (cctx : _ Context.t) ~file_targets
           ~mode:Coq_mode.Native_split ~obj_files_mode:Coq_module.No_obj
           ~wrapper_name coq_module
       ]
-
-let setup_coqdep_and_coqc_rule ~loc ~sctx ~dir ~source_rule ~file_targets
-    ~stanza_flags ~theories_deps ~use_stdlib ~mode ~wrapper_name cctx m =
-  setup_coqc_rule ~file_targets ~stanza_flags ~sctx ~loc cctx m ~dir
-    ~theories_deps ~mode ~wrapper_name ~use_stdlib
-  >>> setup_coqdep_rule ~sctx ~loc cctx ~source_rule m ~dir ~theories_deps
-        ~wrapper_name ~use_stdlib
 
 let coq_modules_of_theory ~sctx lib =
   Action_builder.of_memo
@@ -495,7 +696,7 @@ let setup_cctx_and_modules ~sctx ~dir ~theories_deps ~dir_contents
     Coq_sources.directories coq_dir_contents ~name |> Path.Build.Set.of_list
   in
   let+ cctx =
-    Context.create sctx ~dir ~theories_deps ~theory_dirs s.buildable
+    Context.create sctx ~dir ~theories_deps ~theory_dirs (`Theory s)
   in
   let coq_modules = Coq_sources.library coq_dir_contents ~name in
   (cctx, coq_modules)
@@ -630,9 +831,10 @@ let setup_theory_rules ~sctx ~dir ~dir_contents (s : Theory.t) =
   let* mode = select_native_mode ~sctx ~dir s.buildable in
   Memo.parallel_iter coq_modules
     ~f:
-      (setup_coqdep_and_coqc_rule ~sctx ~loc cctx ~source_rule ~dir
-         ~file_targets:[] ~theories_deps ~stanza_flags:s.buildable.flags
-         ~use_stdlib:s.buildable.use_stdlib ~mode ~wrapper_name)
+      (setup_coqc_rule ~sctx ~loc cctx ~source_rule ~dir ~file_targets:[]
+         ~theories_deps ~stanza_flags:s.buildable.flags
+         ~use_stdlib:s.buildable.use_stdlib ~mode ~wrapper_name
+         ~stanza:(`Theory s))
   >>> setup_coqdoc_rules ~sctx ~dir ~theories_deps s coq_modules ~wrapper_name
 
 let coqtop_args_theory ~sctx ~dir ~dir_contents (s : Theory.t) coq_module =
@@ -769,7 +971,7 @@ let setup_extraction_cctx_and_modules ~sctx ~dir ~dir_contents
     in
     let theories_deps = Resolve.Memo.lift theories_deps in
     let theory_dirs = Path.Build.Set.empty in
-    Context.create sctx ~dir ~theories_deps ~theory_dirs s.buildable
+    Context.create sctx ~dir ~theories_deps ~theory_dirs (`Extraction s)
   and+ coq = Dir_contents.coq dir_contents in
   (cctx, Coq_sources.extract coq s)
 
@@ -790,10 +992,10 @@ let setup_extraction_rules ~sctx ~dir ~dir_contents (s : Extraction.t) =
     theories >>> Action_builder.path (Path.build (Coq_module.source coq_module))
   in
   let* mode = select_native_mode ~sctx ~dir s.buildable in
-  setup_coqdep_and_coqc_rule cctx ~dir ~sctx ~loc:s.buildable.loc
-    ~file_targets:ml_targets ~source_rule ~stanza_flags:s.buildable.flags
-    ~theories_deps ~use_stdlib:s.buildable.use_stdlib coq_module ~mode
-    ~wrapper_name
+  setup_coqc_rule cctx ~dir ~sctx ~loc:s.buildable.loc ~file_targets:ml_targets
+    ~source_rule ~stanza_flags:s.buildable.flags ~theories_deps
+    ~use_stdlib:s.buildable.use_stdlib coq_module ~mode ~wrapper_name
+    ~stanza:(`Extraction s)
 
 let coqtop_args_extraction ~sctx ~dir ~dir_contents (s : Extraction.t)
     coq_module =
@@ -818,3 +1020,16 @@ let coqtop_args_extraction ~sctx ~dir ~dir_contents (s : Extraction.t)
   :: Command.Args.S [ Context.coqc_native_flags ~mode cctx ]
   :: Context.coqc_file_flags ~dir ~theories_deps ~wrapper_name ~use_stdlib cctx
        coq_module
+
+let deps_of ~dir ~boot_type mod_ =
+  (* TODO fix *)
+  let kind = failwith "TODO dune coq top unsupported" in
+  let sctx = failwith "" in
+  ignore kind;
+  ignore sctx;
+  ignore dir;
+  ignore boot_type;
+  ignore mod_;
+  assert false
+(* Action_builder.of_memo_join
+   @@ Deps.of_ ~sctx ~theories:[] ~kind ~dir ~boot_type mod_ *)

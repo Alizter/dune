@@ -1,0 +1,8 @@
+(coq.theory
+ (name Coq)
+ (package coq-stdlib)
+ (synopsis "Coq's Standard Library")
+ (flags -q -w -deprecated-native-compiler-option)
+ (boot))
+
+(include_subdirs qualified)

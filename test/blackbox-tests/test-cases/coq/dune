@@ -3,7 +3,7 @@
 
 (cram
  (applies_to :whole_subtree)
- (deps %{bin:coqc} %{bin:coqdep})
+ (deps %{bin:coqc} %{bin:coqdep} %{bin:coqmod})
  (alias runtest-coq)
  (enabled_if
   (= %{env:DUNE_COQ_TEST=disable} enable)))
@@ -12,3 +12,8 @@
  (applies_to native-compose native-single)
  (enabled_if
   (<> %{system} macosx)))
+
+(env
+ (_
+  (binaries
+   (../../../../src/coqmod/coqmod_main.exe as coqmod))))
