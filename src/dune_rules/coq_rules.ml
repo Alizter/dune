@@ -124,10 +124,10 @@ module Bootstrap = struct
       | Some (_loc, lib) ->
         (* This is here as an optimization, TODO; replace with per_file flags *)
         let init =
+          let open Coq_module in
           String.equal (Coq_lib_name.wrapper (Coq_lib.name lib)) wrapper_name
-          && Option.equal String.equal
-               (List.hd_opt (Coq_module.prefix coq_module))
-               (Some "Init")
+          && Path.is_prefix (prefix coq_module)
+               ~prefix:(Path.of_string_list [ "Init" ])
         in
         if init then Bootstrap_prelude else Bootstrap lib
     else Bootstrap_prelude
@@ -352,9 +352,10 @@ let parse_coqdep ~dir ~(boot_type : Bootstrap.t) ~coq_module
     let ff = List.hd @@ String.extract_blank_separated_words basename in
     let depname, _ = Filename.split_extension ff in
     let modname =
-      String.concat ~sep:"/"
-        Coq_module.(
-          prefix coq_module @ [ Coq_module.Name.to_string (name coq_module) ])
+      let name = Coq_module.name coq_module in
+      let prefix = Coq_module.prefix coq_module in
+      let path = Coq_module.Path.append_name prefix name in
+      String.concat ~sep:"/" (Coq_module.Path.to_string_list path)
     in
     if depname <> modname then invalid "basename";
     let deps = String.extract_blank_separated_words deps in
@@ -368,13 +369,13 @@ let parse_coqdep ~dir ~(boot_type : Bootstrap.t) ~coq_module
       :: deps)
 
 let deps_of ~dir ~boot_type coq_module =
-  let stdout_to = Coq_module.dep_file ~obj_dir:dir coq_module in
-  Action_builder.dyn_paths_unit
-    (let open Action_builder.O in
-    let* boot_type = boot_type in
-    Action_builder.map
-      (Action_builder.lines_of (Path.build stdout_to))
-      ~f:(parse_coqdep ~dir ~boot_type ~coq_module))
+  let stdout_to = Coq_module.dep_file coq_module in
+  let open Action_builder.O in
+  let* boot_type = boot_type in
+  Action_builder.map
+    (Action_builder.lines_of (Path.build stdout_to))
+    ~f:(parse_coqdep ~dir ~boot_type ~coq_module)
+  |> Action_builder.dyn_paths_unit
 
 let setup_coqdep_rule ~sctx ~dir ~loc ~theories_deps ~wrapper_name ~use_stdlib
     (cctx : _ Context.t) ~source_rule coq_module =
@@ -388,7 +389,7 @@ let setup_coqdep_rule ~sctx ~dir ~loc ~theories_deps ~wrapper_name ~use_stdlib
     ; Dep (Path.build source)
     ]
   in
-  let stdout_to = Coq_module.dep_file ~obj_dir:dir coq_module in
+  let stdout_to = Coq_module.dep_file coq_module in
   let* coqdep =
     Super_context.resolve_program sctx "coqdep" ~dir ~loc:(Some loc)
       ~hint:"opam install coq"
@@ -400,7 +401,7 @@ let setup_coqdep_rule ~sctx ~dir ~loc ~theories_deps ~wrapper_name ~use_stdlib
     >>> Action_builder.(with_no_targets (goal source_rule))
     >>> Command.run ~dir:(Path.build dir) ~stdout_to coqdep file_flags)
 
-let coqc_rule (cctx : _ Context.t) ~dir ~coq_flags ~deps_of ~file_flags ~coqc
+let coqc_rule (cctx : _ Context.t) ~coq_flags ~deps_of ~file_flags ~coqc
     ~coqc_dir ~mode ~file_targets ~obj_files_mode ~wrapper_name coq_module =
   let open Action_builder.With_targets.O in
   Action_builder.with_no_targets deps_of
@@ -409,7 +410,7 @@ let coqc_rule (cctx : _ Context.t) ~dir ~coq_flags ~deps_of ~file_flags ~coqc
            [ Command.Args.dyn coq_flags
            ; Hidden_targets
                (Coq_module.obj_files ~wrapper_name ~mode ~obj_files_mode
-                  ~obj_dir:dir coq_module
+                  coq_module
                |> List.map ~f:fst)
            ; Context.coqc_native_flags ~mode cctx
            ; S file_flags
@@ -417,7 +418,7 @@ let coqc_rule (cctx : _ Context.t) ~dir ~coq_flags ~deps_of ~file_flags ~coqc
                (Path.build
                @@
                match mode with
-               | Native_split -> Coq_module.vo_file ~obj_dir:dir coq_module
+               | Native_split -> Coq_module.vo_file coq_module
                | _ -> Coq_module.source coq_module)
            ]
   (* The way we handle the transitive dependencies of .vo files is not safe for
@@ -442,7 +443,7 @@ let setup_coqc_rule ~loc ~dir ~sctx (cctx : _ Context.t) ~file_targets
   match (mode : Coq_mode.t) with
   | Legacy | Native | VoOnly ->
     Super_context.add_rule ~loc ~dir sctx
-      (coqc_rule cctx ~dir ~file_flags ~coqc ~coqc_dir ~coq_flags ~deps_of
+      (coqc_rule cctx ~file_flags ~coqc ~coqc_dir ~coq_flags ~deps_of
          ~file_targets ~mode ~obj_files_mode:Coq_module.Build coq_module
          ~wrapper_name)
   | Native_split ->
@@ -451,10 +452,10 @@ let setup_coqc_rule ~loc ~dir ~sctx (cctx : _ Context.t) ~file_targets
         ~hint:"opam install coq coq-native"
     in
     Super_context.add_rules ~loc ~dir sctx
-      [ coqc_rule cctx ~dir ~file_flags ~coqc ~coqc_dir ~coq_flags ~deps_of
+      [ coqc_rule cctx ~file_flags ~coqc ~coqc_dir ~coq_flags ~deps_of
           ~file_targets ~mode:Coq_mode.VoOnly ~obj_files_mode:Coq_module.Build
           coq_module ~wrapper_name
-      ; coqc_rule cctx ~dir ~file_flags ~coqc:coqnative ~coqc_dir
+      ; coqc_rule cctx ~file_flags ~coqc:coqnative ~coqc_dir
           ~coq_flags:(Action_builder.return []) ~deps_of ~file_targets
           ~mode:Coq_mode.Native_split ~obj_files_mode:Coq_module.No_obj
           ~wrapper_name coq_module
@@ -582,7 +583,7 @@ let setup_coqdoc_rules ~sctx ~dir ~theories_deps ~wrapper_name (s : Theory.t)
            ; Dyn globs
            ; Hidden_deps
                (Dep.Set.of_files @@ List.map ~f:Path.build
-               @@ List.map ~f:(Coq_module.glob_file ~obj_dir:dir) coq_modules)
+               @@ List.map ~f:Coq_module.glob_file coq_modules)
            ]
          in
          Command.run ~sandbox:Sandbox_config.needs_sandboxing
@@ -735,7 +736,7 @@ let install_rules ~sctx ~dir s =
     coq_sources |> Coq_sources.library ~name
     |> List.concat_map ~f:(fun (vfile : Coq_module.t) ->
            let obj_files =
-             Coq_module.obj_files ~wrapper_name ~mode ~obj_dir:dir
+             Coq_module.obj_files ~wrapper_name ~mode
                ~obj_files_mode:Coq_module.Install vfile
              |> List.map
                   ~f:(fun ((vo_file : Path.Build.t), (install_vo_file : string))
