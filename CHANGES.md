@@ -85,6 +85,9 @@ Unreleased
   remove the `.lock` file. Also, bring the implementation of the global lock
   under Windows closer to that of Unix. (#6523, @nojb)
 
+- Add support for `coqffi` with the `coqffi` stanza (#6248, fixes #3995,
+  @Alizter)
+
 - Remove "Entering Directory" messages for `$ dune install`. (#6513,
   @rgrinberg)
 
@@ -214,7 +217,6 @@ Unreleased
 
 3.5.0 (2022-10-19)
 ------------------
-
 - macOS: Handle unknown fsevents without crashing (#6217, @rgrinberg)
 
 - Enable file watching on MacOS SDK < 10.13. (#6218, @rgrinberg)
