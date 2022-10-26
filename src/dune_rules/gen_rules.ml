@@ -280,6 +280,7 @@ let gen_rules sctx dir_contents cctxs expander
                            ])
                    }
                 |> Action_builder.with_file_targets ~file_targets)))
+        | Coqffi_stanza.T m -> Coqffi_rules.setup_ffi_rules ~sctx ~dir:ctx_dir m
         | Coq_stanza.Theory.T m -> (
           Expander.eval_blang expander m.enabled_if >>= function
           | false -> Memo.return ()
