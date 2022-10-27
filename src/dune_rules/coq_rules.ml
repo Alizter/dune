@@ -214,7 +214,6 @@ module Context = struct
     ; theories_deps : Coq_lib.t list Resolve.Memo.t
     ; mlpack_rule : unit Action_builder.t
     ; ml_flags : 'a Command.Args.t Resolve.Memo.t
-    ; scope : Scope.t
     ; boot_type : Bootstrap.t Resolve.Memo.t
     ; use_stdlib : bool
     ; profile_flags : string list Action_builder.t
@@ -226,11 +225,11 @@ module Context = struct
   let resolve_program_general ~sctx ~dir ~name t =
     resolve_program sctx ~dir ~loc:t.buildable.loc name
 
-  let coqdep ~sctx t = resolve_program_general ~sctx ~name:"coqdep" t
+  let coqdep ~dir ~sctx t = resolve_program_general ~sctx ~dir ~name:"coqdep" t
 
-  let coqc ~sctx t = resolve_program_general ~sctx ~name:"coqc" t
+  let coqc ~dir ~sctx t = resolve_program_general ~sctx ~dir ~name:"coqc" t
 
-  let coqdoc ~sctx t = resolve_program_general ~sctx ~name:"coqdoc" t
+  let coqdoc ~dir ~sctx t = resolve_program_general ~sctx ~dir ~name:"coqdoc" t
 
   let coq_flags t =
     let standard = t.profile_flags in
@@ -357,7 +356,6 @@ module Context = struct
     ; theories_deps
     ; mlpack_rule
     ; ml_flags
-    ; scope
     ; boot_type = Resolve.Memo.return Bootstrap.No_boot
     ; use_stdlib
     ; profile_flags
@@ -366,10 +364,11 @@ module Context = struct
     ; native_theory_includes
     }
 
-  let for_module t coq_module =
+  let for_module ~dir t coq_module =
     let boot_type =
+      let* scope = Scope.DB.find_by_dir dir in
       let open Resolve.Memo.O in
-      let+ boot_lib = t.scope |> Scope.coq_libs |> Coq_lib.DB.boot_library in
+      let+ boot_lib = scope |> Scope.coq_libs |> Coq_lib.DB.boot_library in
       Bootstrap.get ~use_stdlib:t.use_stdlib ~boot_lib
         ~wrapper_name:t.wrapper_name coq_module
     in
@@ -556,7 +555,7 @@ let setup_coqc_rule ~loc ~dir ~sctx (cctx : _ Context.t) ~file_targets
         @@ coqc_rule cctx ~dir ~file_flags ~coqc ~coqc_dir coq_module)
 
 let setup_rule ~loc ~sctx ~dir ~source_rule ~file_targets cctx m =
-  let cctx = Context.for_module cctx m in
+  let cctx = Context.for_module ~dir cctx m in
   setup_coqc_rule ~file_targets ~sctx ~loc cctx m ~dir
   >>> setup_coqdep_rule ~sctx ~loc cctx ~source_rule m ~dir
 
@@ -651,7 +650,7 @@ let coqtop_args_theory ~sctx ~dir ~dir_contents (s : Theory.t) coq_module =
       ~coq_lang_version:s.buildable.coq_lang_version
   in
   let* cctx, _ = setup_cctx_and_modules ~sctx ~dir ~dir_contents s theory in
-  let cctx = Context.for_module cctx coq_module in
+  let cctx = Context.for_module ~dir cctx coq_module in
   let+ boot_type = Resolve.Memo.read_memo cctx.boot_type in
   ( (let open Action_builder.O in
     let+ coq_flags = Context.coq_flags cctx in
@@ -796,7 +795,7 @@ let coqtop_args_extraction ~sctx ~dir ~dir_contents (s : Extraction.t) =
   let* cctx, coq_module =
     setup_extraction_cctx_and_modules ~sctx ~dir ~dir_contents s
   in
-  let cctx = Context.for_module cctx coq_module in
+  let cctx = Context.for_module ~dir cctx coq_module in
   let+ boot_type = Resolve.Memo.read_memo cctx.boot_type in
   ( (let open Action_builder.O in
     let+ coq_flags = Context.coq_flags cctx in
