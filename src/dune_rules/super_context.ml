@@ -111,10 +111,9 @@ end = struct
       | Dune_env.T config -> Some config
       | _ -> None)
 
-  let get_impl t dir =
+  let get_impl ~scope t dir =
     (* We recompute the scope on every recursive call, even though it should be
        unchanged. If this becomes a problem, we can memoize [find_by_dir]. *)
-    let* scope = Scope.DB.find_by_dir dir in
     let inherit_from =
       if Path.Build.equal dir (Scope.root scope) then
         let format_config = Dune_project.format_config (Scope.project scope) in
@@ -185,7 +184,9 @@ end = struct
           Memo.exec
             (Memo.create "env-nodes-memo"
                ~input:(module Path.Build)
-               (fun path -> get_impl env_tree path))
+               (fun path ->
+                 let* scope = Scope.DB.find_by_dir path in
+                 get_impl ~scope env_tree path))
 
         let env_tree () = env_tree
       end
