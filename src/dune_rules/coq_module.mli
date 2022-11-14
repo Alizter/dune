@@ -41,6 +41,12 @@ module Path : sig
 
   val of_lib_name : Coq_lib_name.t -> t
 
+  val remove_prefix : t -> prefix:t -> t
+
+  val remove_suffix : t -> suffix:t -> t
+
+  val length : t -> Int.t
+
   module Map : Map.S with type key = t
 end
 

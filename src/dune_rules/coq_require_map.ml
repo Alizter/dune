@@ -2,6 +2,8 @@ open Import
 module Path = Coq_module.Path
 module Name = Coq_module.Name
 
+let _debug = false
+
 type 'a node =
   | Leaf of 'a
   | Tree of 'a node Name.Map.t
@@ -54,10 +56,12 @@ let rec add : 'a. 'a t -> Name.t list -> 'a -> 'a t =
 
 let add t path a = add t (Path.to_list path) a
 
-let of_modules ?(skip_theory_prefix = false) modules =
+let of_modules ~skip_theory_prefix modules =
   List.fold_left modules ~init:empty ~f:(fun acc m ->
-    let path = (Path.rev (Coq_module.path ~skip_theory_prefix m)) in  
-    Printf.printf "adding %s to require map\n" (Path.to_dyn path |> Dyn.to_string);
+      let path = Path.rev (Coq_module.path ~skip_theory_prefix m) in
+      if _debug then
+        Printf.printf "adding %s to require map\n"
+          (Path.to_dyn path |> Dyn.to_string);
 
       add acc path m)
 
@@ -81,19 +85,22 @@ let rec dyn_of_node node : Dyn.t =
 let to_dyn t : Dyn.t = Name.Map.to_dyn dyn_of_node t
 
 let find_all t ~prefix ~suffix =
-  Printf.printf "  Coq_require_map.find_all ~prefix:%s ~suffix:%s\n"
-    (Path.to_dyn prefix |> Dyn.to_string)
-    (Path.to_dyn suffix |> Dyn.to_string);
+  if _debug then
+    Printf.printf "  Coq_require_map.find_all ~prefix:%s ~suffix:%s\n"
+      (Path.to_dyn prefix |> Dyn.to_string)
+      (Path.to_dyn suffix |> Dyn.to_string);
   let prefix = Path.to_list prefix in
   let suffix = Path.to_list suffix in
-  Printf.printf "  - prefix:%s suffix:%s\n"
-    (Dyn.list Name.to_dyn prefix |> Dyn.to_string)
-    (Dyn.list Name.to_dyn suffix |> Dyn.to_string);
+  if _debug then
+    Printf.printf "  - prefix:%s suffix:%s\n"
+      (Dyn.list Name.to_dyn prefix |> Dyn.to_string)
+      (Dyn.list Name.to_dyn suffix |> Dyn.to_string);
   let rec check_prefix m m_prefix prefix =
-    Printf.printf "  check_prefix %s %s %s\n"
-      (Coq_module.to_dyn m |> Dyn.to_string)
-      (Dyn.list Name.to_dyn m_prefix |> Dyn.to_string)
-      (Dyn.list Name.to_dyn prefix |> Dyn.to_string);
+    if _debug then
+      Printf.printf "  check_prefix %s %s %s\n"
+        (Coq_module.to_dyn m |> Dyn.to_string)
+        (Dyn.list Name.to_dyn m_prefix |> Dyn.to_string)
+        (Dyn.list Name.to_dyn prefix |> Dyn.to_string);
     match (m_prefix, prefix) with
     | _, [] -> true
     | [], [ x ] -> Coq_module.Name.equal x (Coq_module.name m)
@@ -103,40 +110,43 @@ let find_all t ~prefix ~suffix =
   in
   let add acc m =
     if check_prefix m (Path.to_list (Coq_module.path m)) prefix then (
-      Printf.printf "  check_prefix = true\n";
+      if _debug then Printf.printf "  check_prefix = true\n";
       m :: acc)
     else (
-      Printf.printf "  check_prefix = false\n";
+      if _debug then Printf.printf "  check_prefix = false\n";
       acc)
   in
   let rec loop acc (t : Coq_module.t t) path =
-    Printf.printf "  loop acc:%s t:%s path%s\n"
-      (Dyn.list Coq_module.to_dyn acc |> Dyn.to_string)
-      (* (to_dyn t |> Dyn.to_string) *)
-      "some map"
-      (Dyn.list Name.to_dyn path |> Dyn.to_string);
+    if _debug then
+      Printf.printf "  loop acc:%s t:%s path%s\n"
+        (Dyn.list Coq_module.to_dyn acc |> Dyn.to_string)
+        (* (to_dyn t |> Dyn.to_string) *)
+        "some map"
+        (Dyn.list Name.to_dyn path |> Dyn.to_string);
     match path with
     | [] ->
-      Printf.printf "  - fold\n";
+      if _debug then Printf.printf "  - fold\n";
       fold t ~init:acc ~f:(fun x y -> add y x)
     | p :: ps -> (
-      Printf.printf "  - find p:%s\n" (Name.to_dyn p |> Dyn.to_string);
+      if _debug then
+        Printf.printf "  - find p:%s\n" (Name.to_dyn p |> Dyn.to_string);
 
       match Name.Map.find t p with
       | None ->
-        Printf.printf "    - None\n";
+        if _debug then Printf.printf "    - None\n";
         acc
       | Some (Leaf s) -> (
-        Printf.printf "    - Some Leaf s:%s\n"
-          (Coq_module.to_dyn s |> Dyn.to_string);
+        if _debug then
+          Printf.printf "    - Some Leaf s:%s\n"
+            (Coq_module.to_dyn s |> Dyn.to_string);
         match ps with
         | [] -> add acc s
         | _ :: _ -> acc)
       | Some (Tree t) ->
-        Printf.printf "    - Some Tree\n";
+        if _debug then Printf.printf "    - Some Tree\n";
         loop acc t ps
       | Some (Tree' (s, t)) ->
-        Printf.printf "    - Tree'\n";
+        if _debug then Printf.printf "    - Tree'\n";
         let acc =
           match ps with
           | [] -> add acc s
@@ -145,6 +155,9 @@ let find_all t ~prefix ~suffix =
         loop acc t ps)
   in
   loop [] t (List.rev suffix)
+  (* get rid of duplicates *)
+  |> List.fold_right ~init:[] ~f:(fun m ms ->
+         if List.mem ms m ~equal:Coq_module.equal then ms else m :: ms)
 
 let rec t_equal ~equal t1 t2 = Name.Map.equal ~equal:(node_equal ~equal) t1 t2
 

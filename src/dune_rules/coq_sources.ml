@@ -123,8 +123,8 @@ let module_list_of_buildable t buildable =
   | `Extraction _ -> assert false
   | `Theory name -> Coq_lib_name.Map.find_exn t.libraries name
 
-let require_map ?(skip_theory_prefix = false) t buildable :
-    Coq_module.t Coq_require_map.t =
+let require_map ~skip_theory_prefix t buildable : Coq_module.t Coq_require_map.t
+    =
   Coq_require_map.of_modules ~skip_theory_prefix
   @@ module_list_of_buildable t buildable
 

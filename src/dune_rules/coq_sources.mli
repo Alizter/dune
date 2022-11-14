@@ -15,7 +15,7 @@ val directories : t -> name:Coq_lib_name.t -> Path.Build.t list
 val extract : t -> Extraction.t -> Coq_module.t
 
 val require_map :
-     ?skip_theory_prefix:bool
+     skip_theory_prefix:bool
   -> t
   -> [ `Theory of Coq_lib_name.t | `Extraction of Extraction.t ]
   -> Coq_module.t Coq_require_map.t

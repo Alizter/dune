@@ -396,7 +396,7 @@ let parse_coqdep ~dir ~(boot_type : Bootstrap.t) ~coq_module
       Path.relative (Path.build (Coq_lib.src_root lib)) "Init/Prelude.vo"
       :: deps)
 
-let verbose = true
+let _debug = false
 (* DEBUG *)
 
 let err_from_not_found ~loc from source =
@@ -412,18 +412,18 @@ let err_from_not_found ~loc from source =
            (Coqmod.From.require from |> Coqmod.Module.name)
        ])
   @
-  if verbose then
+  if _debug then
     [ Pp.textf "%s\n" @@ Dyn.to_string @@ Coq_require_map.to_dyn source ]
   else []
 
 let err_from_ambiguous ~loc m _from source =
   User_error.raise ~loc
-  @@ [ Pp.textf "TODO ambiguous paths:%s\n"
+  @@ [ Pp.textf "TODO ambiguous paths:\n%s\n"
        @@ Dyn.to_string
        @@ Dyn.list Coq_module.to_dyn m
      ]
   @
-  if verbose then
+  if _debug then
     [ Pp.textf "%s" @@ Dyn.to_string @@ Coq_require_map.to_dyn source ]
   else []
 
@@ -436,7 +436,7 @@ let coq_require_map_of_theory ~sctx lib =
   let dir = Coq_lib.src_root lib in
   let* dir_contents = Dir_contents.get sctx ~dir in
   let+ coq_sources = Dir_contents.coq dir_contents in
-  Coq_sources.require_map coq_sources (`Theory name)
+  Coq_sources.require_map ~skip_theory_prefix:false coq_sources (`Theory name)
 
 module Deps = struct
   let loc from_ coq_module =
@@ -467,10 +467,11 @@ module Deps = struct
             theories
         in
         let requires = List.map theories ~f:(Coq_lib.Map.find_exn theory_rms) in
-        Printf.printf "prefix: %s\t suffix: %s\t requires: %s\n"
-          (Dyn.option Coq_module.Path.to_dyn prefix |> Dyn.to_string)
-          (Coq_module.Path.to_dyn suffix |> Dyn.to_string)
-          (Dyn.list Coq_require_map.to_dyn requires |> Dyn.to_string);
+        if _debug then
+          Printf.printf "prefix: %s\t suffix: %s\t requires: %s\n"
+            (Dyn.option Coq_module.Path.to_dyn prefix |> Dyn.to_string)
+            (Coq_module.Path.to_dyn suffix |> Dyn.to_string)
+            (Dyn.list Coq_require_map.to_dyn requires |> Dyn.to_string);
         Require_map_db.exec ~requires sources
       in
       let matches =
@@ -480,15 +481,50 @@ module Deps = struct
           Coq_require_map.find_all ~prefix:Coq_module.Path.empty ~suffix
             require_map
       in
-      match matches with
-      | [] -> err_from_not_found ~loc from_ require_map
-      | [ m ] ->
-        (* TODO: vos support goes here *)
-        Path.build (Coq_module.vo_file m)
-      (* | m :: _ ->
-         (* For ambiguous froms we take the first match. There is no garantee that this is valid. *)
-         Path.build (Coq_module.vo_file m) *)
-      | m -> err_from_ambiguous ~loc m from_ require_map
+      let disambiguate_matches =
+        match matches with
+        | [] -> err_from_not_found ~loc from_ require_map
+        | ms -> (
+          let local_debug = true in
+          if local_debug then
+            Printf.printf "Actual module: %s\n"
+              (Coq_module.path ~skip_theory_prefix:false coq_module
+              |> Coq_module.Path.to_dyn |> Dyn.to_string);
+          let rate m =
+            if local_debug then
+              Printf.printf "%s\n" (Coq_module.Path.to_dyn m |> Dyn.to_string);
+            (match prefix with
+            | None -> m
+            | Some prefix -> Coq_module.Path.remove_prefix ~prefix m)
+            |> fun m ->
+            if local_debug then
+              Printf.printf "chosen m: %s\n"
+                (Coq_module.Path.to_dyn m |> Dyn.to_string);
+            m |> Coq_module.Path.remove_suffix ~suffix |> fun m ->
+            if local_debug then
+              Printf.printf "after suff: %s\n"
+                (Coq_module.Path.to_dyn m |> Dyn.to_string);
+            m |> Coq_module.Path.length
+          in
+          if local_debug then (
+            Printf.printf "Found modules:\n";
+            List.iter
+              ~f:(fun x ->
+                Coq_module.path ~skip_theory_prefix:false x
+                |> Coq_module.Path.to_dyn |> Dyn.to_string
+                |> Printf.printf "%s\n")
+              ms);
+          List.min
+            ~f:(fun m1 m2 ->
+              Int.compare
+                (rate @@ Coq_module.path ~skip_theory_prefix:false m1)
+                (rate @@ Coq_module.path ~skip_theory_prefix:false m2))
+            ms
+          |> function
+          | None -> err_from_ambiguous ~loc ms from_ require_map
+          | Some m -> m)
+      in
+      Path.build (Coq_module.vo_file disambiguate_matches)
     in
 
     Coqmod.froms t |> Memo.parallel_map ~f |> Action_builder.of_memo
@@ -549,11 +585,18 @@ module Deps = struct
           | `Theory (t : Theory.t) -> `Theory (snd t.name)
         in
         match stanza with
-        | `Extraction _ -> Coq_sources.require_map coq_sources what
+        | `Extraction _ ->
+          Coq_sources.require_map ~skip_theory_prefix:true coq_sources what
         | `Theory (t : Theory.t) ->
           if t.boot then
-            Coq_sources.require_map ~skip_theory_prefix:true coq_sources what
-          else Coq_sources.require_map coq_sources what
+            Coq_require_map.merge_all
+              [ Coq_sources.require_map ~skip_theory_prefix:true coq_sources
+                  what
+              ; Coq_sources.require_map ~skip_theory_prefix:false coq_sources
+                  what
+              ]
+          else
+            Coq_sources.require_map ~skip_theory_prefix:false coq_sources what
       in
       let* theory_rms =
         Action_builder.of_memo

@@ -39,6 +39,22 @@ module Name = struct
 
     let rev = List.rev
 
+    let length = List.length
+
+    let remove_prefix t ~prefix =
+      assert (length prefix <= length t);
+      let rec loop y x =
+        match x with
+        | [] -> y
+        | x :: xs ->
+          assert (equal x (List.hd y));
+          loop (List.tl y) xs
+      in
+      loop t prefix
+
+    let remove_suffix t ~suffix =
+      List.rev @@ remove_prefix ~prefix:(List.rev suffix) @@ List.rev t
+
     let empty = []
 
     let append_name t name = t @ [ name ]

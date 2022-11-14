@@ -7,7 +7,7 @@ val empty : 'a t
 
 val add : 'a t -> Path.t -> 'a -> 'a t
 
-val of_modules : ?skip_theory_prefix:bool -> Coq_module.t list -> Coq_module.t t
+val of_modules : skip_theory_prefix:bool -> Coq_module.t list -> Coq_module.t t
 
 val merge_all : 'a t list -> 'a t
 
