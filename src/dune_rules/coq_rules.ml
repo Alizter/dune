@@ -533,7 +533,7 @@ module Coqdoc_mode = struct
   let alias t ~dir =
     match t with
     | Html -> Alias.doc ~dir
-    | Latex -> Alias.make (Alias.Name.of_string "doc-latex") ~dir
+    | Latex -> Alias.doc_latex ~dir
 end
 
 let coqdoc_directory_targets ~dir:obj_dir (theory : Coq_stanza.Theory.t) =
