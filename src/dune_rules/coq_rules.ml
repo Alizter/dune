@@ -171,16 +171,6 @@ let select_native_mode ~sctx ~dir (buildable : Coq_stanza.Buildable.t) =
       | Some (`String "yes") | Some (`String "ondemand") -> Coq_mode.Native
       | _ -> Coq_mode.VoOnly)
 
-let rec resolve_first lib_db = function
-  | [] -> assert false
-  | [ n ] -> Lib.DB.resolve lib_db (Loc.none, Lib_name.of_string n)
-  | n :: l -> (
-    let open Memo.O in
-    Lib.DB.resolve_when_exists lib_db (Loc.none, Lib_name.of_string n)
-    >>= function
-    | Some l -> Resolve.Memo.lift l
-    | None -> resolve_first lib_db l)
-
 let coq_flags ~dir ~stanza_flags ~expander ~sctx =
   let open Action_builder.O in
   let* standard = Action_builder.of_memo @@ Super_context.coq ~dir sctx in
@@ -281,6 +271,16 @@ module Context = struct
   let native_includes ~dir =
     let* scope = Scope.DB.find_by_dir dir in
     let lib_db = Scope.libs scope in
+    let rec resolve_first lib_db = function
+      | [] -> assert false
+      | [ n ] -> Lib.DB.resolve lib_db (Loc.none, Lib_name.of_string n)
+      | n :: l -> (
+        let open Memo.O in
+        Lib.DB.resolve_when_exists lib_db (Loc.none, Lib_name.of_string n)
+        >>= function
+        | Some l -> Resolve.Memo.lift l
+        | None -> resolve_first lib_db l)
+    in
     (* We want the cmi files *)
     Resolve.Memo.map ~f:(fun lib ->
         let info = Lib.info lib in
