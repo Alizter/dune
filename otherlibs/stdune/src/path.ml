@@ -382,6 +382,10 @@ module External : sig
   val append_local : t -> Local.t -> t
 
   val of_filename_relative_to_initial_cwd : string -> t
+
+  module Expert : sig
+    val of_string : string -> t
+  end
 end = struct
   module Table = String.Table
 
@@ -402,6 +406,10 @@ end = struct
       Code_error.raise "Path.External.of_string: relative path given"
         [ ("t", String t) ];
     t
+
+  module Expert = struct
+    let of_string t = t
+  end
 
   let parse_string_exn ~loc t =
     if Filename.is_relative t then

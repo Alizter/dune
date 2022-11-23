@@ -1,0 +1,65 @@
+open Stdune
+open Dune_engine
+open Dune_nix
+
+let pr = Format.printf "%a" (fun fmt x -> Pp.to_fmt fmt (Dune_nix.Ast.pp x))
+
+let nix_eval nix =
+  ignore
+    (Sys.command
+       (Format.asprintf "nix eval --impure --show-trace --expr '%a'"
+          (fun fmt x -> Pp.to_fmt fmt (Dune_nix.Ast.pp x))
+          nix))
+
+let nix_build nix =
+  ignore
+    (Sys.command
+       (Format.asprintf "nix build --impure --show-trace --expr '%a'"
+          (fun fmt x -> Pp.to_fmt fmt (Dune_nix.Ast.pp x))
+          nix))
+
+let%expect_test "hello world" =
+  (* Hack to set build directory as "$out" *)
+  let () =
+    Path.Build.set_build_dir
+      (Path.Outside_build_dir.External (Path.External.Expert.of_string "$out"))
+  in
+  let action =
+    Action.(
+      progn
+        [ mkdir (Path.Build.of_string "hello_world")
+        ; write_file (Path.Build.of_string "hello_world") {|"Hello World!"|}
+        ])
+  in
+  (* let action = Action.mkdir (Path.Build.of_string "hello_world") in *)
+  let nix = Action_to_nix.mkDerivation action in
+  pr nix;
+  [%expect
+    {|
+    with import ( <nixpkgs> ) ( {  } );
+    stdenv.mkDerivation
+    (
+      {
+        name = "foo";
+        buildInputs = [  ];
+        buildPhase = "mkdir -p $out/hello_world;
+    echo -n '"Hello World!"' > $out/hello_world";
+        src = ./src;
+      }
+    ) |}];
+  (* nix_eval nix; *)
+  [%expect {| |}];
+  ignore (Sys.mkdir "src" 0x777);
+  nix_build nix;
+  [%expect.unreachable];
+  (* ls *)
+  ignore (Sys.command "ls result; cat result/hello_world");
+  [%expect.unreachable]
+[@@expect.uncaught_exn {|
+  (* CR expect_test_collector: This test expectation appears to contain a backtrace.
+     This is strongly discouraged as backtraces are fragile.
+     Please change this test to not include a backtrace. *)
+
+  (Sys_error "src: File exists")
+  Raised by primitive operation at Dune_nix_tests__Action_to_nix_tests.(fun) in file "test/expect-tests/dune_nix/action_to_nix_tests.ml", line 52, characters 9-32
+  Called from Expect_test_collector.Make.Instance_io.exec in file "collector/expect_test_collector.ml", line 262, characters 12-19 |}]

@@ -84,6 +84,12 @@ module External : sig
   val of_filename_relative_to_initial_cwd : string -> t
 
   val append_local : t -> Local.t -> t
+
+  module Expert : sig
+    (** [External.Expert.of_string] is unsafe because it doesn't check that the
+        path is absolute. *)
+    val of_string : string -> t
+  end
 end
 
 (** In the source section of the current workspace. *)
