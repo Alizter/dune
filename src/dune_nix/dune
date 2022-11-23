@@ -1,0 +1,4 @@
+(library
+ (name dune_nix)
+ (libraries stdune dyn dune_engine)
+ (synopsis "Dune's nix derivation generation"))
