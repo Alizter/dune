@@ -14,29 +14,31 @@ Testing the coq.ffi stanza with local libraries
   > EOF
 
   $ dune build
-  fake coqffi has run with args:
-  .hello.objs/byte/hello.cmi
-  -o
-  Hello.v
-  
-  Inductive coqffiHasRunAndVHasCompiled : Prop :=  .
-  $ ls _build/default/
-  Hello.glob
-  Hello.v
-  Hello.v.d
-  Hello.vo
-  Hello.vok
-  Hello.vos
-  Nhello_Hello.cmi
-  Nhello_Hello.cmx
-  Nhello_Hello.cmxs
-  Nhello_Hello.o
+  File "dune", line 1, characters 0-42:
+  1 | (coqffi
+  2 |  (modules hello)
+  3 |  (library hello))
+  Error: No rule found for .hello.objs/hello.impl.all-deps
+  [1]
+  $ ls -a _build/default/ _build/default/.hello.objs/
+  _build/default/:
+  .
+  ..
+  .dune
+  .hello.objs
+  .merlin-conf
   hello.a
   hello.cma
   hello.cmxa
   hello.cmxs
   hello.ml
   hello.mli
+  
+  _build/default/.hello.objs/:
+  .
+  ..
+  byte
+  native
 
 The coqffi stanza does not support libraries that were not installed using Dune
 
@@ -89,10 +91,10 @@ Testing the coqffi stanza with flags
   > EOF
 
   $ dune build
-  fake coqffi has run with args:
-  .hello.objs/byte/hello.cmi
-  -o
-  Hello.v
-  --some
-  --flags
-  
+  File "dune", line 1, characters 0-66:
+  1 | (coqffi
+  2 |  (modules hello)
+  3 |  (library hello)
+  4 |  (flags --some --flags))
+  Error: No rule found for .hello.objs/hello.impl.all-deps
+  [1]
