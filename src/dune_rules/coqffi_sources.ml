@@ -7,13 +7,16 @@ let lib ~dir ~library =
      let lib_db = Scope.libs scope in
      Lib.DB.resolve lib_db library
 
-let target_of ~dir m = Path.Build.relative dir (Module_name.to_string m ^ ".v")
+let target_of ~kind ~dir m =
+  match kind with
+  | `V -> Path.Build.relative dir (Module_name.to_string m ^ ".v")
+  | `Ffi -> Path.Build.relative dir (Module_name.to_string m ^ ".ffi")
 
 let modules_of_lib ~loc ~lib ~ml_sources =
   let lib_info = Lib.info lib in
   let lib_name = Lib.name lib in
   match Lib_info.modules lib_info with
-  | External (Some m) -> Memo.return m
+  | External (Some m) -> Memo.return (m, `External)
   | External None ->
     User_error.raise ~loc
       [ Pp.textf
@@ -22,12 +25,12 @@ let modules_of_lib ~loc ~lib ~ml_sources =
           (Lib_name.to_string lib_name)
       ]
   | Local ->
-    ml_sources
-    >>| Ml_sources.modules_and_obj_dir ~for_:(Library lib_name)
-    >>| fst
+    ml_sources >>| Ml_sources.modules_and_obj_dir ~for_:(Library lib_name)
+    >>| fun (modules, _) -> (modules, `Local)
 
-let modules_of ~loc ~lib ~modules ~ml_sources =
-  let* modules_of_lib = modules_of_lib ~loc ~lib ~ml_sources in
+let modules_of ~loc ~dir ~library ~modules ~ml_sources =
+  let* lib = lib ~dir ~library in
+  let* modules_of_lib, _ = modules_of_lib ~loc ~lib ~ml_sources in
   let parse m =
     match Modules.find modules_of_lib m with
     | Some m -> m
@@ -40,5 +43,5 @@ let modules_of ~loc ~lib ~modules ~ml_sources =
   in
   Memo.parallel_map modules ~f:(fun x -> Memo.return @@ parse x)
 
-let targets ~dir ({ modules; _ } : Coqffi_stanza.t) =
-  List.map modules ~f:(target_of ~dir)
+let v_targets ~dir ({ modules; _ } : Coqffi_stanza.t) =
+  List.map modules ~f:(target_of ~kind:`V ~dir)
