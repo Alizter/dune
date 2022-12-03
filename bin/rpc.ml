@@ -59,7 +59,7 @@ let establish_connection_or_raise ~wait once =
 
 let wait_term =
   let doc =
-    "poll until server starts listening and then establish connection."
+    "Poll until server starts listening and then establish connection."
   in
   Arg.(value & flag & info [ "wait" ] ~doc)
 
@@ -129,7 +129,7 @@ module Status = struct
               User_message.print message))
 
   let info =
-    let doc = "show active connections" in
+    let doc = "Show active RPC connections." in
     Cmd.info "status" ~doc
 
   let cmd = Cmd.v info term
@@ -160,8 +160,8 @@ module Build = struct
 
   let info =
     let doc =
-      "build a given target (requires dune to be running in passive watching \
-       mode)"
+      "Build a given target. (Requires Dune to be running in passive watching \
+       mode)."
     in
     Cmd.info "build" ~doc
 
@@ -188,7 +188,7 @@ module Ping = struct
          ~id:(Dune_rpc_private.Id.make (Sexp.Atom "ping_cmd")))
 
   let info =
-    let doc = "Ping the build server running in the current directory" in
+    let doc = "Ping the build server running in the current directory." in
     Cmd.info "ping" ~doc
 
   let term =
@@ -200,12 +200,7 @@ end
 
 let info =
   let doc = "Dune's RPC mechanism. Experimental." in
-  let man =
-    [ `S "DESCRIPTION"
-    ; `P {|This is experimental. do not use|}
-    ; `Blocks Common.help_secs
-    ]
-  in
+  let man = [ `S "DESCRIPTION"; `P "This is experimental. Do not use." ] in
   Cmd.info "rpc" ~doc ~man
 
 let group = Cmd.group info [ Status.cmd; Build.cmd; Ping.cmd ]
