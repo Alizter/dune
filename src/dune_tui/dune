@@ -1,0 +1,5 @@
+(library
+ (name dune_tui)
+ (libraries stdune dune_notty dune_notty_unix dune_console threads.posix)
+ (instrumentation
+  (backend bisect_ppx)))
