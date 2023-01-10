@@ -1,6 +1,6 @@
 let executables = [ "main"; "man_page_gen" ]
 
-let external_libraries = [ "unix"; "threads" ]
+let external_libraries = [ "unix"; "seq"; "threads" ]
 
 let local_libraries =
   [ ("otherlibs/ordering", Some "Ordering", false, None)
@@ -53,6 +53,8 @@ let local_libraries =
   ; ("vendor/uutf", None, false, None)
   ; ("vendor/notty/src", None, true, None)
   ; ("vendor/notty/src-unix", None, true, None)
+  ; ("vendor/lwd/lwd", None, false, None)
+  ; ("vendor/lwd/nottui", None, false, None)
   ; ("src/dune_tui", Some "Dune_tui", false, None)
   ; ("src/dune_config", Some "Dune_config", false, None)
   ; ("src/dune_rules", Some "Dune_rules", true, None)
