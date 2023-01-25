@@ -84,6 +84,7 @@ type t =
   | Redirect_out of Outputs.t * String_with_vars.t * File_perm.t * t
   | Redirect_in of Inputs.t * String_with_vars.t * t
   | Ignore of Outputs.t * t
+  | Chmod of Unix.file_perm * String_with_vars.t
   | Progn of t list
   | Concurrent of t list
   | Echo of String_with_vars.t list
@@ -210,6 +211,10 @@ let decode =
         ; ("ignore-stdout", t >>| fun t -> Ignore (Stdout, t))
         ; ("ignore-stderr", t >>| fun t -> Ignore (Stderr, t))
         ; ("ignore-outputs", t >>| fun t -> Ignore (Outputs, t))
+        ; ( "chmod"
+          , let+ perm = Decoder.int
+            and+ fn = sw in
+            Chmod (perm, fn) )
         ; ("progn", repeat t >>| fun l -> Progn l)
         ; ( "concurrent"
           , Syntax.since Stanza.syntax (3, 8) >>> repeat t >>| fun l ->
@@ -302,6 +307,7 @@ let rec encode =
       ]
   | Ignore (outputs, r) ->
     List [ atom (sprintf "ignore-%s" (Outputs.to_string outputs)); encode r ]
+  | Chmod (perm, fn) -> List [ atom "chmod"; Encoder.int perm; sw fn ]
   | Progn l -> List (atom "progn" :: List.map l ~f:encode)
   | Concurrent l -> List (atom "concurrent" :: List.map l ~f:encode)
   | Echo xs -> List (atom "echo" :: List.map xs ~f:sw)
@@ -348,6 +354,7 @@ let ensure_at_most_one_dynamic_run ~loc action =
     | Ignore (_, t)
     | With_accepted_exit_codes (_, t)
     | No_infer t -> loop t
+    | Chmod _
     | Run _
     | Echo _
     | Cat _
@@ -387,6 +394,7 @@ let rec map_string_with_vars t ~f =
     Redirect_out (o, f sw, p, map_string_with_vars t ~f)
   | Redirect_in (i, sw, t) -> Redirect_in (i, f sw, t)
   | Ignore (o, t) -> Ignore (o, map_string_with_vars t ~f)
+  | Chmod (p, x) -> Chmod (p, f x)
   | Progn xs -> Progn (List.map xs ~f:(map_string_with_vars ~f))
   | Concurrent xs -> Concurrent (List.map xs ~f:(map_string_with_vars ~f))
   | Echo xs -> Echo xs
@@ -426,5 +434,7 @@ let to_dyn a = to_dyn (encode a)
 let equal x y = Poly.equal x y
 
 let chdir dir t = Chdir (dir, t)
+
+let chmod p x = Chmod (p, x)
 
 let run prog args = Run (prog, args)
