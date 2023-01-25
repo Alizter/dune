@@ -789,6 +789,7 @@ The following constructions are available:
   ``setenv``, ``ignore-<outputs>``, ``with-stdin-from`` and
   ``with-<outputs>-to``. This action is available since Dune 2.0.
 - ``(progn <DSL>...)`` to execute several commands in sequence
+- ``(concurrent <DSL>...)``` to execute several commands concurrently.
 - ``(echo <string>)`` to output a string on stdout
 - ``(write-file <file> <string>)`` writes ``<string>`` to ``<file>``
 - ``(cat <file> ...)`` to sequentially print the contents of files to stdout

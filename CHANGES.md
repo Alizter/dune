@@ -18,6 +18,9 @@ Unreleased
 - Fix parsing of the `<=` operator in *blang* expressions of `dune` files.
   Previously, the operator would be interpreted as `,`. (#6928, @tatchi)
 
+- Added a new user action `(concurrent )` which is like `(progn )` but runs the
+  actions concurrently. (#6933, @Alizter)
+
 - Fix `--trace-file` output. Dune now emits a single *complete* event for every
   executed process. Unterminated *async* events are no longer written. (#6892,
   @rgrinberg)
