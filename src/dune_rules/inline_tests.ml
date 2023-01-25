@@ -268,12 +268,14 @@ include Sub_system.Register_end_point (struct
            let run_tests = Action.chdir (Path.build dir) action in
            Action.Full.make ~sandbox
            @@ Action.progn
-                (run_tests
-                :: List.map source_files ~f:(fun fn ->
-                       Action.diff ~optional:true fn
-                         (Path.Build.extend_basename
-                            (Path.as_in_build_dir_exn fn)
-                            ~suffix:".corrected")))))
+                [ run_tests
+                ; Action.concurrent
+                    (List.map source_files ~f:(fun fn ->
+                         Action.diff ~optional:true fn
+                           (Path.Build.extend_basename
+                              (Path.as_in_build_dir_exn fn)
+                              ~suffix:".corrected")))
+                ]))
 
   let gen_rules c ~(info : Info.t) ~backends =
     let open Memo.O in
