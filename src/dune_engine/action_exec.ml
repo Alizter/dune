@@ -281,6 +281,9 @@ let rec exec t ~display ~ectx ~eenv =
   | Redirect_in (inputs, fn, t) -> redirect_in t ~display ~ectx ~eenv inputs fn
   | Ignore (outputs, t) ->
     redirect_out t ~display ~ectx ~eenv ~perm:Normal outputs Config.dev_null
+  | Chmod (perm, fn) ->
+    Unix.chmod (Path.to_string fn) perm;
+    Fiber.return Done
   | Progn ts -> exec_list ts ~display ~ectx ~eenv
   | Concurrent ts ->
     Fiber.parallel_map ts ~f:(exec ~display ~ectx ~eenv)
