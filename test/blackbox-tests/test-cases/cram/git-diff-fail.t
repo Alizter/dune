@@ -15,8 +15,10 @@ First we make a cram test:
 We need to avoid the special treatment of the test when INSIDE_DUNE is set:
   $ unset INSIDE_DUNE
 
-We get nonsense internal output in the display:
-
-  $ dune build --root=. --diff-command="exit 1" --display=short @runtest 2>&1 >/dev/null | head -n2
+We do not observe the leaking of the display of internal processes when running
+dune build. Note that we scrub the actual reported error due to the build tool
+being bogus.
+  $ dune build --root=. --diff-command="exit 1; echo" --display=short @runtest | sed '/^(cd/d' 
   File "mytest.t", line 1, characters 0-0:
-            sh (internal) (exit 1)
+  Command exited with code 1.
+  [1]
