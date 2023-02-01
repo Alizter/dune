@@ -408,6 +408,60 @@ module DB = struct
     in
     Resolve.O.(theories >>= top_closure)
 
+  let _make_stdlib_stanza (coq : lib Resolve.t Memo.Lazy.t) =
+    ignore coq; assert false
+    (* let open Memo.O in
+    let+ coq = Memo.Lazy.force coq in
+
+    { name : Loc.t * Coq_lib_name.t
+    ; package : Package.t option
+    ; project : Dune_project.t
+    ; synopsis : string option
+    ; modules : Ordered_set_lang.t
+    ; boot : bool
+    ; enabled_if : Blang.t
+    ; buildable : Buildable.t
+    }
+
+  let installed (context : Context.t) : t Memo.t =
+    (* 1. Find Coq package *)
+    (* 2. Find Coq stdlib and set boot accordingly *)
+    (* 3. Check theory name against paths in installed theories directory *)
+    let open Memo.O in
+    let* installed_libs = Lib.DB.installed context in
+    let* coq =
+      Lib.DB.resolve_first_when_exists installed_libs
+        [ (Loc.none, Lib_name.of_string "coq")
+        ; (Loc.none, Lib_name.of_string "coq-core")
+        ]
+    in
+    let boot : (Loc.t * lib Resolve.t Memo.Lazy.t) option =
+      match coq with
+      | None -> None
+      | Some coq ->
+        ignore coq;
+        None (* TODO: somehow resolve the stdlib theory *)
+    in
+    let resolve coq_lib_name =
+      (* We only have installed libraries if we have a boot library. This should
+         be the Coq stdlib. *)
+      match boot with
+      | None -> `Not_found
+      | Some (loc, coq) -> (
+        let looking_for_stdlib =
+          Ordering.is_eq
+            (Coq_lib_name.compare coq_lib_name (Coq_lib_name.of_string "Coq"))
+        in
+        match looking_for_stdlib with
+        | true ->
+          let stanza = make_stdlib_stanza coq in
+          `Theory (installed_libs, None, stanza)
+        | false -> (* Point to installed theories *) assert false)
+    in
+    let parent = None in
+    Memo.return { boot; resolve; parent } *)
+
+
   let installed (_ : Context.t) =
     (* TODO For now there are only two installed "theories" that we know about:
 

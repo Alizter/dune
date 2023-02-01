@@ -295,7 +295,9 @@ module DB = struct
     in
     let* public_theories =
       let+ installed_theories = Coq_lib.DB.installed context in
-      public_theories coq_stanzas ~find_db:(fun _ -> public_libs) ~installed_theories
+      public_theories coq_stanzas
+        ~find_db:(fun _ -> public_libs)
+        ~installed_theories
     in
     let+ by_dir =
       scopes_by_dir ~build_dir ~lib_config ~projects ~public_libs

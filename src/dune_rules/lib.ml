@@ -1785,6 +1785,24 @@ module DB = struct
     | None -> Error.not_found ~loc ~name
     | Some k -> Memo.return k
 
+  let rec resolve_first_when_exists t = function
+    | [] -> Code_error.raise "resolve_first_when_exists: empty list" []
+    | [ (loc, name) ] -> resolve_when_exists t (loc, name)
+    | (loc, name) :: l -> (
+      let open Memo.O in
+      resolve_when_exists t (loc, name) >>= function
+      | Some l -> Memo.return (Some l)
+      | None -> resolve_first_when_exists t l)
+
+  let rec resolve_first t = function
+    | [] -> Code_error.raise "resolve_first: empty list" []
+    | [ (loc, name) ] -> resolve t (loc, name)
+    | (loc, name) :: l -> (
+      let open Memo.O in
+      resolve_when_exists t (loc, name) >>= function
+      | Some l -> Memo.return l
+      | None -> resolve_first t l)
+
   let available t name = Resolve_names.available_internal t name
 
   let get_compile_info t ~allow_overlaps name =
