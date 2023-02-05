@@ -34,6 +34,8 @@ Unreleased
 - Added a new user action `(concurrent )` which is like `(progn )` but runs the
   actions concurrently. (#6933, @Alizter)
 
+- Dune now suggests other aliases when an alias is not found (#7004, @Alizter)
+
 3.7.0 (2023-02-17)
 ------------------
 
