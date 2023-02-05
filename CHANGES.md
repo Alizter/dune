@@ -1,6 +1,8 @@
 Unreleased
 ----------
 
+- Dune now suggests other aliases when an alias is not found (#7004, @Alizter)
+
 - Add `dune show rules` as alias of the `dune rules` command. (#8000, @Alizter)
 
 - Add `dune show installed-libraries` as an alias of the `dune

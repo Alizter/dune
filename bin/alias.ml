@@ -77,7 +77,7 @@ let dep_on_alias_rec_multi_contexts ~dir:src_dir ~name ~contexts =
   let* dir =
     Action_builder.of_memo (find_dir_specified_on_command_line ~dir:src_dir)
   in
-  let+ alias_statuses =
+  let* alias_statuses =
     Action_builder.all
       (List.map contexts ~f:(fun ctx ->
            let dir =
@@ -94,12 +94,35 @@ let dep_on_alias_rec_multi_contexts ~dir:src_dir ~name ~contexts =
         | Not_defined -> false)
   in
   if (not is_nonempty) && not (Alias.is_standard name) then
-    User_error.raise
+    let+ load_dir =
+      Action_builder.all
+      @@ List.map contexts ~f:(fun ctx ->
+             let dir =
+               Source_tree.Dir.path dir
+               |> Path.Build.append_source (Context_name.build_dir ctx)
+               |> Path.build
+             in
+             Action_builder.of_memo @@ Load_rules.load_dir ~dir)
+    in
+    let hints =
+      let candidates =
+        List.fold_left load_dir ~init:Alias.Name.Map.empty ~f:(fun acc x ->
+            match (x : Load_rules.Loaded.t) with
+            | Build build ->
+              Alias.Name.Map.union ~f:(fun _ a _ -> Some a) acc build.aliases
+            | _ -> acc)
+        |> Alias.Name.Map.to_list_map ~f:(fun name _ ->
+               Alias.Name.to_string name)
+      in
+      User_message.did_you_mean (Alias.Name.to_string name) ~candidates
+    in
+    User_error.raise ~hints
       [ Pp.textf "Alias %S specified on the command line is empty."
           (Alias.Name.to_string name)
       ; Pp.textf "It is not defined in %s or any of its descendants."
           (Path.Source.to_string_maybe_quoted src_dir)
       ]
+  else Action_builder.return ()
 
 let request { name; recursive; dir; contexts } =
   let contexts = List.map ~f:Context.name contexts in
