@@ -10,6 +10,8 @@ Unreleased
 - Fix parsing of OCaml errors that contain code excerpts with `...` in them.
   (#7008, @rgrinberg)
 
+- Dune now suggests other aliases when an alias is not found (#7004, @Alizter)
+
 - Pre-emptively clear screen in watch mode (#6987, fixes #6884, @rgrinberg)
 
 - Fix cross compilation configuration when a context with targets is itself a

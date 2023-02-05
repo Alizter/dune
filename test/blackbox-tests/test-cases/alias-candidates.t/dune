@@ -1,0 +1,4 @@
+(rule
+ (alias foo)
+ (action
+  (echo "Hello, world from \"foo\"!")))
