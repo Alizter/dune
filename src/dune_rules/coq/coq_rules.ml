@@ -102,18 +102,12 @@ let native_includes ~dir =
 
 let directories_of_lib ~sctx lib =
   let name = Coq_lib.name lib in
-  let dir =
-    Path.as_in_build_dir (Coq_lib.src_root lib) |> function
-    | Some dir -> dir
-    | None ->
-      Code_error.raise "coq library from stanza not in build dir"
-        [ ("name", Coq_lib_name.to_dyn name)
-        ; ("src_root", Path.to_dyn (Coq_lib.src_root lib))
-        ]
-  in
-  let* dir_contents = Dir_contents.get sctx ~dir in
-  let+ coq_sources = Dir_contents.coq dir_contents in
-  Coq_sources.directories coq_sources ~name
+  Path.as_in_build_dir (Coq_lib.src_root lib) |> function
+  | None -> Memo.return []
+  | Some dir ->
+    let* dir_contents = Dir_contents.get sctx ~dir in
+    let+ coq_sources = Dir_contents.coq dir_contents in
+    Coq_sources.directories coq_sources ~name
 
 let setup_native_theory_includes ~sctx ~theories_deps ~theory_dirs =
   Resolve.Memo.bind theories_deps ~f:(fun theories_deps ->
@@ -412,20 +406,19 @@ let setup_coqc_rule ~loc ~dir ~sctx ~coqc_dir ~file_targets ~stanza_flags
     >>| Action.Full.add_sandbox Sandbox_config.no_sandboxing)
 
 let coq_modules_of_theory ~sctx lib =
+  (* TODO generalize to any coq library (even installed) *)
   Action_builder.of_memo
-    (let name = Coq_lib.name lib in
-     let dir =
-       Path.as_in_build_dir (Coq_lib.src_root lib) |> function
-       | Some dir -> dir
-       | None ->
-         Code_error.raise "coq library from stanza not in build dir"
-           [ ("name", Coq_lib_name.to_dyn name)
-           ; ("src_root", Path.to_dyn (Coq_lib.src_root lib))
-           ]
-     in
-     let* dir_contents = Dir_contents.get sctx ~dir in
-     let+ coq_sources = Dir_contents.coq dir_contents in
-     Coq_sources.library coq_sources ~name)
+  @@
+  let name = Coq_lib.name lib in
+  Path.as_in_build_dir (Coq_lib.src_root lib) |> function
+  | None ->
+    (* TODO for now we return no modules when the path of a theory is outside of
+       the build directory *)
+    Memo.return []
+  | Some dir ->
+    let* dir_contents = Dir_contents.get sctx ~dir in
+    let+ coq_sources = Dir_contents.coq dir_contents in
+    Coq_sources.library coq_sources ~name
 
 let source_rule ~sctx theories =
   (* sources for depending libraries coqdep requires all the files to be in the

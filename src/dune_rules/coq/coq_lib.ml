@@ -423,7 +423,7 @@ module DB = struct
     ; boot = Resolve.return None
     ; id =
         (* TODO generalize Id to Path *)
-        Id.create ~path:(assert false) ~name:(Coq_lib_name.of_string "Coq")
+        Id.create ~path:theories_dir ~name:(Coq_lib_name.of_string "Coq")
     ; implicit = true (* TODO do we want to keep implicit for now? *)
     ; use_stdlib =
         false
