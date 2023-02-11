@@ -408,97 +408,37 @@ module DB = struct
     in
     Resolve.O.(theories >>= top_closure)
 
-  let _make_stdlib_stanza (coq : lib Resolve.t Memo.Lazy.t) =
-    ignore coq; assert false
-    (* let open Memo.O in
-    let+ coq = Memo.Lazy.force coq in
-
-    { name : Loc.t * Coq_lib_name.t
-    ; package : Package.t option
-    ; project : Dune_project.t
-    ; synopsis : string option
-    ; modules : Ordered_set_lang.t
-    ; boot : bool
-    ; enabled_if : Blang.t
-    ; buildable : Buildable.t
-    }
-
-  let installed (context : Context.t) : t Memo.t =
-    (* 1. Find Coq package *)
-    (* 2. Find Coq stdlib and set boot accordingly *)
-    (* 3. Check theory name against paths in installed theories directory *)
-    let open Memo.O in
-    let* installed_libs = Lib.DB.installed context in
-    let* coq =
-      Lib.DB.resolve_first_when_exists installed_libs
-        [ (Loc.none, Lib_name.of_string "coq")
-        ; (Loc.none, Lib_name.of_string "coq-core")
-        ]
-    in
-    let boot : (Loc.t * lib Resolve.t Memo.Lazy.t) option =
-      match coq with
-      | None -> None
-      | Some coq ->
-        ignore coq;
-        None (* TODO: somehow resolve the stdlib theory *)
-    in
-    let resolve coq_lib_name =
-      (* We only have installed libraries if we have a boot library. This should
-         be the Coq stdlib. *)
-      match boot with
-      | None -> `Not_found
-      | Some (loc, coq) -> (
-        let looking_for_stdlib =
-          Ordering.is_eq
-            (Coq_lib_name.compare coq_lib_name (Coq_lib_name.of_string "Coq"))
-        in
-        match looking_for_stdlib with
-        | true ->
-          let stanza = make_stdlib_stanza coq in
-          `Theory (installed_libs, None, stanza)
-        | false -> (* Point to installed theories *) assert false)
-    in
-    let parent = None in
-    Memo.return { boot; resolve; parent } *)
-
-
-  let installed (_ : Context.t) =
-    (* TODO For now there are only two installed "theories" that we know about:
-
-        1. Coq stdlib
-        2. user-contrib
-
-        The second one might require some more explanation. We consider the
-        entire user-contrib folder as a single Coq theory. This makes sense for
-        the following reasons:
-
-        - Dune has no way of knowing how to separate the theories inside the
-          user-contrib folder.
-        - Coq internally treats the user-contrib folder as a single theory by
-          passing `-Q user-contrib ""`.
-
-        In the future we might want to install Coq libraries in a more
-        principled manner together with Dune metadata.
-
-        Therefore the Coq library installed in OCaml should have two theories:
-
-        -R $COQLIB/theories/ Coq
-        -Q $COQLIB/user-contrib/ ""
-
-        To find where Coq is installed we can use the Findlib machinary. From
-        there theories and user-contrib should be easy to spot.
-
-        theories/ will typically come with it's own Dune file, so we can create
-        the Coq_lib.DB.t from the (boot) coq.theory stanza there. (Though if we
-        are to refactor the coq stdlib in the future it might make more sense to
-        make one up here).
-
-        We will have to make up a Coq_lib.DB.t for user-contrib anyway.
-    *)
-
-    (* For now we return an empty Coq Lib *)
+  let empty_db =
     let resolve _ = `Not_found in
-    Memo.return { parent = None; resolve; boot = None }
+    { parent = None; resolve; boot = None }
+
+  let from_coqlib ~coqlib =
+    ignore coqlib;
+    Memo.return empty_db
+
+  let installed (context : Context.t) =
+    let open Memo.O in
+    (* First we find coqc so we can query it *)
+    Context.which context "coqc" >>= function
+    | None -> Memo.return empty_db
+    | Some coqc ->
+      (* Next we setup the query for coqc --config *)
+      let* coq_config = Coq_config.make ~coqc:(Ok coqc) in
+      (* Now we query for coqlib *)
+      let coqlib =
+        Coq_config.by_name coq_config "coqlib" |> function
+        | Some coqlib -> (
+          coqlib |> function
+          | Coq_config.Value.Path p -> p (* We have found a path for coqlib *)
+          | coqlib ->
+            (* This should never happen *)
+            Code_error.raise "coqlib is not a path"
+              [ ("coqlib", Coq_config.Value.to_dyn coqlib) ])
+        | None ->
+          (* This happens if the output of coqc --config doesn't include coqlib *)
+          User_error.raise [ Pp.text "coqlib not found from coqc --config" ]
+      in
+      from_coqlib ~coqlib
 end
 
 let theories_closure t = Lazy.force t.theories_closure
