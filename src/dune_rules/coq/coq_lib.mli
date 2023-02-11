@@ -15,7 +15,7 @@ val libraries : t -> (Loc.t * Lib.t) list Resolve.t
 
 val src_root : t -> Path.t
 
-val obj_root : t -> Path.Build.t
+val obj_root : t -> Path.t
 
 val package : t -> Package.t option
 

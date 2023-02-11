@@ -8,30 +8,25 @@ open Import
 module Id = struct
   module T = struct
     type t =
-      { path : Path.Build.t
+      { path : Path.t
       ; name : Coq_lib_name.t
       }
 
     let compare t { path; name } =
       let open Ordering.O in
-      let= () = Path.Build.compare t.path path in
+      let= () = Path.compare t.path path in
       Coq_lib_name.compare t.name name
 
     let to_dyn { path; name } =
-      Dyn.(
-        record
-          [ ("path", Path.Build.to_dyn path)
-          ; ("name", Coq_lib_name.to_dyn name)
-          ])
+      Dyn.record
+        [ ("path", Path.to_dyn path); ("name", Coq_lib_name.to_dyn name) ]
   end
 
   include T
 
   let pp { path; name } =
     Pp.concat ~sep:Pp.space
-      [ Pp.textf "theory %s in" (Coq_lib_name.to_string name)
-      ; Path.pp (Path.build path)
-      ]
+      [ Pp.textf "theory %s in" (Coq_lib_name.to_string name); Path.pp path ]
 
   let create ~path ~name = { path; name }
 
@@ -53,7 +48,7 @@ include struct
     ; use_stdlib : bool
           (* whether this theory uses the stdlib, eventually set to false for all libs *)
     ; src_root : Path.t
-    ; obj_root : Path.Build.t
+    ; obj_root : Path.t
     ; theories : (Loc.t * t) list Resolve.t
     ; libraries : (Loc.t * Lib.t) list Resolve.t
     ; theories_closure : t list Resolve.t Lazy.t
@@ -264,7 +259,7 @@ module DB = struct
         ; use_stdlib
         ; implicit = s.boot
         ; obj_root = dir
-        ; src_root = Path.build dir
+        ; src_root = dir
         ; theories
         ; libraries
         ; theories_closure =
@@ -275,12 +270,11 @@ module DB = struct
         }
       in
       let module Input = struct
-        type nonrec t = t * Lib.DB.t * Path.Build.t * Coq_stanza.Theory.t
+        type nonrec t = t * Lib.DB.t * Path.t * Coq_stanza.Theory.t
 
         let equal (coq_db, ml_db, path, stanza) (coq_db', ml_db', path', stanza')
             =
-          coq_db == coq_db' && ml_db == ml_db'
-          && Path.Build.equal path path'
+          coq_db == coq_db' && ml_db == ml_db' && Path.equal path path'
           && stanza == stanza'
 
         let hash = Poly.hash
@@ -328,7 +322,7 @@ module DB = struct
       | `Hidden -> Error.hidden_without_composition ~loc name
       | `Found_stanza (db, dir, stanza) ->
         let open Memo.O in
-        let+ theory = create_from_stanza coq_db db dir stanza in
+        let+ theory = create_from_stanza coq_db db (Path.build dir) stanza in
         let open Resolve.O in
         let* (_ : (Loc.t * Lib.t) list) = theory.libraries in
         let+ (_ : (Loc.t * lib) list) = theory.theories in
@@ -422,7 +416,9 @@ module DB = struct
     { parent = None; resolve; boot = None }
 
   let stdlib_lib ~coqlib =
-    ignore coqlib;
+    let theories_dir =
+      Path.append_local coqlib (Path.Local.of_string "theories")
+    in
     { loc = Loc.none
     ; boot = Resolve.return None
     ; id =
@@ -432,15 +428,16 @@ module DB = struct
     ; use_stdlib =
         false
         (* whether this theory uses the stdlib, eventually set to false for all libs *)
-    ; src_root = assert false (* TODO *)
-    ; obj_root = assert false (* TODO *)
-    (* Stdlib has no theories deps *)
-    ; theories = Resolve.return []
-    (* Stdlib does have some libraries deps, but these can be ignored *)
-    ; libraries = Resolve.return []
-    (* The closure of the theories deps is empty *)
-    ; theories_closure = lazy (Resolve.return [])
-    (* TODO: this should be the coq package (or coq-stdlib?) *)
+    ; src_root = theories_dir
+    ; obj_root = theories_dir (* Stdlib has no theories deps *)
+    ; theories =
+        Resolve.return []
+        (* Stdlib does have some libraries deps, but these can be ignored *)
+    ; libraries =
+        Resolve.return [] (* The closure of the theories deps is empty *)
+    ; theories_closure =
+        lazy (Resolve.return [])
+        (* TODO: this should be the coq package (or coq-stdlib?) *)
     ; package = None
     }
 
