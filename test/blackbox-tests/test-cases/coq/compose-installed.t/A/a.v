@@ -1,2 +1,2 @@
 From B Require Import b.
-Print message.
+Print hello.

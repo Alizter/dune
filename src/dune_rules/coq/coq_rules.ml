@@ -71,7 +71,7 @@ let boot_flags t : _ Command.Args.t =
      try to load the prelude. *)
   match t with
   (* Coq's stdlib is installed globally *)
-  | `No_boot -> Command.Args.empty
+  | `No_boot
   (* Coq's stdlib is in scope of the composed build *)
   | `Bootstrap _ -> A "-boot"
   (* We are compiling the prelude itself

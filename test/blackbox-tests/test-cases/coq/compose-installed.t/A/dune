@@ -1,3 +1,4 @@
 (coq.theory
  (name A)
+ (flags -noinit)
  (theories B))

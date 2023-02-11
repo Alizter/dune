@@ -445,14 +445,13 @@ module DB = struct
      recursively using the coq_lib_name. This is used only for scanning
      user-contrib and gernating "theories" from the existing directories. *)
   let rec subdirectory_map name dir : Path.t Coq_lib_name.Map.t Memo.t =
+    (* Printf.printf "Making subdirectory map: %s %s\n" (Coq_lib_name.to_string name)
+       (Path.to_string_maybe_quoted dir); *)
     let open Memo.O in
     (* TODO using exn here; remove *)
-    let* dir_exists = Fs_memo.dir_exists (Path.as_outside_build_dir_exn dir) in
+    let* dir_exists = Fs_memo.path_kind (Path.as_outside_build_dir_exn dir) in
     match dir_exists with
-    | false ->
-      Code_error.raise "subdirectory_map: dir does not exist"
-        [ ("name", Coq_lib_name.to_dyn name); ("dir", Path.to_dyn dir) ]
-    | true -> (
+    | Ok Unix.S_DIR -> (
       let* dir_contents =
         Fs_memo.dir_contents (Path.as_outside_build_dir_exn dir)
       in
@@ -479,6 +478,14 @@ module DB = struct
       | Error _ ->
         (* TODO Ignore errors for now *)
         Memo.return Coq_lib_name.Map.empty)
+    | Error x ->
+      User_error.raise
+        [ Pp.text "System error encountered when finding coqlib:"
+        ; Unix_error.Detailed.pp x
+        ]
+    | _ ->
+      Code_error.raise "subdirectory_map: dir does not exist"
+        [ ("name", Coq_lib_name.to_dyn name); ("dir", Path.to_dyn dir) ]
 
   let lib_of_user_contrib_name name path : lib =
     { loc = Loc.none
