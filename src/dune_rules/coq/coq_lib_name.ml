@@ -12,6 +12,8 @@ let compare = List.compare ~compare:String.compare
 
 let to_string x = String.concat ~sep:"." x
 
+let of_string x = String.split ~on:'.' x
+
 let to_dir x = String.concat ~sep:"/" x
 
 let wrapper x = to_string x

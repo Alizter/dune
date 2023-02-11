@@ -13,7 +13,7 @@ val implicit : t -> bool
 (** ml libraries *)
 val libraries : t -> (Loc.t * Lib.t) list Resolve.t
 
-val src_root : t -> Path.Build.t
+val src_root : t -> Path.t
 
 val obj_root : t -> Path.Build.t
 

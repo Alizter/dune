@@ -26,6 +26,8 @@ val decode : (Loc.t * t) Dune_lang.Decoder.t
 (* to be removed in favor of encode / decode *)
 val to_string : t -> string
 
+val of_string : string -> t
+
 val pp : t -> t Pp.t
 
 val to_dyn : t -> Dyn.t

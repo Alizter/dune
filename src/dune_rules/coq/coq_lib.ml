@@ -52,7 +52,7 @@ include struct
     ; implicit : bool (* Only useful for the stdlib *)
     ; use_stdlib : bool
           (* whether this theory uses the stdlib, eventually set to false for all libs *)
-    ; src_root : Path.Build.t
+    ; src_root : Path.t
     ; obj_root : Path.Build.t
     ; theories : (Loc.t * t) list Resolve.t
     ; libraries : (Loc.t * Lib.t) list Resolve.t
@@ -154,6 +154,7 @@ module DB = struct
            Coq_lib_name.t
         -> [ `Redirect of t
            | `Theory of Lib.DB.t * Path.Build.t * Coq_stanza.Theory.t
+           | `Stdlib of lib
            | `Not_found
            ]
     ; boot : (Loc.t * lib Resolve.t Memo.Lazy.t) option
@@ -263,7 +264,7 @@ module DB = struct
         ; use_stdlib
         ; implicit = s.boot
         ; obj_root = dir
-        ; src_root = dir
+        ; src_root = Path.build dir
         ; theories
         ; libraries
         ; theories_closure =
@@ -297,34 +298,42 @@ module DB = struct
 
     let rec find coq_db name =
       match coq_db.resolve name with
-      | `Theory (db, dir, stanza) -> Some (db, dir, stanza)
+      | `Theory (db, dir, stanza) -> `Theory (db, dir, stanza)
       | `Redirect coq_db -> find coq_db name
+      | `Stdlib lib -> `Stdlib lib
       | `Not_found -> (
         match coq_db.parent with
-        | None -> None
+        | None -> `Not_found
         | Some parent -> find parent name)
 
     let find coq_db ~coq_lang_version name =
       match find coq_db name with
-      | None -> `Not_found
-      | Some (mldb, dir, stanza) when coq_lang_version >= (0, 4) ->
-        `Found (mldb, dir, stanza)
-      | Some (mldb, dir, stanza) -> (
+      | `Not_found -> `Not_found
+      (* Composing with installed theories should come past 0.8 *)
+      (* TODO update version check *)
+      | `Stdlib lib when coq_lang_version >= (0, 7) -> `Stdlib lib
+      | `Stdlib _ -> `Not_found
+      (* Composing with theories in the same project should come past 0.4 *)
+      | `Theory (mldb, dir, stanza) when coq_lang_version >= (0, 4) ->
+        `Found_stanza (mldb, dir, stanza)
+      | `Theory (mldb, dir, stanza) -> (
         match coq_db.resolve name with
         | `Not_found -> `Hidden
-        | `Theory _ | `Redirect _ -> `Found (mldb, dir, stanza))
+        | `Theory _ | `Redirect _ | `Stdlib _ ->
+          `Found_stanza (mldb, dir, stanza))
 
     let resolve coq_db ~coq_lang_version (loc, name) =
       match find coq_db ~coq_lang_version name with
       | `Not_found -> Error.theory_not_found ~loc name
       | `Hidden -> Error.hidden_without_composition ~loc name
-      | `Found (db, dir, stanza) ->
+      | `Found_stanza (db, dir, stanza) ->
         let open Memo.O in
         let+ theory = create_from_stanza coq_db db dir stanza in
         let open Resolve.O in
         let* (_ : (Loc.t * Lib.t) list) = theory.libraries in
         let+ (_ : (Loc.t * lib) list) = theory.theories in
         theory
+      | `Stdlib lib -> Resolve.Memo.return lib
   end
 
   include R
@@ -412,15 +421,49 @@ module DB = struct
     let resolve _ = `Not_found in
     { parent = None; resolve; boot = None }
 
-  let from_coqlib ~coqlib =
+  let stdlib_lib ~coqlib =
     ignore coqlib;
-    Memo.return empty_db
+    { loc = Loc.none
+    ; boot = Resolve.return None
+    ; id =
+        (* TODO generalize Id to Path *)
+        Id.create ~path:(assert false) ~name:(Coq_lib_name.of_string "Coq")
+    ; implicit = true (* TODO do we want to keep implicit for now? *)
+    ; use_stdlib =
+        false
+        (* whether this theory uses the stdlib, eventually set to false for all libs *)
+    ; src_root = assert false (* TODO *)
+    ; obj_root = assert false (* TODO *)
+    (* Stdlib has no theories deps *)
+    ; theories = Resolve.return []
+    (* Stdlib does have some libraries deps, but these can be ignored *)
+    ; libraries = Resolve.return []
+    (* The closure of the theories deps is empty *)
+    ; theories_closure = lazy (Resolve.return [])
+    (* TODO: this should be the coq package (or coq-stdlib?) *)
+    ; package = None
+    }
+
+  let from_coqlib ~coqlib =
+    let resolve coq_lib_name =
+      let looking_for_stdlib =
+        Ordering.is_eq
+          (Coq_lib_name.compare coq_lib_name (Coq_lib_name.of_string "Coq"))
+      in
+      match looking_for_stdlib with
+      | true -> `Stdlib (stdlib_lib ~coqlib)
+      | false -> (* Point to installed theories *) assert false
+    in
+    Memo.return { parent = None; resolve; boot = None }
 
   let installed (context : Context.t) =
     let open Memo.O in
     (* First we find coqc so we can query it *)
     Context.which context "coqc" >>= function
-    | None -> Memo.return empty_db
+    | None ->
+      (* If no coqc can be found then we cannot have any installed theories, so
+         we return an empty database *)
+      Memo.return empty_db
     | Some coqc ->
       (* Next we setup the query for coqc --config *)
       let* coq_config = Coq_config.make ~coqc:(Ok coqc) in
