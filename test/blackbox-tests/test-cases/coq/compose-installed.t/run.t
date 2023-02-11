@@ -22,6 +22,14 @@ does *not* have to be a dune project.
 
   $ cd A
   $ dune build --root=.
+  *** Warning: cannot open $TESTCASE_ROOT/./theories
+  *** Warning: cannot open $TESTCASE_ROOT/./../coq-core/plugins
+  Warning:
+  Cannot open directory $TESTCASE_ROOT/./../coq-core/plugins
+  [cannot-open-dir,filesystem]
+  Warning:
+  Cannot open $TESTCASE_ROOT/./theories
+  [cannot-open-path,filesystem]
   Inductive hello : Set :=
       I : hello | am : hello | an : hello | install : hello | loc : hello.
 
