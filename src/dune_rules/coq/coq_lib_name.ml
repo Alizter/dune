@@ -14,6 +14,12 @@ let to_string x = String.concat ~sep:"." x
 
 let of_string x = String.split ~on:'.' x
 
+let empty = []
+
+let to_list x = x
+
+let append x y = x @ [ y ]
+
 let to_dir x = String.concat ~sep:"/" x
 
 let wrapper x = to_string x

@@ -19,9 +19,9 @@ TODO test needs version bump
 
   $ dune build test.vo
 
-  $ cat _build/log | sed -n 's/^\$//p' | tail -n 2
-   (cd _build/default && /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/bin/coqdep -R /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/lib/coq/theories Coq -R . test -dyndep opt test.v) > _build/default/test.v.d
-   (cd _build/default && /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/bin/coqc -q -w -deprecated-native-compiler-option -w -native-compiler-disabled -native-compiler ondemand -R /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/lib/coq/theories Coq -R . test test.v)
+  $ cat _build/log | sed -n 's/^\$ //p' | tail -n 2
+  (cd _build/default && /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/bin/coqdep -R /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/lib/coq/theories Coq -R . test -dyndep opt test.v) > _build/default/test.v.d
+  (cd _build/default && /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/bin/coqc -q -w -deprecated-native-compiler-option -w -native-compiler-disabled -native-compiler ondemand -R /nix/store/x4k9020dvlpw1g41rsrqmsd0isxd248q-coq-8.16.1/lib/coq/theories Coq -R . test test.v)
 
   $ ls _build/default
   test.glob
