@@ -83,6 +83,9 @@ Unreleased
 - Fix segfault on MacOS when dune was being shutdown while in watch mode.
   (#7312, fixes #6151, @gridbugs, @emillon)
 
+- Added load_only_modules field to coq.theory to support Load commands in .v
+  files. (#7056, fixes #3286, @Alizter)
+
 3.7.0 (2023-02-17)
 ------------------
 
