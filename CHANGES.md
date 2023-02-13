@@ -36,6 +36,9 @@ Unreleased
 
 - Dune now suggests other aliases when an alias is not found (#7004, @Alizter)
 
+- Added load_only_modules field to coq.theory to support Load commands in .v
+  files. (#7056, fixes #3286, @Alizter)
+
 3.7.0 (2023-02-17)
 ------------------
 
