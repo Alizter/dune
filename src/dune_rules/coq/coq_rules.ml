@@ -52,14 +52,16 @@ let coq_flags ~dir ~stanza_flags ~expander ~sctx =
   Expander.expand_and_eval_set expander stanza_flags ~standard
 
 let theories_flags ~theories_deps =
-  let theory_coqc_flag lib =
-    let dir = Coq_lib.src_root lib in
-    let binding_flag = if Coq_lib.implicit lib then "-R" else "-Q" in
-    Command.Args.S
-      [ A binding_flag
-      ; Path (Path.build dir)
-      ; A (Coq_lib.name lib |> Coq_lib_name.wrapper)
-      ]
+  let theory_coqc_flag l =
+    let name = Coq_lib.name l |> Coq_lib_name.wrapper in
+    match l with
+    | Coq_lib.Dune lib ->
+      let dir = Coq_lib.Dune.src_root lib in
+      Command.Args.S [ A "-Q"; Path (Path.build dir); A name ]
+    | Legacy lib ->
+      let dir = Coq_lib.Legacy.installed_root lib in
+      let binding_flag = if Coq_lib.Legacy.implicit lib then "-R" else "-Q" in
+      Command.Args.S [ A binding_flag; Path dir; A name ]
   in
   Resolve.Memo.args
     (let open Resolve.Memo.O in
@@ -74,7 +76,7 @@ let boot_flags t : _ Command.Args.t =
      try to load the prelude. *)
   match t with
   (* Coq's stdlib is installed globally *)
-  | `No_boot -> Command.Args.empty
+  | `No_boot -> A "-boot"
   (* Coq's stdlib is in scope of the composed build *)
   | `Bootstrap _ -> A "-boot"
   (* We are compiling the prelude itself
@@ -105,10 +107,16 @@ let native_includes ~dir =
 
 let directories_of_lib ~sctx lib =
   let name = Coq_lib.name lib in
-  let dir = Coq_lib.src_root lib in
-  let* dir_contents = Dir_contents.get sctx ~dir in
-  let+ coq_sources = Dir_contents.coq dir_contents in
-  Coq_sources.directories coq_sources ~name
+  match lib with
+  | Coq_lib.Dune lib ->
+    let dir = Coq_lib.Dune.src_root lib in
+    let* dir_contents = Dir_contents.get sctx ~dir in
+    let+ coq_sources = Dir_contents.coq dir_contents in
+    Coq_sources.directories coq_sources ~name
+  | Coq_lib.Legacy _ ->
+    (* TODO: we can probably return this if we don't restrict ourselves to
+       Path.Build.t *)
+    Memo.return []
 
 let setup_native_theory_includes ~sctx ~theories_deps ~theory_dirs =
   Resolve.Memo.bind theories_deps ~f:(fun theories_deps ->
@@ -199,9 +207,16 @@ let ml_flags_and_ml_pack_rule ~context ~lib_db ~theories_deps
     (* Pair of include flags and paths to mlpack *)
     let libs =
       let* theories = theories_deps in
+
       let* theories =
-        Resolve.Memo.lift
-        @@ Resolve.List.concat_map ~f:Coq_lib.libraries theories
+        Resolve.List.concat_map
+          ~f:(function
+            | Coq_lib.Dune lib -> Coq_lib.Dune.libraries lib
+            | Legacy _ ->
+              Resolve.return []
+              (* TODO we should be finding the plugin locations for legacy libs *))
+          theories
+        |> Resolve.Memo.lift
       in
       let libs = libs @ theories in
       Lib.closure ~linking:false (List.map ~f:snd libs)
@@ -362,11 +377,13 @@ let deps_of ~dir ~boot_type ~wrapper_name coq_module =
   | Some deps ->
     (* Inject prelude deps *)
     let deps =
+      let prelude = "Init/Prelude.vo" in
       match boot_type with
       | `No_boot | `Bootstrap_prelude -> deps
-      | `Bootstrap lib ->
-        Path.relative (Path.build (Coq_lib.src_root lib)) "Init/Prelude.vo"
-        :: deps
+      | `Bootstrap (Coq_lib.Dune lib) ->
+        Path.relative (Coq_lib.Dune.src_root lib |> Path.build) prelude :: deps
+      | `Bootstrap (Legacy lib) ->
+        Path.relative (Coq_lib.Legacy.installed_root lib) prelude :: deps
     in
     Action_builder.paths deps
 
@@ -435,12 +452,20 @@ let setup_coqc_rule ~loc ~dir ~sctx ~coqc_dir ~file_targets ~stanza_flags
     >>| Action.Full.add_sandbox Sandbox_config.no_sandboxing)
 
 let coq_modules_of_theory ~sctx lib =
+  (* TODO generalize to any coq library (even installed) *)
   Action_builder.of_memo
-    (let name = Coq_lib.name lib in
-     let dir = Coq_lib.src_root lib in
-     let* dir_contents = Dir_contents.get sctx ~dir in
-     let+ coq_sources = Dir_contents.coq dir_contents in
-     Coq_sources.library coq_sources ~name)
+  @@
+  let name = Coq_lib.name lib in
+  match lib with
+  | Coq_lib.Legacy _ ->
+    (* TODO for now we return no modules when the path of a theory is outside of
+       the build directory *)
+    Memo.return []
+  | Coq_lib.Dune lib ->
+    let dir = Coq_lib.Dune.src_root lib in
+    let* dir_contents = Dir_contents.get sctx ~dir in
+    let+ coq_sources = Dir_contents.coq dir_contents in
+    Coq_sources.library coq_sources ~name
 
 let source_rule ~sctx theories =
   (* sources for depending libraries coqdep requires all the files to be in the
