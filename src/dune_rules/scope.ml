@@ -219,33 +219,6 @@ module DB = struct
 
   module Path_source_map_traversals = Memo.Make_map_traversals (Path.Source.Map)
 
-  let coq_scopes_by_dir db_by_project_dir projects_by_dir public_theories
-      coq_stanzas =
-    let coq_stanzas_by_project_dir =
-      List.map coq_stanzas ~f:(fun (dir, (stanza : Coq_stanza.Theory.t)) ->
-          let project = stanza.project in
-          (Dune_project.root project, (dir, stanza)))
-      |> Path.Source.Map.of_list_multi
-    in
-
-    let public_theories = Lazy.force public_theories in
-    let parent = Some public_theories in
-    let find_db dir = snd (find_by_dir_in_map db_by_project_dir dir) in
-
-    Path.Source.Map.merge projects_by_dir coq_stanzas_by_project_dir
-      ~f:(fun _dir project coq_stanzas ->
-        assert (Option.is_some project);
-        let coq_stanzas = Option.value coq_stanzas ~default:[] in
-        List.map coq_stanzas ~f:(fun (dir, (stanza : Coq_stanza.Theory.t)) ->
-            let entry =
-              match stanza.package with
-              | None -> Coq_lib.DB.Theory dir
-              | Some _ -> Redirect public_theories
-            in
-            (stanza, entry))
-        |> Coq_lib.DB.create_from_coqlib_stanzas ~parent ~find_db
-        |> Option.some)
-
   let scopes_by_dir ~build_dir ~lib_config ~projects ~public_libs
       ~public_theories stanzas coq_stanzas =
     let open Memo.O in
@@ -265,6 +238,13 @@ module DB = struct
           (Dune_project.root project, stanza))
       |> Path.Source.Map.of_list_multi
     in
+    let coq_stanzas_by_project_dir =
+      lazy
+        (List.map coq_stanzas ~f:(fun (dir, (stanza : Coq_stanza.Theory.t)) ->
+             let project = stanza.project in
+             (Dune_project.root project, (dir, stanza)))
+        |> Path.Source.Map.of_list_multi)
+    in
     let+ db_by_project_dir =
       Path.Source.Map.merge projects_by_dir stanzas_by_project_dir
         ~f:(fun _dir project stanzas ->
@@ -279,15 +259,33 @@ module DB = struct
              (project, db))
     in
 
-    let coq_scopes_by_dir =
+    let coq_db_by_project_dir =
       lazy
-        (coq_scopes_by_dir db_by_project_dir projects_by_dir public_theories
-           coq_stanzas)
+        (let public_theories = Lazy.force public_theories in
+         let find_db dir = snd (find_by_dir_in_map db_by_project_dir dir) in
+         Path.Source.Map.merge projects_by_dir
+           (Lazy.force coq_stanzas_by_project_dir)
+           ~f:(fun _dir project coq_stanzas ->
+             assert (Option.is_some project);
+             let stanzas = Option.value coq_stanzas ~default:[] in
+             let entries =
+               List.map stanzas ~f:(fun (dir, (stanza : Coq_stanza.Theory.t)) ->
+                   let entry =
+                     match stanza.package with
+                     | None -> Coq_lib.DB.Theory dir
+                     | Some _ -> Redirect public_theories
+                   in
+                   (stanza, entry))
+             in
+             Some entries)
+         |> Path.Source.Map.map ~f:(fun stanzas ->
+                Coq_lib.DB.create_from_coqlib_stanzas
+                  ~parent:(Some public_theories) ~find_db stanzas))
     in
 
     let coq_db_find dir =
       lazy
-        (let map = Lazy.force coq_scopes_by_dir in
+        (let map = Lazy.force coq_db_by_project_dir in
          Path.Source.Map.find_exn map dir)
     in
 
