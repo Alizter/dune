@@ -9,16 +9,15 @@ module Id = struct
   module T = struct
     type t =
       { path : Path.Build.t
-      ; loc : Loc.t
       ; name : Coq_lib_name.t
       }
 
-    let compare t { path; name; _ } =
+    let compare t { path; name } =
       let open Ordering.O in
       let= () = Path.Build.compare t.path path in
       Coq_lib_name.compare t.name name
 
-    let to_dyn { path; name; _ } =
+    let to_dyn { path; name } =
       Dyn.(
         record
           [ ("path", Path.Build.to_dyn path)
@@ -28,13 +27,13 @@ module Id = struct
 
   include T
 
-  let pp { path; name; _ } =
+  let pp { path; name } =
     Pp.concat ~sep:Pp.space
       [ Pp.textf "theory %s in" (Coq_lib_name.to_string name)
       ; Path.pp (Path.build path)
       ]
 
-  let create ~path ~name:(loc, name) = { path; name; loc }
+  let create ~path ~name = { path; name }
 
   module C = Comparable.Make (T)
   module Top_closure = Top_closure.Make (C.Set) (Resolve)
@@ -48,8 +47,7 @@ include struct
 
   type t =
     { loc : Loc.t
-    ; boot_id : Id.t option
-          (** boot library that was selected to build this theory *)
+    ; boot : t option Resolve.t
     ; id : Id.t
     ; implicit : bool (* Only useful for the stdlib *)
     ; use_stdlib : bool
@@ -158,23 +156,10 @@ module DB = struct
            | `Theory of Lib.DB.t * Path.Build.t * Coq_stanza.Theory.t
            | `Not_found
            ]
-    ; boot_id : Id.t option
+    ; boot : (Loc.t * lib Resolve.t Memo.Lazy.t) option
     }
 
-  let rec boot_library_id coq_db =
-    match coq_db.boot_id with
-    | Some boot_id -> Some boot_id
-    | None -> (
-      match coq_db.parent with
-      | None -> None
-      | Some parent -> boot_library_id parent)
-
   module rec R : sig
-    val resolve_boot :
-         t
-      -> coq_lang_version:Dune_sexp.Syntax.Version.t
-      -> (Loc.t * lib) option Resolve.Memo.t
-
     val resolve :
          t
       -> coq_lang_version:Dune_sexp.Syntax.Version.t
@@ -182,6 +167,15 @@ module DB = struct
       -> lib Resolve.Memo.t
   end = struct
     open R
+
+    let rec boot coq_db =
+      match coq_db.boot with
+      | Some (_, boot) ->
+        Memo.Lazy.force boot |> Resolve.Memo.map ~f:Option.some
+      | None -> (
+        match coq_db.parent with
+        | None -> Resolve.Memo.return None
+        | Some parent -> boot parent)
 
     let resolve_plugin ~db ~allow_private_deps ~name (loc, lib) =
       let open Resolve.Memo.O in
@@ -211,36 +205,34 @@ module DB = struct
       let f = resolve_plugin ~db ~allow_private_deps ~name in
       Resolve.Memo.List.map plugins ~f
 
-    let check_boot ~boot_id (lib : lib) =
-      match (boot_id, lib.boot_id) with
-      | Some id, Some id' ->
-        if Id.compare id id' = Eq then Resolve.return ()
-        else Error.incompatible_boot id id'
-      | _, _ -> Resolve.return ()
+    let check_boot ~boot ~id (lib : lib) =
+      let open Resolve.O in
+      let* boot = boot in
+      match boot with
+      | None -> Resolve.return ()
+      | Some boot -> (
+        let* boot' = lib.boot in
+        match boot' with
+        | None -> Resolve.return ()
+        | Some boot' -> (
+          match Id.compare boot.id boot'.id with
+          | Eq -> Resolve.return ()
+          | _ -> Error.incompatible_boot lib.id id))
 
     let maybe_add_boot ~boot ~use_stdlib ~is_boot theories =
-      if use_stdlib && not is_boot then
-        let open Resolve.O in
-        let* boot = boot in
+      let open Resolve.O in
+      let* boot = boot in
+      match boot with
+      | Some boot when use_stdlib && not is_boot ->
         let+ theories = theories in
-        Option.to_list boot @ theories
-      else theories
+        (boot.loc, boot) :: theories
+      | Some _ | None -> theories
 
-    let resolve_boot ~coq_lang_version ~coq_db (boot_id : Id.t option) =
-      match boot_id with
-      | Some boot_id ->
-        let open Resolve.Memo.O in
-        let+ lib =
-          resolve ~coq_lang_version coq_db (boot_id.loc, boot_id.name)
-        in
-        Some (boot_id.loc, lib)
-      | None -> Resolve.Memo.return None
-
-    let resolve_theory ~coq_lang_version ~allow_private_deps ~coq_db ~boot_id
+    let resolve_theory ~coq_lang_version ~allow_private_deps ~coq_db ~boot ~id
         (loc, theory_name) =
       let open Resolve.Memo.O in
       let* theory = resolve ~coq_lang_version coq_db (loc, theory_name) in
-      let* () = Resolve.Memo.lift @@ check_boot ~boot_id theory in
+      let* () = Resolve.Memo.lift @@ check_boot ~boot ~id theory in
       let+ () =
         if allow_private_deps then Resolve.Memo.return ()
         else
@@ -250,27 +242,27 @@ module DB = struct
       in
       (loc, theory)
 
-    let resolve_theories ~coq_lang_version ~allow_private_deps ~coq_db ~boot_id
+    let resolve_theories ~coq_lang_version ~allow_private_deps ~coq_db ~boot ~id
         theories =
       let f =
-        resolve_theory ~coq_lang_version ~allow_private_deps ~coq_db ~boot_id
+        resolve_theory ~coq_lang_version ~allow_private_deps ~coq_db ~boot ~id
       in
       Resolve.Memo.List.map theories ~f
 
     let create_from_stanza_impl (coq_db, db, dir, (s : Coq_stanza.Theory.t)) =
       let name = snd s.name in
-      let id = Id.create ~path:dir ~name:s.name in
+      let id = Id.create ~path:dir ~name in
       let coq_lang_version = s.buildable.coq_lang_version in
       let open Memo.O in
-      let boot_id = if s.boot then None else boot_library_id coq_db in
+      let* boot = if s.boot then Resolve.Memo.return None else boot coq_db in
       let allow_private_deps = Option.is_none s.package in
       let use_stdlib = s.buildable.use_stdlib in
       let+ libraries =
         resolve_plugins ~db ~allow_private_deps ~name s.buildable.plugins
       and+ theories =
-        resolve_theories ~coq_lang_version ~allow_private_deps ~coq_db ~boot_id
+        resolve_theories ~coq_lang_version ~allow_private_deps ~coq_db ~boot ~id
           s.buildable.theories
-      and+ boot = resolve_boot ~coq_lang_version ~coq_db boot_id in
+      in
       let theories =
         maybe_add_boot ~boot ~use_stdlib ~is_boot:s.boot theories
       in
@@ -281,7 +273,7 @@ module DB = struct
       let theories = map_error theories in
       let libraries = map_error libraries in
       { loc = s.buildable.loc
-      ; boot_id
+      ; boot
       ; id
       ; use_stdlib
       ; implicit = s.boot
@@ -313,7 +305,7 @@ module DB = struct
     let memo =
       Memo.create "create-from-stanza"
         ~human_readable_description:(fun (_, _, path, theory) ->
-          Id.pp (Id.create ~path ~name:theory.name))
+          Id.pp (Id.create ~path ~name:(snd theory.name)))
         ~input:(module Input)
         create_from_stanza_impl
 
@@ -339,10 +331,6 @@ module DB = struct
         | `Not_found -> `Hidden
         | `Theory _ | `Redirect _ -> `Found (mldb, dir, stanza))
 
-    let resolve_boot coq_db ~coq_lang_version =
-      let boot_id = boot_library_id coq_db in
-      resolve_boot ~coq_lang_version ~coq_db boot_id
-
     let resolve coq_db ~coq_lang_version (loc, name) =
       match find coq_db ~coq_lang_version name with
       | `Not_found -> Error.theory_not_found ~loc name
@@ -358,24 +346,53 @@ module DB = struct
 
   include R
 
-  let select_boot_id entries =
-    match
-      List.find_all entries ~f:(fun ((theory : Coq_stanza.Theory.t), _entry) ->
-          theory.boot)
-    with
-    | [] -> None
-    | [ ((theory : Coq_stanza.Theory.t), entry) ] -> (
-      match entry with
-      | Theory path -> Some (Id.create ~path ~name:theory.name)
-      | Redirect lib -> lib.boot_id)
-    | boots ->
-      let stanzas = List.map boots ~f:fst in
-      Error.duplicate_boot_lib stanzas
+  let rec boot_library_finder t =
+    match t.boot with
+    | None -> (
+      match t.parent with
+      | None -> None
+      | Some parent -> boot_library_finder parent)
+    | Some (loc, lib) -> Some (loc, lib)
+
+  let boot_library t =
+    (* Check if a database and its parents have the boot flag *)
+    match boot_library_finder t with
+    | None -> Resolve.Memo.return None
+    | Some (loc, lib) ->
+      let open Memo.O in
+      let+ lib = Memo.Lazy.force lib in
+      Resolve.map lib ~f:(fun lib -> Some (loc, lib))
 
   (* Should we register errors and printers, or raise is OK? *)
   let create_from_coqlib_stanzas ~(parent : t option) ~find_db
       (entries : (Coq_stanza.Theory.t * entry) list) =
-    let boot_id = select_boot_id entries in
+    let t = Fdecl.create Dyn.opaque in
+    let boot =
+      let boot =
+        match
+          List.find_all entries
+            ~f:(fun ((theory : Coq_stanza.Theory.t), _entry) -> theory.boot)
+        with
+        | [] -> None
+        | [ ((theory : Coq_stanza.Theory.t), _entry) ] ->
+          Some
+            ( theory.buildable.loc
+            , theory.name
+            , theory.buildable.coq_lang_version )
+        | boots ->
+          let stanzas = List.map boots ~f:fst in
+          Error.duplicate_boot_lib stanzas
+      in
+      match boot with
+      | None -> None
+      | Some (loc, name, coq_lang_version) ->
+        let lib =
+          Memo.lazy_ (fun () ->
+              let t = Fdecl.get t in
+              resolve t ~coq_lang_version name)
+        in
+        Some (loc, lib)
+    in
     let map =
       match
         Coq_lib_name.Map.of_list_map entries
@@ -394,7 +411,8 @@ module DB = struct
         | Theory dir -> `Theory (find_db dir, dir, theory)
         | Redirect db -> `Redirect db)
     in
-    { boot_id; resolve; parent }
+    Fdecl.set t { boot; resolve; parent };
+    Fdecl.get t
 
   let find_many t theories ~coq_lang_version =
     Resolve.Memo.List.map theories ~f:(resolve ~coq_lang_version t)
