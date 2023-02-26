@@ -7,3 +7,5 @@ let is_digit = function
 let is_lowercase_hex = function
   | '0' .. '9' | 'a' .. 'f' -> true
   | _non_lowercase_hex_char -> false
+
+let of_int (i : int) = if i < 0 || i > 255 then None else Some (char_of_int i)

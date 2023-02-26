@@ -17,6 +17,8 @@ module Style : sig
     | `Fg_bright_magenta
     | `Fg_bright_cyan
     | `Fg_bright_white
+    | `Fg_8_bit_color of char
+    | `Fg_24_bit_color of char * char * char
     | `Bg_default
     | `Bg_black
     | `Bg_red
@@ -34,6 +36,8 @@ module Style : sig
     | `Bg_bright_magenta
     | `Bg_bright_cyan
     | `Bg_bright_white
+    | `Bg_8_bit_color of char
+    | `Bg_24_bit_color of char * char * char
     | `Bold
     | `Dim
     | `Italic
