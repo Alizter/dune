@@ -2,8 +2,9 @@ let is_root t = Filename.dirname t = t
 let initial_cwd = Stdlib.Sys.getcwd ()
 
 type mkdir_result =
-  | Already_exists
   | Created
+  | Already_exists
+  | Not_a_directory
   | Missing_parent_directory
 
 let mkdir ?(perms = 0o777) t_s =
@@ -13,11 +14,13 @@ let mkdir ?(perms = 0o777) t_s =
   with
   | Unix.Unix_error (EEXIST, _, _) -> Already_exists
   | Unix.Unix_error (ENOENT, _, _) -> Missing_parent_directory
+  | Unix.Unix_error (ENOTDIR, _, _) -> Not_a_directory
 ;;
 
 type mkdir_p_result =
-  | Already_exists
   | Created
+  | Already_exists
+  | Not_a_directory
 
 let rec mkdir_p ?perms t_s =
   match mkdir ?perms t_s with
@@ -33,16 +36,21 @@ let rec mkdir_p ?perms t_s =
     else (
       let parent = Filename.dirname t_s in
       match mkdir_p ?perms parent with
+      | Not_a_directory ->
+        Code_error.raise "failed to create parent directory" [ "t_s", Dyn.string t_s ]
       | Created | Already_exists ->
         (* The [Already_exists] case might happen if some other process managed
            to create the parent directory concurrently. *)
         (match mkdir t_s ?perms with
          | Created -> Created
          | Already_exists -> Already_exists
+         | Not_a_directory ->
+           Code_error.raise "failed to create parent directory" [ "t_s", Dyn.string t_s ]
          | Missing_parent_directory ->
            (* But we just successfully created the parent directory. So it was
               likely deleted right now. Let's give up *)
            Code_error.raise "failed to create parent directory" [ "t_s", Dyn.string t_s ]))
+  | Not_a_directory -> Not_a_directory
 ;;
 
 let resolve_link path =
