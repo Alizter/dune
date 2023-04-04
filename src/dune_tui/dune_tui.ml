@@ -113,6 +113,8 @@ module Tui () = struct
 
   let user_feedback = ref None
 
+  let reset_count = ref 0
+
   let image ~status_line ~messages =
     let status =
       match (status_line : User_message.Style.t Pp.t option) with
@@ -123,10 +125,17 @@ module Tui () = struct
       List.map messages ~f:(fun msg ->
           image_of_user_message_style_pp (User_message.pp msg))
     in
+    let reset_count =
+      image_of_user_message_style_pp
+      @@ Pp.tag User_message.Style.Debug
+      @@ Pp.hbox
+      @@ Pp.textf "Reset count %d" !reset_count
+    in
     Notty.I.vcat
       (messages @ status
       @ List.map ~f:image_of_user_message_style_pp
-      @@ Option.to_list !user_feedback)
+          (Option.to_list !user_feedback)
+      @ [ reset_count ])
 
   let render (state : Dune_threaded_console.state) =
     let messages = Queue.to_list state.messages in
@@ -223,7 +232,9 @@ module Tui () = struct
         let time_budget = Float.max 0. (time_budget -. delta_now) in
         handle_user_events ~now ~time_budget ~mutex state)
 
-  let reset () = ()
+  let reset () =
+    reset_count := !reset_count + 1;
+    ()
 
   let reset_flush_history () = ()
 
