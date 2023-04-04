@@ -111,29 +111,57 @@ module Tui () = struct
 
   let start () = Unix.set_nonblock Unix.stdin
 
+  let user_feedback = ref None
+
   let image ~status_line ~messages =
     let status =
       match (status_line : User_message.Style.t Pp.t option) with
       | None -> []
-      | Some message -> [ image_of_user_message_style_pp message ]
+      | Some message -> List.map ~f:image_of_user_message_style_pp [ message ]
     in
     let messages =
       List.map messages ~f:(fun msg ->
           image_of_user_message_style_pp (User_message.pp msg))
     in
-    Notty.I.vcat (messages @ status)
+    Notty.I.vcat
+      (messages @ status
+      @ List.map ~f:image_of_user_message_style_pp
+      @@ Option.to_list !user_feedback)
 
   let render (state : Dune_threaded_console.state) =
     let messages = Queue.to_list state.messages in
     let image = image ~status_line:state.status_line ~messages in
     Term.image term image
 
-  let resize mutex (state : Dune_threaded_console.state) =
+  (* Current TUI issues
+     - Ctrl-Z and then 'fg' will stop inputs from being captured.
+     - Errors messages are not reset when they are stale.
+     - Resizing from full screen to a small size will not update the screen
+       causing it not to be drawn.
+  *)
+
+  let are_you_sure = ref false
+
+  (** Update any local state and finish *)
+  let finish_interaction () =
+    are_you_sure := false;
+    Unix.gettimeofday ()
+
+  (** Update any global state and finish *)
+  let finish_dirty_interaction ~mutex (state : Dune_threaded_console.state) =
     Mutex.lock mutex;
     state.dirty <- true;
-    Mutex.unlock mutex
+    Mutex.unlock mutex;
+    finish_interaction ()
 
-  let rec handle_user_events ~now ~time_budget mutex state =
+  let give_user_feedback ?(style = User_message.Style.Ok) message =
+    user_feedback := Some Pp.(tag style @@ hbox @@ message)
+
+  let resize ~mutex (state : Dune_threaded_console.state) =
+    finish_dirty_interaction ~mutex state
+
+  let rec handle_user_events ~now ~time_budget ~mutex
+      (state : Dune_threaded_console.state) =
     (* We check for any user input and handle it. If we go over the
        [time_budget] we give up and continue. *)
     let input_fds =
@@ -150,14 +178,42 @@ module Tui () = struct
       (* TODO if anything fancy is done in the UI in the future we need to lock
          the state with the provided mutex *)
       match Term.event term with
-      | `Key (`ASCII 'q', _) ->
+      (* quit when sure *)
+      | `Key (`ASCII 'q', _) when !are_you_sure ->
         (* When we encounter q we make sure to quit by signaling termination. *)
         Unix.kill (Unix.getpid ()) Sys.sigterm;
         Unix.gettimeofday ()
-      | `Resize _ ->
-        resize mutex state;
+      (* quit when unsure *)
+      | `Key (`ASCII 'q', _) ->
+        give_user_feedback ~style:User_message.Style.Warning
+          (Pp.text
+             "You have just pressed 'q' to quit. Are you sure you want to quit?");
+        Mutex.lock mutex;
+        state.dirty <- true;
+        Mutex.unlock mutex;
+        are_you_sure := true;
         Unix.gettimeofday ()
-      | _ -> Unix.gettimeofday ()
+      (* on resize we wish to redraw so the state is set to dirty *)
+      | `Resize _ -> resize ~mutex state
+      (* Unknown ascii key presses *)
+      | `Key (`ASCII c, _) ->
+        give_user_feedback ~style:User_message.Style.Kwd
+          (Pp.textf "You have just pressed '%c' but this does nothing!" c);
+        finish_dirty_interaction ~mutex state
+      (* Mouse interaction *)
+      | `Mouse (`Press button, (x, y), _) ->
+        give_user_feedback ~style:User_message.Style.Kwd
+          (Pp.textf
+             "You have just %s the mouse at (%d, %d) but this does nothing!"
+             (match button with
+             | `Left -> "left clicked"
+             | `Middle -> "middle clicked"
+             | `Right -> "right clicked"
+             | `Scroll `Up -> "scrolled up with"
+             | `Scroll `Down -> "scrolled down with")
+             x y);
+        finish_dirty_interaction ~mutex state
+      | _ -> finish_interaction ()
       | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) ->
         (* If we encounter an exception, we make sure to rehandle user events
            with a corrected time budget. *)
@@ -165,7 +221,7 @@ module Tui () = struct
         let now = Unix.gettimeofday () in
         let delta_now = now -. old_now in
         let time_budget = Float.max 0. (time_budget -. delta_now) in
-        handle_user_events ~now ~time_budget mutex state)
+        handle_user_events ~now ~time_budget ~mutex state)
 
   let reset () = ()
 
