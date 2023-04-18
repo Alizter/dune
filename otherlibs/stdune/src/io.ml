@@ -104,7 +104,12 @@ module Copyfile = struct
   let sendfile =
     let setup_copy ?(chmod = Fun.id) ~src ~dst () =
       match Unix.openfile src [ O_RDONLY ] 0 with
-      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error `Src_missing
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> (
+        match (Unix.lstat src).st_kind with
+        | Unix.S_LNK ->
+          (* broken symlinks should just be created when being copied *)
+          Ok `Create_broken_symlink
+        | _ -> Error `Src_missing)
       | fd_src -> (
         match Unix.fstat fd_src with
         | exception exn ->
@@ -127,7 +132,7 @@ module Copyfile = struct
                 | Unix.Unix_error (Unix.EISDIR, _, _) -> Error `Dst_is_a_dir
                 | _ -> Error (`Exn (Exn_with_backtrace.capture exn)))
             in
-            (fd_src, fd_dst, src_size)))
+            `Sendfile (fd_src, fd_dst, src_size)))
     in
     fun ?chmod ~src ~dst () ->
       (* All of this exception translation is done for now to maintain the
@@ -145,12 +150,14 @@ module Copyfile = struct
       | Error `Src_missing ->
         let message = Printf.sprintf "%s: No such file or directory" src in
         raise (Sys_error message)
-      | Ok (fd_src, fd_dst, src_size) ->
+      | Ok (`Sendfile (fd_src, fd_dst, src_size)) ->
         Exn.protectx (fd_src, fd_dst, src_size)
           ~f:(fun (src, dst, src_size) -> sendfile ~src ~dst src_size)
           ~finally:(fun (src, dst, _) ->
             Unix.close src;
             Unix.close dst)
+      | Ok `Create_broken_symlink ->
+        Unix.symlink ~to_dir:false (Unix.readlink src) dst
 
   let copyfile ?chmod ~src ~dst () =
     let src_stats =

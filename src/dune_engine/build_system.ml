@@ -688,6 +688,7 @@ end = struct
                   Rule_cache.Shared.examine_targets_and_store
                     ~can_go_in_shared_cache ~loc ~rule_digest
                     ~execution_parameters
+                    ~allow_broken_symlinks:false
                     ~produced_targets:exec_result.produced_targets
                     ~action:action.action
                 in
@@ -905,7 +906,10 @@ end = struct
       match Path.Build.Map.find targets path with
       | Some digest -> (digest, File_target)
       | None -> (
-        match Cached_digest.build_file ~allow_dirs:true path with
+        match
+          Cached_digest.build_file ~allow_dirs:false
+            ~allow_broken_symlinks:false path
+        with
         | Ok digest ->
           (digest, Dir_target { generated_file_digests = targets })
           (* Must be a directory target *)

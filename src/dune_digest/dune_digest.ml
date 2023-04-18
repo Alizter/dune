@@ -22,7 +22,12 @@ module Direct_impl : Digest_impl = struct
       | fd -> fd
       | exception Unix.Unix_error (Unix.EACCES, _, _) ->
         raise (Sys_error (sprintf "%s: Permission denied" file))
-      | exception exn -> reraise exn
+      | exception exn ->
+        (* TODO Somehow have a workaround for broken symlinks *)
+        (* Try again for broken symlinks before failing. We need to use O_PATH
+           and O_NOFOLLOW here but Unix from OCaml stdlib doesn't have those :( *)
+        Printf.printf "exn: %s\n" (Printexc.to_string exn);
+        reraise exn
     in
     Exn.protectx fd ~f:md5_fd ~finally:Unix.close
 
@@ -124,10 +129,10 @@ exception
     | `Unexpected_kind
     ]
 
-let directory_digest_version = 2
+let directory_digest_version = 3
 
-let path_with_stats ~allow_dirs path (stats : Stats_for_digest.t) :
-    Path_digest_result.t =
+let path_with_stats ~allow_dirs ~allow_broken_symlinks path
+    (stats : Stats_for_digest.t) : Path_digest_result.t =
   let rec loop path (stats : Stats_for_digest.t) =
     match stats.st_kind with
     | S_LNK ->
@@ -180,5 +185,6 @@ let path_with_stats ~allow_dirs path (stats : Stats_for_digest.t) :
   in
   match stats.st_kind with
   | S_DIR when not allow_dirs -> Unexpected_kind
-  | S_BLK | S_CHR | S_LNK | S_FIFO | S_SOCK -> Unexpected_kind
+  | S_LNK when not allow_broken_symlinks -> Unexpected_kind
+  | S_BLK | S_CHR | S_FIFO | S_SOCK -> Unexpected_kind
   | _ -> loop path stats

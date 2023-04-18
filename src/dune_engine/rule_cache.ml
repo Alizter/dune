@@ -127,7 +127,8 @@ module Workspace_local = struct
     | Ok targets -> (
       match
         Targets.Produced.Option.mapi targets ~f:(fun target () ->
-            Cached_digest.build_file ~allow_dirs:true target
+            Cached_digest.build_file ~allow_dirs:true
+              ~allow_broken_symlinks:false target
             |> Cached_digest.Digest_result.to_option)
       with
       | Some produced_targets -> Hit produced_targets
@@ -357,8 +358,8 @@ module Shared = struct
         User_warning.emit [ pp_error (Sexp.to_string sexp) ];
         None)
 
-  let compute_target_digests_or_raise_error exec_params ~loc ~produced_targets :
-      Digest.t Targets.Produced.t =
+  let compute_target_digests_or_raise_error exec_params ~loc
+      ~allow_broken_symlinks ~produced_targets : Digest.t Targets.Produced.t =
     let compute_digest =
       (* Remove write permissions on targets. A first theoretical reason is that
          the build process should be a computational graph and targets should
@@ -373,6 +374,7 @@ module Shared = struct
           exec_params
       in
       Cached_digest.refresh ~allow_dirs:true ~remove_write_permissions
+        ~allow_broken_symlinks
     in
     match
       Targets.Produced.Option.mapi produced_targets ~f:(fun target () ->
@@ -446,7 +448,7 @@ module Shared = struct
             ]))
 
   let examine_targets_and_store ~can_go_in_shared_cache ~loc ~rule_digest
-      ~execution_parameters ~action
+      ~execution_parameters ~action ~allow_broken_symlinks
       ~(produced_targets : unit Targets.Produced.t) :
       Digest.t Targets.Produced.t Fiber.t =
     let t = Build_config.get () in
@@ -462,9 +464,9 @@ module Shared = struct
       | Some produced_targets_with_digests -> produced_targets_with_digests
       | None ->
         compute_target_digests_or_raise_error execution_parameters ~loc
-          ~produced_targets)
+          ~allow_broken_symlinks ~produced_targets)
     | _ ->
       Fiber.return
         (compute_target_digests_or_raise_error execution_parameters ~loc
-           ~produced_targets)
+           ~allow_broken_symlinks ~produced_targets)
 end

@@ -121,7 +121,9 @@ module Untracked = struct
      two separate tables. We should find a way to merge the tables into one. *)
   let file_digest =
     let sample p =
-      Cached_digest.Untracked.source_or_external_file (Path.outside_build_dir p)
+      (* We allow for broken symbolic links here *)
+      Cached_digest.Untracked.source_or_external_file
+        ~allow_broken_symlinks:true (Path.outside_build_dir p)
     in
     let update_hook p =
       Cached_digest.Untracked.invalidate_cached_timestamp

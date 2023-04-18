@@ -58,6 +58,7 @@ module Shared : sig
     -> rule_digest:Digest.t
     -> execution_parameters:Execution_parameters.t
     -> action:Action.t
+    -> allow_broken_symlinks:bool
     -> produced_targets:unit Targets.Produced.t
     -> Digest.t Targets.Produced.t Fiber.t
 end
