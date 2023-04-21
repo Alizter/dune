@@ -19,7 +19,28 @@ module Stanza = struct
       Option.map since ~f:(fun since ->
           Dune_lang.Syntax.since Menhir_stanza.syntax since)
     in
-    Ordered_set_lang.Unexpanded.field "menhir_flags" ?check
+    located (Ordered_set_lang.Unexpanded.field "menhir_flags" ?check)
+    >>| fun (loc, flags) ->
+    let () =
+      Ordered_set_lang.Unexpanded.fold_strings flags ~init:()
+        ~f:(fun _pos sw acc ->
+          match String_with_vars.text_only sw with
+          | None -> acc
+          | Some text ->
+            if String.equal text "--explain" then
+              User_error.raise ~loc
+                [ Pp.text
+                    "The --explain flag is not supported in the env stanza as \
+                     it currently does not allow Dune's menhir support to \
+                     produce the correct targets."
+                ]
+                ~hints:
+                  [ Pp.text
+                      "Add --explain to the (flags) field of the (menhir) \
+                       stanza. This will produce the correct .conflict files."
+                  ])
+    in
+    flags
 
   module Inline_tests = struct
     type t =
