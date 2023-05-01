@@ -115,6 +115,8 @@ module Tui () = struct
 
   let reset_count = ref 0
 
+  let help_screen = ref false
+
   let horizontal_line_with_count total index =
     let module A = Notty.A in
     let module I = Notty.I in
@@ -158,9 +160,46 @@ module Tui () = struct
           (Option.to_list !user_feedback)
       @ [ reset_count ])
 
+  let top_frame image =
+    let module A = Notty.A in
+    let module I = Notty.I in
+    let twidth, theight = Term.size term in
+    (* We need to determine whether or not we need to add a scroll bar *)
+    let vertical_scroll_bar =
+      I.hsnap ~align:`Right twidth
+      @@
+      if I.height image > theight then
+        I.(uchar A.(fg white) (Uchar.of_int 0x2591) 1 theight)
+      else I.empty
+    in
+    let horizontal_scroll_bar =
+      I.vsnap ~align:`Bottom theight
+      @@
+      if I.width image > twidth then
+        I.(uchar A.(fg white) (Uchar.of_int 0x2591) twidth 1)
+      else I.empty
+    in
+    let help_screen =
+      if !help_screen then
+        let help_screen =
+          Pp.tag User_message.Style.Kwd
+          @@ Pp.vbox
+          @@ Pp.concat ~sep:Pp.newline
+               [ Pp.hbox @@ Pp.text "Help screen"
+               ; Pp.hbox @@ Pp.text "Press 'q' to quit"
+               ; Pp.hbox @@ Pp.text "Press 'h' to toggle this screen"
+               ]
+        in
+        image_of_user_message_style_pp help_screen
+        |> I.hsnap ~align:`Middle twidth
+        |> I.vsnap ~align:`Middle theight
+      else I.empty
+    in
+    I.(help_screen </> vertical_scroll_bar </> horizontal_scroll_bar </> image)
+
   let render (state : Dune_threaded_console.state) =
     let messages = Queue.to_list state.messages in
-    let image = image ~status_line:state.status_line ~messages in
+    let image = top_frame @@ image ~status_line:state.status_line ~messages in
     Term.image term image
 
   (* Current TUI issues
@@ -210,6 +249,10 @@ module Tui () = struct
         (* When we encounter q we make sure to quit by signaling termination. *)
         Unix.kill (Unix.getpid ()) Sys.sigterm;
         Unix.gettimeofday ()
+      (* toggle help screen *)
+      | `Key (`ASCII 'h', _) ->
+        help_screen := not !help_screen;
+        finish_dirty_interaction ~mutex state
       (* on resize we wish to redraw so the state is set to dirty *)
       | `Resize (width, height) -> resize ~width ~height ~mutex state
       (* Unknown ascii key presses *)
