@@ -100,34 +100,37 @@ let attr_of_user_message_style fmt t (pp : User_message.Style.t Pp.t) : unit =
   in
   Notty.I.pp_attr attr Pp.to_fmt fmt pp
 
-let image_of_user_message_style_pp =
-  Notty.I.strf "%a@."
+let image_of_user_message_style_pp ?attr =
+  Notty.I.strf ?attr "%a@."
     (Pp.to_fmt_with_tags ~tag_handler:attr_of_user_message_style)
 
 module Tui () = struct
   module Term = Notty_unix.Term
+  module A = Notty.A
+  module I = Notty.I
 
   let term = Term.create ~nosig:false ()
 
   let start () = Unix.set_nonblock Unix.stdin
 
-  let user_feedback = ref None
+  type ui_state =
+    { mutable user_feedback : User_message.Style.t Pp.t option
+    ; mutable reset_count : int
+    ; mutable help_screen : bool
+    }
 
-  let reset_count = ref 0
-
-  let help_screen = ref false
+  let ui_state = { user_feedback = None; reset_count = 0; help_screen = false }
 
   let horizontal_line_with_count total index =
-    let module A = Notty.A in
-    let module I = Notty.I in
     let twidth, _ = Term.size term in
     let status =
-      let left = I.uchar A.(fg red) (Uchar.of_int 0x169c) 1 1 in
-      let index = I.string A.(fg blue) (string_of_int (index + 1)) in
-      let mid = I.string A.(fg red) "/" in
-      let total = I.string A.(fg blue) (string_of_int total) in
-      let right = I.uchar A.(fg red) (Uchar.of_int 0x169B) 1 1 in
-      I.(left <|> index <|> mid <|> total <|> right)
+      I.hcat
+        [ I.uchar A.(fg red) (Uchar.of_int 0x169c) 1 1
+        ; I.string A.(fg blue) (string_of_int (index + 1))
+        ; I.string A.(fg red) "/"
+        ; I.string A.(fg blue) (string_of_int total)
+        ; I.uchar A.(fg red) (Uchar.of_int 0x169B) 1 1
+        ]
     in
     I.(
       hsnap ~align:`Left twidth status
@@ -152,17 +155,45 @@ module Tui () = struct
       image_of_user_message_style_pp
       @@ Pp.tag User_message.Style.Debug
       @@ Pp.hbox
-      @@ Pp.textf "Reset count %d" !reset_count
+      @@ Pp.textf "Reset count %d" ui_state.reset_count
     in
     Notty.I.vcat
       (messages @ status
       @ List.map ~f:image_of_user_message_style_pp
-          (Option.to_list !user_feedback)
+          (Option.to_list ui_state.user_feedback)
       @ [ reset_count ])
 
+  let border_box image =
+    let w, h = I.(width image, height image) in
+    let border_element ?(attr = A.(fg red)) ?(width = 1) ?(height = 1) unicode
+        valign halign =
+      I.uchar attr (Uchar.of_int unicode) width height
+      |> I.vsnap ~align:valign (h + 2)
+      |> I.hsnap ~align:halign (w + 2)
+    in
+    I.zcat
+      [ border_element 0x2554 `Top `Left (* top left corner *)
+      ; border_element 0x2557 `Top `Right (* top right corner *)
+      ; border_element 0x255A `Bottom `Left (* bottom left corner *)
+      ; border_element 0x255D `Bottom `Right (* bottom right corner *)
+      ; border_element ~width:w 0x2550 `Top `Middle (* top border *)
+      ; border_element ~width:w 0x2550 `Bottom `Middle (* bottom border *)
+      ; border_element ~height:h 0x2551 `Middle `Left (* left border *)
+      ; border_element ~height:h 0x2551 `Middle `Right (* right border *)
+      ; I.pad ~l:1 ~t:1 ~r:1 ~b:1 image
+      ; I.void (w + 2) (h + 2)
+      ]
+
+  let dialogue_box ~title ?(title_attr = Notty.A.(bg blue ++ fg black)) image =
+    let title =
+      I.(
+        string title_attr title
+        |> hsnap ~align:`Middle (I.width image + 2)
+        |> vsnap ~align:`Top (I.height image + 2))
+    in
+    I.(title </> border_box image)
+
   let top_frame image =
-    let module A = Notty.A in
-    let module I = Notty.I in
     let twidth, theight = Term.size term in
     (* We need to determine whether or not we need to add a scroll bar *)
     let vertical_scroll_bar =
@@ -180,17 +211,16 @@ module Tui () = struct
       else I.empty
     in
     let help_screen =
-      if !help_screen then
-        let help_screen =
-          Pp.tag User_message.Style.Kwd
-          @@ Pp.vbox
-          @@ Pp.concat ~sep:Pp.newline
-               [ Pp.hbox @@ Pp.text "Help screen"
-               ; Pp.hbox @@ Pp.text "Press 'q' to quit"
-               ; Pp.hbox @@ Pp.text "Press 'h' to toggle this screen"
-               ]
-        in
-        image_of_user_message_style_pp help_screen
+      if ui_state.help_screen then
+        let attr = A.(fg yellow) in
+        List.map ~f:(I.string attr)
+          [ "Press 'q' to quit"
+          ; "Press 'h' to toggle this screen"
+          ; ""
+          ; "🐪 Developed by the Dune team 🐪"
+          ]
+        |> I.vcat |> I.pad ~l:1 ~r:1 ~t:1 ~b:1
+        |> dialogue_box ~title:"Help Screen" ~title_attr:A.(fg yellow)
         |> I.hsnap ~align:`Middle twidth
         |> I.vsnap ~align:`Middle theight
       else I.empty
@@ -204,8 +234,6 @@ module Tui () = struct
 
   (* Current TUI issues
      - Ctrl-Z and then 'fg' will stop inputs from being captured.
-     - Resizing from full screen to a small size will not update the screen
-       causing it not to be drawn.
   *)
 
   (** Update any local state and finish *)
@@ -219,12 +247,44 @@ module Tui () = struct
     finish_interaction ()
 
   let give_user_feedback ?(style = User_message.Style.Ok) message =
-    user_feedback := Some Pp.(tag style @@ hbox @@ message)
+    ui_state.user_feedback <- Some Pp.(tag style @@ hbox @@ message)
 
-  let resize ~width ~height ~mutex (state : Dune_threaded_console.state) =
+  let handle_resize ~width ~height ~mutex state =
     give_user_feedback ~style:User_message.Style.Debug
       (Pp.textf "You have just resized to (%d, %d)!" width height);
     finish_dirty_interaction ~mutex state
+
+  let handle_quit () =
+    (* When we encounter q we make sure to quit by signaling termination. *)
+    Unix.kill (Unix.getpid ()) Sys.sigterm;
+    Unix.gettimeofday ()
+
+  let handle_help ~mutex state =
+    ui_state.help_screen <- not ui_state.help_screen;
+    finish_dirty_interaction ~mutex state
+
+  let handle_unknown_input ~mutex state event =
+    match event with
+    (* Unknown ascii key presses *)
+    | `Key (`ASCII c, _) ->
+      give_user_feedback ~style:User_message.Style.Kwd
+        (Pp.textf "You have just pressed '%c' but this does nothing!" c);
+      finish_dirty_interaction ~mutex state
+    (* Mouse interaction *)
+    | `Mouse (`Press button, (x, y), _) ->
+      give_user_feedback ~style:User_message.Style.Kwd
+        (Pp.textf
+           "You have just %s the mouse at (%d, %d) but this does nothing!"
+           (match button with
+           | `Left -> "left clicked"
+           | `Middle -> "middle clicked"
+           | `Right -> "right clicked"
+           | `Scroll `Up -> "scrolled up with"
+           | `Scroll `Down -> "scrolled down with")
+           x y);
+      finish_dirty_interaction ~mutex state
+    (* We have no more events to handle, we finish the interaction. *)
+    | _ -> finish_interaction ()
 
   let rec handle_user_events ~now ~time_budget ~mutex
       (state : Dune_threaded_console.state) =
@@ -244,36 +304,15 @@ module Tui () = struct
       (* TODO if anything fancy is done in the UI in the future we need to lock
          the state with the provided mutex *)
       match Term.event term with
-      (* quit when sure *)
-      | `Key (`ASCII 'q', _) ->
-        (* When we encounter q we make sure to quit by signaling termination. *)
-        Unix.kill (Unix.getpid ()) Sys.sigterm;
-        Unix.gettimeofday ()
+      (* quit *)
+      | `Key (`ASCII 'q', _) -> handle_quit ()
       (* toggle help screen *)
-      | `Key (`ASCII 'h', _) ->
-        help_screen := not !help_screen;
-        finish_dirty_interaction ~mutex state
+      | `Key (`ASCII 'h', _) -> handle_help ~mutex state
       (* on resize we wish to redraw so the state is set to dirty *)
-      | `Resize (width, height) -> resize ~width ~height ~mutex state
-      (* Unknown ascii key presses *)
-      | `Key (`ASCII c, _) ->
-        give_user_feedback ~style:User_message.Style.Kwd
-          (Pp.textf "You have just pressed '%c' but this does nothing!" c);
-        finish_dirty_interaction ~mutex state
-      (* Mouse interaction *)
-      | `Mouse (`Press button, (x, y), _) ->
-        give_user_feedback ~style:User_message.Style.Kwd
-          (Pp.textf
-             "You have just %s the mouse at (%d, %d) but this does nothing!"
-             (match button with
-             | `Left -> "left clicked"
-             | `Middle -> "middle clicked"
-             | `Right -> "right clicked"
-             | `Scroll `Up -> "scrolled up with"
-             | `Scroll `Down -> "scrolled down with")
-             x y);
-        finish_dirty_interaction ~mutex state
-      | _ -> finish_interaction ()
+      | `Resize (width, height) -> handle_resize ~width ~height ~mutex state
+      (* Finally given an unknown event, we try to handle it with nice user
+         feedback if we can make sense of it and do nothing otherwise. *)
+      | _ as event -> handle_unknown_input ~mutex state event
       | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) ->
         (* If we encounter an exception, we make sure to rehandle user events
            with a corrected time budget. *)
@@ -284,7 +323,7 @@ module Tui () = struct
         handle_user_events ~now ~time_budget ~mutex state)
 
   let reset () =
-    reset_count := !reset_count + 1;
+    ui_state.reset_count <- ui_state.reset_count + 1;
     ()
 
   let reset_flush_history () = ()
