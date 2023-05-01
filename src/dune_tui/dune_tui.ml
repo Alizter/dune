@@ -165,17 +165,12 @@ module Tui () = struct
 
   (* Current TUI issues
      - Ctrl-Z and then 'fg' will stop inputs from being captured.
-     - Errors messages are not reset when they are stale.
      - Resizing from full screen to a small size will not update the screen
        causing it not to be drawn.
   *)
 
-  let are_you_sure = ref false
-
   (** Update any local state and finish *)
-  let finish_interaction () =
-    are_you_sure := false;
-    Unix.gettimeofday ()
+  let finish_interaction () = Unix.gettimeofday ()
 
   (** Update any global state and finish *)
   let finish_dirty_interaction ~mutex (state : Dune_threaded_console.state) =
@@ -187,7 +182,9 @@ module Tui () = struct
   let give_user_feedback ?(style = User_message.Style.Ok) message =
     user_feedback := Some Pp.(tag style @@ hbox @@ message)
 
-  let resize ~mutex (state : Dune_threaded_console.state) =
+  let resize ~width ~height ~mutex (state : Dune_threaded_console.state) =
+    give_user_feedback ~style:User_message.Style.Debug
+      (Pp.textf "You have just resized to (%d, %d)!" width height);
     finish_dirty_interaction ~mutex state
 
   let rec handle_user_events ~now ~time_budget ~mutex
@@ -209,22 +206,12 @@ module Tui () = struct
          the state with the provided mutex *)
       match Term.event term with
       (* quit when sure *)
-      | `Key (`ASCII 'q', _) when !are_you_sure ->
+      | `Key (`ASCII 'q', _) ->
         (* When we encounter q we make sure to quit by signaling termination. *)
         Unix.kill (Unix.getpid ()) Sys.sigterm;
         Unix.gettimeofday ()
-      (* quit when unsure *)
-      | `Key (`ASCII 'q', _) ->
-        give_user_feedback ~style:User_message.Style.Warning
-          (Pp.text
-             "You have just pressed 'q' to quit. Are you sure you want to quit?");
-        Mutex.lock mutex;
-        state.dirty <- true;
-        Mutex.unlock mutex;
-        are_you_sure := true;
-        Unix.gettimeofday ()
       (* on resize we wish to redraw so the state is set to dirty *)
-      | `Resize _ -> resize ~mutex state
+      | `Resize (width, height) -> resize ~width ~height ~mutex state
       (* Unknown ascii key presses *)
       | `Key (`ASCII c, _) ->
         give_user_feedback ~style:User_message.Style.Kwd
