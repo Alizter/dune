@@ -12,6 +12,11 @@ module Config : sig
     }
 end
 
+type job =
+  { pid : Pid.t
+  ; ivar : Proc.Process_info.t Fiber.Ivar.t
+  }
+
 module Run : sig
   module Build_outcome : sig
     type t =
@@ -106,6 +111,9 @@ val abort_if_build_was_cancelled : unit Fiber.t
 
 (** Number of jobs currently running in the background *)
 val running_jobs_count : t -> int
+
+(** List of jobs currently running in the background *)
+val running_jobs : t -> job list
 
 (** Abort any on-going [Run.go], making it raise [Run.Shutdown_requested].
 

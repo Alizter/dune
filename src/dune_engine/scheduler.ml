@@ -467,6 +467,9 @@ module Process_watcher : sig
 
   (** Send the following signal to all running processes. *)
   val killall : t -> int -> unit
+
+  (** List of currently running jobs *)
+  val running_jobs : t -> job list
 end = struct
   type process_state =
     | Running of job
@@ -487,6 +490,13 @@ end = struct
     let res = Table.mem t.table pid in
     Mutex.unlock t.mutex;
     res
+
+  let running_jobs t =
+    t.table
+    |> Table.fold ~init:[] ~f:(fun data acc ->
+           match data with
+           | Running job -> job :: acc
+           | Zombie _ -> acc)
 
   module Process_table : sig
     val add : t -> job -> unit
@@ -832,6 +842,7 @@ let stats () =
   t.config.stats
 
 let running_jobs_count t = Event.Queue.pending_jobs t.events
+let running_jobs t = Process_watcher.running_jobs t.process_watcher
 
 exception Build_cancelled
 
