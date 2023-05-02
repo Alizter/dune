@@ -21,6 +21,12 @@ module No_flush : Backend_intf.S = struct
   let reset () = prerr_string "\x1b[H\x1b[2J"
 
   let reset_flush_history () = prerr_string "\x1b[1;1H\x1b[2J\x1b[3J"
+
+  module Process = struct
+    let report_start _ = ()
+
+    let report_end _ = ()
+  end
 end
 
 let flush = Combinators.flush (module No_flush)

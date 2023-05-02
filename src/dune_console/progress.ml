@@ -38,6 +38,12 @@ module No_flush = struct
   let finish () = set_status_line None
 
   let reset_flush_history () = Dumb.reset_flush_history ()
+
+  module Process = struct
+    let report_start _ = ()
+
+    let report_end _ = ()
+  end
 end
 
 let no_flush = (module No_flush : Backend_intf.S)

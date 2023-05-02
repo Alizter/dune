@@ -14,6 +14,12 @@ module type S = sig
   val reset_flush_history : unit -> unit
 
   val finish : unit -> unit
+
+  module Process : sig
+    val report_start : Process_info.t -> unit
+
+    val report_end : Proc.Process_info.t -> unit
+  end
 end
 
 type t = (module S)

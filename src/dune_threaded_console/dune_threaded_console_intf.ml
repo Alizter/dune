@@ -53,4 +53,15 @@ module type S = sig
   (** [finish] is called finally by the main thread to finish broadcasting the
       user interface. Any locks on the terminal should be released here. *)
   val finish : unit -> unit
+
+  module Process : sig
+    (** Reporting of process information to the user interface so that it can be
+        reased about. *)
+
+    (** Report the start of a process to the user interface. *)
+    val report_start : Dune_console.Process_info.t -> unit
+
+    (** Report the end of a process to the user interface. *)
+    val report_end : Proc.Process_info.t -> unit
+  end
 end

@@ -675,6 +675,12 @@ module Tui () = struct
   let finish () =
     Notty_unix.Term.release term;
     Unix.clear_nonblock Unix.stdin
+
+  module Process = struct
+    let report_start _ = ()
+
+    let report_end _ = ()
+  end
 end
 
 let backend =

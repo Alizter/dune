@@ -762,6 +762,7 @@ let run_internal ?dir ~(display : Display.t) ?(stdout_to = Io.stdout)
               | Some dir -> Path (Path.to_string dir))
           |> Pid.of_int
         in
+        Dune_console.Process.report_start { pid; started_at };
         (started_at, pid)
       in
       Io.release stdout_to;
@@ -806,6 +807,7 @@ let run_internal ?dir ~(display : Display.t) ?(stdout_to = Io.stdout)
         | WSIGNALED n -> Error (Signaled (Signal.of_int n))
         | WSTOPPED _ -> assert false
       in
+      Dune_console.Process.report_end process_info;
       Option.iter config.stats ~f:(fun stats ->
           report_process_finished stats ~metadata ~dir ~prog:prog_str ~pid ~args
             ~started_at ~exit_status:exit_status' ~stdout:actual_stdout

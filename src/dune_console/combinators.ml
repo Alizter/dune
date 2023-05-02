@@ -49,4 +49,14 @@ let compose (module A : Backend_intf.S) (module B : Backend_intf.S) :
     let reset_flush_history () =
       A.reset_flush_history ();
       B.reset_flush_history ()
+
+    module Process = struct
+      let report_start t =
+        A.Process.report_start t;
+        B.Process.report_start t
+
+      let report_end process_info =
+        A.Process.report_end process_info;
+        B.Process.report_end process_info
+    end
   end : Backend_intf.S)

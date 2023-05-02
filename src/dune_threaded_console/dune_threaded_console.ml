@@ -119,6 +119,13 @@ let make (module Base : S) : (module Dune_console.Backend) =
         let exn = Exn_with_backtrace.capture exn in
         cleanup ();
         Exn_with_backtrace.reraise exn
+
+    module Process = struct
+      let report_start t =
+        Base.Process.report_start t
+
+      let report_end process_info = Base.Process.report_end process_info
+    end
   end in
   (module T)
 

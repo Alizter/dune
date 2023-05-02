@@ -156,4 +156,16 @@ module Status_line = struct
     Exn.protect ~f ~finally:(fun () -> remove_overlay id)
 end
 
+module Process_info = Process_info
+
+module Process = struct
+  let report_start (t : Process_info.t) =
+    let (module M : Backend_intf.S) = !Backend.main in
+    M.Process.report_start t
+
+  let report_end process_info =
+    let (module M : Backend_intf.S) = !Backend.main in
+    M.Process.report_end process_info
+end
+
 let () = User_warning.set_reporter print_user_message

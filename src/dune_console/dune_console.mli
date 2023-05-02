@@ -7,6 +7,14 @@ open Stdune
     be something else. This module allow to set a global backend for the
     application as well as composing backends. *)
 
+module Process_info : sig
+  (** Payload for process tracking *)
+  type t =
+    { pid : Pid.t
+    ; started_at : float
+    }
+end
+
 module type Backend = sig
   (** The interface of a custom console backend. *)
 
@@ -32,6 +40,16 @@ module type Backend = sig
   (** Finalize the backend. After this function is called, it is guaranteed that
       no other functions will be called. *)
   val finish : unit -> unit
+
+  module Process : sig
+    (** Process tracking *)
+
+    (** Report the start of a process. *)
+    val report_start : Process_info.t -> unit
+
+    (** Report the end of a process. *)
+    val report_end : Proc.Process_info.t -> unit
+  end
 end
 
 (** [separate_messages b] changes the behavior of [print_user_message], so that
@@ -127,4 +145,14 @@ module Status_line : sig
   val with_overlay : t -> f:(unit -> 'a) -> 'a
 
   val refresh : unit -> unit
+end
+
+module Process : sig
+  (** Process tracking *)
+
+  (** Report the start of a process. *)
+  val report_start : Process_info.t -> unit
+
+  (** Report the end of a process. *)
+  val report_end : Proc.Process_info.t -> unit
 end
