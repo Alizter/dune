@@ -130,6 +130,11 @@ module Tui () = struct
     ; mutable debug : bool
     ; mutable reset_count : int
     ; mutable help_screen : bool
+    ; mutable proc_screen : bool
+    ; processes : (Pid.t, Dune_console.Process_info.t) Table.t
+    ; finished_processes : (Pid.t, Dune_console.Process_info.t) Table.t
+    ; recently_finished_processes : Dune_console.Process_info.t Queue.t
+    ; mutable long_proc_names : bool
     ; mutable hscroll_pos : float
     ; mutable vscroll_pos : float
     ; mutable hscroll_speed : float
@@ -148,6 +153,11 @@ module Tui () = struct
     ; debug = false
     ; reset_count = 0
     ; help_screen = false
+    ; proc_screen = false
+    ; processes = Table.create (module Pid) 64 (* good size? *)
+    ; finished_processes = Table.create (module Pid) 4096
+    ; recently_finished_processes = Queue.create ()
+    ; long_proc_names = false
     ; hscroll_pos = 0.
     ; vscroll_pos = 0.
     ; hscroll_speed = 0.1
@@ -171,6 +181,11 @@ module Tui () = struct
         ; debug = _
         ; reset_count
         ; help_screen
+        ; proc_screen
+        ; processes
+        ; finished_processes
+        ; recently_finished_processes = _
+        ; long_proc_names
         ; hscroll_pos
         ; vscroll_pos
         ; hscroll_speed
@@ -190,6 +205,12 @@ module Tui () = struct
     [ (Term.size term |> fun (x, y) -> sprintf "Term size: (%d,%d)" x y)
     ; (reset_count |> string_of_int |> fun x -> "Reset count: " ^ x)
     ; (help_screen |> string_of_bool |> fun x -> "Help screen: " ^ x)
+    ; (proc_screen |> string_of_bool |> fun x -> "Proc screen: " ^ x)
+    ; ( processes |> Table.length |> string_of_int |> fun x ->
+        "Process count: " ^ x )
+    ; ( finished_processes |> Table.length |> string_of_int |> fun x ->
+        "Finished process count: " ^ x )
+    ; (long_proc_names |> string_of_bool |> fun x -> "Long proc names: " ^ x)
     ; (hscroll_pos |> string_of_float |> fun x -> "Hscroll pos: " ^ x)
     ; (vscroll_pos |> string_of_float |> fun x -> "Vscroll pos: " ^ x)
     ; (hscroll_speed |> string_of_float |> fun x -> "Hscroll speed: " ^ x)
@@ -264,7 +285,8 @@ module Tui () = struct
       ; I.char A.empty ' ' (w + 2) (h + 2)
       ]
 
-  let dialogue_box ~title ?(title_attr = ui_state.ui_attrs.helper_attr) image =
+  let box_with_title ~title ?(title_attr = ui_state.ui_attrs.helper_attr) image
+      =
     let title =
       I.(
         string title_attr title
@@ -272,6 +294,16 @@ module Tui () = struct
         |> vsnap ~align:`Top (I.height image + 2))
     in
     I.(title </> border_box image)
+
+  let dialogue_box ~title ?(title_attr = ui_state.ui_attrs.helper_attr) ~width
+      ~height image =
+    let hsnap_or_leave img =
+      if I.width img < width then I.hsnap ~align:`Middle width img else img
+    in
+    let vsnap_or_leave img =
+      if I.height img < height then I.vsnap ~align:`Middle height img else img
+    in
+    box_with_title ~title ~title_attr image |> vsnap_or_leave |> hsnap_or_leave
 
   let horizontal_scroll_bar width =
     let nib =
@@ -318,12 +350,6 @@ module Tui () = struct
   (** [help_screen width height] draws a help screen for a terminal of given
       [width] and [height]. *)
   let help_screen width height =
-    let hsnap_or_leave img =
-      if I.width img < width then I.hsnap ~align:`Middle width img else img
-    in
-    let vsnap_or_leave img =
-      if I.height img < height then I.vsnap ~align:`Middle height img else img
-    in
     List.map
       ~f:(I.string ui_state.ui_attrs.helper_attr)
       [ "Press 'q' to quit"
@@ -339,8 +365,73 @@ module Tui () = struct
       |> I.hsnap ~align:`Middle (I.width img)
     ]
     |> I.vcat |> I.pad ~l:1 ~r:1 ~t:1 ~b:1
-    |> dialogue_box ~title:"Help Screen"
-    |> vsnap_or_leave |> hsnap_or_leave
+    |> dialogue_box ~title:"Help Screen" ~width ~height
+
+  let time_image time_diff =
+    let time = Unix.gmtime time_diff in
+    I.string ui_state.ui_attrs.user_feedback_attr
+      (sprintf "%02d:%02d:%02d.%03.0f" time.tm_hour time.tm_min time.tm_sec
+         (mod_float time_diff 1e6 *. 1e3))
+
+  let elapsed_time started_at ended_at = ended_at -. started_at |> time_image
+
+  let process_image
+      { Dune_console.Process_info.pid; started_at; ended_at; prog_str } =
+    let ended_at = Option.value ~default:(Unix.gettimeofday ()) ended_at in
+    let split_prog s =
+      let len = String.length s in
+      if len = 0 then ("", "", "")
+      else
+        let rec find_prog_start i =
+          if i < 0 then 0
+          else
+            match s.[i] with
+            | '\\' | '/' -> i + 1
+            | _ -> find_prog_start (i - 1)
+        in
+        let prog_end =
+          match s.[len - 1] with
+          | '"' -> len - 1
+          | _ -> len
+        in
+        let prog_start = find_prog_start (prog_end - 1) in
+        let prog_end =
+          match String.index_from s prog_start '.' with
+          | None -> prog_end
+          | Some i -> i
+        in
+        let before = String.take s prog_start in
+        let after = String.drop s prog_end in
+        let prog = String.sub s ~pos:prog_start ~len:(prog_end - prog_start) in
+        (before, prog, after)
+    in
+    let short_prog_name_of_prog s =
+      if ui_state.long_proc_names then s
+      else
+        let _, s, _ = split_prog s in
+        s
+    in
+    I.hcat
+      [ I.string ui_state.ui_attrs.user_feedback_attr
+          (sprintf "%d " (Pid.to_int pid))
+      ; elapsed_time started_at ended_at
+      ; I.char A.empty ' ' 1 1
+      ; I.string ui_state.ui_attrs.helper_attr
+          (short_prog_name_of_prog prog_str)
+      ]
+
+  let proc_screen width height =
+    [ Table.fold ui_state.processes ~init:I.empty ~f:(fun proc_info acc ->
+          I.(process_image proc_info <-> acc))
+    ; I.string ui_state.ui_attrs.helper_attr "Recently finished processes:"
+    ; Queue.fold ui_state.recently_finished_processes ~init:I.empty
+        ~f:(fun acc proc_info -> I.(process_image proc_info <-> acc))
+    ; I.string ui_state.ui_attrs.helper_attr
+        (sprintf "Number of finished processes: %d"
+           (ui_state.finished_processes |> Table.length))
+    ]
+    |> I.vcat
+    |> dialogue_box ~title:"Processes" ~width ~height
 
   let top_frame image =
     (* The top frame is our main UI element. It contains all other widgets that
@@ -381,8 +472,11 @@ module Tui () = struct
     let help_screen =
       if ui_state.help_screen then help_screen tw th else I.empty
     in
+    let proc_screen =
+      if ui_state.proc_screen then proc_screen tw th else I.empty
+    in
     let debug_box =
-      if ui_state.debug then debug_image () |> dialogue_box ~title:"Debug"
+      if ui_state.debug then debug_image () |> box_with_title ~title:"Debug"
       else I.empty
     in
     let vertical_scroll_bar, horizontal_scroll_bar, corner_decoration =
@@ -403,6 +497,7 @@ module Tui () = struct
     I.zcat
       [ debug_box
       ; help_screen
+      ; proc_screen
       ; corner_decoration
       ; vertical_scroll_bar
       ; horizontal_scroll_bar
@@ -443,6 +538,10 @@ module Tui () = struct
 
   let handle_help ~mutex state =
     ui_state.help_screen <- not ui_state.help_screen;
+    finish_dirty_interaction ~mutex state
+
+  let handle_process_display ~mutex state =
+    ui_state.proc_screen <- not ui_state.proc_screen;
     finish_dirty_interaction ~mutex state
 
   let handle_horizontal_scroll ~direction ~mutex state =
@@ -542,6 +641,10 @@ module Tui () = struct
     update_vscroll_pos ~y ~height;
     finish_dirty_interaction ~mutex state
 
+ let handle_long_proc_names ~mutex state =
+    ui_state.long_proc_names <- not ui_state.long_proc_names;
+    finish_dirty_interaction ~mutex state
+
   let handle_mouse_press ~pos:(x, y) ~button ~mutex state =
     (* To handle mouse presses we need to workout which widget we are trying to
        interact with. At the moment there are only two scrollbars so this is
@@ -628,8 +731,12 @@ module Tui () = struct
       | `Key (`ASCII 'q', _) -> handle_quit ()
       (* toggle help screen *)
       | `Key (`ASCII ('h' | '?'), _) -> handle_help ~mutex state
+      (* toggle process display *)
+      | `Key (`ASCII 'p', []) -> handle_process_display ~mutex state
       (* toggle debug info *)
-      | `Key (`ASCII 'd', _) -> handle_debug ~mutex state
+      | `Key (`ASCII 'd', []) -> handle_debug ~mutex state
+      (* toggle long process names *)
+      | `Key (`ASCII 'l', []) -> handle_long_proc_names ~mutex state
       (* on resize we wish to redraw so the state is set to dirty *)
       | `Resize (width, height) -> handle_resize ~width ~height ~mutex state
       (* when the mouse is scrolled we scroll the vertical scrollbar *)
@@ -677,9 +784,24 @@ module Tui () = struct
     Unix.clear_nonblock Unix.stdin
 
   module Process = struct
-    let report_start _ = ()
+    let report_start (t : Dune_console.Process_info.t) =
+      Table.add_exn ui_state.processes t.pid t
 
-    let report_end _ = ()
+    let proc_info_of (x : Proc.Process_info.t) : Dune_console.Process_info.t =
+      let old_proc_info = Table.find_exn ui_state.processes x.pid in
+      { old_proc_info with ended_at = Some x.end_time }
+
+    let report_end (process_info : Proc.Process_info.t) =
+      let proc_info = proc_info_of process_info in
+      Table.remove ui_state.processes process_info.pid;
+      Table.add_exn ui_state.finished_processes process_info.pid proc_info;
+      Queue.push ui_state.recently_finished_processes proc_info;
+      if
+        Queue.length ui_state.recently_finished_processes > 4
+        (* TODO we don't have access to concurrency info due to dune_config_file
+           depending on this file. We should update this hard coded limit to the
+           number of jobs *)
+      then ignore (Queue.pop ui_state.recently_finished_processes)
   end
 end
 

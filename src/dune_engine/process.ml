@@ -762,7 +762,8 @@ let run_internal ?dir ~(display : Display.t) ?(stdout_to = Io.stdout)
               | Some dir -> Path (Path.to_string dir))
           |> Pid.of_int
         in
-        Dune_console.Process.report_start { pid; started_at };
+        Dune_console.Process.report_start
+          { pid; started_at; prog_str; ended_at = None };
         (started_at, pid)
       in
       Io.release stdout_to;

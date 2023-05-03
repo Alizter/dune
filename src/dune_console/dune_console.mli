@@ -7,13 +7,7 @@ open Stdune
     be something else. This module allow to set a global backend for the
     application as well as composing backends. *)
 
-module Process_info : sig
-  (** Payload for process tracking *)
-  type t =
-    { pid : Pid.t
-    ; started_at : float
-    }
-end
+module Process_info : module type of Process_info
 
 module type Backend = sig
   (** The interface of a custom console backend. *)
