@@ -1,0 +1,6 @@
+(cram
+ (applies_to :whole_subtree)
+ (deps %{bin:coqc} %{bin:coqdep} %{bin:coqdoc} ../scrub_coq_args.sh)
+ (alias runtest-coq)
+ (enabled_if
+  (= %{env:DUNE_COQ_TEST=disable} enable)))
