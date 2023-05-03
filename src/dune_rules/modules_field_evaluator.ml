@@ -229,10 +229,9 @@ let check_invalid_module_listing ~stanza_loc ~modules_without_implementation
       [ Pp.text "You must provide an implementation for all of these modules." ];
     (* Checking that (modules) includes all declared modules *)
     let print_undelared_modules field mods =
-      (* TODO: this is a warning for now, change to an error in 3.9. *)
       (* If we are in a vendored stanza we do nothing. *)
       if not is_vendored then
-        print ~is_error:false
+        print
           [ Pp.textf "These modules appear in the %s field:" field ]
           mods
           [ Pp.text "They must also appear in the modules field." ]
