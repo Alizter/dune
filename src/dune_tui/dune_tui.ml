@@ -7,7 +7,9 @@ module Tui () = struct
 
   let term = Term.create ~nosig:false ()
 
-  let start () = Unix.set_nonblock Unix.stdin
+  
+  let term_input_fds, _ = Term.fds term
+  let start () = Unix.set_nonblock term_input_fds
 
   type ui_attrs =
     { divider_attr : A.t
@@ -677,7 +679,7 @@ module Tui () = struct
 
   let finish () =
     Notty_unix.Term.release term;
-    Unix.clear_nonblock Unix.stdin
+    Unix.clear_nonblock term_input_fds
 
   module Process = struct
     let report_start (t : Dune_console.Process_info.t) =
