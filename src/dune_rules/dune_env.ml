@@ -21,28 +21,33 @@ module Stanza = struct
     in
     let* menhir_version = Dune_lang.Syntax.get Menhir_stanza.syntax in
     let+ flags = Ordered_set_lang.Unexpanded.field "menhir_flags" ?check in
+    let err_unsupported_flag ~loc flag file =
+      User_error.raise ~loc
+        [ Pp.textf
+            "The %s flag is not supported in the env stanza as it currently \
+             does not allow Dune's menhir support to produce the correct \
+             targets."
+            flag
+        ]
+        ~hints:
+          [ Pp.textf
+              "Add %s to the (flags) field of the (menhir) stanza. This will \
+               produce the correct %s files."
+              flag file
+          ]
+    in
     Ordered_set_lang.Unexpanded.fold_strings flags ~init:()
       ~f:(fun _pos sw acc ->
-        match String_with_vars.text_only sw with
+        let loc = String_with_vars.loc sw in
+        match menhir_version with
         | None -> acc
-        | Some text -> (
-          if String.equal text "--explain" then
-            match menhir_version with
-            | None -> ()
-            | Some menhir_version ->
-              if menhir_version >= (2, 2) then
-                User_error.raise ~loc:(String_with_vars.loc sw)
-                  [ Pp.text
-                      "The --explain flag is not supported in the env stanza \
-                       as it currently does not allow Dune's menhir support to \
-                       produce the correct targets."
-                  ]
-                  ~hints:
-                    [ Pp.text
-                        "Add --explain to the (flags) field of the (menhir) \
-                         stanza. This will produce the correct .conflict \
-                         files."
-                    ]));
+        | Some menhir_version -> (
+          match String_with_vars.text_only sw with
+          | Some "--explain" ->
+            if menhir_version >= (2, 2) then
+              err_unsupported_flag ~loc "--explain" ".conflict"
+          | Some "--cmly" -> err_unsupported_flag ~loc "--cmly" ".cmly"
+          | Some _ | None -> acc));
     flags
 
   module Inline_tests = struct
