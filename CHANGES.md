@@ -30,6 +30,9 @@ Unreleased
 - Switch back to threaded console for all systems; fix unresponsive console on
   Windows (#7906, @nojb)
 
+- Add a `dune targets` command similar to `ls` that displays all the available
+  targets in a given directory. (#7770, grants #265, @Alizter)
+
 3.8.1 (2023-06-05)
 ------------------
 
