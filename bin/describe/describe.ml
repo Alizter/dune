@@ -13,6 +13,8 @@ let subcommands =
   ; Describe_opam_files.command
   ; Describe_pp.command
   ; Printenv.command
+  ; Targets_cmd.command
+  ; Aliases_cmd.command
   ]
 
 let group =
