@@ -27,7 +27,6 @@ let all : _ Cmdliner.Cmd.t list =
     ; Ocaml_merlin.command
     ; Shutdown.command
     ; Diagnostics.command
-    ; Targets_cmd.command
     ]
   in
   let groups =
@@ -38,6 +37,7 @@ let all : _ Cmdliner.Cmd.t list =
     ; Init.group
     ; Promotion.group
     ; Pkg.group
+    ; Show.group
     ]
   in
   terms @ groups
