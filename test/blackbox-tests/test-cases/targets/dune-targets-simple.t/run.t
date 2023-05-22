@@ -18,6 +18,7 @@ working directory.
   simple.cmxa
   simple.cmxs
   simple.ml-gen
+  
 
 Multiple directories can be provided to the command. Also subdirectories may be
 used, and only the targets available in that directory will be displayed.
@@ -34,6 +35,7 @@ used, and only the targets available in that directory will be displayed.
   simple.cmxs
   simple.ml-gen
   
+  
   b:
   c.ml
   dune
@@ -42,6 +44,7 @@ used, and only the targets available in that directory will be displayed.
   simple2.cmxa
   simple2.cmxs
   simple2.ml-gen
+  
 
 The command also works with files in the _build directory.
 
@@ -56,6 +59,7 @@ The command also works with files in the _build directory.
   simple.cmxa
   simple.cmxs
   simple.ml-gen
+  
 
   $ dune targets _build/default/b
   _build/default/b:
@@ -66,10 +70,28 @@ The command also works with files in the _build directory.
   simple2.cmxa
   simple2.cmxs
   simple2.ml-gen
-
+  
 We cannot see inside directory targets
 
   $ dune targets d
   d:
   
+  
+Testing the --aliases command too:
 
+  $ dune targets --aliases
+  .:
+  a.ml
+  d/
+  dune
+  dune-project
+  simple.a
+  simple.cma
+  simple.cmxa
+  simple.cmxs
+  simple.ml-gen
+  @all
+  @check
+  @default
+  @doc-private
+  @fmt

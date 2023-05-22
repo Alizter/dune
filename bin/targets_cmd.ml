@@ -3,7 +3,7 @@ open Stdune
 
 let doc = "Print available targets in a given directory. Works similalry to ls."
 
-let pp_all_direct_targets path =
+let pp_all_direct_targets ~(contexts : Context.t list) ~show_aliases path =
   let dir = Path.of_string path in
   let root =
     match (dir : Path.t) with
@@ -17,7 +17,7 @@ let pp_all_direct_targets path =
       | None -> Path.Source.root)
   in
   let open Action_builder.O in
-  let+ targets =
+  let* targets =
     let open Memo.O in
     Action_builder.of_memo
       (Target.all_direct_targets (Some root) >>| Path.Build.Map.to_list)
@@ -43,18 +43,52 @@ let pp_all_direct_targets path =
             | Directory -> Path.basename path ^ Filename.dir_sep)
         else None)
   in
+  let+ alias_targets =
+    let+ load_dir =
+      Action_builder.all
+      @@ List.map contexts ~f:(fun ctx ->
+             let dir =
+               Path.build
+               @@ Path.Build.append_source
+                    (Dune_engine.Context_name.build_dir (Context.name ctx))
+                    root
+             in
+             Action_builder.of_memo @@ Load_rules.load_dir ~dir)
+    in
+    List.fold_left load_dir ~init:Dune_engine.Alias.Name.Map.empty
+      ~f:(fun acc x ->
+        match (x : Load_rules.Loaded.t) with
+        | Build build ->
+          Dune_engine.Alias.Name.Map.union
+            ~f:(fun _ a _ -> Some a)
+            acc build.aliases
+        | _ -> acc)
+    |> Dune_engine.Alias.Name.Map.to_list_map ~f:(fun name _ ->
+           Dune_engine.Alias.Name.to_string name)
+  in
   [ Pp.textf "%s:" (Path.to_string dir)
   ; Pp.concat_map targets ~f:Pp.text ~sep:Pp.newline
+  ; (if show_aliases then
+     Pp.concat_map alias_targets
+       ~f:(fun alias -> Pp.text ("@" ^ alias))
+       ~sep:Pp.newline
+    else Pp.nop)
   ]
   |> Pp.concat ~sep:Pp.newline
 
 let term =
   let+ common = Common.term
-  and+ paths = Arg.(value & pos_all string [ "." ] & info [] ~docv:"DIR") in
+  and+ paths = Arg.(value & pos_all string [ "." ] & info [] ~docv:"DIR")
+  and+ show_aliases =
+    Arg.(value & flag & info [ "aliases" ] ~doc:"Show aliases")
+  in
   let config = Common.init common in
-  let request _setup =
+  let request (setup : Dune_rules.Main.build_system) =
     let open Action_builder.O in
-    let+ paragraphs = Action_builder.List.map paths ~f:pp_all_direct_targets in
+    let+ paragraphs =
+      Action_builder.List.map paths
+        ~f:(pp_all_direct_targets ~contexts:setup.contexts ~show_aliases)
+    in
     paragraphs
     |> Pp.concat ~sep:(Pp.seq Pp.newline Pp.newline)
     |> List.singleton |> User_message.make |> User_message.print
