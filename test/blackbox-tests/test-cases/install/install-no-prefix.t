@@ -18,5 +18,5 @@ We should suggest to the user here that they should use --prefix.
 
   $ dune install
   Error: The mandir installation directory is unknown.
-  Hint: It could be specified with --mandir
+  Hint: It can be specified with --prefix or by setting --mandir
   [1]
