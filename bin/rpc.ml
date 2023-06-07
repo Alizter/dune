@@ -91,8 +91,9 @@ module Status = struct
     let+ (common : Common.t) = Common.term in
     client_term common @@ fun _common ->
     let where = active_server () in
-    printfn "Server is listening on %s" (Dune_rpc.Where.to_string where);
-    printfn "Connected clients (including this one):\n";
+    Dune_console.printf "Server is listening on %s"
+      (Dune_rpc.Where.to_string where);
+    Dune_console.printf "Connected clients (including this one):\n";
     let open Fiber.O in
     let* conn = Client.Connection.connect_exn where in
     Dune_rpc_impl.Client.client conn
