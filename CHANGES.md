@@ -121,6 +121,9 @@ changelog properly.
 - Add `(build_if)` to the `(test)` stanza. When it evaluates to false, the
   executable is not built. (#7899, fixes #6938, @emillon)
 
+- Fix `-boot` flag being passed to `coqdep` when composing with Coq stdlib
+  (#7942, @Alizter)
+
 - Add necessary parentheses in generated opam constraints (#7682, fixes #3431,
   @Lucccyo)
 
