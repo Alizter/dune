@@ -21,6 +21,13 @@ let compare_some a b =
 
 type t = some option
 
+let to_int = function
+  | None -> 0
+  | Some Symlink -> 1
+  | Some Copy -> 2
+  | Some Hardlink -> 3
+  | Some Patch_back_source_tree -> 4
+
 let compare = Option.compare compare_some
 
 let equal a b =
@@ -69,13 +76,16 @@ end
 module Set = struct
   type key = t
 
-  type t = bool Dict.t
+  type t = int
 
-  let compare = Dict.compare Bool.compare
+  let compare = Int.compare
 
-  let of_func = Dict.of_func
+  let singleton k = 1 lsl to_int k
 
-  let singleton k = of_func (equal k)
+  let of_func f =
+    let e x = if f x then singleton x else 0 in
+    e None lor e (Some Copy) lor e (Some Symlink) lor e (Some Hardlink)
+    lor e (Some Patch_back_source_tree)
 
   (* CR-someday amokhov: [Patch_back_source_tree] is a bit special in that it
      can only appear as a singleton. Perhaps, it should be treated differently
@@ -83,28 +93,22 @@ module Set = struct
      non-representable. *)
   let patch_back_source_tree_only = singleton (Some Patch_back_source_tree)
 
-  let is_patch_back_source_tree_only t =
-    match compare t patch_back_source_tree_only with
-    | Eq -> true
-    | Lt | Gt -> false
+  let is_patch_back_source_tree_only t = t = patch_back_source_tree_only
 
-  let equal a b =
-    match compare a b with
-    | Eq -> true
-    | Lt | Gt -> false
+  let equal a b = Int.equal a b
 
-  let mem = Dict.get
+  let mem t x =
+    let x = singleton x in
+    t land x = x
 
-  let inter (x : t) (y : t) : t =
-    { none = x.none && y.none
-    ; copy = x.copy && y.copy
-    ; symlink = x.symlink && y.symlink
-    ; hardlink = x.hardlink && y.hardlink
-    ; patch_back_source_tree =
-        x.patch_back_source_tree && y.patch_back_source_tree
-    }
+  let inter (x : t) (y : t) : t = x land y
 
-  let to_dyn { Dict.none; copy; symlink; hardlink; patch_back_source_tree } =
+  let to_dyn t =
+    let none = mem t None in
+    let copy = mem t (Some Copy) in
+    let symlink = mem t (Some Symlink) in
+    let hardlink = mem t (Some Hardlink) in
+    let patch_back_source_tree = mem t (Some Patch_back_source_tree) in
     Dyn.Record
       [ ("none", Bool none)
       ; ("copy", Bool copy)

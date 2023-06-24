@@ -58,7 +58,7 @@ end
 module Set : sig
   type key = t
 
-  type t = bool Dict.t
+  type t
 
   val singleton : key -> t
 
