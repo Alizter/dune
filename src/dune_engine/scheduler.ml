@@ -95,7 +95,10 @@ end = struct
 
   let spawn ~signal_watcher f =
     let f () =
-      try f () with exn -> Dune_util.Report_error.report_exception exn
+      try f ()
+      with exn ->
+        let exn = Exn_with_backtrace.capture exn in
+        Dune_util.Report_error.report exn
     in
     let (_ : Thread.t) = create ~signal_watcher f () in
     ()
