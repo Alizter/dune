@@ -345,9 +345,13 @@ let compare_files = function
 ;;
 
 let diff_eq_files { Action.Diff.optional; mode; file1; file2 } =
-  let file1 = if Path.Untracked.exists file1 then file1 else Dev_null.path in
   let file2 = Path.build file2 in
-  (optional && not (Path.Untracked.exists file2)) || compare_files mode file1 file2 = Eq
+  (* We consider a diff equal if one of the following happens:
+     - The diff is set to optional and the built file does not exist.
+     - The original file exists and has the same contents (in binary or text
+       form) as the built file. *)
+  (optional && not (Path.Untracked.exists file2))
+  || (Path.Untracked.exists file1 && compare_files mode file1 file2 = Eq)
 ;;
 
 let zero = Predicate_lang.element 0

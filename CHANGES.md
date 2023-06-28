@@ -19,6 +19,8 @@ changelog properly.
 - Fix the `severity` of error messages sent over RPC which was missing. (#8193,
   @Alizter)
 
+- Empty files are now registered for promotion. (#8077, fixes #8074, @Alizter)
+
 - Add `dune build --dump-gc-stats FILE` argument to dump garbage collection
   stats to a named file. (#8072, @Alizter)
 
