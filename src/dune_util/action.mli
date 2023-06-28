@@ -13,6 +13,8 @@ module Diff : sig
     }
 
   val map : ('p, 't) t -> path:('p -> 'a) -> target:('t -> 'b) -> ('a, 'b) t
+
+  val to_dyn : ('p -> Dyn.t) -> ('t -> Dyn.t) -> ('p, 't) t -> Dyn.t
 end
 
 module Outputs : sig

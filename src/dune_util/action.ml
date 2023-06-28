@@ -3,6 +3,10 @@ module Diff = struct
     type t =
       | Binary
       | Text
+
+    let to_dyn = function
+      | Binary -> Dyn.variant "Binary" []
+      | Text -> Dyn.variant "Text" []
   end
 
   type ('path, 'target) t =
@@ -14,6 +18,15 @@ module Diff = struct
 
   let map t ~path ~target =
     { t with file1 = path t.file1; file2 = target t.file2 }
+
+  let to_dyn path target { optional; mode; file1; file2 } =
+    let open Dyn in
+    record
+      [ ("optional", Dyn.bool optional)
+      ; ("mode", Mode.to_dyn mode)
+      ; ("file1", path file1)
+      ; ("file2", target file2)
+      ]
 end
 
 module Outputs = struct
