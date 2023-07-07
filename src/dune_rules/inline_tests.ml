@@ -210,25 +210,20 @@ include Sub_system.Register_end_point (struct
         | [] -> None
         | flags ->
           let flags =
-            let open Action_builder.O in
-            let+ l =
-              let expander =
-                let bindings =
-                  Pform.Map.singleton
-                    (Pform.Var Library_name)
-                    [ Value.String (Lib_name.Local.to_string (snd lib.name)) ]
-                in
-                Expander.add_bindings expander ~bindings
+            let expander =
+              let bindings =
+                Pform.Map.singleton
+                  (Pform.Var Library_name)
+                  [ Value.String (Lib_name.Local.to_string (snd lib.name)) ]
               in
-              List.map
-                flags
-                ~f:
-                  (Expander.expand_and_eval_set
-                     expander
-                     ~standard:(Action_builder.return []))
-              |> Action_builder.all
+              Expander.add_bindings expander ~bindings
             in
-            List.concat l
+            Action_builder.List.concat_map
+              flags
+              ~f:
+                (Expander.expand_and_eval_set
+                   expander
+                   ~standard:(Action_builder.return []))
           in
           Some flags
       in
