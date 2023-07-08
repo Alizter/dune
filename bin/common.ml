@@ -1222,14 +1222,49 @@ let init ?action_runner ?log_file c =
       Dune_stats.emit stats event);
   (* Setup hook for printing GC stats to a file *)
   at_exit (fun () ->
-    match c.builder.dump_gc_stats with
-    | None -> ()
-    | Some file ->
-      Gc.full_major ();
-      Gc.compact ();
-      let stat = Gc.stat () in
-      let path = Path.external_ file in
-      Dune_util.Gc.serialize ~path stat);
+    if Option.is_some c.builder.dump_gc_stats || Option.is_some c.stats
+    then (
+      (* First take a full major GC, then compact, then get stats *)
+      let gc_stat =
+        Gc.full_major ();
+        Gc.compact ();
+        Gc.stat ()
+      in
+      (* Dump gc stats to file if requested *)
+      (match c.builder.dump_gc_stats with
+       | None -> ()
+       | Some file ->
+         let path = Path.external_ file in
+         Dune_util.Gc.serialize ~path gc_stat);
+      (* Dump gc stats to chrome trace if enabled *)
+      match c.stats with
+      | None -> ()
+      | Some stats ->
+        let open Chrome_trace in
+        (* Now we convert the gc_stat to a chrome trace json format *)
+        let args =
+          [ "minor_words", `Float gc_stat.minor_words
+          ; "promoted_words", `Float gc_stat.promoted_words
+          ; "major_words", `Float gc_stat.major_words
+          ; "minor_collections", `Int gc_stat.minor_collections
+          ; "major_collections", `Int gc_stat.major_collections
+          ; "heap_words", `Int gc_stat.heap_words
+          ; "heap_chunks", `Int gc_stat.heap_chunks
+          ; "live_words", `Int gc_stat.live_words
+          ; "live_blocks", `Int gc_stat.live_blocks
+          ; "free_words", `Int gc_stat.free_words
+          ; "free_blocks", `Int gc_stat.free_blocks
+          ; "largest_free", `Int gc_stat.largest_free
+          ; "fragments", `Int gc_stat.fragments
+          ; "compactions", `Int gc_stat.compactions
+          ; "top_heap_words", `Int gc_stat.top_heap_words
+          ; "stack_size", `Int gc_stat.stack_size
+          ]
+        in
+        let ts = Event.Timestamp.of_float_seconds (Unix.gettimeofday ()) in
+        let common = Event.common_fields ~name:"gc_stats" ~ts () in
+        let event = Event.instant ~args common in
+        Dune_stats.emit stats event));
   config
 ;;
 
