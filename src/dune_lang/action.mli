@@ -119,6 +119,8 @@ type t =
   | Substitute of String_with_vars.t * String_with_vars.t
   | Withenv of String_with_vars.t Env_update.t list * t
   | When of Blang.t * t
+  | Case of String_with_vars.t * (String_with_vars.t * t) list * t
+  | Cond of (Blang.t * t) list * t
 
 val encode : t Encoder.t
 val decode_dune_file : t Decoder.t
