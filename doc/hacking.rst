@@ -708,6 +708,55 @@ Good:
 
    let (foo : _ Command.Args.t) = S []
 
+Continuous Integration
+======================
+
+Dune uses GitHub Actions for continuous integration. The CI is configured in
+``.github/workflows/workflow.yml``. This workflow builds Dune and runs the
+tests. It is run on every push to the repository and every time a pull request
+is created.
+
+Debugging CI
+------------
+
+Sometimes a CI job fails and it is not clear why. In this case, you can try to
+reproduce the failure locally by inspecting the ``workflow.yml`` file and
+rerunning the commands.
+
+Sometimes this isn't enough and you need to be able to run the CI job yourself.
+This can be achieved using nektos-act_. This tool uses ``docker`` and allows you
+to run the GitHub actions locally in containers.
+
+Nix users may use ``nix run nixpkgs#act -- ...`` to run ``act``.
+
+To run the CI job locally, run
+
+.. code:: sh
+
+   $ act -W .github/workflows/workflow.yml -j build --matrix ocaml-compiler:4.04.x
+
+This will run the ``build`` job with the ``ocaml-compiler:4.04.x`` option in the
+matrix. You can alwasy ``--list`` the workflows that can be run and use ``-n``
+for dry runs.
+
+Once you reprodce the error in CI, you can drop into the docker container by
+first finding its name, which can be found by running:
+
+.. code:: sh
+
+   $ docker ps
+
+You can then drop into the container by running:
+
+.. code:: sh
+
+   $ docker exec -ti <container-id> /bin/bash
+
+This should let you interactively inspect the failure.
+
+.. _nektos-act: https://github.com/nektos/act
+
+
 Benchmarking
 ============
 
