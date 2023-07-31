@@ -143,7 +143,7 @@ module Syntax = struct
     | Sexp
 
   let term =
-    let doc = "Output the rules in Makefile syntax." in
+    let doc = "Output the rules in Makefile syntax. (Automatically implies -r)" in
     let+ makefile = Arg.(value & flag & info [ "m"; "makefile" ] ~doc) in
     if makefile then Makefile else Sexp
   ;;
@@ -195,6 +195,11 @@ let term =
           >>| Action_builder.paths
         | _ ->
           Memo.return (Target.interpret_targets (Common.root common) config setup targets)
+      in
+      let recursive =
+        match syntax with
+        | Makefile -> true
+        | Sexp -> recursive
       in
       let+ rules = Dune_engine.Reflection.eval ~request ~recursive in
       let print oc =
