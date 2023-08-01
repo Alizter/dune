@@ -7,6 +7,10 @@ module Kind = struct
       { root : string option
       ; switch : string
       }
+
+    let to_dyn { root; switch } =
+      Dyn.(record [ "root", option string root; "switch", string switch ])
+    ;;
   end
 
   type t =
@@ -15,7 +19,7 @@ module Kind = struct
 
   let to_dyn : t -> Dyn.t = function
     | Default -> Dyn.string "default"
-    | Opam o -> Dyn.(record [ "root", option string o.root; "switch", string o.switch ])
+    | Opam o -> Opam.to_dyn o
   ;;
 end
 
