@@ -3,6 +3,7 @@ val dune_dir_locations_env_var : string
 val dune_ocaml_stdlib_env_var : string
 val dune_ocaml_hardcoded_env_var : string
 val dune_sourceroot_env_var : string
+val debug : bool
 
 type entry =
   { package : string
