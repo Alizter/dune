@@ -92,6 +92,14 @@ module Error = struct
     | Diagnostic d -> `Diagnostic d.diagnostic
   ;;
 
+  module For_tests = struct
+    let make ~id ~description ~dir ~promotion () =
+      match description with
+      | `Exn exn -> Exn { id; exn }
+      | `Diagnostic diagnostic -> Diagnostic { id; diagnostic; dir; promotion }
+    ;;
+  end
+
   module Set : sig
     type error := t
 

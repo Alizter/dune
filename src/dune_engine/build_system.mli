@@ -88,6 +88,7 @@ module Error : sig
 
     module Map : Map.S with type key = t
 
+    val gen : unit -> t
     val compare : t -> t -> Ordering.t
     val to_int : t -> int
     val to_dyn : t -> Dyn.t
@@ -125,6 +126,20 @@ module Error : sig
     val equal : t -> t -> bool
     val current : t -> error Id.Map.t
     val empty : t
+  end
+
+  module For_tests : sig
+    (** Internal helpers for testing purposes. Do not use. *)
+
+    (** Construct an [Error.t] *)
+    val make
+      :  id:Id.t
+      -> description:
+           [ `Exn of Exn_with_backtrace.t | `Diagnostic of Compound_user_error.t ]
+      -> dir:Path.t option
+      -> promotion:Diff_promotion.Annot.t option
+      -> unit
+      -> t
   end
 end
 
