@@ -9,14 +9,143 @@ module Public = struct
   end
 
   module Diagnostics = struct
+    module V1 = struct
+      module Related = struct
+        type t =
+          { message : unit Pp.t
+          ; loc : Loc.t
+          }
+
+        let sexp =
+          let open Conv in
+          let loc = field "loc" (required Loc.sexp) in
+          let message = field "message" (required sexp_pp_unit) in
+          let to_ (loc, message) = { loc; message } in
+          let from { loc; message } = loc, message in
+          iso (record (both loc message)) to_ from
+        ;;
+
+        let to_diagnostic_related t : Diagnostic.Related.t =
+          { message = t.message |> Pp.map_tags ~f:(fun _ -> User_message.Style.Details)
+          ; loc = t.loc
+          }
+        ;;
+
+        let of_diagnostic_related (t : Diagnostic.Related.t) =
+          { message = t.message |> Pp.map_tags ~f:(fun _ -> ()); loc = t.loc }
+        ;;
+      end
+
+      type t =
+        { targets : Target.t list
+        ; id : Diagnostic.Id.t
+        ; message : unit Pp.t
+        ; loc : Loc.t option
+        ; severity : Diagnostic.severity option
+        ; promotion : Diagnostic.Promotion.t list
+        ; directory : string option
+        ; related : Related.t list
+        }
+
+      let sexp_severity =
+        let open Conv in
+        enum [ "error", Diagnostic.Error; "warning", Warning ]
+      ;;
+
+      let sexp =
+        let open Conv in
+        let from { targets; message; loc; severity; promotion; directory; id; related } =
+          targets, message, loc, severity, promotion, directory, id, related
+        in
+        let to_ (targets, message, loc, severity, promotion, directory, id, related) =
+          { targets; message; loc; severity; promotion; directory; id; related }
+        in
+        let loc = field "loc" (optional Loc.sexp) in
+        let message = field "message" (required sexp_pp_unit) in
+        let targets = field "targets" (required (list Target.sexp)) in
+        let severity = field "severity" (optional sexp_severity) in
+        let directory = field "directory" (optional string) in
+        let promotion = field "promotion" (required (list Diagnostic.Promotion.sexp)) in
+        let id = field "id" (required Diagnostic.Id.sexp) in
+        let related = field "related" (required (list Related.sexp)) in
+        iso
+          (record (eight targets message loc severity promotion directory id related))
+          to_
+          from
+      ;;
+
+      let to_diagnostic t : Diagnostic.t =
+        { targets = t.targets
+        ; message = t.message |> Pp.map_tags ~f:(fun _ -> User_message.Style.Details)
+        ; loc = t.loc
+        ; severity = t.severity
+        ; promotion = t.promotion
+        ; directory = t.directory
+        ; id = t.id
+        ; related = t.related |> List.map ~f:Related.to_diagnostic_related
+        }
+      ;;
+
+      let of_diagnostic (t : Diagnostic.t) =
+        { targets = t.targets
+        ; message = t.message |> Pp.map_tags ~f:(fun _ -> ())
+        ; loc = t.loc
+        ; severity = t.severity
+        ; promotion = t.promotion
+        ; directory = t.directory
+        ; id = t.id
+        ; related = t.related |> List.map ~f:Related.of_diagnostic_related
+        }
+      ;;
+
+      module Event = struct
+        type nonrec t =
+          | Add of t
+          | Remove of t
+
+        let sexp =
+          let diagnostic = sexp in
+          let open Conv in
+          let add = constr "Add" diagnostic (fun a -> Add a) in
+          let remove = constr "Remove" diagnostic (fun a -> Remove a) in
+          sum
+            [ econstr add; econstr remove ]
+            (function
+             | Add t -> case t add
+             | Remove t -> case t remove)
+        ;;
+
+        let to_event : t -> Diagnostic.Event.t = function
+          | Add t -> Add (to_diagnostic t)
+          | Remove t -> Remove (to_diagnostic t)
+        ;;
+
+        let of_event : Diagnostic.Event.t -> t = function
+          | Add t -> Add (of_diagnostic t)
+          | Remove t -> Remove (of_diagnostic t)
+        ;;
+      end
+    end
+
     let v1 =
-      Decl.Request.make_current_gen
-        ~req:Conv.unit
-        ~resp:(Conv.list Diagnostic.sexp)
+      Decl.Request.make_gen
         ~version:1
+        ~req:Conv.unit
+        ~resp:(Conv.list V1.sexp)
+        ~upgrade_req:Fun.id
+        ~downgrade_req:Fun.id
+        ~upgrade_resp:(List.map ~f:V1.to_diagnostic)
+        ~downgrade_resp:(List.map ~f:V1.of_diagnostic)
     ;;
 
-    let decl = Decl.Request.make ~method_:"diagnostics" ~generations:[ v1 ]
+    let v2 =
+      Decl.Request.make_current_gen
+        ~version:2
+        ~req:Conv.unit
+        ~resp:(Conv.list Diagnostic.sexp)
+    ;;
+
+    let decl = Decl.Request.make ~method_:"diagnostics" ~generations:[ v1; v2 ]
   end
 
   module Shutdown = struct
@@ -184,10 +313,21 @@ module Poll = struct
     let name = "diagnostic"
 
     let v1 =
+      Decl.Request.make_gen
+        ~version:1
+        ~req:Id.sexp
+        ~resp:(Conv.option (Conv.list Public.Diagnostics.V1.Event.sexp))
+        ~upgrade_req:Fun.id
+        ~downgrade_req:Fun.id
+        ~upgrade_resp:(Option.map ~f:(List.map ~f:Public.Diagnostics.V1.Event.to_event))
+        ~downgrade_resp:(Option.map ~f:(List.map ~f:Public.Diagnostics.V1.Event.of_event))
+    ;;
+
+    let v2 =
       Decl.Request.make_current_gen
+        ~version:2
         ~req:Id.sexp
         ~resp:(Conv.option (Conv.list Diagnostic.Event.sexp))
-        ~version:1
     ;;
   end
 
@@ -209,7 +349,7 @@ module Poll = struct
 
   let diagnostic =
     let open Diagnostic in
-    make name [ v1 ]
+    make name [ v1; v2 ]
   ;;
 
   let running_jobs =
