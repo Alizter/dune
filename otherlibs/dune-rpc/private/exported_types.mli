@@ -11,6 +11,8 @@ module Loc : sig
   val sexp : t Conv.value
 end
 
+val sexp_pp : 'a Conv.value -> 'a Pp.t Conv.value
+
 module Target : sig
   type t =
     | Path of string
@@ -31,6 +33,89 @@ module Path : sig
   val relative : t -> string -> t
   val to_string_absolute : t -> string
   val sexp : t Conv.value
+end
+
+module Ansi_color : sig
+  module RGB8 : sig
+    type t = char
+
+    val sexp : t Conv.value
+  end
+
+  module RGB24 : sig
+    type t = int
+
+    val sexp : t Conv.value
+  end
+
+  module Style : sig
+    type t =
+      | Fg_default
+      | Fg_black
+      | Fg_red
+      | Fg_green
+      | Fg_yellow
+      | Fg_blue
+      | Fg_magenta
+      | Fg_cyan
+      | Fg_white
+      | Fg_bright_black
+      | Fg_bright_red
+      | Fg_bright_green
+      | Fg_bright_yellow
+      | Fg_bright_blue
+      | Fg_bright_magenta
+      | Fg_bright_cyan
+      | Fg_bright_white
+      | Fg_8_bit_color of RGB8.t
+      | Fg_24_bit_color of RGB24.t
+      | Bg_default
+      | Bg_black
+      | Bg_red
+      | Bg_green
+      | Bg_yellow
+      | Bg_blue
+      | Bg_magenta
+      | Bg_cyan
+      | Bg_white
+      | Bg_bright_black
+      | Bg_bright_red
+      | Bg_bright_green
+      | Bg_bright_yellow
+      | Bg_bright_blue
+      | Bg_bright_magenta
+      | Bg_bright_cyan
+      | Bg_bright_white
+      | Bg_8_bit_color of RGB8.t
+      | Bg_24_bit_color of RGB24.t
+      | Bold
+      | Dim
+      | Italic
+      | Underline
+
+    val sexp : t Conv.value
+  end
+end
+
+module User_message : sig
+  module Style : sig
+    type t =
+      | Loc
+      | Error
+      | Warning
+      | Kwd
+      | Id
+      | Prompt
+      | Hint
+      | Details
+      | Ok
+      | Debug
+      | Success
+      | Ansi_styles of Ansi_color.Style.t list
+
+    val to_user_message_style : t -> Stdune.User_message.Style.t
+    val of_user_message_style : Stdune.User_message.Style.t -> t
+  end
 end
 
 module Diagnostic : sig
@@ -60,11 +145,12 @@ module Diagnostic : sig
 
   module Related : sig
     type t =
-      { message : unit Pp.t
+      { message : User_message.Style.t Pp.t
       ; loc : Loc.t
       }
 
     val message : t -> unit Pp.t
+    val message_with_style : t -> User_message.Style.t Pp.t
     val loc : t -> Loc.t
     val sexp : t Conv.value
   end
@@ -72,7 +158,7 @@ module Diagnostic : sig
   type t =
     { targets : Target.t list
     ; id : Id.t
-    ; message : unit Pp.t
+    ; message : User_message.Style.t Pp.t
     ; loc : Loc.t option
     ; severity : severity option
     ; promotion : Promotion.t list
@@ -84,6 +170,7 @@ module Diagnostic : sig
   val id : t -> Id.t
   val loc : t -> Loc.t option
   val message : t -> unit Pp.t
+  val message_with_style : t -> User_message.Style.t Pp.t
   val severity : t -> severity option
   val promotion : t -> Promotion.t list
   val targets : t -> Target.t list

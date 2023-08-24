@@ -162,6 +162,7 @@ let%expect_test "related error" =
            does not match the interface .foo.objs/byte/foo.cmi: \n\
            Values do not match: val x : bool is not included in val x : int\n\
            The type bool is not compatible with the type int\n\
+           \n\
            "
         ]
       ]
@@ -240,8 +241,8 @@ let%expect_test "related error" =
           ]
         ]
       ; [ "message"
-        ; [ "Verbatim"; "Module \"Foo\" is used in several\n\
-                         stanzas:\n\
+        ; [ "Verbatim"; "Module \"Foo\" is used in several stanzas:\n\
+                         \n\
                          " ]
         ]
       ; [ "promotion"; [] ]
@@ -311,8 +312,8 @@ let%expect_test "promotion" =
         ]
       ; [ "message"
         ; [ "Verbatim"
-          ; "Error: Files _build/default/x and _build/default/x.gen\n\
-             differ.\n\
+          ; "Error: Files _build/default/x and _build/default/x.gen differ.\n\
+             \n\
              "
           ]
         ]
@@ -372,6 +373,7 @@ let%expect_test "optional promotion" =
         ; [ "Verbatim"
           ; "Error: Files _build/default/output.expected and _build/default/output.actual\n\
              differ.\n\
+             \n\
              "
           ]
         ]
@@ -430,8 +432,9 @@ let%expect_test "error from user rule" =
         ]
       ; [ "message"
         ; [ "Verbatim"
-          ; "Error: Rule failed to generate the following\n\
-             targets:- foo\n\
+          ; "Error: Rule failed to generate the following targets:\n\
+             - foo\n\
+             \n\
              "
           ]
         ]
@@ -471,8 +474,8 @@ let%expect_test "library error location" =
           ]
         ]
       ; [ "message"
-        ; [ "Verbatim"; "Error: Library \"fake-library\" not\n\
-                         found.\n\
+        ; [ "Verbatim"; "Error: Library \"fake-library\" not found.\n\
+                         \n\
                          " ]
         ]
       ; [ "promotion"; [] ]
@@ -521,6 +524,7 @@ let%expect_test "create and fix error" =
             ; [ "Verbatim"
               ; "This expression has type int but an expression was expected of type\n\
                 \  string\n\
+                 \n\
                  "
               ]
             ]
@@ -562,6 +566,7 @@ let%expect_test "create and fix error" =
             ; [ "Verbatim"
               ; "This expression has type int but an expression was expected of type\n\
                 \  string\n\
+                 \n\
                  "
               ]
             ]
@@ -717,6 +722,7 @@ let g = A.f
               ]
             ]
           ; [ "message"; [ "Verbatim"; "foobar\n\
+                                        \n\
                                         " ] ]
           ; [ "promotion"; [] ]
           ; [ "related"; [] ]
@@ -745,6 +751,7 @@ let g = A.f
               ]
             ]
           ; [ "message"; [ "Verbatim"; "foobar\n\
+                                        \n\
                                         " ] ]
           ; [ "promotion"; [] ]
           ; [ "related"; [] ]
@@ -773,6 +780,7 @@ let g = A.f
               ]
             ]
           ; [ "message"; [ "Verbatim"; "unused value f.\n\
+                                        \n\
                                         " ] ]
           ; [ "promotion"; [] ]
           ; [ "related"; [] ]
@@ -801,6 +809,7 @@ let g = A.f
               ]
             ]
           ; [ "message"; [ "Verbatim"; "unused value g.\n\
+                                        \n\
                                         " ] ]
           ; [ "promotion"; [] ]
           ; [ "related"; [] ]

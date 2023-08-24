@@ -32,9 +32,13 @@ let diagnostic_of_error : Build_system.Error.t -> Dune_rpc_private.Diagnostic.t 
     | `Diagnostic { Compound_user_error.main = message; related } -> message, related
   in
   let loc = Option.map message.loc ~f:make_loc in
-  let make_message pars = Pp.map_tags (Pp.concat pars) ~f:(fun _ -> ()) in
   let id =
     Build_system.Error.id m |> Build_system.Error.Id.to_int |> Diagnostic.Id.create
+  in
+  let make_message pars =
+    Pp.map_tags
+      (Pp.concat pars)
+      ~f:Dune_rpc_private.User_message.Style.of_user_message_style
   in
   let promotion =
     match Build_system.Error.promotion m with
@@ -52,10 +56,28 @@ let diagnostic_of_error : Build_system.Error.t -> Dune_rpc_private.Diagnostic.t 
       ; loc = make_loc (Option.value_exn related.loc)
       })
   in
+  let message =
+    let paragraphs =
+      let paragraphs = message.paragraphs in
+      match message.hints with
+      | [] -> paragraphs
+      | _ ->
+        let open Pp.O in
+        List.append
+          paragraphs
+          (List.map message.hints ~f:(fun hint ->
+             Pp.tag User_message.Style.Hint (Pp.verbatim "Hint:") ++ Pp.space ++ hint))
+    in
+    List.map paragraphs ~f:Pp.box
+    |> Pp.concat_map ~sep:Pp.nop ~f:(fun pp -> Pp.seq pp Pp.cut)
+    |> Pp.vbox
+    |> List.singleton
+    |> make_message
+  in
   { Dune_rpc_private.Diagnostic.severity = Some Dune_rpc_private.Diagnostic.Error
   ; id
   ; targets = []
-  ; message = make_message message.paragraphs
+  ; message
   ; loc
   ; promotion
   ; related
