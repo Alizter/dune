@@ -34,13 +34,13 @@ let term =
 ;;
 
 (* style for diving visual elements like borders or rules *)
-let divider_attr = A.(fg red)
+let divider_attr = Lwd.var A.(fg red)
 
 (* style for helpful ui elements like scrollbar structures or help text *)
-let helper_attr = A.(fg yellow)
+let helper_attr = Lwd.var A.(fg yellow)
 
 (* style for user feedback like message count, or scrollbar position *)
-let user_feedback_attr = A.(fg cyan)
+let user_feedback_attr = Lwd.var A.(fg cyan)
 
 (* Here we keep some persistent state about the program that we udpate each time we
    render. This allows other components to "react" to changes using [Lwd]. *)
@@ -75,12 +75,13 @@ module Message_viewer = struct
   (* We approximate the first line of the message. Unfortunately due to the way Notty
      images work, it is not easy to get the actual width of the first line. Therefore we
      just chop a third off as an approximation. *)
-  let message_synopsis ~attr =
+  let message_synopsis =
     let+ messages = message_images
+    and+ helper_attr = Lwd.get helper_attr
     and+ width, _ = Lwd.get term_size in
     fun index ->
       match List.nth messages index with
-      | None -> I.string attr "..."
+      | None -> I.string helper_attr "..."
       | Some message ->
         let cropped_image = I.vcrop 0 (I.height message - 1) message in
         I.hcrop 0 (min (I.width cropped_image / 3) (width - 15)) cropped_image
@@ -92,7 +93,10 @@ module Message_viewer = struct
   let horizontal_line_with_count total index =
     let+ is_hidden = Lwd.get is_message_hidden
     and+ w = max_message_length
-    and+ synopsis = Lwd.app (message_synopsis ~attr:helper_attr) (Lwd.return index) in
+    and+ synopsis = Lwd.app message_synopsis (Lwd.return index)
+    and+ divider_attr = Lwd.get divider_attr
+    and+ helper_attr = Lwd.get helper_attr
+    and+ user_feedback_attr = Lwd.get user_feedback_attr in
     let index_is_hidden = is_hidden index in
     let status =
       I.hcat
@@ -157,9 +161,10 @@ module Message_viewer = struct
     let expand_all = Lwd.var false in
     let scrollbox_state = Lwd.var Scrollbox.State.init in
     let* messages = message_images
-    and+ w = max_message_length in
+    and+ w = max_message_length
+    and+ helper_attr = Lwd.get helper_attr in
     let+ { ui; vscroll; hscroll } =
-      let image =
+      let* image =
         let+ messages =
           List.mapi messages ~f:(line_separated_message ~total:(List.length messages))
           |> Lwd_utils.flatten_l
@@ -206,18 +211,26 @@ end
    other compoenents can trigger the help screen. *)
 let help_box =
   let help_screen_lines =
-    [ "Press 'q' to quit"
+    [ "Navigate with the mouse or arrow keys (or vim bindings)"
+    ; "Press 'q' to quit"
     ; "Press '?' to toggle this screen"
-    ; "Navigate with the mouse or arrow keys (or vim bindings)"
     ; "Press 'm' to expand / collapse all messages"
+    ; "Press 'tab' to jump to next tab"
+    ; "Press 'shift' + 'tab' to jump to previous tab"
     ]
   in
-  let* width, height = Lwd.get term_size in
+  let* width, height = Lwd.get term_size
+  and+ helper_attr = Lwd.get helper_attr
+  and+ divider_attr = Lwd.get divider_attr in
   Help_box.make ~helper_attr ~divider_attr ~help_screen_lines ~width ~height
 ;;
 
+let extra_buttons = Lwd.var []
+
 (* The status bar shows the build status and includes a help button. *)
 let status_bar =
+  let* helper_attr = Lwd.get helper_attr
+  and+ user_feedback_attr = Lwd.get user_feedback_attr in
   let+ w, _ = Lwd.get term_size
   and+ help_button =
     let+ { toggle; _ } = help_box in
@@ -229,6 +242,7 @@ let status_bar =
         ]
     in
     Button.of_ (Ui.atom image) toggle
+  and+ extra_buttons = Lwd.get extra_buttons
   and+ status =
     Lwd.get status_line
     >>| function
@@ -253,18 +267,34 @@ let status_bar =
            [ hsnap_or_leave ~width:w status
            ; Drawing.horizontal_rule ~attr:helper_attr ~w
            ]
-    ; help_button
+    ; Ui.hcat ([ help_button ] @ extra_buttons)
     ]
+;;
+
+let extra_tabs = Lwd.var []
+
+let main_view =
+  let* helper_attr = Lwd.get helper_attr
+  and+ extra_tabs = Lwd.get extra_tabs in
+  match extra_tabs with
+  | [] -> Message_viewer.ui
+  | _ ->
+    let+ { ui; _ } =
+      Tabs.make
+        ~title_attr:helper_attr
+        ({ Tabs.Tab.title = "main"; ui = (fun () -> Message_viewer.ui) } :: extra_tabs)
+    in
+    ui
 ;;
 
 (* Our document has 3 components:
    - A help box
    - A status bar
-   - A message viewer *)
+   - A main view *)
 let document =
-  let* { ui = help_box; toggle = handle_help } = help_box in
-  let+ status_bar = status_bar
-  and+ message_viewer = Message_viewer.ui in
+  let+ { ui = help_box; toggle = handle_help } = help_box
+  and+ status_bar = status_bar
+  and+ main_view = main_view in
   let keyboard_handler = function
     (* When we encounter q we make sure to quit by signaling termination. *)
     | `ASCII 'q', _ ->
@@ -276,7 +306,7 @@ let document =
       `Handled
     | _ -> `Unhandled
   in
-  Ui.zcat [ Ui.vcat [ status_bar; message_viewer ]; help_box ]
+  Ui.zcat [ Ui.vcat [ status_bar; main_view ]; help_box ]
   |> Ui.keyboard_area keyboard_handler
 ;;
 
@@ -381,3 +411,11 @@ let backend =
   let t = lazy (Dune_threaded_console.make (module Console_backend)) in
   fun () -> Lazy.force t
 ;;
+
+module Widgets = struct
+  module Button = Button
+  module Tabs = Tabs
+end
+
+module Drawing = Drawing
+module Import = Import

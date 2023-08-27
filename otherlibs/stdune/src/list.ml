@@ -172,6 +172,12 @@ let rec nth t i =
   | _ :: xs, i -> nth xs (i - 1)
 ;;
 
+let nth_exn t i =
+  match nth t i with
+  | Some x -> x
+  | None -> Code_error.raise "nth_exn: index out of bounds" []
+;;
+
 let physically_equal = Stdlib.( == )
 
 let init =

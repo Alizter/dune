@@ -6,6 +6,8 @@ open Import
     [User_message.Style.t] tags into appropriate Notty [A.t]s. *)
 val pp_to_image : User_message.Style.t Pp.t -> I.t
 
+val attr_of_ansi_color_rgb24 : Ansi_color.RGB24.t -> A.color
+
 (** [horizontal_rule ~attr ~w] draws a horizontal line with [attr] of length [w]. *)
 val horizontal_rule : attr:A.t -> w:int -> I.t
 

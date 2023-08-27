@@ -39,6 +39,7 @@ val compare : 'a t -> 'a t -> compare:('a -> 'a -> Ordering.t) -> Ordering.t
 val assoc : ('a * 'b) t -> 'a -> 'b option
 val singleton : 'a -> 'a t
 val nth : 'a t -> int -> 'a option
+val nth_exn : 'a t -> int -> 'a
 val physically_equal : 'a t -> 'a t -> bool
 val init : int -> f:(int -> 'a) -> 'a list
 val hd_opt : 'a t -> 'a option

@@ -123,7 +123,10 @@ end = struct
       let jobs =
         List.fold_left jobs ~init:state.jobs ~f:(fun acc job_event ->
           match (job_event : Job.Event.t) with
-          | Start job -> Job_id_map.add_exn acc job.id job
+          | Start job ->
+            (match Job_id_map.add acc job.id job with
+             | Ok jobs -> jobs
+             | Error _ -> acc)
           | Stop id -> Job_id_map.remove acc id)
       in
       state.jobs <- jobs;
@@ -147,7 +150,9 @@ end = struct
               ( (match mode with
                  | `Add_only diags -> `Add_only (diag :: diags)
                  | `Remove -> `Remove)
-              , Diagnostic_id_map.add_exn acc diag.id diag ))
+              , (match Diagnostic_id_map.add acc diag.id diag with
+                 | Ok map -> map
+                 | Error _ -> acc) ))
       in
       state.diagnostics <- diagnostics;
       match mode with
@@ -163,9 +168,31 @@ end = struct
     | Diagnostics diagnostics -> Update.diagnostics state diagnostics
   ;;
 
+  let setup_tui (state : t) =
+    (* UI for TUI *)
+    let open Dune_tui.Import in
+    let open Dune_tui.Import.Lwd.O in
+    let tab title =
+      let ui () =
+        let+ width, height = Lwd.get Dune_tui.term_size in
+        Ui.vcat
+          ([ Ui.atom @@ I.string A.empty (sprintf "Terminal size: (%d, %d)" width height)
+           ]
+           @ Job_id_map.to_list_map state.jobs ~f:(fun _key job ->
+             Ui.atom
+             @@ Dune_tui.Drawing.pp_to_image
+                  (Pp.map_tags ~f:(fun () -> User_message.Style.Id) (Job.description job)))
+          )
+      in
+      { Dune_tui.Widgets.Tabs.Tab.ui; title }
+    in
+    Lwd.set Dune_tui.extra_tabs [ tab "Jobs"; tab "Other stuff" ]
+  ;;
+
   let render =
     let f d = Console.print_user_message (Diagnostic.to_user_message d) in
     fun (state : t) (update : Update.t) ->
+      setup_tui state;
       (match (update : Update.t) with
        | Add_diagnostics diags -> List.iter diags ~f
        | Update_status -> ()
@@ -220,26 +247,39 @@ let render_loop ~(event : Event.t Fiber_event_bus.t) =
 ;;
 
 let monitor ~quit_on_disconnect () =
+  Fiber.with_error_handler ~on_error:(fun exn ->
+    Dune_util.Log.log (fun () -> [ Exn_with_backtrace.pp exn ]);
+    Fiber.never)
+  @@ fun () ->
   Fiber.repeat_while ~init:1 ~f:(fun i ->
     match Dune_rpc_impl.Where.get () with
     | Some where ->
-      let* connect = Client.Connection.connect_exn where in
-      let+ () =
-        Dune_rpc_impl.Client.client
-          connect
-          (Dune_rpc.Initialize.Request.create
-             ~id:(Dune_rpc.Id.make (Sexp.Atom "monitor_cmd")))
-          ~f:(fun client ->
-            let event = Fiber_event_bus.create () in
-            let module Sub = Dune_rpc_private.Public.Sub in
-            Fiber.all_concurrently_unit
-              [ render_loop ~event
-              ; fetch_loop ~event ~client ~f:(fun x -> Event.Jobs x) Sub.running_jobs
-              ; fetch_loop ~event ~client ~f:(fun x -> Event.Progress x) Sub.progress
-              ; fetch_loop ~event ~client ~f:(fun x -> Event.Diagnostics x) Sub.diagnostic
-              ])
-      in
-      Some i
+      let* connect = Client.Connection.connect where in
+      (match connect with
+       | Error msg ->
+         User_message.print msg;
+         Fiber.return (Some i)
+       | Ok connect ->
+         let+ () =
+           Dune_rpc_impl.Client.client
+             connect
+             (Dune_rpc.Initialize.Request.create
+                ~id:(Dune_rpc.Id.make (Sexp.Atom "monitor_cmd")))
+             ~f:(fun client ->
+               let event = Fiber_event_bus.create () in
+               let module Sub = Dune_rpc_private.Public.Sub in
+               Fiber.all_concurrently_unit
+                 [ render_loop ~event
+                 ; fetch_loop ~event ~client ~f:(fun x -> Event.Jobs x) Sub.running_jobs
+                 ; fetch_loop ~event ~client ~f:(fun x -> Event.Progress x) Sub.progress
+                 ; fetch_loop
+                     ~event
+                     ~client
+                     ~f:(fun x -> Event.Diagnostics x)
+                     Sub.diagnostic
+                 ])
+         in
+         Some i)
     | None when quit_on_disconnect ->
       User_error.raise [ Pp.text "RPC server not running." ]
     | None ->
@@ -275,7 +315,11 @@ let command =
             ~doc:"Quit if the connection to the server is lost.")
     in
     let common = Common.forbid_builds common in
-    let config = Common.init ~log_file:No_log_file common in
+    let log_file =
+      Log.File.This
+        (Path.append_local Path.build_dir (Path.Local.of_string ".monitor.log"))
+    in
+    let config = Common.init ~log_file common in
     let stats = Common.stats common in
     let config =
       Dune_config.for_scheduler
