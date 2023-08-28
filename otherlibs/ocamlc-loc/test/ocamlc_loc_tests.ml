@@ -42,8 +42,6 @@ module Test = struct
   ;;
 end
 
-(* FIXME: unused value warning isn't parsed correctly - the file excerpt isn't
-   extracted *)
 let%expect_test "unused value" =
   let raw_error =
     String.trim
