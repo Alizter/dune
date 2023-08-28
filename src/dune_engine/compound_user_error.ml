@@ -6,14 +6,14 @@ module T : sig
     ; related : User_message.t list
     }
 
-  val create : main:User_message.t -> related:User_message.t list -> t
+  val make : main:User_message.t -> related:User_message.t list -> t
 end = struct
   type t =
     { main : User_message.t
     ; related : User_message.t list
     }
 
-  let create ~main ~related =
+  let make ~main ~related =
     let () =
       List.iter related ~f:(fun (related : User_message.t) ->
         match related.loc with
@@ -38,7 +38,6 @@ let to_dyn { main; related } =
 ;;
 
 let annot = User_message.Annots.Key.create ~name:"compound-user-error" (Dyn.list to_dyn)
-let make ~main ~related = create ~main ~related
 
 let make_loc ~dir { Ocamlc_loc.path; chars; lines } : Loc.t =
   let pos_fname =
