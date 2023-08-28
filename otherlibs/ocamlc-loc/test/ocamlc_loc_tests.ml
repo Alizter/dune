@@ -648,3 +648,25 @@ File "src/dune_threaded_console/dune_threaded_console.ml", line 9, characters 17
 ; severity = Error None
 } |}]
 ;;
+
+let%expect_test _ =
+  test_error
+    {|
+File "test/expect-tests/dune_rpc_impl/dune_rpc_impl_tests.ml", line 266, characters 4-6:
+266 |     {|:
+          ^^
+Error: String literal not terminated
+    |};
+  [%expect
+    {|
+    >> error 0
+    { loc =
+        { path = "test/expect-tests/dune_rpc_impl/dune_rpc_impl_tests.ml"
+        ; line = Single 266
+        ; chars = Some (4, 6)
+        }
+    ; message = "String literal not terminated"
+    ; related = []
+    ; severity = Error None
+    } |}]
+;;
