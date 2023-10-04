@@ -22,6 +22,7 @@ module Map = Map
 module Option = Option
 module Or_exn = Or_exn
 module Ordering = Ordering
+module Hlist = Hlist
 
 module Pp = struct
   include Pp
