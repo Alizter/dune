@@ -19,7 +19,7 @@
     , nixpkgs
     , ocamllsp
     , melange
-    }@inputs:
+    }:
     let package = "dune";
     in flake-utils.lib.eachDefaultSystem (system:
     let
@@ -216,7 +216,6 @@
                 ccls
               ]) ++ (with pkgs.ocamlPackages; [
                 ocamllsp.outputs.packages.${system}.default
-                pkgs.ocamlPackages.melange
                 rescript-syntax
                 js_of_ocaml-compiler
                 js_of_ocaml
