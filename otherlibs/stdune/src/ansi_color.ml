@@ -9,7 +9,7 @@ module RGB8 : sig
   val compare : t -> t -> Ordering.t
 
   (* This is only used internally. *)
-  val write_to_buffer : Buffer.t -> t -> unit
+  val write_to_buffer : position:[ `Background | `Foreground ] -> Buffer.t -> t -> unit
 end = struct
   type t = char
 
@@ -20,8 +20,10 @@ end = struct
   let to_int t = int_of_char t
   let compare t1 t2 = Char.compare t1 t2
 
-  let write_to_buffer buf c =
-    Buffer.add_string buf "38;5;";
+  let write_to_buffer ~position buf c =
+    (match position with
+     | `Foreground -> Buffer.add_string buf "38;5;"
+     | `Background -> Buffer.add_string buf "48;5;");
     int_of_char c |> Int.to_string |> Buffer.add_string buf
   ;;
 end
@@ -39,7 +41,7 @@ module RGB24 : sig
   val of_int : int -> t
 
   (* This is only used internally. *)
-  val write_to_buffer : Buffer.t -> t -> unit
+  val write_to_buffer : position:[ `Background | `Foreground ] -> Buffer.t -> t -> unit
 end = struct
   type t = int
 
@@ -55,8 +57,10 @@ end = struct
     ((red land 0xFF) lsl 16) lor ((green land 0xFF) lsl 8) lor (blue land 0xFF)
   ;;
 
-  let write_to_buffer buf t =
-    Buffer.add_string buf "38;2;";
+  let write_to_buffer ~position buf t =
+    (match position with
+     | `Foreground -> Buffer.add_string buf "38;2;"
+     | `Background -> Buffer.add_string buf "48;2;");
     red t |> Int.to_string |> Buffer.add_string buf;
     Buffer.add_char buf ';';
     green t |> Int.to_string |> Buffer.add_string buf;
@@ -129,8 +133,8 @@ module Style = struct
     | `Fg_bright_magenta -> Buffer.add_string buf "95"
     | `Fg_bright_cyan -> Buffer.add_string buf "96"
     | `Fg_bright_white -> Buffer.add_string buf "97"
-    | `Fg_8_bit_color c -> RGB8.write_to_buffer buf c
-    | `Fg_24_bit_color rgb -> RGB24.write_to_buffer buf rgb
+    | `Fg_8_bit_color c -> RGB8.write_to_buffer ~position:`Foreground buf c
+    | `Fg_24_bit_color rgb -> RGB24.write_to_buffer ~position:`Foreground buf rgb
     | `Bg_default -> Buffer.add_string buf "49"
     | `Bg_black -> Buffer.add_string buf "40"
     | `Bg_red -> Buffer.add_string buf "41"
@@ -148,8 +152,8 @@ module Style = struct
     | `Bg_bright_magenta -> Buffer.add_string buf "105"
     | `Bg_bright_cyan -> Buffer.add_string buf "106"
     | `Bg_bright_white -> Buffer.add_string buf "107"
-    | `Bg_8_bit_color c -> RGB8.write_to_buffer buf c
-    | `Bg_24_bit_color rgb -> RGB24.write_to_buffer buf rgb
+    | `Bg_8_bit_color c -> RGB8.write_to_buffer ~position:`Background buf c
+    | `Bg_24_bit_color rgb -> RGB24.write_to_buffer ~position:`Background buf rgb
     | `Bold -> Buffer.add_string buf "1"
     | `Dim -> Buffer.add_string buf "2"
     | `Italic -> Buffer.add_string buf "3"
