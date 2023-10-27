@@ -147,20 +147,9 @@ let of_opam_repo_dir_path ~source ~repo_id opam_repo_dir_path =
   { source = Directory packages_dir_path; serializable }
 ;;
 
-let xdg_repo_location =
-  let ( / ) = Filename.concat in
-  lazy (Xdg.cache_dir (Lazy.force Dune_util.xdg) / "dune/git-repo" |> Path.of_string)
-;;
-
-let of_git_repo ~repo_id ~source =
+let of_git_repo rev_store ~repo_id ~source =
   let+ at_rev, computed_repo_id =
-    let* remote =
-      let* repo =
-        let dir = Lazy.force xdg_repo_location in
-        Rev_store.load_or_create ~dir
-      in
-      Rev_store.add_repo repo ~source
-    in
+    let* remote = Rev_store.add_repo rev_store ~source in
     match repo_id with
     | Some repo_id ->
       let+ at_rev = Rev_store.Remote.rev_of_repository_id remote repo_id in
