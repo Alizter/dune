@@ -21,5 +21,6 @@ module Remote : sig
   val rev_of_repository_id : t -> Repository_id.t -> At_rev.t option Fiber.t
 end
 
-val load_or_create : dir:Path.t -> t Fiber.t
+val create : dir:Path.t -> t
+val load_or_create : t -> t Fiber.t
 val add_repo : t -> source:string -> Remote.t Fiber.t

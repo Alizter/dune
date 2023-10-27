@@ -320,8 +320,15 @@ module Lock = struct
         ]
   ;;
 
+  let xdg_repo_location =
+    let ( / ) = Filename.concat in
+    lazy (Xdg.cache_dir (Lazy.force Dune_util.xdg) / "dune/git-repo" |> Path.of_string)
+  ;;
+
   let get_repos repos ~opam_repository_path ~opam_repository_url ~repositories =
     let open Fiber.O in
+    let dir = Lazy.force xdg_repo_location in
+    let rev_store = Dune_pkg.Rev_store.create ~dir in
     match opam_repository_path, opam_repository_url with
     | Some _, Some _ ->
       (* in theory you can set both, but how to prioritize them? *)
@@ -330,7 +337,7 @@ module Lock = struct
       let repo_id = Repository_id.of_path path in
       Fiber.return @@ [ Opam_repo.of_opam_repo_dir_path ~source:None ~repo_id path ]
     | None, Some (url : OpamUrl.t) ->
-      let+ opam_repo = Opam_repo.of_git_repo ~repo_id:None ~source:url.path in
+      let+ opam_repo = Opam_repo.of_git_repo rev_store ~repo_id:None ~source:url.path in
       [ opam_repo ]
     | None, None ->
       repositories
@@ -345,7 +352,7 @@ module Lock = struct
         | Some repo ->
           let opam_url = Dune_pkg.Pkg_workspace.Repository.opam_url repo in
           (match location_of_opam_url opam_url with
-           | `Git source -> Opam_repo.of_git_repo ~repo_id:None ~source
+           | `Git source -> Opam_repo.of_git_repo rev_store ~repo_id:None ~source
            | `Path path ->
              let repo_id = Repository_id.of_path path in
              Fiber.return @@ Opam_repo.of_opam_repo_dir_path ~source:None ~repo_id path))
