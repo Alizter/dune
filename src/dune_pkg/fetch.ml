@@ -24,8 +24,8 @@ module Curl = struct
       ; "--compressed"
       ; "--user-agent"
       ; Lazy.force user_agent
-      ; "--write-out"
-      ; "%{http_code}\\n"
+      ; "--write-out" (* This arg must be quoted to work on windows *)
+      ; "\"%{http_code}\""
       ; "-o"
       ; Path.to_string output
       ; "--"
@@ -56,16 +56,57 @@ module Curl = struct
            ([ Pp.textf "curl returned an invalid error code %d" exit_code ] @ stderr)))
     else (
       Path.unlink_no_err stderr;
-      match Int.of_string http_code with
+      (* Since we had to quote the return http_code, we need to strip it *)
+      match
+        let open Option.O in
+        String.drop_prefix_and_suffix ~prefix:"\"" ~suffix:"\"" http_code
+        >>= Int.of_string
+      with
       | None ->
         Error
           (User_message.make
              [ Pp.textf "curl returned an HTTP code we don't understand: %S" http_code ])
+      | Some 200 -> Ok ()
       | Some http_code ->
-        if http_code = 200
-        then Ok ()
-        else
-          Error (User_message.make [ Pp.textf "download failed with code %d" http_code ]))
+        Error (User_message.make [ Pp.textf "download failed with code %d" http_code ]))
+  ;;
+end
+
+module Tar = struct
+  let bin = lazy (Bin.which ~path:(Env_path.path Env.initial) "tar")
+
+  let run ~temp_dir ~output =
+    let bin =
+      match Lazy.force bin with
+      | Some p -> p
+      | None -> User_error.raise [ Pp.text "tar not available in PATH" ]
+    in
+    let args = [ "-xf"; Path.to_string output; "--force-local" ] in
+    let stderr = Path.relative temp_dir "tar.stderr" in
+    let+ _, exit_code =
+      let stderr_to = Process.Io.file stderr Out in
+      Process.run_capture_line Return ~stderr_to ~display:Quiet bin args
+    in
+    if exit_code <> 0
+    then (
+      let stderr =
+        match Io.read_file stderr with
+        | s ->
+          Path.unlink_no_err stderr;
+          [ Pp.text s ]
+        | exception s ->
+          [ Pp.textf
+              "failed to read stderr form file %s"
+              (Path.to_string_maybe_quoted stderr)
+          ; Exn.pp s
+          ]
+      in
+      Error
+        (User_message.make
+           ([ Pp.textf "tar returned an invalid error code %d" exit_code ] @ stderr)))
+    else (
+      Path.unlink_no_err stderr;
+      Ok ())
   ;;
 end
 
@@ -172,19 +213,8 @@ let fetch_curl ~unpack ~checksum ~target (url : OpamUrl.t) =
           Io.copy_file ~src:output ~dst:target ();
           Fiber.return @@ Ok ()
         | true ->
-          Fiber_job.run
-            (OpamSystem.extract_job ~dir:(Path.to_string target) (Path.to_string output))
-          >>| (function
-          | None -> Ok ()
-          | Some exn ->
-            let exn =
-              User_message.make
-                [ Pp.textf "failed to unpackage archive downloaded from %s" url
-                ; Pp.text "reason:"
-                ; Exn.pp exn
-                ]
-            in
-            Error (Unavailable (Some exn)))))
+          Tar.run ~temp_dir:target ~output
+          >>| Result.map_error ~f:(fun x -> Unavailable (Some x))))
 ;;
 
 let fetch_others ~unpack ~checksum ~target (url : OpamUrl.t) =
