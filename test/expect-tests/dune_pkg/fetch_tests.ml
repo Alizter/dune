@@ -54,6 +54,57 @@ Content-Length: %d
   port, thread
 ;;
 
+let serve_404 () =
+  let host = Unix.inet_addr_loopback in
+  let addr = Unix.ADDR_INET (host, 0) in
+  let sock = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt sock Unix.SO_REUSEADDR true;
+  Unix.bind sock addr;
+  Unix.listen sock 5;
+  let port =
+    match Unix.getsockname sock with
+    | Unix.ADDR_INET (_, port) -> port
+    | ADDR_UNIX _ -> assert false
+  in
+  let thread =
+    Thread.create
+      (fun sock ->
+        let descr, _sockaddr = Unix.accept sock in
+        let write_end = Unix.out_channel_of_descr descr in
+        Printf.fprintf write_end {|HTTP/1.1 404 Not Found
+Content-Length: 0
+
+|};
+        close_out write_end)
+      sock
+  in
+  port, thread
+;;
+
+let serve_nonsense () =
+  let host = Unix.inet_addr_loopback in
+  let addr = Unix.ADDR_INET (host, 0) in
+  let sock = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt sock Unix.SO_REUSEADDR true;
+  Unix.bind sock addr;
+  Unix.listen sock 5;
+  let port =
+    match Unix.getsockname sock with
+    | Unix.ADDR_INET (_, port) -> port
+    | ADDR_UNIX _ -> assert false
+  in
+  let thread =
+    Thread.create
+      (fun sock ->
+        let descr, _sockaddr = Unix.accept sock in
+        let write_end = Unix.out_channel_of_descr descr in
+        Printf.fprintf write_end "nonsense";
+        close_out write_end)
+      sock
+  in
+  port, thread
+;;
+
 let download ?(reproducible = true) ~unpack ~port ~filename ~target ?checksum () =
   let open Fiber.O in
   let url = url ~port ~filename in
@@ -195,4 +246,34 @@ let%expect_test "downloading, tarball" =
   md5=c533195dc4253503071a19d42f08e877
   but got
   <REDACTED> |}]
+;;
+
+let%expect_test "downloading 404" =
+  let filename = "nonexistent.md" in
+  let port, server = serve_404 () in
+  run (download ~unpack:false ~port ~filename ~target:(target filename));
+  Thread.join server;
+  print_endline "Finished successfully?";
+  [%expect.unreachable]
+[@@expect.uncaught_exn
+  {|
+  (Dune_util__Report_error.Already_reported)
+  Trailing output
+  ---------------
+  Error: download failed with code 404 |}]
+;;
+
+let%expect_test "downloading nonsense" =
+  let filename = "nonsense.md" in
+  let port, server = serve_nonsense () in
+  run (download ~unpack:false ~port ~filename ~target:(target filename));
+  Thread.join server;
+  print_endline "Finished successfully?";
+  [%expect.unreachable]
+[@@expect.uncaught_exn
+  {|
+  (Dune_util__Report_error.Already_reported)
+  Trailing output
+  ---------------
+  Error: curl returned an invalid error code 1 |}]
 ;;
