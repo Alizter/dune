@@ -149,7 +149,7 @@ let of_opam_repo_dir_path ~source ~repo_id opam_repo_dir_path =
 
 let of_git_repo rev_store ~repo_id ~source =
   let+ at_rev, computed_repo_id =
-    let* repo = Rev_store.load_or_create rev_store in
+    let* repo = Rev_store.initialize rev_store in
     let* remote = Rev_store.add_repo repo ~source in
     match repo_id with
     | Some repo_id ->

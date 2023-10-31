@@ -9,6 +9,7 @@ type t =
   { dir : Path.t
   ; lock : Fiber.Mutex.t
   }
+type uninitialized = t
 
 type rev = Rev of string
 
@@ -55,7 +56,7 @@ let create ~dir =
   { dir; lock }
 ;;
 
-let load_or_create ({ dir; lock } as t) =
+let initialize ({ dir; lock } as t) =
   Fiber.Mutex.with_lock lock ~f:(fun () ->
     let* () = Fiber.return () in
     let+ () =
