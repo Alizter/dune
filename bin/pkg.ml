@@ -327,7 +327,13 @@ module Lock = struct
          [ "dune"; "git-repo" ])
   ;;
 
-  let get_repos repos ~opam_repository_path ~opam_repository_url ~repositories =
+  let get_repos
+    repos
+    ~allow_networking
+    ~opam_repository_path
+    ~opam_repository_url
+    ~repositories
+    =
     let open Fiber.O in
     let dir = Lazy.force xdg_repo_location in
     let* rev_store = Dune_pkg.Rev_store.create ~dir in
@@ -339,7 +345,9 @@ module Lock = struct
       let repo_id = Repository_id.of_path path in
       Fiber.return @@ [ Opam_repo.of_opam_repo_dir_path ~source:None ~repo_id path ]
     | None, Some (url : OpamUrl.t) ->
-      let+ opam_repo = Opam_repo.of_git_repo rev_store ~repo_id:None ~source:url.path in
+      let+ opam_repo =
+        Opam_repo.of_git_repo rev_store ~allow_networking ~repo_id:None ~source:url.path
+      in
       [ opam_repo ]
     | None, None ->
       repositories
@@ -354,7 +362,8 @@ module Lock = struct
         | Some repo ->
           let opam_url = Dune_pkg.Pkg_workspace.Repository.opam_url repo in
           (match location_of_opam_url opam_url with
-           | `Git source -> Opam_repo.of_git_repo rev_store ~repo_id:None ~source
+           | `Git source ->
+             Opam_repo.of_git_repo rev_store ~allow_networking ~repo_id:None ~source
            | `Path path ->
              let repo_id = Repository_id.of_path path in
              Fiber.return @@ Opam_repo.of_opam_repo_dir_path ~source:None ~repo_id path))
@@ -388,6 +397,7 @@ module Lock = struct
 
   let solve
     per_context
+    ~allow_networking
     ~opam_repository_path
     ~opam_repository_url
     ~sys_bindings_from_current_system
@@ -420,7 +430,12 @@ module Lock = struct
                     ~sys_bindings_from_current_system)
            in
            let* repos =
-             get_repos repos ~opam_repository_path ~opam_repository_url ~repositories
+             get_repos
+               repos
+               ~allow_networking
+               ~opam_repository_path
+               ~opam_repository_url
+               ~repositories
            in
            let overlay =
              Console.Status_line.add_overlay (Constant (Pp.text "Solving for Build Plan"))
@@ -476,6 +491,7 @@ module Lock = struct
   let lock
     ~context_name
     ~all_contexts
+    ~allow_networking
     ~dont_poll_system_solver_variables
     ~version_preference
     ~opam_repository_path
@@ -495,6 +511,7 @@ module Lock = struct
     in
     solve
       per_context
+      ~allow_networking
       ~opam_repository_path
       ~opam_repository_url
       ~sys_bindings_from_current_system
@@ -540,6 +557,15 @@ module Lock = struct
                enabled by default but is currently opt-in as we expect to make major \
                changes to it in the future. Without this flag all conditional commands \
                and terms in Opam files are included unconditionally.")
+    and+ disable_networking =
+      Arg.(
+        value
+        & flag
+        & info
+            [ "disable-networking" ]
+            ~doc:
+              "Disable networking when trying to lock. This will fail if the opam \
+               repository is not already cached locally.")
     in
     let builder = Common.Builder.forbid_builds builder in
     let common, config = Common.init builder in
@@ -547,6 +573,7 @@ module Lock = struct
       lock
         ~context_name
         ~all_contexts
+        ~allow_networking:(not disable_networking)
         ~dont_poll_system_solver_variables
         ~version_preference
         ~opam_repository_path
@@ -588,6 +615,7 @@ module Outdated = struct
               let* repos =
                 Lock.get_repos
                   repos
+                  ~allow_networking:true
                   ~opam_repository_path
                   ~opam_repository_url
                   ~repositories

@@ -5,8 +5,7 @@ type t
 module Remote : sig
   type t
 
-  val update : t -> unit Fiber.t
-  val default_branch : t -> string option Fiber.t
+  val default_branch : t -> string option
 
   module At_rev : sig
     type t
@@ -22,4 +21,4 @@ module Remote : sig
 end
 
 val create : dir:Path.t -> t Fiber.t
-val add_repo : t -> source:string -> Remote.t Fiber.t
+val add_repo : t -> allow_networking:bool -> source:string -> Remote.t Fiber.t

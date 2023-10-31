@@ -147,33 +147,43 @@ let of_opam_repo_dir_path ~source ~repo_id opam_repo_dir_path =
   { source = Directory packages_dir_path; serializable }
 ;;
 
-let of_git_repo rev_store ~repo_id ~source =
+let of_git_repo rev_store ~allow_networking ~repo_id ~source =
   let+ at_rev, computed_repo_id =
-    let* remote = Rev_store.add_repo rev_store ~source in
+    let* remote = Rev_store.add_repo rev_store ~allow_networking ~source in
     match repo_id with
     | Some repo_id ->
       let+ at_rev = Rev_store.Remote.rev_of_repository_id remote repo_id in
       at_rev, Some repo_id
     | None ->
       let+ at_rev =
-        let* name =
-          Rev_store.Remote.default_branch remote
-          >>| function
-          | Some name -> name
-          | None ->
-            User_error.raise
-              ~hints:
-                [ Pp.text
-                    "Specify a different repository with a default branch or an exiting \
-                     revision"
-                ]
-              [ Pp.textf
-                  "No revision given and default branch could not be determined in \
-                   repository %s"
-                  source
-              ]
+        let names =
+          match Rev_store.Remote.default_branch remote with
+          | Some name -> [ name ]
+          | None -> []
         in
-        Rev_store.Remote.rev_of_name remote ~name
+        let rec retry = function
+          | [] -> Fiber.return None
+          | name :: names ->
+            let* possible_rev = Rev_store.Remote.rev_of_name remote ~name in
+            (match possible_rev with
+             | Some _ -> Fiber.return possible_rev
+             | None -> retry names)
+        in
+        let+ rev = retry (names @ [ "master"; "main" ]) in
+        match rev with
+        | Some _ -> rev
+        | None ->
+          User_error.raise
+            ~hints:
+              [ Pp.text
+                  "Specify a different repository with a default branch or an exiting \
+                   revision"
+              ]
+            [ Pp.textf
+                "No revision given and default branch could not be determined in \
+                 repository %s"
+                source
+            ]
       in
       let repo_id = Option.map at_rev ~f:Rev_store.Remote.At_rev.repository_id in
       at_rev, repo_id

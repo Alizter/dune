@@ -69,18 +69,24 @@ module Remote = struct
   type nonrec t =
     { repo : t
     ; handle : string
+    ; mutable default_branch : string option
     }
 
+  let default_branch t = t.default_branch
   let head_branch = Re.(compile (seq [ str "HEAD branch: "; group (rep1 any); eol ]))
-  let update { repo; handle } = run repo [ "fetch"; handle; "--no-tags" ]
 
-  let default_branch { repo; handle } =
-    run_capture_lines repo [ "remote"; "show"; handle ]
-    >>| List.find_map ~f:(fun line ->
-      Re.exec_opt head_branch line |> Option.map ~f:(fun groups -> Re.Group.get groups 1))
+  let update ({ repo; handle; _ } as t) =
+    let* () = run repo [ "fetch"; handle; "--no-tags" ] in
+    let+ default_branch =
+      run_capture_lines repo [ "remote"; "show"; handle ]
+      >>| List.find_map ~f:(fun line ->
+        Re.exec_opt head_branch line
+        |> Option.map ~f:(fun groups -> Re.Group.get groups 1))
+    in
+    t.default_branch <- default_branch
   ;;
 
-  let equal { repo; handle } t = equal repo t.repo && String.equal handle t.handle
+  let equal { repo; handle; _ } t = equal repo t.repo && String.equal handle t.handle
 
   module At_rev = struct
     type nonrec t =
@@ -88,16 +94,16 @@ module Remote = struct
       ; revision : rev
       }
 
-    let content { remote = { repo; handle = _ }; revision } path = show repo revision path
+    let content { remote; revision } path = show remote.repo revision path
 
-    let directory_entries { remote = { repo; handle = _ }; revision = Rev rev } path =
+    let directory_entries { remote; revision = Rev rev } path =
       (* TODO: there are much better of implementing this:
          1. Using one [$ git show] for the entire director
          2. using libgit or ocamlgit
          3. using [$ git archive] *)
       let+ all_files =
         run_capture_zero_separated_lines
-          repo
+          remote.repo
           [ "ls-tree"; "-z"; "--name-only"; "-r"; rev ]
       in
       List.filter_map all_files ~f:(fun entry ->
@@ -113,13 +119,15 @@ module Remote = struct
     let repository_id { revision = Rev rev; remote = _ } = Repository_id.of_git_hash rev
   end
 
-  let rev_of_name ({ repo; handle } as remote) ~name =
+  let rev_of_name remote ~name =
     (* TODO handle non-existing name *)
-    let+ rev = run_capture_line repo [ "rev-parse"; sprintf "%s/%s" handle name ] in
+    let+ rev =
+      run_capture_line remote.repo [ "rev-parse"; sprintf "%s/%s" remote.handle name ]
+    in
     Some { At_rev.remote; revision = Rev rev }
   ;;
 
-  let rev_of_repository_id ({ repo; handle = _ } as remote) repo_id =
+  let rev_of_repository_id ({ repo; _ } as remote) repo_id =
     match Repository_id.git_hash repo_id with
     | None -> Fiber.return None
     | Some rev ->
@@ -165,11 +173,11 @@ let remote_add ~dir handle source =
   Io.write_file git_config stanza
 ;;
 
-let add_repo ({ lock; dir } as t) ~source =
+let add_repo ({ lock; dir } as t) ~allow_networking ~source =
   let handle = source |> Dune_digest.string |> Dune_digest.to_string in
   Fiber.Mutex.with_lock lock ~f:(fun () ->
     if not (remote_exists ~dir ~name:handle) then remote_add ~dir handle source;
-    let remote : Remote.t = { repo = t; handle } in
-    let+ () = Remote.update remote in
+    let remote : Remote.t = { repo = t; handle; default_branch = None } in
+    let+ () = if allow_networking then Remote.update remote else Fiber.return () in
     remote)
 ;;
