@@ -5,44 +5,48 @@ module Display = Dune_engine.Display
 module Re = Dune_re
 open Fiber.O
 
-type t =
-  { dir : Path.t
-  ; lock : Fiber.Mutex.t
-  }
-type uninitialized = t
+type 'a t =
+  | Store :
+      { dir : Path.t
+      ; lock : Fiber.Mutex.t
+      ; state : 'a
+      }
+      -> 'a t
 
 type rev = Rev of string
 
-let equal { dir; lock = _ } t = Path.equal dir t.dir
+let equal (Store { dir; lock = _; _ }) (Store t) = Path.equal dir t.dir
 let display = Display.Quiet
 let failure_mode = Process.Failure_mode.Strict
 let output_limit = Sys.max_string_length
 let make_stdout () = Process.Io.make_stdout ~output_on_success:Swallow ~output_limit
 let make_stderr () = Process.Io.make_stderr ~output_on_success:Swallow ~output_limit
 
-let run { dir; lock = _ } =
+let run_unitialized (Store { dir; lock = _; _ }) =
   let stdout_to = make_stdout () in
   let stderr_to = make_stderr () in
   let git = Lazy.force Vcs.git in
   Process.run ~dir ~display ~stdout_to ~stderr_to failure_mode git
 ;;
 
-let run_capture_line { dir; lock = _ } =
+let run (Store { state = `Initialized; _ } as t) = run_unitialized t
+
+let run_capture_line (Store { dir; lock = _; state = `Initialized }) =
   let git = Lazy.force Vcs.git in
   Process.run_capture_line ~dir ~display failure_mode git
 ;;
 
-let run_capture_lines { dir; lock = _ } =
+let run_capture_lines (Store { dir; lock = _; state = `Initialized }) =
   let git = Lazy.force Vcs.git in
   Process.run_capture_lines ~dir ~display failure_mode git
 ;;
 
-let run_capture_zero_separated_lines { dir; lock = _ } =
+let run_capture_zero_separated_lines (Store { dir; lock = _; state = `Initialized }) =
   let git = Lazy.force Vcs.git in
   Process.run_capture_zero_separated ~dir ~display failure_mode git
 ;;
 
-let show { dir; lock = _ } (Rev rev) path =
+let show (Store { dir; lock = _; state = `Initialized }) (Rev rev) path =
   let git = Lazy.force Vcs.git in
   let failure_mode = Vcs.git_accept () in
   let command = [ "show"; sprintf "%s:%s" rev (Path.Local.to_string path) ] in
@@ -53,16 +57,16 @@ let show { dir; lock = _ } (Rev rev) path =
 
 let create ~dir =
   let lock = Fiber.Mutex.create () in
-  { dir; lock }
+  Store { dir; lock; state = `Uninitialized }
 ;;
 
-let initialize ({ dir; lock } as t) =
+let initialize (Store ({ dir; lock; state = `Uninitialized } as r) as t) =
   Fiber.Mutex.with_lock lock ~f:(fun () ->
     let* () = Fiber.return () in
     let+ () =
       match Fpath.mkdir_p (Path.to_string dir) with
       | Already_exists -> Fiber.return ()
-      | Created -> run t [ "init"; "--bare" ]
+      | Created -> run_unitialized t [ "init"; "--bare" ]
       | exception Unix.Unix_error (e, x, y) ->
         User_error.raise
           [ Pp.textf "%s isn't a directory" (Path.to_string_maybe_quoted dir)
@@ -70,12 +74,12 @@ let initialize ({ dir; lock } as t) =
           ]
           ~hints:[ Pp.text "delete this file or check its permissions" ]
     in
-    t)
+    Store { r with state = `Initialized })
 ;;
 
 module Remote = struct
   type nonrec t =
-    { repo : t
+    { repo : [ `Initialized ] t
     ; handle : string
     }
 
@@ -173,7 +177,7 @@ let remote_add ~dir handle source =
   Io.write_file git_config stanza
 ;;
 
-let add_repo ({ lock; dir } as t) ~source =
+let add_repo (Store { lock; dir; state = `Initialized } as t) ~source =
   let handle = source |> Dune_digest.string |> Dune_digest.to_string in
   Fiber.Mutex.with_lock lock ~f:(fun () ->
     let exists = remote_exists ~dir ~name:handle in

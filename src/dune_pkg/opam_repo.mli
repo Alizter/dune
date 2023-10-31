@@ -23,7 +23,7 @@ val of_opam_repo_dir_path
 
 (** [of_git_repo git source] loads the data through git *)
 val of_git_repo
-  :  Rev_store.uninitialized
+  :  [ `Uninitialized ] Rev_store.t
   -> repo_id:Repository_id.t option
   -> source:string
   -> t Fiber.t
