@@ -1,8 +1,4 @@
-open Stdune
-open Dune_vcs
-module Process = Dune_engine.Process
-module Display = Dune_engine.Display
-module Re = Dune_re
+open Import
 open Fiber.O
 
 type t =
