@@ -18,7 +18,7 @@
   (package dune)))
 
 (cram
- (applies_to windows-diff github6644)
+ (applies_to windows-diff github6644 windows-opam-generation)
  (alias runtest-windows))
 
 ;; DISABLED TESTS
