@@ -31,3 +31,7 @@
 (cram
  (deps %{bin:which})
  (applies_to pkg-deps))
+
+(cram
+ (applies_to :whole_subtree)
+ (alias runtest-windows))
