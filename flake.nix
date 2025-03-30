@@ -3,9 +3,8 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     melange = {
-      url = "github:melange-re/melange/refs/tags/5.0.0-52";
+      url = "github:melange-re/melange/refs/tags/5.1.0-52";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
     };
     ocaml-overlays = {
       url = "github:nix-ocaml/nix-overlays";
@@ -80,6 +79,14 @@
         [ file mercurial ]
         ++ lib.optionals stdenv.isLinux [ strace ];
       testNativeBuildInputs = with pkgs; [ nodejs-slim pkg-config opam ocamlformat ];
+      
+      docInputs = with pkgs.python3.pkgs; [
+        sphinx-autobuild
+        furo
+        sphinx-copybutton
+        sphinx-design
+        myst-parser
+      ];
     in
     {
       formatter = pkgs.nixpkgs-fmt;
@@ -125,14 +132,8 @@
                 else pkgs;
 
               inherit (pkgs') writeScriptBin stdenv;
+              inherit docInputs;
 
-              docInputs = with pkgs'.python3.pkgs; [
-                sphinx-autobuild
-                furo
-                sphinx-copybutton
-                sphinx-design
-                myst-parser
-              ];
               duneScript =
                 writeScriptBin "dune" ''
                   #!${stdenv.shell}
@@ -167,16 +168,7 @@
         {
           doc =
             pkgs.mkShell {
-              buildInputs = (with pkgs;
-                [
-                  sphinx
-                  sphinx-autobuild
-                  python310Packages.sphinx-copybutton
-                  python310Packages.furo
-                  python310Packages.sphinx-design
-                  python310Packages.myst-parser
-                ]
-              );
+              buildInputs = docInputs;
               meta.description = ''
                 Provides a shell environment suitable for building the Dune
                 documentation website (e.g. `make doc`).
