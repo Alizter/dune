@@ -31,7 +31,7 @@
   [1]
 
 Inline tests also generate an alias
-  $ dune build @foo_simple
+  $ dune build @lib:foo_simple
   File "dune", line 9, characters 1-40:
   9 |  (inline_tests (backend backend_simple)))
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -39,7 +39,7 @@ Inline tests also generate an alias
   [1]
 
 Make sure building both aliases doesn't build both
-  $ dune build @runtest @foo_simple
+  $ dune build @runtest @lib:foo_simple
   File "dune", line 9, characters 1-40:
   9 |  (inline_tests (backend backend_simple)))
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

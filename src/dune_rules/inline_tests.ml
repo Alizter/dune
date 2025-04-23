@@ -349,7 +349,9 @@ include Sub_system.Register_end_point (struct
             |> Super_context.add_rule sctx ~dir ~loc
         in
         let alias =
-          Lib_name.Local.to_string lib_name |> Alias.Name.of_string |> Alias.make ~dir
+          "lib:" ^ Lib_name.Local.to_string lib_name
+          |> Alias.Name.of_string
+          |> Alias.make ~dir
         in
         let* () =
           let* runtest_alias =
