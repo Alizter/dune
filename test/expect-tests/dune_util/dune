@@ -5,6 +5,26 @@
    (<> %{system} win))
   (deps
    (sandbox always)))
+ (modules flock_tests)
+ (libraries
+  dune_util
+  dyn
+  stdune
+  ;; This is because of the (implicit_transitive_deps false)
+  ;; in dune-project
+  ppx_expect.config
+  ppx_expect.config_types
+  base
+  ppx_inline_test.config)
+ (preprocess
+  (pps ppx_expect)))
+
+(library
+ (name alias_name_tests)
+ (inline_tests
+  (deps
+   (sandbox always)))
+ (modules alias_name_tests)
  (libraries
   dune_util
   dyn
