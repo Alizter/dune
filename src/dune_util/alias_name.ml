@@ -1,24 +1,36 @@
 open Stdune
 include String
 
-(* DUNE3 once we get rid the "loose" validation, implement this module using
-   [Stringlike] *)
-let of_string_opt_loose s = Option.some_if (Filename.basename s = s) s
+module T = struct
+  type t = string
 
-let of_string_opt = function
-  (* The [""] case is caught by of_string_opt_loose. But there's no harm in
-     being more explicit about it *)
-  | "" | "." | "/" | ".." -> None
-  | s -> of_string_opt_loose s
-;;
+  let module_ = "Alias_name"
+  let description = "alias name"
 
-let of_string s =
-  match of_string_opt s with
-  | Some s -> s
-  | None -> Code_error.raise "invalid alias name" [ "s", Dyn.string s ]
-;;
+  let description_of_valid_string =
+    Pp.paragraph
+      "Alias names must be non-empty and be different from '.' and '..'. They can \
+       contain any non-whitespace character except for '/'."
+    |> Option.some
+  ;;
 
-let to_string s = s
+  (* TODO: *)
+  let hint_valid = None
+
+  (* Anything that doesn't look like a path is a valid alias name. *)
+  let of_string_opt_loose s = Option.some_if (not @@ String.contains s '/') s
+
+  let of_string_opt = function
+    | "" | "." | "/" | ".." -> None
+    | s -> of_string_opt_loose s
+  ;;
+
+  let to_string s = s
+end
+
+include T
+include Stringlike.Make (T)
+
 let to_dyn = String.to_dyn
 
 let parse_local_path (loc, p) =

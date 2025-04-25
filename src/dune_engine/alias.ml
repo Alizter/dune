@@ -12,15 +12,13 @@ module Name = struct
   let default = of_string "default"
 
   let parse_local_path (loc, p) =
-    match Path.Local.parent p with
-    | Some dir ->
-      ( dir
-      , (* TODO one day we should validate the name properly here *)
-        Path.Local.basename p |> of_string_opt_loose |> Option.value_exn )
-    | None ->
-      User_error.raise
-        ~loc
-        [ Pp.textf "Invalid alias path: %S" (Path.Local.to_string_maybe_quoted p) ]
+    Option.map (Path.Local.parent p) ~f:(fun dir ->
+      dir, Path.Local.basename p |> of_string_opt |> Option.value_exn)
+    |> Option.value
+         ~default:
+           (User_error.raise
+              ~loc
+              [ Pp.textf "Invalid alias path: %S" (Path.Local.to_string_maybe_quoted p) ])
   ;;
 end
 
@@ -43,9 +41,7 @@ end = struct
   let of_user_written_path ~loc path =
     match Path.as_in_build_dir path with
     | Some path ->
-      let name =
-        Path.Build.basename path |> Name.of_string_opt_loose |> Option.value_exn
-      in
+      let name = Path.Build.basename path |> Name.of_string_opt |> Option.value_exn in
       { dir = Path.Build.parent_exn path; name }
     | None ->
       User_error.raise
