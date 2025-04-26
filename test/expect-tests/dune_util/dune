@@ -19,6 +19,15 @@
  (preprocess
   (pps ppx_expect)))
 
+; Common utils for alias name tests
+
+(library
+ (name alias_name_tests_utils)
+ (modules alias_name_tests_utils)
+ (libraries dune_util stdune))
+
+; Tests for alias names on all platforms
+
 (library
  (name alias_name_tests)
  (inline_tests
@@ -26,11 +35,29 @@
    (sandbox always)))
  (modules alias_name_tests)
  (libraries
+  alias_name_tests_utils
   dune_util
   dyn
   stdune
-  ;; This is because of the (implicit_transitive_deps false)
-  ;; in dune-project
+  ppx_expect.config
+  ppx_expect.config_types
+  base
+  ppx_inline_test.config)
+ (preprocess
+  (pps ppx_expect)))
+
+; Tests for alias names on Windows
+
+(library
+ (name alias_name_tests_win)
+ (enabled_if
+  (= %{system} win))
+ (modules alias_name_tests_win)
+ (libraries
+  alias_name_tests_utils
+  dune_util
+  dyn
+  stdune
   ppx_expect.config
   ppx_expect.config_types
   base
