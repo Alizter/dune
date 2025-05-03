@@ -7,7 +7,8 @@ let depexts_hint = function
     [ Pp.textf "You may want to verify the following depexts are installed:"
     ; Pp.enumerate ~f:Pp.verbatim depexts
     ]
-    |> Pp.concat_map ~sep:Pp.cut ~f:(fun pp -> Pp.box pp)
+    |> Pp.concat_map ~sep:Pp.cut ~f:Pp.box
+    |> Pp.vbox
     |> Option.some
 ;;
 

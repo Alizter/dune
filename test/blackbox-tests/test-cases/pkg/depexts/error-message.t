@@ -47,7 +47,8 @@ error message.
   File "dune-project", line 1, characters 0-0:
   Error: Invalid first line, expected: (lang <lang> <version>)
   
-  Hint: You may want to verify the following depexts are installed:
+  Hint:
+  You may want to verify the following depexts are installed:
   - unzip
   - gnupg
   [1]
