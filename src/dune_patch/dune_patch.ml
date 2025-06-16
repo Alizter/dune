@@ -1,18 +1,5 @@
 open Stdune
 
-include struct
-  open Dune_engine
-  module Action = Action
-  module Process = Process
-  module Utils = Utils
-  module Action_builder = Action_builder
-end
-
-include struct
-  open Dune_lang
-  module Value = Value
-end
-
 let re =
   let line xs = Re.seq ((Re.bol :: xs) @ [ Re.eol ]) in
   let followed_by_line xs = Re.seq [ Re.str "\n"; line xs ] in
@@ -26,54 +13,41 @@ let re =
        ]
 ;;
 
-module Patch = struct
-  (* CR-someday alizter: more parsed information about the patch should go here.
-     Eventually we wish to replace the patch command inside the patch action with a pure
-     OCaml implementation. *)
-  type operation =
-    | New of Path.Local.t
-    | Delete of Path.Local.t
-    | Replace of Path.Local.t
-
-  type t =
-    { prefix : int
-    ; op : operation
-    }
-end
-
-let patches_of_string patch_string =
+let prefix_of_patch ~loc patch_string =
   Re.all re patch_string
   |> List.filter_map ~f:(fun group ->
     let open Option.O in
     (* A match failure means a file name couldn't be parsed. *)
     let* old_file = Re.Group.get_opt group 1 in
     let* new_file = Re.Group.get_opt group 2 in
+    let validate_as_path file =
+      let path = Path.Local.parse_string_exn ~loc file in
+      if
+        Path.Local.is_root path
+        (* TODO: location is not quite correct here. Should instead
+           be location of patch file. *)
+      then
+        User_error.raise ~loc [ Pp.textf "Directory %S in patch file is invalid." file ];
+      path
+    in
+    let prefix file =
+      match validate_as_path file |> Path.Local.split_first_component with
+      | Some _ -> 1
+      | None -> 0
+    in
     match old_file = "/dev/null", new_file = "/dev/null" with
-    | true, true ->
-      (* when both files are /dev/null we don't care about the patch. *)
-      None
+    (* when both files are /dev/null we don't care about the patch. *)
+    | true, true -> None
     | true, false ->
-      (* New file *)
-      let path = Path.Local.of_string new_file in
-      let prefix, path =
-        match Path.Local.split_first_component path with
-        | Some ("b", path) -> 1, path
-        | _ -> 0, path
-      in
-      Some { Patch.op = Patch.New path; prefix }
+      (* Create file *)
+      Some (prefix new_file)
     | false, true ->
       (* Delete file *)
-      let path = Path.Local.of_string old_file in
-      let prefix, path =
-        match Path.Local.split_first_component path with
-        | Some ("a", path) -> 1, path
-        | _ -> 0, path
-      in
-      Some { Patch.op = Patch.Delete path; prefix }
+      Some (prefix old_file)
     | false, false ->
-      let old_path = Path.Local.of_string old_file in
-      let new_path = Path.Local.of_string new_file in
-      let new_path, prefix =
+      let old_path = validate_as_path old_file in
+      let new_path = validate_as_path new_file in
+      let prefix =
         match
           ( Path.Local.split_first_component old_path
           , Path.Local.split_first_component new_path )
@@ -81,83 +55,64 @@ let patches_of_string patch_string =
         | Some (_, old_path), Some (_, new_path)
           when Path.Local.equal old_path new_path && not (Path.Local.is_root new_path) ->
           (* suffixes are the same and not empty *)
-          new_path, 1
-        | _, _ -> new_path, 0
+          1
+        | _, _ -> 0
       in
       (* Replace file *)
-      Some { Patch.op = Patch.Replace new_path; prefix })
+      Some prefix)
+  |> List.min ~f:Int.compare
+  |> Option.value ~default:0
 ;;
 
-let prog =
-  lazy
-    (let path = Env_path.path Env.initial in
-     let bins = [ "gpatch"; "patch" ] in
-     match List.find_map bins ~f:(Bin.which ~path) with
-     | Some p -> p
-     | None -> User_error.raise [ Pp.textf "%s not found." (String.enumerate_and bins) ])
+let parse_patches ~loc patch_contents =
+  Patch.parse ~p:(prefix_of_patch ~loc patch_contents) patch_contents
 ;;
 
-let exec display ~patch ~dir ~stderr =
+let apply_patches ~dir patches =
+  let path p = Path.append_local dir (Path.Local.of_string p) in
+  let cleanly = true in
+  List.iter patches ~f:(fun patch ->
+    match patch.Patch.operation with
+    | Delete p | Git_ext (_, p, Patch.Delete_only) -> Path.unlink_no_err (path p)
+    | Create p | Git_ext (_, p, Patch.Create_only) ->
+      Patch.patch ~cleanly None patch |> Option.value_exn |> Io.write_file (path p)
+    | Edit (p, q) ->
+      Io.read_file (path p)
+      |> fun file ->
+      Patch.patch ~cleanly (Some file) patch |> Option.value_exn |> Io.write_file (path q)
+    | Git_ext (_, _, Rename_only (p, q)) -> Path.rename (path p) (path q))
+;;
+
+let exec ~loc ~dir ~patch =
   let open Fiber.O in
-  let* () = Fiber.return () in
-  let patches =
-    patch
-    (* Read the patch file. *)
-    |> Io.read_file
-    (* Collect all the patches. *)
-    |> patches_of_string
-  in
-  List.iter patches ~f:(fun { Patch.op; prefix = _ } ->
-    (* Depending on whether it is creating a new file or modifying an existing file
-       prepare the files that will be modified accordingly. For modifying existing files
-       this means materializing any symlinks or hardlinks. *)
-    match op with
-    | Patch.New _ | Delete _ -> ()
-    | Replace file ->
-      let file = Path.append_local dir file in
-      let temp = Path.extend_basename file ~suffix:".for_patch" in
-      Io.copy_file ~src:file ~dst:temp ();
-      Path.rename temp file);
-  match patches with
-  | [] -> User_error.raise [ Pp.text "No patches in patch file detected" ]
-  | { Patch.op = _; prefix } :: patches ->
-    (match
-       List.for_all ~f:(fun { Patch.op = _; prefix = p } -> Int.equal prefix p) patches
-     with
-     | false ->
-       User_error.raise [ Pp.text "Different prefix lengths in file unsupported" ]
-     | true ->
-       let p_flag = sprintf "-p%d" prefix in
-       Process.run
-         ~dir
-         ~display
-         ~stdout_to:Process.(Io.null Out)
-         ~stderr_to:stderr
-         ~stdin_from:Process.(Io.null In)
-         Process.Failure_mode.Strict
-         (Lazy.force prog)
-         [ p_flag; "-i"; Path.reach_for_running ~from:dir patch ])
+  let+ () = Fiber.return () in
+  Io.read_file patch |> parse_patches ~loc |> apply_patches ~dir
 ;;
-
-module Spec = struct
-  type ('path, 'target) t = 'path
-
-  let name = "patch"
-  let version = 2
-  let bimap patch f _ = f patch
-  let is_useful_to ~memoize = memoize
-  let encode patch input _ : Sexp.t = input patch
-
-  let action patch ~ectx:_ ~(eenv : Action.env) =
-    exec !Dune_engine.Clflags.display ~patch ~dir:eenv.working_dir ~stderr:eenv.stderr_to
-  ;;
-end
 
 (* CR-someday alizter: This should be an action builder. *)
-module Action = Action_ext.Make (Spec)
+module Action = Action_ext.Make (struct
+    open Dune_engine
+
+    type ('path, 'target) t = 'path
+
+    let name = "patch"
+    let version = 3
+    let bimap patch f _ = f patch
+    let is_useful_to ~memoize = memoize
+    let encode patch input _ : Sexp.t = input patch
+
+    let action patch ~(ectx : Action.context) ~(eenv : Action.env) =
+      exec ~loc:ectx.rule_loc ~dir:eenv.working_dir ~patch
+    ;;
+  end)
 
 let action ~patch = Action.action patch
 
 module For_tests = struct
+  module Patch = Patch
+
+  let prefix_of_patch = prefix_of_patch
+  let parse_patches = parse_patches
+  let apply_patches = apply_patches
   let exec = exec
 end

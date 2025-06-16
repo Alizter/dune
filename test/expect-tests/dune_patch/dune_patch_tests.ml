@@ -115,6 +115,395 @@ let unified_spaces =
 |}
 ;;
 
+let hello_world =
+  {|
+diff --git a/foo.ml b/foo.ml
+new file mode 100644
+index 0000000..557db03
+--- /dev/null
++++ b/foo.ml
+@@ -0,0 +1 @@
++Hello World
+|}
+;;
+
+(* Testing patch prefix parsing *)
+
+let test p =
+  Dune_patch.For_tests.prefix_of_patch ~loc:Loc.none p |> Printf.printf "prefix: %d"
+;;
+
+let%expect_test "patch prefix" =
+  test basic;
+  [%expect {| prefix: 1 |}];
+  test subdirectory;
+  [%expect {| prefix: 1 |}];
+  test combined;
+  [%expect {| prefix: 1 |}];
+  test no_prefix;
+  [%expect {| prefix: 0 |}];
+  test random_prefix;
+  [%expect {| prefix: 1 |}];
+  test unified_spaces;
+  [%expect {| prefix: 1 |}]
+;;
+
+(* Testing patch parsing *)
+
+let git_ext_to_dyn = function
+  | _ -> assert false
+;;
+
+let operation_to_dyn = function
+  | Patch.Edit (mine, their) -> Dyn.variant "Edit" [ Dyn.string mine; Dyn.string their ]
+  | Delete mine -> Dyn.variant "Delete" [ Dyn.string mine ]
+  | Create their -> Dyn.variant "Create" [ Dyn.string their ]
+  | Git_ext (mine, their, git_ext) ->
+    Dyn.variant "Git_ext" [ Dyn.string mine; Dyn.string their; git_ext_to_dyn git_ext ]
+;;
+
+let hunk_to_dyn { Patch.mine_start; mine_len; mine; their_start; their_len; their } =
+  Dyn.record
+    [ "mine_start", Dyn.int mine_start
+    ; "mine_len", Dyn.int mine_len
+    ; "mine", Dyn.list Dyn.string mine
+    ; "their_start", Dyn.int their_start
+    ; "their_len", Dyn.int their_len
+    ; "their", Dyn.list Dyn.string their
+    ]
+;;
+
+let patch_to_dyn { Patch.operation; hunks; mine_no_nl; their_no_nl } =
+  Dyn.record
+    [ "operation", operation_to_dyn operation
+    ; "hunks", Dyn.list hunk_to_dyn hunks
+    ; "mine_no_nl", Dyn.bool mine_no_nl
+    ; "their_no_nl", Dyn.bool their_no_nl
+    ]
+;;
+
+let test p =
+  Dune_patch.For_tests.parse_patches ~loc:Loc.none p
+  |> Dyn.list patch_to_dyn
+  |> Dyn.pp
+  |> Format.printf "%a" Pp.to_fmt
+;;
+
+let%expect_test "parse basic patch" =
+  test basic;
+  [%expect
+    {|
+    [ { operation = Edit ("foo.ml", "foo.ml")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse subdirectory patch" =
+  test subdirectory;
+  [%expect
+    {|
+    [ { operation = Edit ("dir/foo.ml", "dir/foo.ml")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse combined patch" =
+  test combined;
+  [%expect
+    {|
+    [ { operation = Edit ("foo.ml", "foo.ml")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ; { operation = Edit ("dir/foo.ml", "dir/foo.ml")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse new_file patch" =
+  test new_file;
+  [%expect
+    {|
+    [ { operation = Create "foo.ml"
+      ; hunks =
+          [ { mine_start = 0
+            ; mine_len = 0
+            ; mine = []
+            ; their_start = 1
+            ; their_len = 2
+            ; their = [ "This is right"; "" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse delete_file patch" =
+  test delete_file;
+  [%expect
+    {|
+    [ { operation = Delete "foo.ml"
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 0
+            ; their_len = 0
+            ; their = []
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse unified patch" =
+  test unified;
+  [%expect
+    {|
+    [ { operation = Edit ("foo.ml", "foo.ml")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse no_prefix patch" =
+  test no_prefix;
+  [%expect
+    {|
+    [ { operation = Edit ("foo.ml", "foo.ml")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse random_prefix patch" =
+  test random_prefix;
+  [%expect
+    {|
+    [ { operation = Edit ("foo.ml", "foo.ml")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong" ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse spaces patch" =
+  test spaces;
+  [%expect
+    {|
+    [ { operation = Edit ("foo", "foo")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong." ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right." ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+let%expect_test "parse unified_spaces patch`" =
+  test unified_spaces;
+  [%expect
+    {|
+    [ { operation = Edit ("foo bar", "foo bar")
+      ; hunks =
+          [ { mine_start = 1
+            ; mine_len = 1
+            ; mine = [ "This is wrong." ]
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "This is right." ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+|}]
+;;
+
+let%expect_test "parse hello_world patch" =
+  test hello_world;
+  [%expect
+    {|
+    [ { operation = Create "foo.ml"
+      ; hunks =
+          [ { mine_start = 0
+            ; mine_len = 0
+            ; mine = []
+            ; their_start = 1
+            ; their_len = 1
+            ; their = [ "Hello World" ]
+            }
+          ]
+      ; mine_no_nl = false
+      ; their_no_nl = false
+      }
+    ]
+    |}]
+;;
+
+(* Testing parsing of bad patch names *)
+
+let bad_name name =
+  {|
+--- /dev/null
++++ |}
+  ^ name
+  ^ {|
+@@ -0,0 +1 @@
++x
+|}
+;;
+
+let test name =
+  let loc = Loc.in_file (Path.of_string "dummy.file") in
+  match Dune_patch.For_tests.parse_patches ~loc (bad_name name) with
+  | exception e -> Exn.pp e |> Format.printf "%a" Pp.to_fmt
+  | _ -> print_endline "No error!"
+;;
+
+let%expect_test "forbid current dir" =
+  (* We don't allow "." *)
+  test ".";
+  [%expect
+    {|
+    File "dummy.file", line 1, characters 0-0:
+    Error: Directory "." in patch file is
+    invalid.
+  |}]
+;;
+
+let%expect_test "bad patch names" =
+  (* We wish to reject all patches beginning with "..". *)
+  (* TODO: error message a little funny here. *)
+  test "../a";
+  [%expect
+    {|
+    File "dummy.file", line 1, characters 0-0:
+    Error: path outside the workspace: ../a from
+    .
+    |}]
+;;
+
+let%expect_test "allow parent dir in subdir" =
+  (* This is fine, since Dune is able to understand the path. *)
+  test "a/../b";
+  [%expect {| No error! |}]
+;;
+
+let%expect_test "_" =
+  test "a/..";
+  [%expect {|
+    File "dummy.file", line 1, characters 0-0:
+    Error: Directory "a/.." in patch file is
+    invalid.
+    |}]
+;;
+
+let%expect_test "forbid absolute dirs" =
+  (* TODO: raise user error *)
+  test "/a";
+  [%expect
+    {|
+    ("Local.relative: received absolute path", { t = "."; path = "/a"
+    })
+  |}]
+;;
+
+(* Testing patch applicaiton *)
+
+
 (* Testing the patch action *)
 
 include struct
@@ -138,7 +527,6 @@ let create_files =
 
 let test files (patch, patch_contents) =
   let dir = Temp.create Dir ~prefix:"dune" ~suffix:"patch_test" in
-  let display = Display.Quiet in
   Sys.chdir (Path.to_string dir);
   let patch_file = Path.append_local dir (Path.Local.of_string patch) in
   let config =
@@ -156,7 +544,10 @@ let test files (patch, patch_contents) =
   @@ fun () ->
   let open Fiber.O in
   let* () = Fiber.return @@ create_files ((patch, patch_contents) :: files) in
-  Dune_patch.For_tests.exec display ~patch:patch_file ~dir ~stderr:Process.Io.stderr
+  Dune_patch.For_tests.exec
+    ~loc:(Loc.in_file (Path.of_string "dune.patch.test"))
+    ~patch:patch_file
+    ~dir
 ;;
 
 let check path =
@@ -205,19 +596,9 @@ let () = Dune_util.Report_error.report_backtraces true
 let%expect_test "patching a deleted file" =
   let filename = "foo.ml" in
   test [ filename, "This is wrong\n" ] ("foo.patch", delete_file);
-  (* Different implementations of the patch command behave differently when the
-     patch specifies deleting a file: *)
   match Unix.stat filename with
-  | { st_kind = S_REG; st_size; _ } ->
-    (* Some implementations of patch (e.g. the patch that ships with macOS
-       15.1) do not delete files, and instead truncate them to 0 length. If
-       the file still exists after applying the patch, assert that it is now
-       empty. *)
-    assert (st_size == 0)
-  | _ -> failwith "Not a regular file"
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-    (* Most implementations of patch will delete the file. *)
-    ()
+  | _ -> failwith "Still exists"
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
 let undo_breaks =
@@ -268,7 +649,7 @@ let%expect_test "patching files with spaces" =
   with
   | Dune_util.Report_error.Already_reported ->
     print_endline @@ normalize_error_path [%expect.output];
-    [%expect {| Error: foo: No such file or directory |}]
+    [%expect {| Error: foo): No such file or directory |}]
 ;;
 
 let%expect_test "patching files with (unified) spaces" =
@@ -278,6 +659,15 @@ let%expect_test "patching files with (unified) spaces" =
     [%expect.unreachable]
   with
   | Dune_util.Report_error.Already_reported ->
-    print_endline @@ normalize_error_path [%expect.output];
-    [%expect {| Error: foo: No such file or directory |}]
+    print_endline [%expect.output];
+    [%expect
+      {|
+      Error: exception Invalid_argument("apply_hunk")
+
+      I must not crash.  Uncertainty is the mind-killer. Exceptions are the
+      little-death that brings total obliteration.  I will fully express my cases.
+      Execution will pass over me and through me.  And when it has gone past, I
+      will unwind the stack along its path.  Where the cases are handled there will
+      be nothing.  Only I will remain.
+      |}]
 ;;
