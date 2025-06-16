@@ -138,7 +138,6 @@ let create_files =
 
 let test files (patch, patch_contents) =
   let dir = Temp.create Dir ~prefix:"dune" ~suffix:"patch_test" in
-  let display = Display.Quiet in
   Sys.chdir (Path.to_string dir);
   let patch_file = Path.append_local dir (Path.Local.of_string patch) in
   let config =
@@ -156,7 +155,7 @@ let test files (patch, patch_contents) =
   @@ fun () ->
   let open Fiber.O in
   let* () = Fiber.return @@ create_files ((patch, patch_contents) :: files) in
-  Dune_patch.For_tests.exec display ~patch:patch_file ~dir ~stderr:Process.Io.stderr
+  Dune_patch.For_tests.exec ~patch:patch_file ~dir
 ;;
 
 let check path =

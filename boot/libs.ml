@@ -364,6 +364,11 @@ let local_libraries =
     ; include_subdirs_unqualified = false
     ; special_builtin_support = None
     }
+  ; { path = "vendor/patch"
+    ; main_module_name = Some "Patch"
+    ; include_subdirs_unqualified = false
+    ; special_builtin_support = None
+    }
   ; { path = "src/dune_patch"
     ; main_module_name = Some "Dune_patch"
     ; include_subdirs_unqualified = false
