@@ -424,7 +424,10 @@ let check_supported ~dune_lang_ver t (loc, ver) =
       ]
   | `Unsupported_in_project (supported_ranges, min_lang_ver) ->
     let dune_ver_text v =
-      Printf.sprintf "version %s of the dune language" (Version.to_string v)
+      (* If we are checking `dune lang` then we shouldn't mention the `dune language` twice. *)
+      match String.equal t.name "dune" with
+      | true -> Printf.sprintf "version %s of dune" (Version.to_string v)
+      | false -> Printf.sprintf "version %s of the dune language" (Version.to_string v)
     in
     let until =
       match min_lang_ver with
@@ -432,10 +435,17 @@ let check_supported ~dune_lang_ver t (loc, ver) =
       | None -> ""
     in
     let supported =
-      (if List.is_empty supported_ranges
-       then Pp.textf "There are no supported versions of this extension in %s."
-       else Pp.textf "Supported versions of this extension in %s:")
-        (dune_ver_text dune_lang_ver)
+      match List.is_empty supported_ranges with
+      | true ->
+        Pp.textf
+          "There are no supported versions of %s in version %s."
+          t.desc
+          (Version.to_string dune_lang_ver)
+      | false ->
+        Pp.textf
+          "Supported versions of %s in %s are:"
+          t.desc
+          (dune_ver_text dune_lang_ver)
     in
     let message =
       [ Pp.textf
