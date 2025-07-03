@@ -124,3 +124,5 @@ val filter_map : string -> f:(char -> char option) -> string
 val contains_double_underscore : string -> bool
 val last : string -> char option
 val replace_char : string -> from:char -> to_:char -> string
+
+val edit_distance : limit:int -> string -> string -> int

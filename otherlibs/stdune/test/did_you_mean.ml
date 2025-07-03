@@ -11,9 +11,9 @@ let%expect_test "did you mean" =
   test "acress" [ "caress" ];
   [%expect {| did you mean caress? |}];
   test "recievee" [ "receive" ];
-  [%expect {| |}];
+  [%expect {| did you mean receive? |}];
   test "rutnets" [ "runtest" ];
-  [%expect {| |}];
+  [%expect {| did you mean runtest? |}];
   test "deffalt" [ "default" ];
   [%expect {| did you mean default? |}]
 ;;

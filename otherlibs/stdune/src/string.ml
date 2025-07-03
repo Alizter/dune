@@ -332,3 +332,92 @@ let last s = if length s > 0 then Some s.[length s - 1] else None
 let replace_char s ~from ~to_ =
   String.map (fun c -> if Char.equal c from then to_ else c) s
 ;;
+
+(* Spellchecking *)
+
+module Uchar = Stdlib.Uchar
+
+let uchar_array_of_utf_8_string s =
+  let slen = length s in
+  (* is an upper bound on Uchar.t count *)
+  let uchars = Array.make slen Uchar.max in
+  let k = ref 0
+  and i = ref 0 in
+  while !i < slen do
+    let dec = get_utf_8_uchar s !i in
+    i := !i + Uchar.utf_decode_length dec;
+    uchars.(!k) <- Uchar.utf_decode_uchar dec;
+    incr k
+  done;
+  uchars, !k
+;;
+
+let edit_distance' ?(limit = Int.max_int) s (s0, len0) s1 =
+  if limit <= 1
+  then if equal s s1 then 0 else limit
+  else (
+    let[@inline] minimum a b c = Int.min a (Int.min b c) in
+    let s1, len1 = uchar_array_of_utf_8_string s1 in
+    let limit = Int.min (Int.max len0 len1) limit in
+    if Int.abs (len1 - len0) >= limit
+    then limit
+    else (
+      let s0, s1 = if len0 > len1 then s0, s1 else s1, s0 in
+      let len0, len1 = if len0 > len1 then len0, len1 else len1, len0 in
+      let rec loop row_minus2 row_minus1 row i len0 limit s0 s1 =
+        if i > len0
+        then row_minus1.(Array.length row_minus1 - 1)
+        else (
+          let len1 = Array.length row - 1 in
+          let row_min = ref Int.max_int in
+          row.(0) <- i;
+          let jmax =
+            let jmax = Int.min len1 (i + limit - 1) in
+            if jmax < 0 then (* overflow *) len1 else jmax
+          in
+          for j = Int.max 1 (i - limit) to jmax do
+            let cost = if Uchar.equal s0.(i - 1) s1.(j - 1) then 0 else 1 in
+            let min =
+              minimum
+                (row_minus1.(j - 1) + cost) (* substitute *)
+                (row_minus1.(j) + 1) (* delete *)
+                (row.(j - 1) + 1)
+              (* insert *)
+              (* Note when j = i - limit, the latter [row] read makes a bogus read
+             on the value that was in the matrix at d.(i-2).(i - limit - 1).
+             Since by induction for all i,j, d.(i).(j) >= abs (i - j),
+             (row.(j-1) + 1) is greater or equal to [limit] and thus does
+             not affect adversely the minimum computation. *)
+            in
+            let min =
+              if
+                i > 1
+                && j > 1
+                && Uchar.equal s0.(i - 1) s1.(j - 2)
+                && Uchar.equal s0.(i - 2) s1.(j - 1)
+              then Int.min min (row_minus2.(j - 2) + cost) (* transpose *)
+              else min
+            in
+            row.(j) <- min;
+            row_min := Int.min !row_min min
+          done;
+          if !row_min >= limit
+          then (* can no longer decrease *) limit
+          else loop row_minus1 row row_minus2 (i + 1) len0 limit s0 s1)
+      in
+      let ignore =
+        (* Value used to make the values around the diagonal stripe ignored
+       by the min computations when we have a limit. *)
+        limit + 1
+      in
+      let row_minus2 = Array.make (len1 + 1) ignore in
+      let row_minus1 = Array.init (len1 + 1) ~f:Fun.id in
+      let row = Array.make (len1 + 1) ignore in
+      let d = loop row_minus2 row_minus1 row 1 len0 limit s0 s1 in
+      if d > limit then limit else d))
+;;
+
+let edit_distance ~limit s0 s1 =
+  let us0 = uchar_array_of_utf_8_string s0 in
+  edit_distance' ~limit s0 us0 s1
+;;
