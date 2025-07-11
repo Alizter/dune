@@ -733,9 +733,21 @@ module Pkg_config = struct
         [ sprintf "%s=%s%s" _PKG_CONFIG_PATH pkg_config_path new_pkg_config_path ]
       | _ -> None
     in
-    let pc_flags = "--print-errors" in
+    let pc_flags =
+      let windows_pc_flags =
+        match ocaml_config_var c "ccomp_type" with
+        | Some "msvc" when Sys.win32 -> [ "--msvc-syntax" ]
+        | _ -> []
+      in
+      "--print-errors" :: windows_pc_flags
+    in
     let { Process.exit_code; stderr; _ } =
-      Process.run_process c ~dir ?env t.pkg_config (t.pkg_config_args @ [ pc_flags; expr ])
+      Process.run_process
+        c
+        ~dir
+        ?env
+        t.pkg_config
+        (List.concat [ t.pkg_config_args; pc_flags; [ expr ] ])
     in
     if exit_code = 0
     then (
