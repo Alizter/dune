@@ -8,13 +8,13 @@ module Flock = Dune_util.Flock
 open Fiber.O
 
 module Object = struct
-  type t = Sha1 of string
+  type t = string
 
-  let compare (Sha1 x) (Sha1 y) = String.compare x y
-  let to_string (Sha1 s) = s
-  let equal (Sha1 x) (Sha1 y) = String.equal x y
-  let to_dyn (Sha1 s) = Dyn.string s
-  let hash (Sha1 s) = String.hash s
+  let compare x y = String.compare x y
+  let to_string s = s
+  let equal x y = String.equal x y
+  let to_dyn s = Dyn.string s
+  let hash s = String.hash s
 
   type resolved = t
 
@@ -24,7 +24,7 @@ module Object = struct
       && String.for_all s ~f:(function
         | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
         | _ -> false)
-    then Some (Sha1 (String.lowercase_ascii s))
+    then Some (String.lowercase_ascii s)
     else None
   ;;
 end
@@ -154,7 +154,7 @@ module Cache = struct
 
     let conv =
       Lmdb.Conv.make
-        ~serialise:(fun alloc { obj = Sha1 obj; path } ->
+        ~serialise:(fun alloc { obj; path } ->
           let path = Path.Local.to_string path in
           let len = obj_size + String.length path in
           let bs = alloc len in
@@ -171,7 +171,7 @@ module Cache = struct
           let path =
             Bigstringaf.substring bs ~off:obj_size ~len:(Bigstringaf.length bs - obj_size)
           in
-          { obj = Sha1 obj; path = Path.Local.of_string path })
+          { obj; path = Path.Local.of_string path })
         ()
     ;;
   end
@@ -200,15 +200,12 @@ module Cache = struct
 
       let conv =
         Lmdb.Conv.make
-          ~serialise:(fun alloc -> function
-             | Object.Sha1 obj ->
-               let len = obj_size in
-               let bs = alloc len in
-               Bigstringaf.blit_from_string obj ~src_off:0 bs ~dst_off:0 ~len:obj_size;
-               bs)
-          ~deserialise:(fun bs ->
-            let obj = Bigstringaf.substring bs ~off:0 ~len:obj_size in
-            Object.Sha1 obj)
+          ~serialise:(fun alloc obj ->
+            let len = obj_size in
+            let bs = alloc len in
+            Bigstringaf.blit_from_string obj ~src_off:0 bs ~dst_off:0 ~len:obj_size;
+            bs)
+          ~deserialise:(fun bs -> Bigstringaf.substring bs ~off:0 ~len:obj_size)
           ()
       ;;
     end
@@ -512,7 +509,7 @@ let rev_parse { dir; _ } rev =
   if code = 0 then Some (Option.value_exn (Object.of_sha1 line)) else None
 ;;
 
-let object_exists_no_lock { dir; _ } (Object.Sha1 sha1) =
+let object_exists_no_lock { dir; _ } sha1 =
   let git = Lazy.force Vcs.git in
   let+ (), code =
     Process.run ~dir ~display:Quiet ~env Return git [ "cat-file"; "-e"; sha1 ]
@@ -540,7 +537,7 @@ let resolve_object t hash =
   | true -> Some hash
 ;;
 
-let mem_path repo (Object.Sha1 sha1) path =
+let mem_path repo sha1 path =
   cat_file repo [ "-e"; sprintf "%s:%s" sha1 (Path.Local.to_string path) ]
 ;;
 
@@ -552,7 +549,7 @@ let show =
       "show"
       :: List.map revs_and_paths ~f:(function
         | `Object o -> o
-        | `Path (Object.Sha1 r, path) -> sprintf "%s:%s" r (Path.Local.to_string path))
+        | `Path (r, path) -> sprintf "%s:%s" r (Path.Local.to_string path))
     in
     let stderr_to = make_stderr () in
     Process.run_capture ~dir ~display:Quiet ~stderr_to failure_mode git command
@@ -574,7 +571,7 @@ let show =
           +
           match cmd with
           | `Object o -> String.length o
-          | `Path (Object.Sha1 r, path) ->
+          | `Path (r, path) ->
             String.length r + String.length (Path.Local.to_string path) + 1
         in
         let new_remaining = cmd_len_remaining - cmd_len in
@@ -761,7 +758,7 @@ module At_rev = struct
       section, arg, binding, value
     ;;
 
-    let config repo (Object.Sha1 rev) path : t Fiber.t =
+    let config repo rev path : t Fiber.t =
       [ "config"; "--list"; "--blob"; sprintf "%s:%s" rev (Path.Local.to_string path) ]
       |> run_capture_lines repo ~display:Quiet
       >>| Git_error.result_get_or_code_error
@@ -820,16 +817,12 @@ module At_rev = struct
   end
 
   let files_and_submodules repo key =
-    let rev =
-      match key with
-      | Object.Sha1 rev -> rev
-    in
     let cached = Cache.Files_and_submodules.get key in
     match cached with
     | Some v -> Fiber.return v
     | None ->
       let+ value =
-        run_capture_zero_separated_lines repo [ "ls-tree"; "-z"; "--long"; "-r"; rev ]
+        run_capture_zero_separated_lines repo [ "ls-tree"; "-z"; "--long"; "-r"; key ]
         >>| Git_error.result_get_or_code_error
         >>| List.fold_left
               ~init:(File.Set.empty, Commit.Set.empty)
@@ -850,14 +843,13 @@ module At_rev = struct
       ~f:(fun { Commit.path; rev } m ->
         match Path.Local.Map.add m path rev with
         | Ok m -> m
-        | Error (Sha1 existing_rev) ->
-          let (Sha1 found_rev) = rev in
+        | Error existing_rev ->
           User_error.raise
             [ Pp.textf
                 "Path %s specified multiple times as submodule pointing to different \
                  commits: %s and %s"
                 (Path.Local.to_string path)
-                found_rev
+                rev
                 existing_rev
             ])
   ;;
@@ -952,16 +944,12 @@ module At_rev = struct
   ;;
 
   let check_out
-        { repo = { dir; _ }
-        ; revision = Sha1 rev
-        ; files = _
-        ; recursive_directory_entries = _
-        }
+        { repo = { dir; _ }; revision; files = _; recursive_directory_entries = _ }
         ~target
     =
     (* TODO iterate over submodules to output sources *)
     let git = Lazy.force Vcs.git in
-    let temp_dir = Temp_dir.dir_for_target ~target ~prefix:"rev-store" ~suffix:rev in
+    let temp_dir = Temp_dir.dir_for_target ~target ~prefix:"rev-store" ~suffix:revision in
     Fiber.finalize ~finally:(fun () ->
       let+ () = Fiber.return () in
       Temp.destroy Dir temp_dir)
@@ -970,7 +958,7 @@ module At_rev = struct
     let stdout_to = Process.Io.file archive Process.Io.Out in
     let stderr_to = make_stderr () in
     let* () =
-      let args = [ "archive"; "--format=tar"; rev ] in
+      let args = [ "archive"; "--format=tar"; revision ] in
       let+ (), exit_code =
         Process.run ~dir ~display:Quiet ~stdout_to ~stderr_to ~env failure_mode git args
       in
@@ -1121,9 +1109,7 @@ let content_of_files t files =
 let content_of_files t files =
   let keys =
     List.map files ~f:(fun file ->
-      let path = File.path file in
-      let obj = Object.Sha1 (File.hash file) in
-      file, { Cache.Key.obj; path })
+      file, { Cache.Key.obj = File.hash file; path = File.path file })
   in
   let cached = Cache.get (Cache.Key.Set.of_list_map keys ~f:snd) in
   let uncached =
