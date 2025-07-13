@@ -122,7 +122,7 @@ module Cache = struct
        |> Result.map ~f:(fun path ->
          Lmdb.Env.create
            ~max_readers:70
-           ~map_size:16_000_000
+           ~map_size:500_000_000 (* 500 MB *)
            ~max_maps:2
            ~flags:Lmdb.Env.Flags.(no_meta_sync)
            Rw
