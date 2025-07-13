@@ -1,8 +1,13 @@
 open Stdune
 open Dune_vcs
-module Process = Dune_engine.Process
-module Display = Dune_engine.Display
-module Scheduler = Dune_engine.Scheduler
+
+include struct
+  open Dune_engine
+  module Process = Process
+  module Display = Display
+  module Scheduler = Scheduler
+end
+
 module Re = Dune_re
 open Fiber.O
 
