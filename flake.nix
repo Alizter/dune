@@ -24,6 +24,7 @@
         ocaml-overlays.overlays.default
         (self: super: {
           ocamlPackages = super.ocaml-ng.ocamlPackages_5_3.overrideScope (oself: osuper: {
+            ocaml = osuper.ocaml.override { framePointerSupport = true; };
             mdx = osuper.mdx.override {
               logs = oself.logs;
             };
