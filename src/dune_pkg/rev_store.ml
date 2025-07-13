@@ -140,13 +140,10 @@ module Cache = struct
 
   module Key = struct
     module T = struct
-      type t =
-        { obj : Object.t
-        ; path : Path.Local.t
-        }
+      type t = Object.t
 
-      let compare = Poly.compare
-      let to_dyn = Dyn.opaque
+      let compare = Object.compare
+      let to_dyn = Object.to_dyn
     end
 
     include T
@@ -158,24 +155,12 @@ module Cache = struct
 
     let conv =
       Lmdb.Conv.make
-        ~serialise:(fun alloc { obj; path } ->
-          let path = Path.Local.to_string path in
-          let len = obj_size + String.length path in
+        ~serialise:(fun alloc obj ->
+          let len = obj_size in
           let bs = alloc len in
           Bigstringaf.blit_from_string obj ~src_off:0 bs ~dst_off:0 ~len:obj_size;
-          Bigstringaf.blit_from_string
-            path
-            ~src_off:0
-            bs
-            ~dst_off:obj_size
-            ~len:(String.length path);
           bs)
-        ~deserialise:(fun bs ->
-          let obj = Bigstringaf.substring bs ~off:0 ~len:obj_size in
-          let path =
-            Bigstringaf.substring bs ~off:obj_size ~len:(Bigstringaf.length bs - obj_size)
-          in
-          { obj; path = Path.Local.of_string path })
+        ~deserialise:(Bigstringaf.substring ~off:0 ~len:obj_size)
         ()
     ;;
   end
@@ -1128,25 +1113,22 @@ let content_of_files t files =
 ;;
 
 let content_of_files t files =
-  let keys =
-    List.map files ~f:(fun file ->
-      file, { Cache.Key.obj = File.hash file; path = File.path file })
-  in
-  let cached = Cache.get (Cache.Key.Set.of_list_map keys ~f:snd) in
+  let keys = List.map files ~f:(fun file -> File.hash file, file) in
+  let cached = Cache.get (Cache.Key.Set.of_list_map keys ~f:fst) in
   let uncached =
-    List.filter_map keys ~f:(fun (file, key) ->
-      if Cache.Key.Map.mem cached key then None else Some (file, key))
+    List.filter_map keys ~f:(fun (key, file) ->
+      if Cache.Key.Map.mem cached key then None else Some (key, file))
   in
-  content_of_files t (List.map ~f:fst uncached)
+  content_of_files t (List.map ~f:snd uncached)
   >>| function
-  | [] -> List.map keys ~f:(fun (_, key) -> Cache.Key.Map.find_exn cached key)
+  | [] -> List.map keys ~f:(fun (key, _) -> Cache.Key.Map.find_exn cached key)
   | to_write ->
     let to_write =
-      List.combine uncached to_write
-      |> Cache.Key.Map.of_list_map_exn ~f:(fun ((_, key), contents) -> key, contents)
+      List.combine (List.map ~f:fst uncached) to_write
+      |> Cache.Key.Map.of_list_reduce ~f:(fun x _y -> x)
     in
     Cache.set to_write;
-    List.map keys ~f:(fun (_, key) ->
+    List.map keys ~f:(fun (key, _) ->
       match Cache.Key.Map.find cached key with
       | Some s -> s
       | None -> Cache.Key.Map.find_exn to_write key)
