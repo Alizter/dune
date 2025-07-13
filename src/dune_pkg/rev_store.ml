@@ -186,10 +186,10 @@ module Cache = struct
   module Files_and_submodules = struct
     module Key = struct
       module T = struct
-        type t = { obj : Object.t }
+        type t = Object.t
 
-        let compare = Poly.compare
-        let to_dyn = Dyn.opaque
+        let compare = Object.compare
+        let to_dyn = Object.to_dyn
       end
 
       include T
@@ -199,14 +199,15 @@ module Cache = struct
 
       let conv =
         Lmdb.Conv.make
-          ~serialise:(fun alloc { obj = Sha1 obj } ->
-            let len = obj_size in
-            let bs = alloc len in
-            Bigstringaf.blit_from_string obj ~src_off:0 bs ~dst_off:0 ~len:obj_size;
-            bs)
+          ~serialise:(fun alloc -> function
+             | Object.Sha1 obj ->
+               let len = obj_size in
+               let bs = alloc len in
+               Bigstringaf.blit_from_string obj ~src_off:0 bs ~dst_off:0 ~len:obj_size;
+               bs)
           ~deserialise:(fun bs ->
             let obj = Bigstringaf.substring bs ~off:0 ~len:obj_size in
-            { obj = Sha1 obj })
+            Object.Sha1 obj)
           ()
       ;;
     end
@@ -818,8 +819,11 @@ module At_rev = struct
     ;;
   end
 
-  let files_and_submodules repo (Object.Sha1 rev) =
-    let key = { Cache.Files_and_submodules.Key.obj = Object.Sha1 rev } in
+  let files_and_submodules repo key =
+    let rev =
+      match key with
+      | Object.Sha1 rev -> rev
+    in
     let cached = Cache.Files_and_submodules.get key in
     match cached with
     | Some v -> Fiber.return v
