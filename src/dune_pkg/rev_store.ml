@@ -1,5 +1,4 @@
 open Stdune
-open Dune_vcs
 module Process = Dune_engine.Process
 module Display = Dune_engine.Display
 module Scheduler = Dune_engine.Scheduler
@@ -140,6 +139,22 @@ let env =
   |> Env.add ~var:"GIT_TERMINAL_PROMPT" ~value:"0"
 ;;
 
+let minimal_git_version = "2.29"
+
+let git =
+  Lazy.map Dune_vcs.Vcs.git ~f:(fun git ->
+    match git with
+    | Some git -> git
+    | None ->
+      let hint =
+        Printf.sprintf
+          "Git %s is required for package management. Please install git or add it to \
+           your PATH."
+          minimal_git_version
+      in
+      Dune_engine.Utils.program_not_found "git" ~loc:None ~hint)
+;;
+
 module Git_error = struct
   type t =
     { dir : Path.t
@@ -149,7 +164,7 @@ module Git_error = struct
     }
 
   let raise_code_error { dir; args; exit_code; output } =
-    let git = Lazy.force Vcs.git in
+    let git = Lazy.force git in
     Code_error.raise
       "git returned non-zero exit code"
       [ "exit code", Dyn.int exit_code
@@ -168,7 +183,7 @@ end
 
 let run_with_exit_code { dir; _ } ~allow_codes ~display args =
   let stdout_to = make_stdout () in
-  let git = Lazy.force Vcs.git in
+  let git = Lazy.force git in
   let+ stderr, exit_code =
     Fiber_util.Temp.with_temp_file
       ~prefix:"dune"
@@ -191,11 +206,18 @@ let run_with_exit_code { dir; _ } ~allow_codes ~display args =
       when String.is_prefix ~prefix:"error: unknown option `no-write-fetch-head'" stderr
       ->
       User_error.raise
-        [ User_message.command
-            "Your git version doesn't support the '--no-write-fetch-head' flag. The \
-             minimum supported version is Git 2.29."
+        [ Pp.hovbox
+            (Pp.concat
+               ~sep:Pp.space
+               [ Pp.text "Your "
+               ; User_message.command "git"
+               ; Pp.textf
+                   " version doesn't support the '--no-write-fetch-head' flag. The \
+                    minimum supported version is Git %s."
+                   minimal_git_version
+               ])
         ]
-        ~hints:[ User_message.command "Please update your git version." ]
+        ~hints:[ Pp.text "Please update your git version." ]
     | _ ->
       Dune_console.print [ Pp.verbatim stderr ];
       Error { Git_error.dir; args; exit_code; output = [] })
@@ -207,7 +229,7 @@ let run t ~display args =
 ;;
 
 let run_capture_lines { dir; _ } ~display args =
-  let git = Lazy.force Vcs.git in
+  let git = Lazy.force git in
   let+ output, exit_code =
     Process.run_capture_lines ~dir ~display ~env failure_mode git args
   in
@@ -215,7 +237,7 @@ let run_capture_lines { dir; _ } ~display args =
 ;;
 
 let run_capture_zero_separated_lines { dir; _ } args =
-  let git = Lazy.force Vcs.git in
+  let git = Lazy.force git in
   let+ output, exit_code =
     Process.run_capture_zero_separated ~dir ~display:Quiet ~env failure_mode git args
   in
@@ -223,8 +245,8 @@ let run_capture_zero_separated_lines { dir; _ } args =
 ;;
 
 let cat_file { dir; _ } command =
-  let git = Lazy.force Vcs.git in
-  let failure_mode = Vcs.git_accept () in
+  let git = Lazy.force git in
+  let failure_mode = Dune_vcs.Vcs.git_accept () in
   let stderr_to = make_stderr () in
   let stdout_to = make_stdout () in
   "cat-file" :: command
@@ -233,7 +255,7 @@ let cat_file { dir; _ } command =
 ;;
 
 let rev_parse { dir; _ } rev =
-  let git = Lazy.force Vcs.git in
+  let git = Lazy.force git in
   let+ line, code =
     Process.run_capture_line
       ~dir
@@ -247,7 +269,7 @@ let rev_parse { dir; _ } rev =
 ;;
 
 let object_exists_no_lock { dir; _ } (Object.Sha1 sha1) =
-  let git = Lazy.force Vcs.git in
+  let git = Lazy.force git in
   let+ (), code =
     Process.run ~dir ~display:Quiet ~env Return git [ "cat-file"; "-e"; sha1 ]
   in
@@ -280,8 +302,8 @@ let mem_path repo (Object.Sha1 sha1) path =
 
 let show =
   let show { dir; _ } revs_and_paths =
-    let git = Lazy.force Vcs.git in
-    let failure_mode = Vcs.git_accept () in
+    let git = Lazy.force git in
+    let failure_mode = Dune_vcs.Vcs.git_accept () in
     let command =
       "show"
       :: List.map revs_and_paths ~f:(function
@@ -296,7 +318,7 @@ let show =
       (if Sys.win32 then 8191 else 2097152)
       - String.length "show"
       - 1 (* space *)
-      - String.length (Path.to_string (Lazy.force Vcs.git))
+      - String.length (Path.to_string (Lazy.force git))
       - 100 (* some extra safety *)
     in
     let rec loop acc batch cmd_len_remaining = function
@@ -755,7 +777,7 @@ module At_rev = struct
         }
         ~target
     =
-    let git = Lazy.force Vcs.git in
+    let git = Lazy.force git in
     let temp_dir = Temp_dir.dir_for_target ~target ~prefix:"rev-store" ~suffix:rev in
     Fiber.finalize ~finally:(fun () ->
       let+ () = Fiber.return () in

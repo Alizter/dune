@@ -28,6 +28,11 @@ module Kind = struct
   ;;
 
   let equal = ( = )
+
+  let bin_name = function
+    | Git -> "git"
+    | Hg -> "hg"
+  ;;
 end
 
 module T = struct
@@ -50,23 +55,13 @@ end
 
 include T
 
+let create ~root ~kind = { root; kind }
+  let root t = t.root
+  let kind t = t.kind
+
 let git, hg =
-  let get prog =
-    lazy
-      (match Bin.which ~path:(Env_path.path Env.initial) prog with
-       | Some x -> x
-       | None ->
-         let hint =
-           match prog with
-           | "git" ->
-             Some
-               "Git is required for version information in 'dune subst', build info, and \
-                package management. Install git or add it to your PATH."
-           | _ -> None
-         in
-         Utils.program_not_found prog ~loc:None ?hint)
-  in
-  get "git", get "hg"
+  let get prog = lazy (Bin.which ~path:(Env_path.path Env.initial) prog) in
+  get (Kind.bin_name Git), get (Kind.bin_name Hg)
 ;;
 
 let select git hg t =
@@ -81,6 +76,9 @@ let prog t =
     (match t.kind with
      | Git -> git
      | Hg -> hg)
+  |> function
+  | Some prog -> prog
+  | None -> Utils.program_not_found ~loc:None (Kind.bin_name t.kind)
 ;;
 
 let run t args =

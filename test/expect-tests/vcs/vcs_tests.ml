@@ -14,19 +14,20 @@ let () = at_exit (fun () -> Path.rm_rf (Lazy.force temp_dir))
    people don't have hg installed. *)
 let has_hg =
   match Lazy.force Vcs.hg with
-  | (_ : Path.t) -> true
-  | exception _ -> false
+  | Some (_ : Path.t) -> true
+  | None -> false
 ;;
 
 let run (vcs : Vcs.t) args =
+  let git = Lazy.map Vcs.git ~f:Option.value_exn in
   let prog, prog_str, real_args =
-    match vcs.kind with
-    | Git -> Vcs.git, "git", args
+    match Vcs.kind vcs with
+    | Git -> git, "git", args
     | Hg ->
       if has_hg
-      then Vcs.hg, "hg", args
+      then Lazy.map Vcs.hg ~f:Option.value_exn, "hg", args
       else
-        ( Vcs.git
+        ( git
         , "hg"
         , (match args with
            | [ "tag"; s; "-u"; _ ] -> [ "tag"; "-a"; s; "-m"; s ]
@@ -46,8 +47,8 @@ let run (vcs : Vcs.t) args =
        Env.add
          Env.initial
          ~var:"GIT_DIR"
-         ~value:(Filename.concat (Path.to_absolute_filename vcs.root) ".git"))
-    ~dir:vcs.root
+         ~value:(Filename.concat (Path.to_absolute_filename (Vcs.root vcs)) ".git"))
+    ~dir:(Vcs.root vcs)
     ~stdout_to:(Process.Io.file Dev_null.path Process.Io.Out)
 ;;
 
@@ -63,14 +64,14 @@ let run_action (vcs : Vcs.t) action =
   match action with
   | Init ->
     let* () = run vcs [ "init"; "-q" ] in
-    (match vcs.kind with
+    (match Vcs.kind vcs with
      | Hg -> Fiber.return ()
      | Git ->
        let* () = run vcs [ "config"; "user.email"; "dune@dune.com" ] in
        run vcs [ "config"; "user.name"; "Dune Dune" ])
   | Add fn -> run vcs [ "add"; fn ]
   | Commit ->
-    (match vcs.kind with
+    (match Vcs.kind vcs with
      | Git -> run vcs [ "commit"; "-m"; "commit message" ]
      | Hg -> run vcs [ "commit"; "-m"; "commit message"; "-u"; "toto" ])
   | Write (fn, s) ->
@@ -80,13 +81,13 @@ let run_action (vcs : Vcs.t) action =
   | Describe expected ->
     printf
       "$ %s describe [...]\n"
-      (match vcs.kind with
+      (match Vcs.kind vcs with
        | Git -> "git"
        | Hg -> "hg");
     Memo.reset (Memo.Invalidation.clear_caches ~reason:Test);
     let vcs =
-      match vcs.kind with
-      | Hg when not has_hg -> { vcs with kind = Git }
+      match Vcs.kind vcs with
+      | Hg when not has_hg -> Vcs.create ~root:(Vcs.root vcs) ~kind:Git
       | _ -> vcs
     in
     let+ s = Memo.run (Vcs.describe vcs) in
@@ -112,7 +113,7 @@ let run_action (vcs : Vcs.t) action =
     if processed <> expected then printf "Expected: %s\nOriginal: %s\n" expected s;
     printf "\n"
   | Tag s ->
-    (match vcs.kind with
+    (match Vcs.kind vcs with
      | Git -> run vcs [ "tag"; "-a"; s; "-m"; s ]
      | Hg -> run vcs [ "tag"; s; "-u"; "toto" ])
 ;;
@@ -121,7 +122,7 @@ let run kind script =
   let (lazy temp_dir) = temp_dir in
   Path.rm_rf temp_dir;
   Path.mkdir_p temp_dir;
-  let vcs = { Vcs.kind; root = temp_dir } in
+  let vcs = Vcs.create ~root:temp_dir ~kind in
   Dune_engine.Clflags.display := Short;
   let config =
     { Scheduler.Config.concurrency = 1

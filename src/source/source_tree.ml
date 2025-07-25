@@ -45,7 +45,7 @@ module Dir0 = struct
         |> Vcs.Kind.of_dir_contents
       with
       | None -> vcs
-      | Some kind -> This { Vcs.kind; root = Path.(append_source root) path }
+      | Some kind -> This (Vcs.create ~root:(Path.(append_source root) path) ~kind)
     ;;
   end
 
@@ -424,7 +424,7 @@ let ancestor_vcs =
             |> Filename.Set.of_list
             |> Vcs.Kind.of_dir_contents
           with
-          | Some kind -> Some { Vcs.kind; root = Path.of_string dir }
+          | Some kind -> Some (Vcs.create ~kind ~root:(Path.of_string dir))
           | None -> loop dir
           | exception Sys_error msg ->
             User_warning.emit

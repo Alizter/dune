@@ -97,7 +97,7 @@ let build_info_code cctx ~libs ~api_version =
     | Some vcs ->
       let p =
         Option.value
-          (Path.as_in_source_tree vcs.root)
+          (Path.as_in_source_tree (Vcs.root vcs))
           (* The only VCS root that is potentially not in the source tree is the
              VCS at the root of the repo. For this VCS, it is enough to use the
              source tree root in the placeholder given that we take the nearest

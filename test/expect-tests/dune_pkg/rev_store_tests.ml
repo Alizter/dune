@@ -5,7 +5,6 @@ module Process = Dune_engine.Process
 module Display = Dune_engine.Display
 module Rev_store = Dune_pkg.Rev_store
 module Opam_repo = Dune_pkg.Opam_repo
-module Vcs = Dune_vcs.Vcs
 
 let () = Dune_tests_common.init ()
 
@@ -25,14 +24,14 @@ let make_stderr () = Process.Io.make_stderr ~output_on_success:Swallow ~output_l
 let git ~dir =
   let stdout_to = make_stdout () in
   let stderr_to = make_stdout () in
-  let git = Lazy.force Vcs.git in
+  let git = Lazy.force Dune_vcs.Vcs.git |> Option.value_exn in
   let failure_mode = Process.Failure_mode.Strict in
   fun args -> Process.run ~dir ~display ~stdout_to ~stderr_to failure_mode git args
 ;;
 
 let git_out ~dir =
   let stderr_to = make_stdout () in
-  let git = Lazy.force Vcs.git in
+  let git = Lazy.force Dune_vcs.Vcs.git |> Option.value_exn in
   let failure_mode = Process.Failure_mode.Strict in
   fun args -> Process.run_capture_line ~dir ~display ~stderr_to failure_mode git args
 ;;
