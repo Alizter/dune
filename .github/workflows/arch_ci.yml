@@ -79,6 +79,7 @@ jobs:
           shell: bash
           memory: 8G
           cpu_count: 4
+          shutdown_vm: false
           run: |
             set -e
             uname -a
