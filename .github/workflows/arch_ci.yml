@@ -19,40 +19,40 @@ jobs:
             version: '14.3'
             install_cmd: |
               sudo pkg update
-              sudo pkg install -y ocaml
+              sudo pkg install -y ocaml gmake
 
           - os: freebsd
             arch: arm64
             version: '14.3'
             install_cmd: |
               sudo pkg update
-              sudo pkg install -y ocaml
+              sudo pkg install -y ocaml gmake
 
           - os: openbsd
             arch: x86-64
             version: '7.7'
             install_cmd: |
-              doas pkg_add ocaml
+              sudo pkg_add ocaml gmake
 
           - os: openbsd
             arch: arm64
             version: '7.7'
             install_cmd: |
-              doas pkg_add ocaml
+              sudo pkg_add ocaml gmake
 
           - os: netbsd
             arch: x86-64
             version: '10.1'
             install_cmd: |
               sudo pkgin update
-              sudo pkgin install -y ocaml
+              sudo pkgin install -y ocaml gmake
 
           - os: netbsd
             arch: arm64
             version: '10.1'
             install_cmd: |
               sudo pkgin update
-              sudo pkgin install -y ocaml
+              sudo pkgin install -y ocaml gmake
 
           - os: haiku
             arch: x86-64
@@ -77,7 +77,7 @@ jobs:
           architecture: ${{ matrix.arch }}
           version: ${{ matrix.version }}
           shell: bash
-          memory: 5G
+          memory: 8G
           cpu_count: 4
           run: |
             echo "::group::System Info"
@@ -98,6 +98,6 @@ jobs:
             echo "::endgroup::"
 
             echo "::group::Build Dune"
-            make bootstrap
+            gmake bootstrap
             echo "::endgroup::"
 
