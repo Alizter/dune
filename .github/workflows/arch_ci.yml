@@ -60,7 +60,7 @@ jobs:
             install_cmd: |
               export PATH=$PATH:/boot/home/config/non-packaged/bin
               cd ..
-              git clone https://github.com/ocaml/ocaml.git --depth 1 -b 5.3
+              git clone https://github.com/ocaml/ocaml.git --depth 1 -b 4.14
               cd ocaml
               ./configure --prefix=/boot/home/config/non-packaged
               make -j
