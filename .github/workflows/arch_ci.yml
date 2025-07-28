@@ -19,40 +19,40 @@ jobs:
             version: '14.3'
             install_cmd: |
               sudo pkg update
-              sudo pkg install -y ocaml gmake
+              sudo pkg install -y ocaml gmake git
 
           - os: freebsd
             arch: arm64
             version: '14.3'
             install_cmd: |
               sudo pkg update
-              sudo pkg install -y ocaml gmake
+              sudo pkg install -y ocaml gmake git
 
           - os: openbsd
             arch: x86-64
             version: '7.7'
             install_cmd: |
-              sudo pkg_add ocaml gmake
+              sudo pkg_add ocaml gmake git
 
           - os: openbsd
             arch: arm64
             version: '7.7'
             install_cmd: |
-              sudo pkg_add ocaml gmake
+              sudo pkg_add ocaml gmake git
 
           - os: netbsd
             arch: x86-64
             version: '10.1'
             install_cmd: |
               sudo pkgin update
-              sudo pkgin install ocaml gmake
+              sudo pkgin install ocaml gmake git
 
           - os: netbsd
             arch: arm64
             version: '10.1'
             install_cmd: |
               sudo pkgin update
-              sudo pkgin install ocaml gmake
+              sudo pkgin install ocaml gmake git
 
           - os: haiku
             arch: x86-64
