@@ -54,6 +54,19 @@ jobs:
               sudo pkgin update
               sudo pkgin install -y ocaml
 
+          - os: haiku
+            arch: x86-64
+            version: 'r1beta5'
+            install_cmd: |
+              export PATH=$PATH:/boot/home/config/non-packaged/bin
+              cd ..
+              git clone https://github.com/ocaml/ocaml.git --depth 1 -b 5.3
+              cd ocaml
+              ./configure --prefix=/boot/home/config/non-packaged
+              make -j
+              make install
+              cd ../dune
+
     steps:
       - uses: actions/checkout@v4
 
