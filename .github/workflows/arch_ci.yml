@@ -81,7 +81,7 @@ jobs:
           cpu_count: 4
           shutdown_vm: false
           run: |
-            set -e
+            set -xeuo pipefail
             echo "::group::System Info"
             uname -a
             echo $SHELL
