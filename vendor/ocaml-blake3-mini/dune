@@ -36,7 +36,8 @@
     (= %{system} "linux")
     (= %{system} "macosx")
     (= %{system} "freebsd")
-    (= %{system} "openbsd"))))
+    (= %{system} "openbsd")
+    (= %{system} "netbsd"))))
  (deps blake3_avx2_x86-64_unix.S)
  (targets blake3_avx2_x86-64%{ext_obj})
  (action
@@ -50,7 +51,8 @@
     (= %{system} "linux")
     (= %{system} "macosx")
     (= %{system} "freebsd")
-    (= %{system} "openbsd"))))
+    (= %{system} "openbsd")
+    (= %{system} "netbsd"))))
  (deps blake3_avx512_x86-64_unix.S)
  (targets blake3_avx512_x86-64%{ext_obj})
  (action
@@ -64,7 +66,8 @@
     (= %{system} "linux")
     (= %{system} "macosx")
     (= %{system} "freebsd")
-    (= %{system} "openbsd"))))
+    (= %{system} "openbsd")
+    (= %{system} "netbsd"))))
  (deps blake3_sse2_x86-64_unix.S)
  (targets blake3_sse2_x86-64%{ext_obj})
  (action
@@ -78,7 +81,8 @@
     (= %{system} "linux")
     (= %{system} "macosx")
     (= %{system} "freebsd")
-    (= %{system} "openbsd"))))
+    (= %{system} "openbsd")
+    (= %{system} "netbsd"))))
  (deps blake3_sse41_x86-64_unix.S)
  (targets blake3_sse41_x86-64%{ext_obj})
  (action
@@ -208,7 +212,8 @@
       (= %{system} "linux")
       (= %{system} "macosx")
       (= %{system} "freebsd")
-      (= %{system} "openbsd"))))
+      (= %{system} "openbsd")
+      (= %{system} "netbsd"))))
    (not
     (or
      (= %{architecture} "arm64")
