@@ -77,7 +77,8 @@
    (or
     (= %{system} "linux")
     (= %{system} "macosx")
-    (= %{system} "freebsd"))))
+    (= %{system} "freebsd")
+    (= %{system} "openbsd"))))
  (deps blake3_sse41_x86-64_unix.S)
  (targets blake3_sse41_x86-64%{ext_obj})
  (action
