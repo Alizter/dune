@@ -43,16 +43,12 @@ jobs:
           - os: netbsd
             arch: x86-64
             version: '10.1'
-            install_cmd: |
-              sudo pkgin update
-              sudo pkgin install ocaml git
+            install_cmd: 'sudo pkgin update && sudo pkgin install ocaml git'
 
           - os: netbsd
             arch: arm64
             version: '10.1'
-            install_cmd: |
-              sudo pkgin update
-              sudo pkgin install ocaml git
+            install_cmd: 'sudo pkgin update && sudo pkgin install ocaml git'
 
           - os: haiku
             arch: x86-64
