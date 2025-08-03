@@ -94,6 +94,7 @@ jobs:
             echo "::group::OCaml Version"
             which ocaml
             ocaml -version
+            ocamlc -config
             echo "::endgroup::"
             echo "::group::Build Dune"
             ocaml boot/bootstrap.ml
