@@ -35,7 +35,8 @@
    (or
     (= %{system} "linux")
     (= %{system} "macosx")
-    (= %{system} "freebsd"))))
+    (= %{system} "freebsd")
+    (= %{system} "openbsd"))))
  (deps blake3_avx2_x86-64_unix.S)
  (targets blake3_avx2_x86-64%{ext_obj})
  (action
@@ -48,7 +49,8 @@
    (or
     (= %{system} "linux")
     (= %{system} "macosx")
-    (= %{system} "freebsd"))))
+    (= %{system} "freebsd")
+    (= %{system} "openbsd"))))
  (deps blake3_avx512_x86-64_unix.S)
  (targets blake3_avx512_x86-64%{ext_obj})
  (action
@@ -61,7 +63,8 @@
    (or
     (= %{system} "linux")
     (= %{system} "macosx")
-    (= %{system} "freebsd"))))
+    (= %{system} "freebsd")
+    (= %{system} "openbsd"))))
  (deps blake3_sse2_x86-64_unix.S)
  (targets blake3_sse2_x86-64%{ext_obj})
  (action
@@ -203,7 +206,8 @@
       (= %{system} "mingw64")
       (= %{system} "linux")
       (= %{system} "macosx")
-      (= %{system} "freebsd"))))
+      (= %{system} "freebsd")
+      (= %{system} "openbsd"))))
    (not
     (or
      (= %{architecture} "arm64")
