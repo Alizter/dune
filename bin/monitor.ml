@@ -244,8 +244,8 @@ let monitor ~quit_on_disconnect () =
       User_error.raise [ Pp.text "RPC server not running." ]
     | None ->
       Console.Status_line.set
-        (Console.Status_line.Live
-           (fun () -> Pp.verbatim ("Waiting for RPC server" ^ String.make (i mod 4) '.')));
+        (Console.Status_line.Constant
+           (Pp.verbatim ("Waiting for RPC server" ^ String.make (i mod 4) '.')));
       let+ () = Scheduler.sleep ~seconds:0.3 in
       Some (i + 1))
 ;;
