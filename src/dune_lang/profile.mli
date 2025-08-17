@@ -4,6 +4,7 @@
 type t =
   | Dev
   | Release
+  | Ocamlprof
   | User_defined of string
 
 val equal : t -> t -> bool

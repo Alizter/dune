@@ -9,6 +9,8 @@ type t =
   ; ocamldep : Action.Prog.t
   ; ocamlmklib : Action.Prog.t
   ; ocamlobjinfo : Action.Prog.t
+  ; ocamlcp : Action.Prog.t
+  ; ocamloptp : Action.Prog.t
   ; ocaml_config : Ocaml_config.t
   ; ocaml_config_vars : Ocaml_config.Vars.t
   ; version : Ocaml.Version.t
@@ -46,10 +48,12 @@ let make_ocaml_config ~env ~ocamlc =
       ]
 ;;
 
-let compiler t (mode : Ocaml.Mode.t) =
-  match mode with
-  | Byte -> Ok t.ocamlc
-  | Native -> t.ocamlopt
+let compiler t ~(profile : Profile.t) (mode : Ocaml.Mode.t) =
+  match profile, mode with
+  | Ocamlprof, Byte -> t.ocamlcp
+  | _, Byte -> Ok t.ocamlc
+  | Ocamlprof, Native -> t.ocamloptp
+  | _, Native -> t.ocamlopt
 ;;
 
 let best_mode t : Mode.t =
@@ -90,7 +94,9 @@ let make name ~which ~env ~get_ocaml_tool =
   and* ocaml = get_ocaml_tool "ocaml"
   and* ocamldep = get_ocaml_tool "ocamldep"
   and* ocamlmklib = get_ocaml_tool "ocamlmklib"
-  and* ocamlobjinfo = get_ocaml_tool "ocamlobjinfo" in
+  and* ocamlobjinfo = get_ocaml_tool "ocamlobjinfo"
+  and* ocamlcp = get_ocaml_tool "ocamlcp"
+  and* ocamloptp = get_ocaml_tool "ocamloptp" in
   let version = Ocaml.Version.of_ocaml_config ocaml_config in
   let builtins = make_builtins ~version ~ocaml_config in
   Memo.return
@@ -101,6 +107,8 @@ let make name ~which ~env ~get_ocaml_tool =
     ; ocamldep
     ; ocamlmklib
     ; ocamlobjinfo
+    ; ocamlcp
+    ; ocamloptp
     ; ocaml_config
     ; ocaml_config_vars
     ; version

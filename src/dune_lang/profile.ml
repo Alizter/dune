@@ -6,6 +6,7 @@ module type Stringlike = Dune_util.Stringlike
 type t =
   | Dev
   | Release
+  | Ocamlprof
   | User_defined of string
 
 include (
@@ -21,6 +22,7 @@ include (
         (match p with
          | "dev" -> Dev
          | "release" -> Release
+         | "ocamlprof" -> Ocamlprof
          | s -> User_defined s)
     ;;
 
@@ -30,6 +32,7 @@ include (
     let to_string = function
       | Dev -> "dev"
       | Release -> "release"
+      | Ocamlprof -> "ocamlprof"
       | User_defined s -> s
     ;;
   end) :
@@ -38,9 +41,12 @@ include (
 let equal x y =
   match x, y with
   | Dev, Dev -> true
+  | Dev, _ | _, Dev -> false
   | Release, Release -> true
+  | Release, _ | _, Release -> false
+  | Ocamlprof, Ocamlprof -> true
+  | Ocamlprof, _ | _, Ocamlprof -> false
   | User_defined x, User_defined y -> String.equal x y
-  | _, _ -> false
 ;;
 
 let default = Dev
@@ -65,5 +71,6 @@ let to_dyn =
   function
   | Dev -> variant "Dev" []
   | Release -> variant "Release" []
+  | Ocamlprof -> variant "Ocamlprof" []
   | User_defined s -> variant "User_defined" [ string s ]
 ;;

@@ -10,6 +10,8 @@ type t =
   ; ocamldep : Action.Prog.t
   ; ocamlmklib : Action.Prog.t
   ; ocamlobjinfo : Action.Prog.t
+  ; ocamlcp : Action.Prog.t
+  ; ocamloptp : Action.Prog.t
   ; ocaml_config : Ocaml_config.t
   ; ocaml_config_vars : Ocaml_config.Vars.t
   ; version : Ocaml.Version.t
@@ -33,8 +35,8 @@ val make
 
 val of_binaries : path:Path.t list -> Context_name.t -> Env.t -> Path.Set.t -> t Memo.t
 
-(** Return the compiler needed for this compilation mode *)
-val compiler : t -> Ocaml.Mode.t -> Action.Prog.t
+(** Return the compiler needed for this compilation mode and profile. *)
+val compiler : t -> profile:Profile.t -> Ocaml.Mode.t -> Action.Prog.t
 
 (** The best compilation mode for this context *)
 val best_mode : t -> Mode.t

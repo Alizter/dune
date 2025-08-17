@@ -53,7 +53,7 @@ let build_lib
   let ctx = Super_context.context sctx in
   let* ocaml = Context.ocaml ctx in
   let map_cclibs = cclibs ocaml.lib_config.ccomp_type ~flag:"-cclib" in
-  Ocaml_toolchain.compiler ocaml mode
+  Ocaml_toolchain.compiler ~profile:(Context.profile ctx) ocaml mode
   |> Memo.Result.iter ~f:(fun compiler ->
     [ Command.Args.dyn (Ocaml_flags.get flags (Ocaml mode))
     ; Hidden_deps (Cm_files.unsorted_objects_and_cms cm_files ~mode |> Dep.Set.of_files)

@@ -148,7 +148,7 @@ let build_cm
       Some melc
     | Ocaml mode ->
       Memo.return
-        (let compiler = Ocaml_toolchain.compiler ocaml mode in
+        (let compiler = Ocaml_toolchain.compiler ~profile:(Context.profile ctx) ocaml mode in
          (* TODO one day remove this silly optimization *)
          match compiler with
          | Ok _ as s -> Some s

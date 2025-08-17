@@ -209,7 +209,7 @@ let link_exe
     Action_builder.with_no_targets prefix
     >>> Command.run
           ~dir:(Path.build (Context.build_dir ctx))
-          (Ocaml_toolchain.compiler ocaml mode)
+          (Ocaml_toolchain.compiler ~profile:(Context.profile ctx) ocaml mode)
           [ Command.Args.dyn ocaml_flags
           ; A "-o"
           ; Target exe
