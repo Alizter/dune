@@ -953,10 +953,8 @@ module Library = struct
              String.uncapitalize_ascii t.toplevel_module ^ "__" ^ base ^ ext))
     ;;
 
-    let header t =
-      match t with
-      | None -> ""
-      | Some t -> sprintf "open! %s\n" t.alias_module
+    let header modules =
+      List.map modules ~f:(sprintf "open! %s\n") |> String.concat ~sep:""
     ;;
 
     let generate_wrapper t modules =
@@ -1099,7 +1097,10 @@ module Library = struct
         String.Set.add (String.capitalize_ascii name) modules
     in
     let wrapper = Wrapper.make ~namespace ~modules in
-    let header = Wrapper.header wrapper in
+    let header =
+      Wrapper.header
+        (Option.map (fun (m : Wrapper.t) -> m.alias_module) wrapper |> Option.to_list)
+    in
     let+ files, build_info_file =
       Fiber.fork_and_join
         (fun () -> Fiber.parallel_map files ~f:(process_source_file wrapper ~header))
