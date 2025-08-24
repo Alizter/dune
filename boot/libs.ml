@@ -507,6 +507,12 @@ let local_libraries =
     ; special_builtin_support = None
     ; root_module = None
     }
+  ; { path = "src/test_lib"
+    ; main_module_name = Some "Test_lib"
+    ; include_subdirs = Qualified
+    ; special_builtin_support = None
+    ; root_module = None
+    }
   ]
 
 let main =

@@ -48,7 +48,8 @@
   dune_spawn
   opam_format
   source
-  xdg)
+  xdg
+  test_lib)
  (bootstrap_info bootstrap-info))
 
 ; Installing the dune binary depends on the kind of build:
