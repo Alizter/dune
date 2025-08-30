@@ -68,10 +68,8 @@ end = struct
         | List (_, name_sexp :: values) ->
           (match name_sexp with
            | Atom (_, A name) ->
-             Name.Map.set
-               acc
-               name
-               { Unparsed.values; entry = sexp; prev = Name.Map.find acc name }
+             Name.Map.update acc name ~f:(fun prev ->
+               Some { Unparsed.values; entry = sexp; prev })
            | List (loc, _) | Quoted_string (loc, _) | Template { loc; _ } ->
              User_error.raise ~loc [ Pp.text "Atom expected" ])
         | _ ->
