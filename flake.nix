@@ -178,20 +178,20 @@
                 ++ [ duneScript ];
               inputsFrom = [ pkgs'.ocamlPackages.dune_3 ];
               buildInputs = testBuildInputs ++ (with pkgs'.ocamlPackages; [
-                re
-                ocaml-lsp
+                ctypes
+                cinaps
+                integers
+                lwt
+                mdx
+                menhir
                 merlin
                 ocaml-index
-                ppx_expect
-                spawn
-                ctypes
-                integers
-                mdx
-                cinaps
-                menhir
+                ocaml-lsp
                 odoc
-                lwt
                 patdiff
+                ppx_expect
+                re
+                spawn
               ] ++ (extraBuildInputs pkgs'));
               inherit INSIDE_NIX;
             };
@@ -288,8 +288,6 @@
               inherit INSIDE_NIX;
               buildInputs = with pkgs; [ gnumake ocaml-ng.ocamlPackages_4_08.ocaml ];
               meta.description = ''
-                Provides a minimal shell environment with OCaml 4.08 in order
-                to test the bootstrapping script.
               '';
             };
 
@@ -317,19 +315,19 @@
                 # dev tools
                 ccls
                 # test dependencies
-                git
-                which
+                binaryen
                 curl
+                git
                 procps
+                which
               ]) ++ (with pkgs.ocamlPackages; [
-                pkgs.ocamlPackages.ocaml-lsp
-                pkgs.ocamlPackages.melange
-                js_of_ocaml-compiler
-                js_of_ocaml
-                pkgs.binaryen
-                wasm_of_ocaml-compiler
-                utop
                 core_bench
+                js_of_ocaml
+                js_of_ocaml-compiler
+                melange
+                ocaml-lsp
+                utop
+                wasm_of_ocaml-compiler
               ]);
               meta.description = ''
                 Provides a shell environment where `dune` is provided and built
