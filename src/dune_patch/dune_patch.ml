@@ -21,14 +21,30 @@ let prefix_of_patch ~loc patch_string =
     let* old_file = Re.Group.get_opt group 1 in
     let* new_file = Re.Group.get_opt group 2 in
     let validate_as_path file =
-      let path = Path.Local.parse_string_exn ~loc file in
-      if
-        Path.Local.is_root path
-        (* TODO: location is not quite correct here. Should instead
-           be location of patch file. *)
+      if not (Filename.is_relative file)
       then
-        User_error.raise ~loc [ Pp.textf "Directory %S in patch file is invalid." file ];
-      path
+        User_error.raise
+          ~loc
+          [ Pp.textf "Absolute path %S in patch file is not allowed." file ]
+      else (
+        let path =
+          match Path.Local.parse_string_exn ~loc file with
+          | exception User_error.E _ ->
+            User_error.raise
+              ~loc
+              [ Pp.textf
+                  "Patch files may not reference paths starting with \"..\" as they \
+                   would access files outside the project."
+              ]
+          | path -> path
+        in
+        if
+          Path.Local.is_root path
+          (* TODO: location is not quite correct here. Should instead
+             be location of patch file. *)
+        then
+          User_error.raise ~loc [ Pp.textf "Directory %S in patch file is invalid." file ];
+        path)
     in
     let prefix file =
       match validate_as_path file |> Path.Local.split_first_component with
@@ -52,9 +68,9 @@ let prefix_of_patch ~loc patch_string =
           ( Path.Local.split_first_component old_path
           , Path.Local.split_first_component new_path )
         with
-        | Some (_, old_path), Some (_, new_path)
-          when Path.Local.equal old_path new_path && not (Path.Local.is_root new_path) ->
-          (* suffixes are the same and not empty *)
+        | Some (_, old_suffix), Some (_, new_suffix)
+          when not (Path.Local.is_root old_suffix) && not (Path.Local.is_root new_suffix) ->
+          (* Both files have prefixes and suffixes are not empty *)
           1
         | _, _ -> 0
       in
@@ -77,10 +93,16 @@ let apply_patches ~dir patches =
     | Create p | Git_ext (_, p, Patch.Create_only) ->
       Patch.patch ~cleanly None patch |> Option.value_exn |> Io.write_file (path p)
     | Edit (p, q) ->
-      Io.read_file (path p)
-      |> fun file ->
-      Patch.patch ~cleanly (Some file) patch |> Option.value_exn |> Io.write_file (path q)
-    | Git_ext (_, _, Rename_only (p, q)) -> Path.rename (path p) (path q))
+      let source_path = path p in
+      if Path.exists source_path
+      then
+        Io.read_file source_path
+        |> fun file ->
+        Patch.patch ~cleanly (Some file) patch
+        |> Option.value_exn
+        |> Io.write_file (path q)
+      else User_error.raise [ Pp.textf "Cannot edit file %S: file does not exist" p ]
+    | Git_ext (mine, their, Rename_only (_, _)) -> Path.rename (path mine) (path their))
 ;;
 
 let exec ~loc ~dir ~patch =

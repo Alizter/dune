@@ -1,0 +1,182 @@
+open Stdune
+
+(* Testing the patch action *)
+
+include struct
+  open Dune_engine
+  module Action = Action
+  module Display = Display
+  module Process = Process
+  module Scheduler = Scheduler
+end
+
+let create_files =
+  List.iter ~f:(fun (f, contents) ->
+    ignore
+      (Fpath.mkdir_p
+         (Path.Local.of_string f
+          |> Path.Local.parent
+          |> Option.value ~default:(Path.Local.of_string ".")
+          |> Path.Local.to_string));
+    Io.String_path.write_file f contents)
+;;
+
+let test files (patch, patch_contents) =
+  let dir = Temp.create Dir ~prefix:"dune" ~suffix:"patch_test" in
+  Sys.chdir (Path.to_string dir);
+  let patch_file = Path.append_local dir (Path.Local.of_string patch) in
+  let config =
+    { Scheduler.Config.concurrency = 1
+    ; stats = None
+    ; print_ctrl_c_warning = false
+    ; watch_exclusions = []
+    }
+  in
+  Scheduler.Run.go
+    config
+    ~timeout_seconds:5.0
+    ~file_watcher:No_watcher
+    ~on_event:(fun _ _ -> ())
+  @@ fun () ->
+  let open Fiber.O in
+  let* () = Fiber.return @@ create_files ((patch, patch_contents) :: files) in
+  Dune_patch.For_tests.exec
+    ~loc:(Loc.in_file (Path.of_string "dune.patch.test"))
+    ~patch:patch_file
+    ~dir
+;;
+
+let check path =
+  match (Unix.stat path).st_kind with
+  | S_REG -> Io.String_path.cat path
+  | _ -> failwith "Not a regular file"
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> printfn "File %s not found" path
+;;
+
+let%expect_test "action test - basic edit" =
+  test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.basic);
+  check "foo.ml";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - subdirectory edit" =
+  test [ "dir/foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.subdirectory);
+  check "dir/foo.ml";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - combined patches" =
+  test
+    [ "foo.ml", "This is wrong\n"; "dir/foo.ml", "This is wrong\n" ]
+    ("foo.patch", Patch_examples.combined);
+  check "foo.ml";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - create file" =
+  test [] ("foo.patch", Patch_examples.new_file);
+  check "foo.ml";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - delete file" =
+  let filename = "foo.ml" in
+  test [ filename, "This is wrong\n" ] ("foo.patch", Patch_examples.delete_file);
+  match Unix.stat filename with
+  | _ -> failwith "Still exists"
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let undo_breaks =
+  String.map ~f:(function
+    | '\n' -> ' '
+    | c -> c)
+;;
+
+let rsplit2_exn s ~on =
+  match String.rsplit2 s ~on with
+  | Some s -> s
+  | None -> Code_error.raise "rsplit2_exn" [ "s", String s; "on", Char on ]
+;;
+
+let normalize_error_path s =
+  let s = undo_breaks s in
+  let location, reason = rsplit2_exn s ~on:':' in
+  let prefix, path = String.lsplit2_exn location ~on:' ' in
+  let path = Filename.basename path in
+  sprintf "%s %s:%s" prefix path reason
+;;
+
+let%expect_test "action test - unified diff format" =
+  test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.unified);
+  check "foo.ml";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - no prefix" =
+  test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.no_prefix);
+  check "foo.ml";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - custom prefix" =
+  test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.random_prefix);
+  check "foo.ml";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - filename with spaces" =
+  try
+    test [ "foo bar", "This is wrong\n" ] ("foo.patch", Patch_examples.spaces);
+    check "foo bar";
+    [%expect.unreachable]
+  with
+  | Dune_util.Report_error.Already_reported ->
+    print_endline @@ normalize_error_path [%expect.output];
+    [%expect {| Error: Cannot edit file "foo": file does not exist |}]
+;;
+
+let%expect_test "action test - unified format with spaces" =
+  test [ "foo bar", "This is wrong\n" ] ("foo.patch", Patch_examples.unified_spaces);
+  check "foo bar";
+  [%expect {| This is right |}]
+;;
+
+let%expect_test "action test - git_ext_delete_only" =
+  test [ "foo.ml", "Hello World\n" ] ("foo.patch", Patch_examples.git_ext_delete_only);
+  check "foo.ml";
+  [%expect {| File foo.ml not found |}]
+;;
+
+let%expect_test "action test - git_ext_create_only" =
+  test [] ("foo.patch", Patch_examples.git_ext_create_only);
+  check "foo.ml";
+  [%expect {| Hello World |}]
+;;
+
+(* BUG: Same prefix parsing issue - Git_ext uses unparsed paths "a/old.ml", "b/new.ml". *)
+let%expect_test "action test - rename_patch" =
+  test [ "a/old.ml", "content\n" ] ("foo.patch", Patch_examples.rename_patch);
+  check "b/new.ml";
+  [%expect.unreachable]
+[@@expect.uncaught_exn {|
+  (Dune_util__Report_error.Already_reported)
+  Trailing output
+  ---------------
+  Error:
+  rename(/tmp/nix-shell.Zo8cKb/nix-shell.gz44qK/build_5ce8c6_dune/dune_c66cbb_patch_test/a/old.ml): No such file or directory
+  |}]
+;;
+
+(* BUG: Same prefix parsing issue - Edit operation uses unparsed paths "a/source.ml", "b/target.ml". *)
+let%expect_test "action test - edit_with_rename" =
+  test [ "a/source.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.edit_with_rename);
+  check "b/target.ml";
+  [%expect.unreachable]
+[@@expect.uncaught_exn {|
+  (Dune_util__Report_error.Already_reported)
+  Trailing output
+  ---------------
+  Error: Cannot edit file "source.ml": file does not exist
+  |}]
+;;
