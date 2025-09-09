@@ -19,7 +19,7 @@ let test_apply_patches patches files check_files =
     else Printf.printf "%s: NOT FOUND\n" f)
 ;;
 
-let%expect_test "apply_patches - edit" =
+let%expect_test "apply_patches - basic" =
   let patches = Dune_patch.For_tests.parse_patches ~loc:Loc.none Patch_examples.basic in
   test_apply_patches patches [ "foo.ml", "This is wrong\n" ] [ "foo.ml" ];
   [%expect
@@ -28,7 +28,7 @@ let%expect_test "apply_patches - edit" =
     This is right |}]
 ;;
 
-let%expect_test "apply_patches - create" =
+let%expect_test "apply_patches - new_file" =
   let patches =
     Dune_patch.For_tests.parse_patches ~loc:Loc.none Patch_examples.new_file
   in
@@ -40,7 +40,7 @@ let%expect_test "apply_patches - create" =
     |}]
 ;;
 
-let%expect_test "apply_patches - delete" =
+let%expect_test "apply_patches - delete_file" =
   let patches =
     Dune_patch.For_tests.parse_patches ~loc:Loc.none Patch_examples.delete_file
   in
@@ -77,12 +77,13 @@ let%expect_test "apply_patches - delete missing file" =
 ;;
 
 (* Edit with rename now works correctly after prefix parsing fix. *)
-let%expect_test "apply_patches - edit with rename" =
+let%expect_test "apply_patches - edit_with_rename" =
   let patches =
     Dune_patch.For_tests.parse_patches ~loc:Loc.none Patch_examples.edit_with_rename
   in
   test_apply_patches patches [ "source.ml", "This is wrong\n" ] [ "target.ml" ];
-  [%expect {|
+  [%expect
+    {|
     target.ml:
     This is right
     |}]
@@ -107,14 +108,15 @@ let%expect_test "apply_patches - git_ext_create_only (parses as Create)" =
     Hello World |}]
 ;;
 
-(* BUG: Prefix parsing not working correctly for rename operations.
-   Should parse as Git_ext("old.ml", "new.ml", ...) but gets Git_ext("a/old.ml", "b/new.ml", ...).
-   Test currently expects the buggy behavior. *)
-let%expect_test "apply_patches - rename_patch (Git_ext Rename_only)" =
+(* Rename operations now work correctly after fixing prefix parsing. *)
+let%expect_test "apply_patches - rename_patch" =
   let patches =
     Dune_patch.For_tests.parse_patches ~loc:Loc.none Patch_examples.rename_patch
   in
   test_apply_patches patches [ "old.ml", "content\n" ] [ "new.ml" ];
-  [%expect.unreachable]
-[@@expect.uncaught_exn {| ("Unix.Unix_error(Unix.ENOENT, \"rename\", \"/tmp/nix-shell.Zo8cKb/nix-shell.gz44qK/build_5ce8c6_dune/dune_6df707_apply_test/a/old.ml\")") |}]
+  [%expect
+    {|
+    new.ml:
+    content
+    |}]
 ;;

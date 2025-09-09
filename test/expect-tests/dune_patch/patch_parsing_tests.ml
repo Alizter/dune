@@ -44,7 +44,7 @@ let test p =
   |> Format.printf "%a" Pp.to_fmt
 ;;
 
-let%expect_test "parse_patches - basic edit" =
+let%expect_test "parse_patches - basic" =
   test Patch_examples.basic;
   [%expect
     {|
@@ -65,7 +65,7 @@ let%expect_test "parse_patches - basic edit" =
     |}]
 ;;
 
-let%expect_test "parse_patches - subdirectory edit" =
+let%expect_test "parse_patches - subdirectory" =
   test Patch_examples.subdirectory;
   [%expect
     {|
@@ -86,7 +86,7 @@ let%expect_test "parse_patches - subdirectory edit" =
     |}]
 ;;
 
-let%expect_test "parse_patches - combined patches" =
+let%expect_test "parse_patches - combined" =
   test Patch_examples.combined;
   [%expect
     {|
@@ -120,7 +120,7 @@ let%expect_test "parse_patches - combined patches" =
     |}]
 ;;
 
-let%expect_test "parse_patches - create file" =
+let%expect_test "parse_patches - new_file" =
   test Patch_examples.new_file;
   [%expect
     {|
@@ -141,7 +141,7 @@ let%expect_test "parse_patches - create file" =
     |}]
 ;;
 
-let%expect_test "parse_patches - delete file" =
+let%expect_test "parse_patches - delete_file" =
   test Patch_examples.delete_file;
   [%expect
     {|
@@ -162,7 +162,7 @@ let%expect_test "parse_patches - delete file" =
     |}]
 ;;
 
-let%expect_test "parse_patches - unified format" =
+let%expect_test "parse_patches - unified" =
   test Patch_examples.unified;
   [%expect
     {|
@@ -183,7 +183,7 @@ let%expect_test "parse_patches - unified format" =
     |}]
 ;;
 
-let%expect_test "parse_patches - no prefix" =
+let%expect_test "parse_patches - no_prefix" =
   test Patch_examples.no_prefix;
   [%expect
     {|
@@ -204,7 +204,7 @@ let%expect_test "parse_patches - no prefix" =
     |}]
 ;;
 
-let%expect_test "parse_patches - custom prefix" =
+let%expect_test "parse_patches - random_prefix" =
   test Patch_examples.random_prefix;
   [%expect
     {|
@@ -225,7 +225,8 @@ let%expect_test "parse_patches - custom prefix" =
     |}]
 ;;
 
-let%expect_test "parse_patches - filename with spaces" =
+let%expect_test "parse_patches - spaces" =
+  (* BUG: Should be Edit ("foo bar", "foo bar") but parser truncates at space *)
   test Patch_examples.spaces;
   [%expect
     {|
@@ -246,7 +247,7 @@ let%expect_test "parse_patches - filename with spaces" =
     |}]
 ;;
 
-let%expect_test "parse_patches - unified format with spaces" =
+let%expect_test "parse_patches - unified_spaces" =
   test Patch_examples.unified_spaces;
   [%expect
     {|
@@ -267,7 +268,7 @@ let%expect_test "parse_patches - unified format with spaces" =
     |}]
 ;;
 
-let%expect_test "parse_patches - hello world" =
+let%expect_test "parse_patches - hello_world" =
   test Patch_examples.hello_world;
   [%expect
     {|
@@ -288,12 +289,12 @@ let%expect_test "parse_patches - hello world" =
     |}]
 ;;
 
-let%expect_test "parse_patches - git rename" =
+let%expect_test "parse_patches - rename_patch" =
   test Patch_examples.rename_patch;
   [%expect
     {|
     [ { operation =
-          Git_ext ("a/old.ml", "b/new.ml", Rename_only ("old.ml", "new.ml"))
+          Git_ext ("old.ml", "new.ml", Rename_only ("old.ml", "new.ml"))
       ; hunks = []
       ; mine_no_nl = false
       ; their_no_nl = false
@@ -302,7 +303,7 @@ let%expect_test "parse_patches - git rename" =
     |}]
 ;;
 
-let%expect_test "parse_patches - git ext delete" =
+let%expect_test "parse_patches - git_ext_delete_only" =
   test Patch_examples.git_ext_delete_only;
   [%expect
     {|
@@ -323,7 +324,7 @@ let%expect_test "parse_patches - git ext delete" =
     |}]
 ;;
 
-let%expect_test "parse_patches - git ext create" =
+let%expect_test "parse_patches - git_ext_create_only" =
   test Patch_examples.git_ext_create_only;
   [%expect
     {|
@@ -344,7 +345,7 @@ let%expect_test "parse_patches - git ext create" =
     |}]
 ;;
 
-let%expect_test "parse_patches - edit with rename" =
+let%expect_test "parse_patches - edit_with_rename" =
   test Patch_examples.edit_with_rename;
   [%expect
     {|

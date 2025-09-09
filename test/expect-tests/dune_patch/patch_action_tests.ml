@@ -53,19 +53,19 @@ let check path =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> printfn "File %s not found" path
 ;;
 
-let%expect_test "action test - basic edit" =
+let%expect_test "action test - basic" =
   test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.basic);
   check "foo.ml";
   [%expect {| This is right |}]
 ;;
 
-let%expect_test "action test - subdirectory edit" =
+let%expect_test "action test - subdirectory" =
   test [ "dir/foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.subdirectory);
   check "dir/foo.ml";
   [%expect {| This is right |}]
 ;;
 
-let%expect_test "action test - combined patches" =
+let%expect_test "action test - combined" =
   test
     [ "foo.ml", "This is wrong\n"; "dir/foo.ml", "This is wrong\n" ]
     ("foo.patch", Patch_examples.combined);
@@ -73,13 +73,13 @@ let%expect_test "action test - combined patches" =
   [%expect {| This is right |}]
 ;;
 
-let%expect_test "action test - create file" =
+let%expect_test "action test - new_file" =
   test [] ("foo.patch", Patch_examples.new_file);
   check "foo.ml";
   [%expect {| This is right |}]
 ;;
 
-let%expect_test "action test - delete file" =
+let%expect_test "action test - delete_file" =
   let filename = "foo.ml" in
   test [ filename, "This is wrong\n" ] ("foo.patch", Patch_examples.delete_file);
   match Unix.stat filename with
@@ -107,25 +107,25 @@ let normalize_error_path s =
   sprintf "%s %s:%s" prefix path reason
 ;;
 
-let%expect_test "action test - unified diff format" =
+let%expect_test "action test - unified" =
   test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.unified);
   check "foo.ml";
   [%expect {| This is right |}]
 ;;
 
-let%expect_test "action test - no prefix" =
+let%expect_test "action test - no_prefix" =
   test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.no_prefix);
   check "foo.ml";
   [%expect {| This is right |}]
 ;;
 
-let%expect_test "action test - custom prefix" =
+let%expect_test "action test - random_prefix" =
   test [ "foo.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.random_prefix);
   check "foo.ml";
   [%expect {| This is right |}]
 ;;
 
-let%expect_test "action test - filename with spaces" =
+let%expect_test "action test - spaces" =
   try
     test [ "foo bar", "This is wrong\n" ] ("foo.patch", Patch_examples.spaces);
     check "foo bar";
@@ -136,7 +136,7 @@ let%expect_test "action test - filename with spaces" =
     [%expect {| Error: Cannot edit file "foo": file does not exist |}]
 ;;
 
-let%expect_test "action test - unified format with spaces" =
+let%expect_test "action test - unified_spaces" =
   test [ "foo bar", "This is wrong\n" ] ("foo.patch", Patch_examples.unified_spaces);
   check "foo bar";
   [%expect {| This is right |}]
@@ -154,29 +154,14 @@ let%expect_test "action test - git_ext_create_only" =
   [%expect {| Hello World |}]
 ;;
 
-(* BUG: Same prefix parsing issue - Git_ext uses unparsed paths "a/old.ml", "b/new.ml". *)
 let%expect_test "action test - rename_patch" =
-  test [ "a/old.ml", "content\n" ] ("foo.patch", Patch_examples.rename_patch);
-  check "b/new.ml";
-  [%expect.unreachable]
-[@@expect.uncaught_exn {|
-  (Dune_util__Report_error.Already_reported)
-  Trailing output
-  ---------------
-  Error:
-  rename(/tmp/nix-shell.Zo8cKb/nix-shell.gz44qK/build_5ce8c6_dune/dune_c66cbb_patch_test/a/old.ml): No such file or directory
-  |}]
+  test [ "old.ml", "content\n" ] ("foo.patch", Patch_examples.rename_patch);
+  check "new.ml";
+  [%expect {| content |}]
 ;;
 
-(* BUG: Same prefix parsing issue - Edit operation uses unparsed paths "a/source.ml", "b/target.ml". *)
 let%expect_test "action test - edit_with_rename" =
-  test [ "a/source.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.edit_with_rename);
-  check "b/target.ml";
-  [%expect.unreachable]
-[@@expect.uncaught_exn {|
-  (Dune_util__Report_error.Already_reported)
-  Trailing output
-  ---------------
-  Error: Cannot edit file "source.ml": file does not exist
-  |}]
+  test [ "source.ml", "This is wrong\n" ] ("foo.patch", Patch_examples.edit_with_rename);
+  check "target.ml";
+  [%expect {| This is right |}]
 ;;

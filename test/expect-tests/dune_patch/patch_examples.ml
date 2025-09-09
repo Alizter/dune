@@ -1,7 +1,6 @@
 open Stdune
 
 let () = Dune_tests_common.init ()
-let () = Dune_util.Report_error.report_backtraces true
 
 (* Patch string examples for testing *)
 

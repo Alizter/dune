@@ -69,7 +69,8 @@ let prefix_of_patch ~loc patch_string =
           , Path.Local.split_first_component new_path )
         with
         | Some (_, old_suffix), Some (_, new_suffix)
-          when not (Path.Local.is_root old_suffix) && not (Path.Local.is_root new_suffix) ->
+          when (not (Path.Local.is_root old_suffix))
+               && not (Path.Local.is_root new_suffix) ->
           (* Both files have prefixes and suffixes are not empty *)
           1
         | _, _ -> 0

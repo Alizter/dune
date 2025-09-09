@@ -385,12 +385,10 @@ let parse_one ~p data =
               let from_ = Lib.String.slice ~start:12 x in
               let to_ = Lib.String.slice ~start:10 y in
               let git_filenames = Lib.String.slice ~start:11 git_filenames in
-              match Fname.parse_git_header_rename ~from_ ~to_ git_filenames with
-              | None -> git_action
-              | Some (a, b) ->
-                  let a = strip_prefix ~p a in
-                  let b = strip_prefix ~p b in
-                  Some (a, b, Rename_only (from_, to_))
+              (* For pure renames with no --- or +++ lines, use rename directive paths directly *)
+              let a = strip_prefix ~p from_ in
+              let b = strip_prefix ~p to_ in
+              Some (a, b, Rename_only (from_, to_))
         in
         find_start ~mode ~git_action xs
     | x::xs when is_git mode && Lib.String.is_prefix ~prefix:"deleted file mode " x ->
@@ -427,8 +425,7 @@ let parse_one ~p data =
           when String.equal f f' -> Some op, xs
         | Some (a, b, Rename_only (_, _)), (Edit (a', b') as op)
           when String.equal a a' && String.equal b b' -> Some op, xs
-        | Some (_, _, (Rename_only _ | Delete_only | Create_only) as git_op), _
-          -> Some (Git_ext git_op), x :: y :: xs
+        | Some (a, b, ext), _ -> Some (Git_ext (a, b, ext)), x :: y :: xs
         end
     | x::y::_xs when Lib.String.is_prefix ~prefix:"*** " x && Lib.String.is_prefix ~prefix:"--- " y ->
       failwith "Context diffs are not supported"
