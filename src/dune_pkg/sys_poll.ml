@@ -42,6 +42,16 @@ let normalise_os raw =
   | s -> s
 ;;
 
+let run_strip_whitespace ~path ~prog ~args =
+  match Bin.which ~path prog with
+  | None -> Fiber.return None
+  | Some prog ->
+    Process.run_capture_lines ~display:Quiet Strict prog args
+    >>| List.filter ~f:String.is_empty
+    >>| List.hd
+    >>| norm
+;;
+
 let run_capture_line ~path ~prog ~args =
   match Bin.which ~path prog with
   | None -> Fiber.return None
@@ -145,7 +155,7 @@ let os_version ~android_release ~os ~os_release_fields ~path =
        let major, minor, build, _ = OpamStubs.getWindowsVersion () in
        Some (Printf.sprintf "%d.%d.%d" major minor build) |> Fiber.return
      | Some "cygwin" ->
-       run_capture_line ~path ~prog:"cmd" ~args:[ "/C"; "ver" ]
+       run_strip_whitespace ~path ~prog:"cmd" ~args:[ "/C"; "ver" ]
        >>| Option.bind ~f:(fun s ->
          match Scanf.sscanf s "%_s@[ Version %s@]" Fun.id with
          | Ok s -> norm s
