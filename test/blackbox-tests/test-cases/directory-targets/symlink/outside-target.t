@@ -1,9 +1,10 @@
 Test symlink to directory outside the directory target.
 
 This tests symlinks pointing outside the directory target to other parts of the
-build tree. This is likely the reason for the original restriction.
+build tree.
 
-FIXME: This should work once #9873 is fixed.
+TODO: Validate whether symlinks escaping the directory target boundary should
+be forbidden for reproducibility/sandboxing concerns.
 
   $ cat > dune-project << EOF
   > (lang dune 3.21)
@@ -31,18 +32,12 @@ Create a directory target to link to:
   > EOF
 
   $ dune build d
-  File "dune", lines 8-15, characters 0-144:
-   8 | (rule
-   9 |  (target (dir d))
-  10 |  (deps outside_dir)
-  11 |  (action
-  12 |   (progn
-  13 |    (run mkdir -p d)
-  14 |    (chdir d
-  15 |     (run ln -s ../outside_dir link_to_outside)))))
-  Error: Error trying to read targets after a rule was run:
-  - d/link_to_outside: Unexpected file kind "S_DIR" (directory)
-  [1]
+
+  $ ls _build/default/d
+  link_to_outside
+
+  $ cat _build/default/d/link_to_outside/external.txt
+  content
 
 Test relative symlink to directory outside the target:
 
@@ -65,15 +60,6 @@ Test relative symlink to directory outside the target:
   > EOF
 
   $ dune build d2
-  File "dune", lines 8-15, characters 0-147:
-   8 | (rule
-   9 |  (target (dir d2))
-  10 |  (deps outside_dir)
-  11 |  (action
-  12 |   (progn
-  13 |    (run mkdir -p d2)
-  14 |    (chdir d2
-  15 |     (run ln -s ../outside_dir link_to_outside)))))
-  Error: Error trying to read targets after a rule was run:
-  - d2/link_to_outside: Unexpected file kind "S_DIR" (directory)
-  [1]
+
+  $ cat _build/default/d2/link_to_outside/external.txt
+  content
