@@ -194,6 +194,7 @@ module Produced = struct
       | Empty_dir of Path.Build.t
       | Unreadable_dir of Path.Build.t * Unix_error.Detailed.t
       | Unsupported_file of Path.Build.t * File_kind.t
+      | Symlink_escapes_target of Path.Build.t
 
     let message = function
       | Missing_dir dir ->
@@ -225,6 +226,12 @@ module Produced = struct
              |> Path.Source.to_string_maybe_quoted)
             (File_kind.to_string kind)
         ]
+      | Symlink_escapes_target symlink ->
+        [ Pp.textf
+            "Symbolic link %S escapes the directory target"
+            (Path.Build.drop_build_context_maybe_sandboxed_exn symlink
+             |> Path.Source.to_string_maybe_quoted)
+        ]
     ;;
 
     let to_string_hum = function
@@ -232,6 +239,7 @@ module Produced = struct
       | Empty_dir _ -> "empty directory"
       | Unreadable_dir (_, unix_error) -> Unix_error.Detailed.to_string_hum unix_error
       | Unsupported_file _ -> "unsupported file kind"
+      | Symlink_escapes_target _ -> "symlink escapes target"
     ;;
   end
 
@@ -239,7 +247,8 @@ module Produced = struct
 
   (** The call sites ensure that [dir = Path.Build.append_local validated.root local].
       No need for [local] actually... *)
-  let rec contents_of_dir ~file_f (dir : Path.Build.t) : ('a dir_contents, Error.t) result
+  let rec contents_of_dir ~file_f ~dir_target (dir : Path.Build.t)
+    : ('a dir_contents, Error.t) result
     =
     let open Result.O in
     let init = empty in
@@ -250,6 +259,36 @@ module Produced = struct
       Result.List.fold_left dir_contents ~init ~f:(fun dir_contents (name, kind) ->
         match (kind : File_kind.t) with
         | S_LNK | S_REG ->
+          (* For symlinks, check if they escape the directory target *)
+          (match kind with
+           | S_LNK ->
+             let symlink_path = Path.Build.relative dir name in
+             let target = Unix.readlink (Path.Build.to_string symlink_path) in
+             (if Filename.is_relative target
+              then
+                (* Resolve relative symlink against its parent directory *)
+                let target_parts = String.split target ~on:'/' in
+                let rec resolve_parts acc = function
+                  | [] -> Ok acc
+                  | ".." :: rest ->
+                    (match Path.Build.parent acc with
+                     | Some parent -> resolve_parts parent rest
+                     | None ->
+                       (* Trying to go above root - symlink escapes *)
+                       Error (Error.Symlink_escapes_target symlink_path))
+                  | "." :: rest -> resolve_parts acc rest
+                  | part :: rest -> resolve_parts (Path.Build.relative acc part) rest
+                in
+                resolve_parts dir target_parts
+                >>= fun resolved ->
+                if Path.Build.is_descendant resolved ~of_:dir_target
+                then Ok ()
+                else Error (Error.Symlink_escapes_target symlink_path)
+              else
+                (* Absolute paths always escape (can't validate within build dir reliably) *)
+                Error (Error.Symlink_escapes_target symlink_path))
+           | _ -> Ok ())
+          >>= fun () ->
           let files =
             match file_f (Path.Local.relative (Path.Build.local dir) name) with
             | Some payload -> Filename.Map.add_exn dir_contents.files name payload
@@ -257,9 +296,7 @@ module Produced = struct
           in
           Ok { dir_contents with files }
         | S_DIR ->
-          let+ subdirs_contents =
-            contents_of_dir ~file_f (Path.Build.relative dir name)
-          in
+          let+ subdirs_contents = contents_of_dir ~file_f ~dir_target (Path.Build.relative dir name) in
           { dir_contents with
             subdirs = Filename.Map.add_exn dir_contents.subdirs name subdirs_contents
           }
@@ -271,7 +308,7 @@ module Produced = struct
     (* We assume here that [dir_name] is either a child of [root], or that we're ok with having [root/a/b] but not [root/a]. *)
     let aggregate_dir { root; contents } dir_name =
       let dir = Path.Build.relative root dir_name in
-      let* new_contents = contents_of_dir ~file_f:(fun _ -> Some ()) dir in
+      let* new_contents = contents_of_dir ~file_f:(fun _ -> Some ()) ~dir_target:dir dir in
       if is_empty_dir_conts new_contents
       then Error (Empty_dir dir)
       else (

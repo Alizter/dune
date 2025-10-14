@@ -209,6 +209,12 @@ struct
           | Cyclic_symlink ->
             let error = Pp.verbatim "Cyclic symbolic link" in
             Right (target, error)
+          | Symlink_escapes_target path ->
+            let error =
+              Pp.verbatim
+                (sprintf "Symbolic link escapes directory target: %s" (Path.to_string path))
+            in
+            Right (target, error)
           | Unexpected_kind file_kind ->
             let error =
               Pp.verbatim

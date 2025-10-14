@@ -1,8 +1,8 @@
 Test symlink to absolute path directory.
 
 This tests what happens with absolute path symlinks pointing both inside and
-outside the project. Absolute paths are inherently non-portable and may fail
-in sandboxed builds.
+outside the project. Absolute paths are now forbidden as they escape the
+directory target boundary.
 
 Create a directory outside the dune project:
 
@@ -28,7 +28,7 @@ Create a directory inside the project for absolute path testing:
   > content
   > EOF
 
-Test 1: Absolute symlink to directory inside the project:
+Test 1: Absolute symlink to directory inside the project (forbidden):
 
   $ cat > dune << EOF
   > (rule
@@ -40,14 +40,17 @@ Test 1: Absolute symlink to directory inside the project:
   > EOF
 
   $ dune build d1
+  File "dune", lines 1-6, characters 0-252:
+  1 | (rule
+  2 |  (target (dir d1))
+  3 |  (action
+  4 |   (progn
+  5 |    (run mkdir -p d1)
+  6 |    (run ln -s $TESTCASE_ROOT/project/abs_target_inside d1/abs_symlink))))
+  Error: Symbolic link "d1/abs_symlink" escapes the directory target
+  [1]
 
-  $ ls _build/default/d1
-  abs_symlink
-
-  $ cat _build/default/d1/abs_symlink/file.txt
-  content
-
-Test 2: Absolute symlink to directory outside the project:
+Test 2: Absolute symlink to directory outside the project (forbidden):
 
   $ cat > dune << EOF
   > (rule
@@ -59,9 +62,13 @@ Test 2: Absolute symlink to directory outside the project:
   > EOF
 
   $ dune build d2
+  File "dune", lines 1-6, characters 0-256:
+  1 | (rule
+  2 |  (target (dir d2))
+  3 |  (action
+  4 |   (progn
+  5 |    (run mkdir -p d2)
+  6 |    (run ln -s $TESTCASE_ROOT/project/../abs_target_outside d2/abs_symlink))))
+  Error: Symbolic link "d2/abs_symlink" escapes the directory target
+  [1]
 
-  $ ls _build/default/d2
-  abs_symlink
-
-  $ cat _build/default/d2/abs_symlink/file.txt
-  content

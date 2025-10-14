@@ -1,16 +1,14 @@
 Test validation of symlinks that escape the directory target.
 
-Symlinks that point outside the directory target boundary may be problematic
-for reproducibility and sandboxing.
+Symlinks that point outside the directory target boundary are forbidden
+for reproducibility and sandboxing concerns.
 
   $ cat > dune-project << EOF
   > (lang dune 3.21)
   > (using directory-targets 0.1)
   > EOF
 
-TODO: Determine if this should be forbidden.
-
-Currently, symlinks escaping to sibling directories are allowed:
+Symlinks escaping to sibling directories are now forbidden:
 
   $ cat > dune << EOF
   > (rule
@@ -31,38 +29,22 @@ Currently, symlinks escaping to sibling directories are allowed:
   > EOF
 
   $ dune build d
+  File "dune", lines 8-15, characters 0-127:
+   8 | (rule
+   9 |  (target (dir d))
+  10 |  (deps sibling)
+  11 |  (action
+  12 |   (progn
+  13 |    (run mkdir -p d)
+  14 |    (chdir d
+  15 |     (run ln -s ../sibling escape)))))
+  Error: Symbolic link "d/escape" escapes the directory target
+  [1]
 
-  $ ls _build/default/d
-  escape
-
-  $ cat _build/default/d/escape/file.txt
-  content
-
-Symlinks escaping to source tree:
+Symlinks escaping to source tree are also forbidden:
 
   $ mkdir source_dir
   $ touch source_dir/file.txt
-
-First, let's check the actual paths to understand the layout:
-
-  $ cat > dune << EOF
-  > (rule
-  >  (target (dir d2))
-  >  (deps source_dir/file.txt)
-  >  (action
-  >   (progn
-  >    (run mkdir -p d2)
-  >    (system "pwd")
-  >    (system "touch d2/dummy")
-  >    (chdir d2
-  >     (system "pwd")))))
-  > EOF
-
-  $ dune build d2
-  $TESTCASE_ROOT/_build/default
-  $TESTCASE_ROOT/_build/default/d2
-
-Now create a symlink to the source tree (3 levels up: d3 -> default -> _build -> root):
 
   $ cat > dune << EOF
   > (rule
@@ -76,10 +58,16 @@ Now create a symlink to the source tree (3 levels up: d3 -> default -> _build ->
   > EOF
 
   $ dune build d3
-
-  $ ls _build/default/d3
-  escape_to_source
-
-  $ cat _build/default/d3/escape_to_source/file.txt
+  File "dune", lines 1-8, characters 0-161:
+  1 | (rule
+  2 |  (target (dir d3))
+  3 |  (deps source_dir/file.txt)
+  4 |  (action
+  5 |   (progn
+  6 |    (run mkdir -p d3)
+  7 |    (chdir d3
+  8 |     (run ln -s ../../../source_dir escape_to_source)))))
+  Error: Symbolic link "d3/escape_to_source" escapes the directory target
+  [1]
 
 
