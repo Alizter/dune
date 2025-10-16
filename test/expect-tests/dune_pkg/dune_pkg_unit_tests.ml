@@ -72,9 +72,20 @@ let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
       [ Dune_engine.Context_name.to_string ctx_name; ".lock"; lock_dir_path ]
     |> Path.build
   in
-  Lock_dir.Write_disk.(
-    prepare ~portable_lock_dir:false ~lock_dir_path ~files:Package_name.Map.empty lock_dir
-    |> commit);
+  (* Write the lock directory using file_contents_by_path *)
+  let file_contents =
+    Lock_dir.file_contents_by_path ~portable_lock_dir:false lock_dir
+  in
+  Path.mkdir_p lock_dir_path;
+  List.iter file_contents ~f:(fun (path_within_lock_dir, contents) ->
+    let path = Path.relative lock_dir_path path_within_lock_dir in
+    Option.iter (Path.parent path) ~f:Path.mkdir_p;
+    let cst =
+      List.map contents ~f:(fun sexp ->
+        Dune_sexp.Ast.add_loc ~loc:Loc.none sexp |> Dune_sexp.Cst.concrete)
+    in
+    let pp = Dune_lang.Format.pp_top_sexps ~version:(3, 11) cst in
+    Format.asprintf "%a" Pp.to_fmt pp |> Io.write_file path);
   let lock_dir_round_tripped =
     try Lock_dir.read_disk_exn lock_dir_path with
     | User_error.E _ as exn ->
