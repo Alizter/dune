@@ -14,8 +14,7 @@ Update ".ocamlformat" file with unknown version of OCamlFormat.
 
 Format, it shows the solving error.
   $ DUNE_CONFIG__LOCK_DEV_TOOL=enabled dune fmt
-  Error: Unable to solve dependencies for the following lock directories:
-  Lock directory dev-tools.locks/ocamlformat:
-  Couldn't solve the package dependency formula.
+  File "default/.dev-tool-locks/_unknown_", line 1, characters 0-0:
+  Error: Couldn't solve the package dependency formula.
   The following packages couldn't be found: ocamlformat
   [1]

@@ -155,6 +155,7 @@ Regenerate the `dune-project` file introducing an unsatisfiable constraint.
 
 Run the solver again. This time it will fail.
   $ dune pkg lock
+  File "default/.lock/_unknown_", line 1, characters 0-0:
   Error: Couldn't solve the package dependency formula.
   Selected candidates: baz.0.1.0 foo.0.0.1 lockfile_generation_test.dev
   - bar -> (problem)
@@ -168,11 +169,6 @@ Run the solver again. This time it will fail.
         bar.0.0.1:
           Package does not satisfy constraints of local package
           lockfile_generation_test
-  -> required by _build/_private/default/.lock/dune.lock/content
-  -> required by lock directory environment for context "default"
-  -> required by base environment for context "default"
-  -> required by loading findlib for context "default"
-  -> required by loading the OCaml compiler for context "default"
   [1]
 
 We'll also test how the lockfile generation works with alternate solutions.
