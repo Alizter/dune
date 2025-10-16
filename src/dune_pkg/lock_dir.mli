@@ -129,19 +129,13 @@ module Metadata : Dune_sexp.Versioned_file.S with type data := unit
 
 val metadata_filename : Filename.t
 
-module Write_disk : sig
-  type lock_dir := t
-  type t
-
-  val prepare
-    :  portable_lock_dir:bool
-    -> lock_dir_path:Path.t
-    -> files:File_entry.t Package_version.Map.Multi.t Package_name.Map.t
-    -> lock_dir
-    -> t
-
-  val commit : t -> unit
-end
+(** [file_contents_by_path ~portable_lock_dir t] returns a list of (filename, sexp list)
+    pairs representing the serialized lock directory contents. This is used to generate
+    the files that make up a lock directory. *)
+val file_contents_by_path
+  :  portable_lock_dir:bool
+  -> t
+  -> (string * Dune_sexp.t list) list
 
 val read_disk : Path.t -> (t, User_message.t) result
 val read_disk_exn : Path.t -> t
