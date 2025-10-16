@@ -3,6 +3,10 @@ module Pkg = Dune_pkg.Lock_dir.Pkg
 
 type t := Dune_pkg.Lock_dir.t
 
+(** Synchronous loading functions for immediate use (e.g., in tests) *)
+val read_disk : Path.t -> (t, User_message.t) result
+
+val read_disk_exn : Path.t -> t
 val get_with_path : Context_name.t -> (Path.t * t, User_message.t) result Memo.t
 val get : Context_name.t -> (t, User_message.t) result Memo.t
 val get_exn : Context_name.t -> t Memo.t

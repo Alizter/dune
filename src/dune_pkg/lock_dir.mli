@@ -140,17 +140,6 @@ val file_contents_by_path
 val read_disk : Path.t -> (t, User_message.t) result
 val read_disk_exn : Path.t -> t
 
-module Make_load (Io : sig
-    include Monad.S
-
-    val parallel_map : 'a list -> f:('a -> 'b t) -> 'b list t
-    val readdir_with_kinds : Path.t -> (Filename.t * Unix.file_kind) list t
-    val with_lexbuf_from_file : Path.t -> f:(Lexing.lexbuf -> 'a) -> 'a t
-  end) : sig
-  val load : Path.t -> (t, User_message.t) result Io.t
-  val load_exn : Path.t -> t Io.t
-end
-
 (** [transitive_dependency_closure t ~platform names] returns the set of package names
     making up the transitive closure of dependencies of the set [names], or
     [Error (`Missing_packages missing_packages)] if if any element of [names]

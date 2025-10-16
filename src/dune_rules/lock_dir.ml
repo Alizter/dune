@@ -97,23 +97,6 @@ module Sys_vars = struct
   ;;
 end
 
-module Load = Make_load (struct
-    include Memo
-
-    let readdir_with_kinds path =
-      Readdir.read_directory_with_kinds (Path.to_string path)
-      |> function
-      | Error _ ->
-        (* CR-someday rgrinberg: add some proper message here *)
-        User_error.raise [ Pp.text "" ]
-      | Ok content -> return content
-    ;;
-
-    let with_lexbuf_from_file path ~f =
-      Io.Untracked.with_lexbuf_from_file path ~f |> return
-    ;;
-  end)
-
 let select_lock_dir lock_dir_selection =
   let* workspace = Workspace.workspace () in
   let expander ~source pform =
@@ -214,8 +197,7 @@ let get_with_path ctx =
         [ "context", Context_name.to_dyn ctx ]
   in
   let* () = Build_system.build_dir path in
-  Load.load path
-  >>= function
+  match Dune_pkg.Lock_dir.read_disk path with
   | Error e -> Memo.return (Error e)
   | Ok lock_dir ->
     let+ workspace_lock_dir = get_workspace_lock_dir ctx in
@@ -233,7 +215,7 @@ let get_exn ctx = get ctx >>| User_error.ok_exn
 
 let of_dev_tool dev_tool =
   let path = dev_tool_lock_dir_path dev_tool in
-  Load.load_exn path
+  Memo.of_reproducible_fiber (Fiber.return (Dune_pkg.Lock_dir.read_disk_exn path))
 ;;
 
 let lock_dirs_of_workspace (workspace : Workspace.t) =
