@@ -1328,44 +1328,35 @@ let file_contents_by_path ~portable_lock_dir t =
         package_filename, Pkg.encode ~portable_lock_dir ~solved_for_platforms pkg))
 ;;
 
-module Make_load (Io : sig
-    include Monad.S
-
-    val parallel_map : 'a list -> f:('a -> 'b t) -> 'b list t
-    val readdir_with_kinds : Path.t -> (Filename.t * Unix.file_kind) list t
-    val with_lexbuf_from_file : Path.t -> f:(Lexing.lexbuf -> 'a) -> 'a t
-  end) =
-struct
-  let load_metadata metadata_file_path =
-    let open Io.O in
-    let+ ( syntax
-         , version
-         , dependency_hash
-         , ocaml
-         , repos
-         , expanded_solver_variable_bindings
-         , solved_for_platforms )
+module Parser = struct
+  let metadata metadata_file_path lexbuf =
+    let ( syntax
+        , version
+        , dependency_hash
+        , ocaml
+        , repos
+        , expanded_solver_variable_bindings
+        , solved_for_platforms )
       =
-      Io.with_lexbuf_from_file metadata_file_path ~f:(fun lexbuf ->
-        Metadata.parse_contents
-          lexbuf
-          ~f:(fun { Metadata.Lang.Instance.syntax; data = (); version } ->
-            let open Decoder in
-            let+ ( ocaml
-                 , dependency_hash
-                 , repos
-                 , expanded_solver_variable_bindings
-                 , solved_for_platforms )
-              =
-              decode_metadata
-            in
-            ( syntax
-            , version
-            , dependency_hash
-            , ocaml
-            , repos
-            , expanded_solver_variable_bindings
-            , solved_for_platforms )))
+      Metadata.parse_contents
+        lexbuf
+        ~f:(fun { Metadata.Lang.Instance.syntax; data = (); version } ->
+          let open Decoder in
+          let+ ( ocaml
+               , dependency_hash
+               , repos
+               , expanded_solver_variable_bindings
+               , solved_for_platforms )
+            =
+            decode_metadata
+          in
+          ( syntax
+          , version
+          , dependency_hash
+          , ocaml
+          , repos
+          , expanded_solver_variable_bindings
+          , solved_for_platforms ))
     in
     if String.equal (Syntax.name syntax) (Syntax.name Dune_lang.Pkg.syntax)
     then
@@ -1385,23 +1376,16 @@ struct
         ]
   ;;
 
-  let load_pkg
+  let pkg
         ~portable_lock_dir
         ~version
         ~lock_dir_path
         ~solved_for_platforms
         package_name
-        maybe_package_version
+        _maybe_package_version
+        lexbuf
     =
-    let open Io.O in
-    let pkg_file_path =
-      Path.relative
-        lock_dir_path
-        (Package_filename.make package_name maybe_package_version)
-    in
-    let+ sexp =
-      Io.with_lexbuf_from_file pkg_file_path ~f:(Dune_sexp.Parser.parse ~mode:Many)
-    in
+    let sexp = Dune_sexp.Parser.parse ~mode:Many lexbuf in
     let parser =
       let env = Pform.Env.pkg Dune_lang.Pkg.syntax version in
       let decode =
@@ -1415,113 +1399,95 @@ struct
       ~solved_for_platforms
       package_name
   ;;
-
-  let check_packages packages ~lock_dir_path =
-    match validate_packages packages with
-    | Ok () -> Ok ()
-    | Error (`Missing_dependencies missing_dependencies) ->
-      List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->
-        User_message.prerr
-          (User_message.make
-             ~loc
-             [ Pp.textf
-                 "The package %S depends on the package %S, but %S does not appear in \
-                  the lockdir %s."
-                 (Package_name.to_string dependant_package.info.name)
-                 (Package_name.to_string dependency)
-                 (Package_name.to_string dependency)
-                 (Path.to_string_maybe_quoted lock_dir_path)
-             ]));
-      Error
-        (User_error.make
-           ~hints:
-             [ Pp.concat
-                 ~sep:Pp.space
-                 [ Pp.text
-                     "This could indicate that the lockdir is corrupted. Delete it and \
-                      then regenerate it by running:"
-                 ; User_message.command "dune pkg lock"
-                 ]
-             ]
-           [ Pp.textf
-               "At least one package dependency is itself not present as a package in \
-                the lockdir %s."
-               (Path.to_string_maybe_quoted lock_dir_path)
-           ])
-  ;;
-
-  let load lock_dir_path =
-    let open Io.O in
-    let* ( version
-         , dependency_hash
-         , ocaml
-         , repos
-         , expanded_solver_variable_bindings
-         , solved_for_platforms )
-      =
-      load_metadata (Path.relative lock_dir_path metadata_filename)
-    in
-    let portable_lock_dir, solved_for_platforms =
-      match solved_for_platforms with
-      | Some x -> true, x
-      | None -> false, (Loc.none, [])
-    in
-    let+ packages =
-      Io.readdir_with_kinds lock_dir_path
-      >>| List.filter_map ~f:(fun (name, (kind : Unix.file_kind)) ->
-        match kind with
-        | S_REG -> Package_filename.to_package_name_and_version name |> Result.to_option
-        | _ ->
-          (* TODO *)
-          None)
-      >>= Io.parallel_map ~f:(fun (package_name, maybe_package_version) ->
-        let _loc, solved_for_platforms = solved_for_platforms in
-        let+ pkg =
-          load_pkg
-            ~portable_lock_dir
-            ~version
-            ~lock_dir_path
-            ~solved_for_platforms
-            package_name
-            maybe_package_version
-        in
-        pkg)
-      >>| Packages.of_pkg_list
-    in
-    check_packages packages ~lock_dir_path
-    |> Result.map ~f:(fun () ->
-      { version
-      ; dependency_hash
-      ; packages
-      ; ocaml
-      ; repos
-      ; expanded_solver_variable_bindings
-      ; solved_for_platforms
-      })
-  ;;
-
-  let load_exn lock_dir_path =
-    let open Io.O in
-    load lock_dir_path >>| User_error.ok_exn
-  ;;
 end
 
-module Load_immediate = Make_load (struct
-    include Monad.Id
+let check_packages packages ~lock_dir_path =
+  match validate_packages packages with
+  | Ok () -> Ok ()
+  | Error (`Missing_dependencies missing_dependencies) ->
+    List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->
+      User_message.prerr
+        (User_message.make
+           ~loc
+           [ Pp.textf
+               "The package %S depends on the package %S, but %S does not appear in the \
+                lockdir %s."
+               (Package_name.to_string dependant_package.info.name)
+               (Package_name.to_string dependency)
+               (Package_name.to_string dependency)
+               (Path.to_string_maybe_quoted lock_dir_path)
+           ]));
+    Error
+      (User_error.make
+         ~hints:
+           [ Pp.concat
+               ~sep:Pp.space
+               [ Pp.text
+                   "This could indicate that the lockdir is corrupted. Delete it and \
+                    then regenerate it by running:"
+               ; User_message.command "dune pkg lock"
+               ]
+           ]
+         [ Pp.textf
+             "At least one package dependency is itself not present as a package in the \
+              lockdir %s."
+             (Path.to_string_maybe_quoted lock_dir_path)
+         ])
+;;
 
-    let parallel_map xs ~f = List.map xs ~f
+let read_disk lock_dir_path =
+  let metadata_file_path = Path.relative lock_dir_path metadata_filename in
+  let version, dependency_hash, ocaml, repos, expanded_solver_variable_bindings, solved_for_platforms =
+    Io.with_lexbuf_from_file metadata_file_path ~f:(Parser.metadata metadata_file_path)
+  in
+  let portable_lock_dir, solved_for_platforms =
+    match solved_for_platforms with
+    | Some x -> true, x
+    | None -> false, (Loc.none, [])
+  in
+  let entries =
+    match Path.readdir_unsorted_with_kinds lock_dir_path with
+    | Ok entries -> entries
+    | Error e -> User_error.raise [ Pp.text (Unix_error.Detailed.to_string_hum e) ]
+  in
+  let packages =
+    entries
+    |> List.filter_map ~f:(fun (name, (kind : Unix.file_kind)) ->
+      match kind with
+      | S_REG -> Package_filename.to_package_name_and_version name |> Result.to_option
+      | _ -> None)
+    |> List.map ~f:(fun (package_name, maybe_package_version) ->
+      let pkg_file_path =
+        Path.relative
+          lock_dir_path
+          (Package_filename.make package_name maybe_package_version)
+      in
+      let _loc, solved_for_platforms = solved_for_platforms in
+      Io.with_lexbuf_from_file
+        pkg_file_path
+        ~f:
+          (Parser.pkg
+             ~portable_lock_dir
+             ~version
+             ~lock_dir_path
+             ~solved_for_platforms
+             package_name
+             maybe_package_version))
+    |> Packages.of_pkg_list
+  in
+  check_packages packages ~lock_dir_path
+  |> Result.map ~f:(fun () ->
+    { version
+    ; dependency_hash
+    ; packages
+    ; ocaml
+    ; repos
+    ; expanded_solver_variable_bindings
+    ; solved_for_platforms
+    })
+;;
 
-    let readdir_with_kinds path =
-      match Path.readdir_unsorted_with_kinds path with
-      | Ok entries -> entries
-      | Error e -> User_error.raise [ Pp.text (Unix_error.Detailed.to_string_hum e) ]
-    ;;
-
-    let with_lexbuf_from_file = Io.with_lexbuf_from_file
-  end)
-
-let read_disk = Load_immediate.load
-let read_disk_exn = Load_immediate.load_exn
+let read_disk_exn lock_dir_path = read_disk lock_dir_path |> User_error.ok_exn
 
 let transitive_dependency_closure t ~platform start =
   let missing_packages =

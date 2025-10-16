@@ -73,9 +73,7 @@ let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
     |> Path.build
   in
   (* Write the lock directory using file_contents_by_path *)
-  let file_contents =
-    Lock_dir.file_contents_by_path ~portable_lock_dir:false lock_dir
-  in
+  let file_contents = Lock_dir.file_contents_by_path ~portable_lock_dir:false lock_dir in
   Path.mkdir_p lock_dir_path;
   List.iter file_contents ~f:(fun (path_within_lock_dir, contents) ->
     let path = Path.relative lock_dir_path path_within_lock_dir in
@@ -87,7 +85,7 @@ let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
     let pp = Dune_lang.Format.pp_top_sexps ~version:(3, 11) cst in
     Format.asprintf "%a" Pp.to_fmt pp |> Io.write_file path);
   let lock_dir_round_tripped =
-    try Lock_dir.read_disk_exn lock_dir_path with
+    try Dune_rules.Lock_dir.read_disk_exn lock_dir_path with
     | User_error.E _ as exn ->
       let metadata_path = Path.relative lock_dir_path Lock_dir.metadata_filename in
       let metadata_file_contents = Io.read_file metadata_path in

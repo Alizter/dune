@@ -195,23 +195,25 @@ module Spec = struct
         Format.asprintf "%a" Pp.to_fmt pp |> Io.write_file path);
       (* Write .files directories *)
       Dune_pkg.Package_name.Map.iteri files ~f:(fun package_name files_by_version ->
-        Dune_pkg.Package_version.Map.iteri files_by_version ~f:(fun package_version file_list ->
-          let maybe_package_version =
-            if portable_lock_dir then Some package_version else None
-          in
-          let files_dir =
-            Dune_pkg.Lock_dir.Pkg.files_dir
-              package_name
-              maybe_package_version
-              ~lock_dir:lock_dir_path
-          in
-          Path.mkdir_p files_dir;
-          List.iter file_list ~f:(fun { Dune_pkg.File_entry.original; local_file } ->
-            let dst = Path.append_local files_dir local_file in
-            Path.mkdir_p (Path.parent_exn dst);
-            match original with
-            | Path src -> Io.copy_file ~src ~dst ()
-            | Content content -> Io.write_file dst content)));
+        Dune_pkg.Package_version.Map.iteri
+          files_by_version
+          ~f:(fun package_version file_list ->
+            let maybe_package_version =
+              if portable_lock_dir then Some package_version else None
+            in
+            let files_dir =
+              Dune_pkg.Lock_dir.Pkg.files_dir
+                package_name
+                maybe_package_version
+                ~lock_dir:lock_dir_path
+            in
+            Path.mkdir_p files_dir;
+            List.iter file_list ~f:(fun { Dune_pkg.File_entry.original; local_file } ->
+              let dst = Path.append_local files_dir local_file in
+              Path.mkdir_p (Path.parent_exn dst);
+              match original with
+              | Path src -> Io.copy_file ~src ~dst ()
+              | Content content -> Io.write_file dst content)));
       Fiber.return ()
   ;;
 end

@@ -1,5 +1,5 @@
 open Import
-module Lock_dir = Dune_pkg.Lock_dir
+module Lock_dir = Dune_rules.Lock_dir
 module Local_package = Dune_pkg.Local_package
 
 module Show_lock = struct
@@ -21,7 +21,7 @@ module Show_lock = struct
       let build_lock_dir_path = Path.Build.append_local build_lock_dir source_local in
       let lock_dir = Lock_dir.read_disk_exn (Path.build build_lock_dir_path) in
       let packages =
-        Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
+        Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
         |> Package_name.Map.values
       in
       Pp.concat
@@ -88,7 +88,7 @@ end
 
 module List_locked_dependencies = struct
   module Package_universe = Dune_pkg.Package_universe
-  module Lock_dir = Dune_pkg.Lock_dir
+  module Lock_dir = Dune_rules.Lock_dir
   module Opam_repo = Dune_pkg.Opam_repo
   module Package_version = Dune_pkg.Package_version
   module Opam_solver = Dune_pkg.Opam_solver
