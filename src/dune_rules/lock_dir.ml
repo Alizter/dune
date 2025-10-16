@@ -253,11 +253,9 @@ let enabled =
      | Set (_, `Disabled) -> Memo.return false
      | Unset ->
        let* lock_dirs = lock_dirs_of_workspace workspace in
-       let lock_dirs = Path.Source.Set.to_list lock_dirs in
-       lock_dirs
-       |> Memo.List.exists ~f:(fun lock_dir ->
-         let+ found = Source_tree.find_dir lock_dir in
-         Option.is_some found))
+       if Path.Source.Set.is_empty lock_dirs
+       then Memo.return false
+       else Memo.return true)
 ;;
 
 let lock_dir_active ctx =

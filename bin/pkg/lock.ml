@@ -12,13 +12,15 @@ let show_solution_for lock_dir =
   let solution_dir = Path.Build.append_local build_lock_dir source_local in
   match Readdir.read_directory (Path.Build.to_string solution_dir) with
   | Ok entries ->
-    entries
-    |> List.sort ~compare:String.compare
-    |> List.filter_map ~f:(fun entry ->
-      match String.rsplit2 ~on:'.' entry with
-      | Some (pkg_name, "pkg") -> Some (pkg_name, entry)
-      | None | Some _ -> None)
-    |> (function
+    let lock_files =
+      entries
+      |> List.filter_map ~f:(fun entry ->
+        match String.rsplit2 ~on:'.' entry with
+        | Some (pkg_name, "pkg") -> Some (pkg_name, entry)
+        | None | Some _ -> None)
+      |> List.sort ~compare:(fun (pkg_a, _) (pkg_b, _) -> String.compare pkg_a pkg_b)
+    in
+    (match lock_files with
      | [] -> Console.print [ Pp.text "(no dependencies to lock)" ]
      | lock_files ->
        lock_files

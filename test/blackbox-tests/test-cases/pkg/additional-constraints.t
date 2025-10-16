@@ -51,9 +51,8 @@ There are no valid version of foo at the moment:
   >  (name x)
   >  (depends foo bar))
   > EOF
-  Error: Unable to solve dependencies for the following lock directories:
-  Lock directory dune.lock:
-  Couldn't solve the package dependency formula.
+  File "default/.lock/_unknown_", line 1, characters 0-0:
+  Error: Couldn't solve the package dependency formula.
   Selected candidates: bar.1.9.1 x.dev
   - foo -> (problem)
       No usable implementations:
