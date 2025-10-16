@@ -137,8 +137,8 @@ val file_contents_by_path
   -> t
   -> (string * Dune_sexp.t list) list
 
-val read_disk : Path.t -> (t, User_message.t) result
-val read_disk_exn : Path.t -> t
+val deserialize : Path.t -> (t, User_message.t) result
+val deserialize_exn : Path.t -> t
 
 (** [transitive_dependency_closure t ~platform names] returns the set of package names
     making up the transitive closure of dependencies of the set [names], or

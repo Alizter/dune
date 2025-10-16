@@ -16,7 +16,8 @@ let find_outdated_packages ~transitive ~lock_dirs_arg () =
               (Path.Source.to_string_maybe_quoted lock_dir_path)
           , ([], Path.source lock_dir_path, []) )
       | Some _ ->
-        let lock_dir_path = Path.source lock_dir_path in
+        let lock_dir_source = lock_dir_path in
+        let lock_dir_path = Path.source lock_dir_source in
         (* updating makes sense when checking for outdated packages *)
         let* repos =
           get_repos
@@ -24,7 +25,7 @@ let find_outdated_packages ~transitive ~lock_dirs_arg () =
             ~repositories:(repositories_of_lock_dir workspace ~lock_dir_path)
         and+ local_packages = Memo.run find_local_packages
         and+ platform = solver_env_from_system_and_context ~lock_dir_path in
-        let lock_dir = Dune_rules.Lock_dir.read_disk_exn lock_dir_path in
+        let* lock_dir = Pkg_common.load_lock_dir_exn lock_dir_source |> Memo.run in
         let packages =
           Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
         in
@@ -83,7 +84,6 @@ let term =
           [ "transitive" ]
           ~doc:"Check for outdated packages in transitive dependencies")
   and+ lock_dirs_arg = Pkg_common.Lock_dirs_arg.term in
-  let builder = Common.Builder.forbid_builds builder in
   let common, config = Common.init builder in
   Scheduler.go_with_rpc_server ~common ~config (fun () ->
     let open Fiber.O in

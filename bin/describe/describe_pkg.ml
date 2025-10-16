@@ -1,5 +1,4 @@
 open Import
-module Lock_dir = Dune_rules.Lock_dir
 module Local_package = Dune_pkg.Local_package
 
 module Show_lock = struct
@@ -9,17 +8,10 @@ module Show_lock = struct
       Memo.run (Workspace.workspace ())
       >>| Pkg.Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dir_arg
     in
-    Fiber.parallel_map lock_dir_paths ~f:(fun lock_dir_path ->
-      let lock_dir_path = Path.source lock_dir_path in
+    Fiber.parallel_map lock_dir_paths ~f:(fun lock_dir_source ->
+      let lock_dir_path = Path.source lock_dir_source in
+      let* lock_dir = Pkg.Pkg_common.load_lock_dir_exn lock_dir_source |> Memo.run in
       let+ platform = Pkg.Pkg_common.solver_env_from_system_and_context ~lock_dir_path in
-      let build_lock_dir =
-        Path.Build.L.relative
-          Dune_rules.Private_context.t.build_dir
-          [ Context_name.to_string Context_name.default; ".lock" ]
-      in
-      let source_local = Path.local_part lock_dir_path in
-      let build_lock_dir_path = Path.Build.append_local build_lock_dir source_local in
-      let lock_dir = Lock_dir.read_disk_exn (Path.build build_lock_dir_path) in
       let packages =
         Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
         |> Package_name.Map.values
@@ -35,10 +27,9 @@ module Show_lock = struct
   ;;
 
   let term =
-    let+ builder = Common.Builder.term
-    and+ lock_dir_arg = Pkg.Pkg_common.Lock_dirs_arg.term in
-    let builder = Common.Builder.forbid_builds builder in
-    let common, config = Common.init builder in
+  let+ builder = Common.Builder.term
+  and+ lock_dir_arg = Pkg.Pkg_common.Lock_dirs_arg.term in
+  let common, config = Common.init builder in
     Scheduler.go_with_rpc_server ~common ~config @@ print_lock lock_dir_arg
   ;;
 
@@ -88,7 +79,6 @@ end
 
 module List_locked_dependencies = struct
   module Package_universe = Dune_pkg.Package_universe
-  module Lock_dir = Dune_rules.Lock_dir
   module Opam_repo = Dune_pkg.Opam_repo
   module Package_version = Dune_pkg.Package_version
   module Opam_solver = Dune_pkg.Opam_solver
@@ -132,31 +122,38 @@ module List_locked_dependencies = struct
     let lock_dirs =
       Pkg.Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dirs workspace
     in
-    List.filter_map lock_dirs ~f:(fun lock_dir_path ->
-      if Path.exists (Path.source lock_dir_path)
-      then (
-        match Lock_dir.read_disk_exn (Path.source lock_dir_path) with
-        | lock_dir -> Some (lock_dir_path, lock_dir)
-        | exception User_error.E e ->
-          User_warning.emit
-            [ Pp.textf
-                "Failed to parse lockdir %s:"
-                (Path.Source.to_string_maybe_quoted lock_dir_path)
-            ; User_message.pp e
-            ];
-          None)
-      else None)
+    let open Memo.O in
+    Memo.List.filter_map lock_dirs ~f:(fun lock_dir_path ->
+      if not (Path.exists (Path.source lock_dir_path))
+      then Memo.return None
+      else
+        let+ result = Pkg.Pkg_common.load_lock_dir lock_dir_path in
+        Some (lock_dir_path, result))
   ;;
 
   let list_locked_dependencies ~transitive ~lock_dirs () =
     let open Fiber.O in
     let* lock_dirs_by_path, local_packages =
-      let open Memo.O in
-      Memo.both
-        (Workspace.workspace () >>| enumerate_lock_dirs_by_path ~lock_dirs)
-        Pkg.Pkg_common.find_local_packages
-      |> Memo.run
+      Memo.run
+        (let open Memo.O in
+         let* workspace = Workspace.workspace () in
+         let enumerate = enumerate_lock_dirs_by_path workspace ~lock_dirs in
+         Memo.both enumerate Pkg.Pkg_common.find_local_packages)
     in
+    let lock_dirs_by_path, parse_errors =
+      List.fold_left lock_dirs_by_path ~init:([], []) ~f:(fun (oks, errors) (path, res) ->
+        match res with
+        | Ok lock_dir -> ( (path, lock_dir) :: oks, errors )
+        | Error error -> (oks, (path, error) :: errors))
+      |> fun (oks, errors) -> List.rev oks, List.rev errors
+    in
+    List.iter parse_errors ~f:(fun (lock_dir_path, error) ->
+      User_warning.emit
+        [ Pp.textf
+            "Failed to parse lockdir %s:"
+            (Path.Source.to_string_maybe_quoted lock_dir_path)
+        ; User_message.pp error
+        ]);
     let+ pp =
       Fiber.parallel_map lock_dirs_by_path ~f:(fun (lock_dir_path, lock_dir) ->
         let lock_dir_path = Path.source lock_dir_path in
@@ -196,7 +193,6 @@ module List_locked_dependencies = struct
               "Display transitive dependencies (by default only immediate dependencies \
                are displayed)")
     and+ lock_dirs = Pkg.Pkg_common.Lock_dirs_arg.term in
-    let builder = Common.Builder.forbid_builds builder in
     let common, config = Common.init builder in
     Scheduler.go_with_rpc_server ~common ~config
     @@ list_locked_dependencies ~transitive ~lock_dirs

@@ -21,8 +21,7 @@ let to_dyn = function
   | Dune_release -> Dyn.variant "Dune_release" []
 ;;
 
-let all =
-  [ Ocamlformat; Odoc; Ocamllsp; Utop; Ocamlearlybird; Odig; Opam_publish; Dune_release ]
+let all = []
 ;;
 
 let equal a b =

@@ -1,7 +1,6 @@
 open! Import
 open Pkg_common
 module Package_universe = Dune_pkg.Package_universe
-module Lock_dir = Dune_rules.Lock_dir
 module Opam_repo = Dune_pkg.Opam_repo
 module Package_version = Dune_pkg.Package_version
 module Opam_solver = Dune_pkg.Opam_solver
@@ -17,16 +16,20 @@ let info =
 
 let enumerate_lock_dirs_by_path ~lock_dirs () =
   let open Memo.O in
-  let+ per_contexts =
+  let* per_contexts =
     Workspace.workspace () >>| Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dirs
   in
-  List.filter_map per_contexts ~f:(fun lock_dir_path ->
-    if Path.exists (Path.source lock_dir_path)
-    then (
-      match Lock_dir.read_disk_exn (Path.source lock_dir_path) with
-      | lock_dir -> Some (Ok (lock_dir_path, lock_dir))
-      | exception User_error.E e -> Some (Error (lock_dir_path, `Parse_error e)))
-    else None)
+  per_contexts
+  |> Memo.List.filter_map ~f:(fun lock_dir_path ->
+    let path = Path.source lock_dir_path in
+    if not (Path.exists path)
+    then Memo.return None
+    else
+      let+ result = Pkg_common.load_lock_dir lock_dir_path in
+      Some
+        (match result with
+         | Ok lock_dir -> Ok (lock_dir_path, lock_dir)
+         | Error user_message -> Error (lock_dir_path, `Parse_error user_message)))
 ;;
 
 let validate_lock_dirs ~lock_dirs () =
@@ -79,7 +82,6 @@ let validate_lock_dirs ~lock_dirs () =
 let term =
   let+ builder = Common.Builder.term
   and+ lock_dirs = Pkg_common.Lock_dirs_arg.term in
-  let builder = Common.Builder.forbid_builds builder in
   let common, config = Common.init builder in
   Scheduler.go_with_rpc_server ~common ~config (fun () ->
     let open Fiber.O in
