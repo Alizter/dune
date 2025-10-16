@@ -503,7 +503,9 @@ let setup_lock_alias ~dir =
           |> Path.Build.append_local build_prefix
           |> Path.build
           |> Path.Set.add paths)
-        >>| Action_builder.path_set
+        >>| fun paths ->
+        let paths = Path.Set.add paths Lock_dir.default_path in
+        Action_builder.path_set paths
       in
       Rules.Produce.Alias.add_deps alias deps)
   in

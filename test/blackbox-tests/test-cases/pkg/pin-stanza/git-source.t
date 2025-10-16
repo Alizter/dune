@@ -74,6 +74,8 @@ In this case Dune can't determine which reference to use and will error out:
   Error: Reference "duplicated" in remote
   "file://$PWD/_repo"
   is ambiguous
+  -> required by _build/_private/default/.lock/dune.lock
+  -> required by alias mock-opam-repository/pkg-lock
   Hint: If you want to specify a tag use refs/tags/duplicated
   Hint: If you want to specify a branch use refs/branches/duplicated
 
