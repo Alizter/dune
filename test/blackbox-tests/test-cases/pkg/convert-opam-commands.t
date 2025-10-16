@@ -138,6 +138,11 @@ Package which has boolean where string was expected. This should be caught while
   for package with-malformed-interpolation.0.0.1.
   The variable interpolation:
   %{prefix
+  -> required by _build/_private/default/.lock/dune.lock
+  -> required by lock directory environment for context "default"
+  -> required by base environment for context "default"
+  -> required by loading findlib for context "default"
+  -> required by loading the OCaml compiler for context "default"
   [1]
 
   $ solve exercise-filters
@@ -263,6 +268,11 @@ Test that if opam filter translation is disabled the output doesn't contain any 
                                        ^
   Error: unable to parse opam file
   Parse error
+  -> required by _build/_private/default/.lock/dune.lock
+  -> required by lock directory environment for context "default"
+  -> required by base environment for context "default"
+  -> required by loading findlib for context "default"
+  -> required by loading the OCaml compiler for context "default"
   [1]
 
 Package with package conjunction and string selections inside variable interpolations:
