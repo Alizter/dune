@@ -1435,7 +1435,7 @@ let check_packages packages ~lock_dir_path =
          ])
 ;;
 
-let read_disk lock_dir_path =
+let deserialize lock_dir_path =
   let metadata_file_path = Path.relative lock_dir_path metadata_filename in
   let version, dependency_hash, ocaml, repos, expanded_solver_variable_bindings, solved_for_platforms =
     Io.with_lexbuf_from_file metadata_file_path ~f:(Parser.metadata metadata_file_path)
@@ -1487,7 +1487,7 @@ let read_disk lock_dir_path =
     })
 ;;
 
-let read_disk_exn lock_dir_path = read_disk lock_dir_path |> User_error.ok_exn
+let deserialize_exn lock_dir_path = deserialize lock_dir_path |> User_error.ok_exn
 
 let transitive_dependency_closure t ~platform start =
   let missing_packages =

@@ -138,28 +138,33 @@ let dev_tool_source_lock_dir dev_tool =
 ;;
 
 let dev_tool_lock_dir dev_tool =
-  (* dev tools always live in default *)
-  let ctx_name = Context_name.default |> Context_name.to_string in
-  let dev_tool_segment = dev_tool_to_path_segment dev_tool in
-  let lock_dir =
-    Path.Build.L.relative Private_context.t.build_dir [ ctx_name; ".dev-tool-locks" ]
-  in
-  let lock_dir = Path.Build.append_local lock_dir dev_tool_segment in
-  Path.build lock_dir
+  Path.source (dev_tool_source_lock_dir dev_tool)
 ;;
 
-let lock_dir_of_source p =
+let build_path_of_source p =
   let local = Path.Source.to_local p in
   Path.Build.append_local path_prefix local |> Path.build
 ;;
 
+let load path =
+  let open Memo.O in
+  let* () = Build_system.build_dir path in
+  Memo.of_reproducible_fiber (Fiber.return (Dune_pkg.Lock_dir.deserialize path))
+;;
+
+let load_exn path = load path >>| User_error.ok_exn
+
+let load_from_source lock_dir =
+  let source_path = Path.source lock_dir in
+  Memo.return (Dune_pkg.Lock_dir.deserialize source_path)
+;;
+
+let load_from_source_exn lock_dir =
+  load_from_source lock_dir >>| User_error.ok_exn
+;;
+
 let dev_tool_lock_dir_path dev_tool =
-  let tool = dev_tool |> Dev_tool.package_name |> Package_name.to_string in
-  let ctx_name = Context_name.default in
-  Path.Build.L.relative
-    Private_context.t.build_dir
-    [ Context_name.to_string ctx_name; ".dev-tool-locks"; tool ]
-  |> Path.build
+  dev_tool_lock_dir dev_tool
 ;;
 
 let get_path ctx_name =
@@ -174,7 +179,7 @@ let get_path ctx_name =
   | None | Some (Default { lock_dir = None; _ }) -> Memo.return (Some default_path)
   | Some (Default { lock_dir = Some lock_dir_selection; _ }) ->
     let+ source_lock_dir = select_lock_dir lock_dir_selection in
-    Some (lock_dir_of_source source_lock_dir)
+    Some (build_path_of_source source_lock_dir)
   | Some (Opam _) -> Memo.return None
 ;;
 
@@ -196,8 +201,8 @@ let get_with_path ctx =
         "No lock dir path for context available"
         [ "context", Context_name.to_dyn ctx ]
   in
-  let* () = Build_system.build_dir path in
-  match Dune_pkg.Lock_dir.read_disk path with
+  let* result = load path in
+  match result with
   | Error e -> Memo.return (Error e)
   | Ok lock_dir ->
     let+ workspace_lock_dir = get_workspace_lock_dir ctx in
@@ -215,7 +220,7 @@ let get_exn ctx = get ctx >>| User_error.ok_exn
 
 let of_dev_tool dev_tool =
   let path = dev_tool_lock_dir_path dev_tool in
-  Memo.of_reproducible_fiber (Fiber.return (Dune_pkg.Lock_dir.read_disk_exn path))
+  Memo.of_reproducible_fiber (Fiber.return (Dune_pkg.Lock_dir.deserialize_exn path))
 ;;
 
 let lock_dirs_of_workspace (workspace : Workspace.t) =

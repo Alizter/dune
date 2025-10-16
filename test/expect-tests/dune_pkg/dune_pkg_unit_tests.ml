@@ -85,7 +85,7 @@ let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
     let pp = Dune_lang.Format.pp_top_sexps ~version:(3, 11) cst in
     Format.asprintf "%a" Pp.to_fmt pp |> Io.write_file path);
   let lock_dir_round_tripped =
-    try Dune_rules.Lock_dir.read_disk_exn lock_dir_path with
+    try Dune_pkg.Lock_dir.deserialize_exn lock_dir_path with
     | User_error.E _ as exn ->
       let metadata_path = Path.relative lock_dir_path Lock_dir.metadata_filename in
       let metadata_file_contents = Io.read_file metadata_path in

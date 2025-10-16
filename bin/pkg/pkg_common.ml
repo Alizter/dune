@@ -150,6 +150,16 @@ let find_local_packages =
   >>| Package.Name.Map.map ~f:Dune_pkg.Local_package.of_package
 ;;
 
+let load_lock_dir lock_dir_path =
+  let path = Dune_rules.Lock_dir.build_path_of_source lock_dir_path in
+  Dune_rules.Lock_dir.load path
+;;
+
+let load_lock_dir_exn lock_dir_path =
+  let open Memo.O in
+  load_lock_dir lock_dir_path >>| User_error.ok_exn
+;;
+
 let pp_package { Lock_dir.Pkg.info = { Lock_dir.Pkg_info.name; version; avoid; _ }; _ } =
   let warn =
     if avoid

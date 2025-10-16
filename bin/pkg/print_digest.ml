@@ -8,7 +8,6 @@ let term =
       & pos 0 (some string) None
       & info [] ~doc:"The name of the package" ~docv:"PACKAGE")
   and+ context_name = Common.context_arg ~doc:"Context used to determine lockdir" in
-  let builder = Common.Builder.forbid_builds builder in
   let common, config = Common.init builder in
   let package_name =
     match Package_name.of_string_opt package_name with

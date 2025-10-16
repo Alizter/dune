@@ -3,10 +3,14 @@ module Pkg = Dune_pkg.Lock_dir.Pkg
 
 type t := Dune_pkg.Lock_dir.t
 
-(** Synchronous loading functions for immediate use (e.g., in tests) *)
-val read_disk : Path.t -> (t, User_message.t) result
+(** Load a lockdir that is produced as a build target. *)
+val load : Path.t -> (t, User_message.t) result Memo.t
+val load_exn : Path.t -> t Memo.t
 
-val read_disk_exn : Path.t -> t
+(** Convenience helper for lockdirs that originate from the source tree. *)
+val load_from_source : Path.Source.t -> (t, User_message.t) result Memo.t
+val load_from_source_exn : Path.Source.t -> t Memo.t
+
 val get_with_path : Context_name.t -> (Path.t * t, User_message.t) result Memo.t
 val get : Context_name.t -> (t, User_message.t) result Memo.t
 val get_exn : Context_name.t -> t Memo.t
@@ -31,6 +35,9 @@ val default_source_path : Path.Source.t
 
 (** The location in the source tree where a dev tool lock dir is expected *)
 val dev_tool_source_lock_dir : Dune_pkg.Dev_tool.t -> Path.Source.t
+
+(** Build directory path corresponding to a source lockdir. *)
+val build_path_of_source : Path.Source.t -> Path.t
 
 (** Returns the path to the lock_dir that will be used to lock the
     given dev tool *)

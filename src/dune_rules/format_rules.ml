@@ -48,32 +48,6 @@ module Ocamlformat = struct
     | Intf -> "--intf"
   ;;
 
-  let action_when_ocamlformat_is_locked ~input ~output kind =
-    let path = Path.build @@ Pkg_dev_tool.exe_path Ocamlformat in
-    let dir = Path.Build.parent_exn input in
-    let action =
-      (* An action which runs at on the file at [input] and stores the
-         resulting diff in the file at [output] *)
-      Action_builder.with_stdout_to
-        output
-        (let open Action_builder.O in
-         (* This ensures that at is installed as a dev tool before
-            running it. *)
-         let+ () = Action_builder.path path
-         (* Declare the dependency on the input file so changes to the input
-            file trigger ocamlformat to run again on the updated file. *)
-         and+ () = Action_builder.path (Path.build input) in
-         let args = [ flag_of_kind kind; Path.Build.basename input ] in
-         Action.chdir (Path.build dir) @@ Action.run (Ok path) args |> Action.Full.make)
-    in
-    let open Action_builder.With_targets.O in
-    (* Depend on [extra_deps] so if the ocamlformat config file
-       changes then ocamlformat will run again. *)
-    extra_deps dir
-    >>> action
-    |> With_targets.map ~f:(Action.Full.add_sandbox Sandbox_config.needs_sandboxing)
-  ;;
-
   let action_when_ocamlformat_isn't_locked ~input kind =
     let module S = String_with_vars in
     let dir = Path.Build.parent_exn input in
@@ -88,28 +62,23 @@ module Ocamlformat = struct
   ;;
 end
 
-let format_action format ~ocamlformat_is_locked ~input ~output ~expander kind =
-  match (format : Dialect.Format.t) with
-  | Ocamlformat when ocamlformat_is_locked ->
-    Memo.return (Ocamlformat.action_when_ocamlformat_is_locked ~input ~output kind)
-  | _ ->
-    assert (not ocamlformat_is_locked);
-    let loc, (action, extra_deps) =
-      match format with
-      | Ocamlformat ->
-        Loc.none, Ocamlformat.action_when_ocamlformat_isn't_locked ~input kind
-      | Action (loc, action) -> loc, (action, With_targets.return ())
-    in
-    let+ expander = expander in
-    let open Action_builder.With_targets.O in
-    extra_deps
-    >>> Pp_spec_rules.action_for_pp_with_target
-          ~sandbox:Sandbox_config.default
-          ~loc
-          ~expander
-          ~action
-          ~src:input
-          ~target:output
+let format_action format ~ocamlformat_is_locked:_ ~input ~output ~expander kind =
+  let loc, (action, extra_deps) =
+    match (format : Dialect.Format.t) with
+    | Ocamlformat ->
+      Loc.none, Ocamlformat.action_when_ocamlformat_isn't_locked ~input kind
+    | Action (loc, action) -> loc, (action, With_targets.return ())
+  in
+  let+ expander = expander in
+  let open Action_builder.With_targets.O in
+  extra_deps
+  >>> Pp_spec_rules.action_for_pp_with_target
+        ~sandbox:Sandbox_config.default
+        ~loc
+        ~expander
+        ~action
+        ~src:input
+        ~target:output
 ;;
 
 let gen_rules_output
@@ -124,7 +93,7 @@ let gen_rules_output
   let loc = Format_config.loc config in
   let dir = Path.Build.parent_exn output_dir in
   let alias_formatted = Alias.fmt ~dir:output_dir in
-  let* ocamlformat_is_locked = Lock_dir.enabled in
+let ocamlformat_is_locked = false in
   let setup_formatting file =
     (let input_basename = Path.Source.basename file in
      let input = Path.Build.relative dir input_basename in

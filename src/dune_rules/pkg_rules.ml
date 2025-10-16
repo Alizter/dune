@@ -246,7 +246,10 @@ module Paths = struct
         Path.Build.L.relative
           Private_context.t.build_dir
           [ Context_name.to_string ctx; ".pkg"; Pkg_digest.to_string pkg_digest ]
-      | Dev_tool dev_tool -> Pkg_dev_tool.universe_install_path dev_tool
+      | Dev_tool _ ->
+        Path.Build.L.relative
+          Private_context.t.build_dir
+          [ Context_name.to_string Context_name.default; ".pkg"; "dev-tool-disabled" ]
     in
     of_root pkg_digest.name ~root
   ;;
@@ -1386,7 +1389,6 @@ module DB = struct
   (* Returns the db for all dev tools combined with the default context, and
      the digest for the dev tool's package. *)
   let of_dev_tool dev_tool =
-    let system_provided = default_system_provided in
     let* lock_dir = Lock_dir.of_dev_tool dev_tool
     and* platform = Lock_dir.Sys_vars.solver_env ()
     and* lock_dir_active_for_default_ctx =
@@ -1403,12 +1405,12 @@ module DB = struct
         in
         Pkg_table.union pkg_digest_table_default_ctx pkg_digest_table_all_dev_tools
     in
-    ( { pkg_digest_table; system_provided }
+    ( { pkg_digest_table; system_provided = Package.Name.Set.empty }
     , pkg_digest_of_name
         lock_dir
         platform
         (Pkg_dev_tool.package_name dev_tool)
-        ~system_provided )
+        ~system_provided:Package.Name.Set.empty )
   ;;
 end
 
@@ -1520,19 +1522,8 @@ end = struct
             Code_error.raise
               "Package files directory is external source directory, this is unsupported"
               [ "dir", Path.External.to_dyn e ]
-          | In_source_tree s ->
-            (match Path.Source.explode s with
-             | [ "dev-tools.locks"; dev_tool; files_dir ] ->
-               Path.Build.L.relative
-                 Private_context.t.build_dir
-                 [ "default"; ".dev-tool-locks"; dev_tool; files_dir ]
-             | otherwise ->
-               Code_error.raise
-                 "Unexpected files_dir path"
-                 [ "components", (Dyn.list Dyn.string) otherwise ])
-          | In_build_dir b ->
-            (* it's already a build path, no need to do anything *)
-            b)
+          | In_source_tree s -> Path.source s
+          | In_build_dir b -> Path.build b)
       in
       let id = Pkg.Id.gen () in
       let write_paths =
@@ -1577,7 +1568,7 @@ end = struct
         ; paths
         ; write_paths
         ; info
-        ; files_dir
+        ; files_dir = Option.map files_dir ~f:Path.as_in_build_dir_exn
         ; pkg_digest
         ; exported_env = []
         }
@@ -2319,23 +2310,9 @@ let setup_package_rules db ~package_universe ~dir ~pkg_digest : Gen_rules.result
 ;;
 
 let setup_rules ~components ~dir ctx =
-  (* Note that the path components in the following patterns must
-     correspond to the paths returned by [Paths.make]. The string
-     ".dev-tool" is hardcoded into several patterns, and must match
-     the value of [Pkg_dev_tool.install_path_base_dir_name]. *)
-  assert (String.equal Pkg_dev_tool.install_path_base_dir_name ".dev-tool");
   match Context_name.is_default ctx, components with
-  | true, [ ".dev-tool"; dev_tool_package_name ] ->
-    let pkg_name = Package.Name.of_string dev_tool_package_name in
-    let dev_tool = Pkg_dev_tool.of_package_name pkg_name in
-    let* db, pkg_digest = DB.of_dev_tool (Dune_pkg.Dev_tool.of_package_name pkg_name) in
-    setup_package_rules db ~package_universe:(Dev_tool dev_tool) ~dir ~pkg_digest
-  | true, [ ".dev-tool" ] ->
-    Gen_rules.make
-      ~build_dir_only_sub_dirs:
-        (Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.all)
-      (Memo.return Rules.empty)
-    |> Memo.return
+  | true, [ ".dev-tool"; _ ]
+  | true, [ ".dev-tool" ] -> Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
   | _, [ ".pkg" ] ->
     Gen_rules.make
       ~build_dir_only_sub_dirs:
@@ -2355,8 +2332,8 @@ let setup_rules ~components ~dir ctx =
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | true, ".dev-tool" :: _ :: _ :: _ ->
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
-  | is_default, [] ->
-    let sub_dirs = ".pkg" :: (if is_default then [ ".dev-tool" ] else []) in
+  | _is_default, [] ->
+    let sub_dirs = [ ".pkg" ] in
     let build_dir_only_sub_dirs =
       Gen_rules.Build_only_sub_dirs.singleton ~dir @@ Subdir_set.of_list sub_dirs
     in
