@@ -2,35 +2,63 @@ open Import
 module Local_package = Dune_pkg.Local_package
 
 module Show_lock = struct
-  let print_lock lock_dir_arg () =
+  let print_lock lock_dir_arg common () =
     let open Fiber.O in
-    let* lock_dir_paths =
-      Memo.run (Workspace.workspace ())
-      >>| Pkg.Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dir_arg
-    in
-    Fiber.parallel_map lock_dir_paths ~f:(fun lock_dir_source ->
-      let lock_dir_path = Path.source lock_dir_source in
-      let* lock_dir = Pkg.Pkg_common.load_lock_dir_exn lock_dir_source |> Memo.run in
-      let+ platform = Pkg.Pkg_common.solver_env_from_system_and_context ~lock_dir_path in
-      let packages =
-        Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
-        |> Package_name.Map.values
+    let request (_setup : Import.Main.build_system) =
+      let open Action_builder.O in
+      let* lock_dir_paths =
+        Action_builder.of_memo (
+          let open Memo.O in
+          let* workspace = Workspace.workspace () in
+          Memo.return (Pkg.Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dir_arg workspace)
+        )
       in
-      Pp.concat
-        ~sep:Pp.space
-        [ Pp.hovbox
-          @@ Pp.textf "Contents of %s:" (Path.to_string_maybe_quoted lock_dir_path)
-        ; Pkg.Pkg_common.pp_packages packages
-        ]
-      |> Pp.vbox)
-    >>| Console.print
+      let* () =
+        lock_dir_paths
+        |> List.map ~f:(fun lock_dir_source ->
+          let lock_dir_path = Dune_rules.Lock_dir.build_path_of_source lock_dir_source in
+          Action_builder.path lock_dir_path)
+        |> Action_builder.all_unit
+      in
+      Action_builder.of_memo (
+        let open Memo.O in
+        let* results =
+          Memo.List.map lock_dir_paths ~f:(fun lock_dir_source ->
+            let lock_dir_path = Path.source lock_dir_source in
+            let build_path = Dune_rules.Lock_dir.build_path_of_source lock_dir_source in
+            let* lock_dir = Dune_rules.Lock_dir.load_exn build_path in
+            Memo.return (lock_dir_path, lock_dir))
+        in
+        Memo.of_reproducible_fiber (
+          let open Fiber.O in
+          let+ processed_results =
+            Fiber.sequential_map results ~f:(fun (lock_dir_path, lock_dir) ->
+              let+ platform = Pkg.Pkg_common.solver_env_from_system_and_context ~lock_dir_path in
+              let packages =
+                Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
+                |> Package_name.Map.values
+              in
+              Pp.concat
+                ~sep:Pp.space
+                [ Pp.hovbox
+                  @@ Pp.textf "Contents of %s:" (Path.to_string_maybe_quoted lock_dir_path)
+                ; Pkg.Pkg_common.pp_packages packages
+                ]
+              |> Pp.vbox)
+          in
+          Console.print processed_results))
+    in
+    Build.run_build_system ~common ~request
+    >>| function
+    | Ok () -> ()
+    | Error `Already_reported -> raise Dune_util.Report_error.Already_reported
   ;;
 
   let term =
-  let+ builder = Common.Builder.term
-  and+ lock_dir_arg = Pkg.Pkg_common.Lock_dirs_arg.term in
-  let common, config = Common.init builder in
-    Scheduler.go_with_rpc_server ~common ~config @@ print_lock lock_dir_arg
+    let+ builder = Common.Builder.term
+    and+ lock_dir_arg = Pkg.Pkg_common.Lock_dirs_arg.term in
+    let common, config = Common.init builder in
+    Scheduler.go_with_rpc_server ~common ~config @@ print_lock lock_dir_arg common
   ;;
 
   let command =
