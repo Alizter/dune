@@ -649,7 +649,11 @@ let private_context ~dir components _ctx =
   >>= function
   | `Invalid_context -> Memo.return Gen_rules.unknown_context
   | `Valid (ctx, components) ->
-    let+ lock_rules = Lock_rules.setup_rules ~dir ~components
+    let* lock_dir_enabled = Lock_dir.enabled in
+    let+ lock_rules =
+      if lock_dir_enabled
+      then Lock_rules.setup_rules ~dir ~components
+      else Memo.return Gen_rules.no_rules
     and+ pkg_rules = Pkg_rules.setup_rules ctx ~dir ~components in
     Gen_rules.combine lock_rules pkg_rules
   | `Root ->

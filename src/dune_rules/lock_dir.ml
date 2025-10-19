@@ -137,9 +137,7 @@ let dev_tool_source_lock_dir dev_tool =
   Path.Source.append_local dev_tools_path dev_tool_segment
 ;;
 
-let dev_tool_lock_dir dev_tool =
-  Path.source (dev_tool_source_lock_dir dev_tool)
-;;
+let dev_tool_lock_dir dev_tool = Path.source (dev_tool_source_lock_dir dev_tool)
 
 let build_path_of_source p =
   let local = Path.Source.to_local p in
@@ -159,13 +157,8 @@ let load_from_source lock_dir =
   Memo.return (Dune_pkg.Lock_dir.deserialize source_path)
 ;;
 
-let load_from_source_exn lock_dir =
-  load_from_source lock_dir >>| User_error.ok_exn
-;;
-
-let dev_tool_lock_dir_path dev_tool =
-  dev_tool_lock_dir dev_tool
-;;
+let load_from_source_exn lock_dir = load_from_source lock_dir >>| User_error.ok_exn
+let dev_tool_lock_dir_path dev_tool = dev_tool_lock_dir dev_tool
 
 let get_path ctx_name =
   let* workspace = Workspace.workspace () in
@@ -253,9 +246,9 @@ let enabled =
      | Set (_, `Disabled) -> Memo.return false
      | Unset ->
        let* lock_dirs = lock_dirs_of_workspace workspace in
-       if Path.Source.Set.is_empty lock_dirs
-       then Memo.return false
-       else Memo.return true)
+       Path.Source.Set.to_list lock_dirs
+       |> Memo.List.exists ~f:(fun lock_dir ->
+         Fs_memo.dir_exists (Path.Outside_build_dir.In_source_dir lock_dir)))
 ;;
 
 let lock_dir_active ctx =
