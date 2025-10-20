@@ -649,7 +649,7 @@ let private_context ~dir components _ctx =
   >>= function
   | `Invalid_context -> Memo.return Gen_rules.unknown_context
   | `Valid (ctx, components) ->
-    let* lock_dir_enabled = Lock_dir.enabled in
+    let* lock_dir_enabled = Lock_dir.enabled () in
     let+ lock_rules =
       if lock_dir_enabled
       then Lock_rules.setup_rules ~dir ~components
@@ -734,7 +734,7 @@ let gen_rules ctx ~dir components =
     let gen_pkg_alias_rule = Pkg_rules.setup_pkg_install_alias ~dir ctx in
     let* sctx_rules = gen_rules ctx (Super_context.find_exn ctx) ~dir components in
     let sctx_rules = Gen_rules.combine sctx_rules gen_pkg_alias_rule in
-    let+ lock_dir_enabled = Lock_dir.enabled in
+    let+ lock_dir_enabled = Lock_dir.enabled () in
     match lock_dir_enabled with
     | false -> sctx_rules
     | true ->

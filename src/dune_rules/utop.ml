@@ -163,7 +163,7 @@ let utop_ocamlpath =
    we need to tell findlib where to look for libraries by means of a custom
    findlib.conf file. *)
 let findlib_conf sctx ~dir =
-  let* lock_dir_enabled = Lock_dir.enabled in
+  let* lock_dir_enabled = Lock_dir.enabled () in
   match lock_dir_enabled with
   | false ->
     (* If there isn't lockdir don't create the findlib.conf rule. *)
@@ -182,7 +182,7 @@ let findlib_conf sctx ~dir =
 
 let lib_db sctx ~dir =
   let* scope = Scope.DB.find_by_dir dir in
-  let* lock_dir_enabled = Lock_dir.enabled in
+  let* lock_dir_enabled = Lock_dir.enabled () in
   match lock_dir_enabled with
   | false -> Memo.return (Scope.libs scope)
   | true ->

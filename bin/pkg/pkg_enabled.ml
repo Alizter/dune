@@ -7,7 +7,7 @@ let term =
     Memo.run
     @@
     let open Memo.O in
-    let+ enabled = Dune_rules.Lock_dir.enabled in
+    let+ enabled = Dune_rules.Lock_dir.enabled () in
     match enabled with
     | true -> ()
     | false -> exit 1)

@@ -1306,6 +1306,8 @@ let init_with_root ~(root : Workspace_root.t) (builder : Builder.t) =
   (* We need to print this before reading the workspace file, so that the editor
      can interpret errors in the workspace file. *)
   print_entering_message c;
+  (* Set the ignore_lock_dir flag before loading the workspace *)
+  Dune_rules.Clflags.ignore_lock_dir := c.builder.ignore_lock_dir;
   Workspace.Clflags.set c.builder.workspace_config;
   let config =
     (* Here we make the assumption that this computation doesn't yield. *)

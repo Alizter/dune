@@ -236,7 +236,7 @@ let lock_dirs_of_workspace (workspace : Workspace.t) =
     Set.union (Set.of_list lock_paths_from_toplevel) (Set.of_list lock_dirs_from_ctx)
 ;;
 
-let enabled =
+let enabled () =
   match !Clflags.ignore_lock_dir with
   | true -> Memo.return false
   | false ->
@@ -252,7 +252,7 @@ let enabled =
 ;;
 
 let lock_dir_active ctx =
-  let* enabled = enabled in
+  let* enabled = enabled () in
   match enabled with
   | false -> Memo.return false
   | true ->

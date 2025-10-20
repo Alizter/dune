@@ -52,7 +52,7 @@ let term =
             [ Pp.textf "no library is defined in %s" (String.maybe_quoted dir) ]
         | true ->
           let* () = Build_system.build_file utop_exe in
-          let* lock_dir_enabled = Dune_rules.Lock_dir.enabled in
+          let* lock_dir_enabled = Dune_rules.Lock_dir.enabled () in
           let* () =
             if lock_dir_enabled
             then

@@ -579,19 +579,16 @@ module Group = struct
     { native; targets }
   ;;
 
-  let default (builder : Builder.t) ~lock ~targets =
+  let default (builder : Builder.t) ~targets =
     let* path =
       let+ env = builder.env in
       Env_path.path env
     in
     let+ (kind : Kind.t) =
-      if lock
-      then Memo.return @@ Kind.Lock { default = true }
-      else
-        Pkg_rules.lock_dir_active builder.name
-        >>| function
-        | true -> Kind.Lock { default = true }
-        | false -> Default
+      Pkg_rules.lock_dir_active builder.name
+      >>| function
+      | true -> Kind.Lock { default = true }
+      | false -> Default
     in
     create { builder with path } ~kind ~targets
   ;;
@@ -659,7 +656,7 @@ module Group = struct
       match context with
       | Opam { base; switch } ->
         create_for_opam builder ~switch ~loc:base.loc ~targets:base.targets
-      | Default { lock_dir; base } ->
+      | Default { lock_dir = _; base } ->
         let* builder =
           match builder.findlib_toolchain with
           | Some _ -> Memo.return builder
@@ -672,8 +669,7 @@ module Group = struct
                  findlib_toolchain = Some (Context_name.parse_string_exn (Loc.none, name))
                })
         in
-        let lock = Option.is_some lock_dir in
-        default builder ~targets:base.targets ~lock
+        default builder ~targets:base.targets
     ;;
 
     let memo =
