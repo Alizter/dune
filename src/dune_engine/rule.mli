@@ -8,6 +8,7 @@ module Info : sig
     | From_dune_file of Loc.t
     | Internal
     | Source_file_copy of Path.Source.t
+    | Package of Loc.t option
 
   val of_loc_opt : Loc.t option -> t
 end

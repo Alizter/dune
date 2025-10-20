@@ -45,5 +45,5 @@ dune.lock):
 Building fails as the patch cannot be found anymore
 
   $ build_pkg test
-  Error: Lock directory is not active for context "default".
+  Error: No rule found for default/.lock/dune.lock (context _private)
   [1]

@@ -5,6 +5,7 @@ module Info = struct
     | From_dune_file of Loc.t
     | Internal
     | Source_file_copy of Path.Source.t
+    | Package of Loc.t option
 
   let of_loc_opt = function
     | None -> Internal
@@ -15,6 +16,7 @@ module Info = struct
     | From_dune_file loc -> Dyn.Variant ("From_dune_file", [ Loc.to_dyn loc ])
     | Internal -> Dyn.Variant ("Internal", [])
     | Source_file_copy p -> Dyn.Variant ("Source_file_copy", [ Path.Source.to_dyn p ])
+    | Package loc -> Dyn.Variant ("Package", [ Dyn.option Loc.to_dyn loc ])
   ;;
 end
 
@@ -80,6 +82,7 @@ let make ?(mode = Mode.Standard) ?(info = Info.Internal) ~targets action =
       Code_error.raise
         message
         [ "info", Info.to_dyn info; "targets", Targets.to_dyn targets ]
+    | Package loc -> User_error.raise ?loc [ Pp.text message ]
   in
   let targets =
     match Targets.validate targets with
@@ -105,6 +108,7 @@ let make ?(mode = Mode.Standard) ?(info = Info.Internal) ~targets action =
         (Path.drop_optional_build_context
            (Path.build (Path.Build.relative targets.root "_unknown_")))
     | Source_file_copy p -> Loc.in_file (Path.source p)
+    | Package loc -> Option.value loc ~default:Loc.none
   in
   { id = Id.gen (); targets; action; mode; info; loc }
 ;;

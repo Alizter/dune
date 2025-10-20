@@ -11,6 +11,7 @@ type error =
   ; msg : User_message.t
   ; has_embedded_location : bool
   ; needs_stack_trace : bool
+  ; package_management_failure : bool
   }
 
 let code_error ~loc ~dyn_without_loc =
@@ -29,6 +30,7 @@ let code_error ~loc ~dyn_without_loc =
         ]
   ; has_embedded_location = false
   ; needs_stack_trace = false
+  ; package_management_failure = false
   }
 ;;
 
@@ -58,10 +60,12 @@ let get_error_from_exn = function
              [ Pp.text "Dependency cycle between:"; Pp.chain cycle ~f:(fun p -> p) ]
        ; has_embedded_location = false
        ; needs_stack_trace = false
+       ; package_management_failure = false
        })
   | User_error.E msg ->
     let has_embedded_location = User_message.has_embedded_location msg in
     let needs_stack_trace = User_message.needs_stack_trace msg in
+    let package_management_failure = User_message.package_management_failure msg in
     let msg =
       match msg.dir with
       | None -> msg
@@ -71,7 +75,12 @@ let get_error_from_exn = function
          | None -> msg
          | Some (ctxt, _) -> { msg with context = Some ctxt })
     in
-    { responsible = User; msg; has_embedded_location; needs_stack_trace }
+    { responsible = User
+    ; msg
+    ; has_embedded_location
+    ; needs_stack_trace
+    ; package_management_failure
+    }
   | Code_error.E e ->
     code_error ~loc:e.loc ~dyn_without_loc:(Code_error.to_dyn_without_loc e)
   | Unix.Unix_error (error, syscall, arg) ->
@@ -81,12 +90,14 @@ let get_error_from_exn = function
           [ Unix_error.Detailed.pp (Unix_error.Detailed.create error ~syscall ~arg) ]
     ; has_embedded_location = false
     ; needs_stack_trace = false
+    ; package_management_failure = false
     }
   | Sys_error msg ->
     { responsible = User
     ; msg = User_error.make [ Pp.text msg ]
     ; has_embedded_location = false
     ; needs_stack_trace = false
+    ; package_management_failure = false
     }
   | exn ->
     let open Pp.O in
@@ -108,6 +119,7 @@ let get_error_from_exn = function
     ; msg = User_message.make ?loc [ pp ]
     ; has_embedded_location = Option.is_some loc
     ; needs_stack_trace = false
+      ; package_management_failure = false
     }
 ;;
 
@@ -155,7 +167,13 @@ let gen_report exn backtrace =
   match exn with
   | Already_reported -> ()
   | _ ->
-    let { responsible; msg; has_embedded_location; needs_stack_trace } =
+    let { responsible
+        ; msg
+        ; has_embedded_location
+        ; needs_stack_trace
+        ; package_management_failure
+        }
+      =
       get_error_from_exn exn
     in
     let msg = if msg.loc = Some Loc.none then { msg with loc = None } else msg in
@@ -180,7 +198,8 @@ let gen_report exn backtrace =
       then memo_stack
       else (
         match msg.loc with
-        | None -> if has_embedded_location then [] else memo_stack
+        | None ->
+          if has_embedded_location || package_management_failure then [] else memo_stack
         | Some loc ->
           if Filename.is_relative (Loc.start loc).pos_fname
           then

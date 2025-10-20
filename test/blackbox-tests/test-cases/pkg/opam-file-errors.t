@@ -34,4 +34,9 @@ Handle the case where opam's parser rejects the file.
                 ^
   Error: unable to parse opam file
   Parse error
+  -> required by _build/_private/default/.lock/dune.lock
+  -> required by lock directory environment for context "default"
+  -> required by base environment for context "default"
+  -> required by loading findlib for context "default"
+  -> required by loading the OCaml compiler for context "default"
   [1]
