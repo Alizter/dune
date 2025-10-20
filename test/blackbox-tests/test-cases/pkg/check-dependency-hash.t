@@ -81,7 +81,8 @@ Add a second dependency to the project:
   > EOF
   $ dune pkg validate-lockdir
   Lockdir dune.lock does not contain a solution for local packages:
-  File "dune.lock/lock.dune", line 3, characters 17-49:
+  File "_build/_private/default/.lock/dune.lock/lock.dune", line 3, characters
+  17-49:
   Error: Dependency hash in lockdir does not match the hash of non-local
   dependencies of this project. The lockdir expects the the non-local
   dependencies to hash to:
@@ -101,7 +102,8 @@ Remove all dependencies from the project:
   > EOF
   $ dune pkg validate-lockdir
   Lockdir dune.lock does not contain a solution for local packages:
-  File "dune.lock/lock.dune", line 3, characters 17-49:
+  File "_build/_private/default/.lock/dune.lock/lock.dune", line 3, characters
+  17-49:
   Error: This project has no non-local dependencies yet the lockfile contains a
   dependency hash: 7ba1cacd46bb2609d7b9735909c3b8a5
   Hint: Regenerate the lockdir by running 'dune pkg lock'
@@ -123,32 +125,26 @@ Exercise handling invalid dependency hashes.
 Case where the label ("md5") is missing:
   $ make_lock_metadata_with_hash badhash
   $ dune pkg validate-lockdir
-  Failed to parse lockdir dune.lock:
-  File "dune.lock/lock.dune", line 2, characters 17-24:
+  File "_build/_private/default/.lock/dune.lock/lock.dune", line 2, characters 17-24:
+  2 | (dependency_hash badhash)
+                       ^^^^^^^
   Error: Dependency hash is not a valid md5 hash: badhash
-  
-  Error: Some lockdirs do not contain solutions for local packages:
-  - dune.lock
   [1]
 
 Case where the label is not "md5":
   $ make_lock_metadata_with_hash foo=badhash
   $ dune pkg validate-lockdir
-  Failed to parse lockdir dune.lock:
-  File "dune.lock/lock.dune", line 2, characters 17-28:
+  File "_build/_private/default/.lock/dune.lock/lock.dune", line 2, characters 17-28:
+  2 | (dependency_hash foo=badhash)
+                       ^^^^^^^^^^^
   Error: Dependency hash is not a valid md5 hash: foo=badhash
-  
-  Error: Some lockdirs do not contain solutions for local packages:
-  - dune.lock
   [1]
 
 Case where the the hash is not a valid md5 hash:
   $ make_lock_metadata_with_hash md5=badhash
   $ dune pkg validate-lockdir
-  Failed to parse lockdir dune.lock:
-  File "dune.lock/lock.dune", line 2, characters 17-28:
+  File "_build/_private/default/.lock/dune.lock/lock.dune", line 2, characters 17-28:
+  2 | (dependency_hash md5=badhash)
+                       ^^^^^^^^^^^
   Error: Dependency hash is not a valid md5 hash: md5=badhash
-  
-  Error: Some lockdirs do not contain solutions for local packages:
-  - dune.lock
   [1]
