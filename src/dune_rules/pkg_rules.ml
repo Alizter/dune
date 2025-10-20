@@ -2382,15 +2382,20 @@ let ocaml_toolchain context =
 ;;
 
 let all_deps universe =
-  let* db =
-    (* Disallow sharing so that the only packages in the DB are the ones from
-       the universe's respective lock directory. *)
-    DB.of_ctx (Package_universe.context_name universe) ~allow_sharing:false
-  in
-  Pkg_digest.Map.values db.pkg_digest_table
-  |> Memo.parallel_map ~f:(fun { DB.Pkg_table.pkg_digest; _ } ->
-    Resolve.resolve db Loc.none pkg_digest universe)
-  >>| Pkg.top_closure
+  let ctx = Package_universe.context_name universe in
+  let* lock_active = Lock_dir.lock_dir_active ctx in
+  match lock_active with
+  | false -> Memo.return []
+  | true ->
+    let* db =
+      (* Disallow sharing so that the only packages in the DB are the ones from
+         the universe's respective lock directory. *)
+      DB.of_ctx ctx ~allow_sharing:false
+    in
+    Pkg_digest.Map.values db.pkg_digest_table
+    |> Memo.parallel_map ~f:(fun { DB.Pkg_table.pkg_digest; _ } ->
+      Resolve.resolve db Loc.none pkg_digest universe)
+    >>| Pkg.top_closure
 ;;
 
 let all_project_deps context = all_deps (Dependencies context)
@@ -2444,10 +2449,14 @@ let exported_env context =
   Memo.push_stack_frame ~human_readable_description:(fun () ->
     Pp.textf "lock directory environment for context %S" (Context_name.to_string context))
   @@ fun () ->
-  let+ all_project_deps = all_project_deps context in
-  let env = Pkg.build_env_of_deps all_project_deps in
-  let vars = Env.Map.map env ~f:Value_list_env.string_of_env_values in
-  Env.extend Env.empty ~vars
+  let* lock_dir_active = lock_dir_active context in
+  match lock_dir_active with
+  | false -> Memo.return Env.empty
+  | true ->
+    let+ all_project_deps = all_project_deps context in
+    let env = Pkg.build_env_of_deps all_project_deps in
+    let vars = Env.Map.map env ~f:Value_list_env.string_of_env_values in
+    Env.extend Env.empty ~vars
 ;;
 
 let find_package ctx pkg =

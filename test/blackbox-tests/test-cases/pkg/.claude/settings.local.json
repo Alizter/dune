@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/ali/dune2/src/**)",
+      "Read(//home/ali/dune2/bin/**)",
+      "Read(//home/ali/dune2/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

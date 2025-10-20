@@ -263,7 +263,7 @@ let odoc_dev_tool_exe_path_building_if_necessary () =
 
 let odoc_program sctx dir =
   let open Action_builder.O in
-  let* odoc_dev_tool_enabled = Action_builder.of_memo Lock_dir.enabled in
+  let* odoc_dev_tool_enabled = Action_builder.of_memo (Lock_dir.enabled ()) in
   match odoc_dev_tool_enabled with
   | true -> odoc_dev_tool_exe_path_building_if_necessary ()
   | false ->

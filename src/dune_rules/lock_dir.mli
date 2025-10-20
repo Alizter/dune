@@ -21,7 +21,7 @@ val get_path : Context_name.t -> Path.t option Memo.t
 (** Returns true if lock dir functionality is active, be it via explicitely
     opting in via [(pkg enabled)] or inferred through the existence of lock
     directories *)
-val enabled : bool Memo.t
+val enabled : unit -> bool Memo.t
 
 (** Returns the path to the lockdir that will be used to lock the
     given dev tool *)
