@@ -78,11 +78,11 @@ Locking should be successful and it should include the additional file
   - foo.1.2
 
   $ find ${default_lock_dir} | sort
-  dune.lock
-  dune.lock/foo.files
-  dune.lock/foo.files/hello.txt
-  dune.lock/foo.pkg
-  dune.lock/lock.dune
+  _build/_private/default/.lock/dune.lock
+  _build/_private/default/.lock/dune.lock/foo.files
+  _build/_private/default/.lock/dune.lock/foo.files/hello.txt
+  _build/_private/default/.lock/dune.lock/foo.pkg
+  _build/_private/default/.lock/dune.lock/lock.dune
 
 The extra-file should have the same content as the original file, we determine
 that by hashing with the checksum that we expected in the OPAM file
