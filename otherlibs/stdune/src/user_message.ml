@@ -139,6 +139,10 @@ module Annots = struct
   let has_embedded_location = Key.create ~name:"has-embedded-location" Unit.to_dyn
   let needs_stack_trace = Key.create ~name:"needs-stack-trace" Unit.to_dyn
 
+  let package_management_failure =
+    Key.create ~name:"package-management-failure" Unit.to_dyn
+  ;;
+
   let to_dyn t =
     Dyn.Map
       (let f =
@@ -316,6 +320,11 @@ let is_loc_none loc =
 
 let has_embedded_location msg = Annots.mem msg.annots Annots.has_embedded_location
 let has_location msg = (not (is_loc_none msg.loc)) || has_embedded_location msg
+
+let package_management_failure msg =
+  Annots.mem msg.annots Annots.package_management_failure
+;;
+
 let needs_stack_trace msg = Annots.mem msg.annots Annots.needs_stack_trace
 
 let command cmd =

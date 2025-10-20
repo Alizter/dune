@@ -23,7 +23,13 @@ available that avoids a cycle.
 Solver finds the invalid solution as it doesn't check cycles.
 
   $ solve c
-  Solution for dune.lock:
-  - a.0.0.1
-  - b.0.0.1
-  - c.0.0.1
+  Error: Dependency cycle between packages:
+     a.0.0.1
+  -> b.0.0.1
+  -> c.0.0.1
+  -> a.0.0.1
+  -> required by lock directory environment for context "default"
+  -> required by base environment for context "default"
+  -> required by loading findlib for context "default"
+  -> required by loading the OCaml compiler for context "default"
+  [1]

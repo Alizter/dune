@@ -34,7 +34,6 @@ constraint on `foo` will fail:
   >  (name x)
   >  (depends (foo (= :version))))
   > EOF
-  File "default/.lock/_unknown_", line 1, characters 0-0:
   Error: Couldn't solve the package dependency formula.
   Selected candidates: x.dev
   - foo -> (problem)

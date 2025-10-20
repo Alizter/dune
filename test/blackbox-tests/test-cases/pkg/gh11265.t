@@ -13,7 +13,6 @@ A package which depends on a single package and also conflicts with the same pac
   >  (depends bar)
   >  (conflicts bar))
   > EOF
-  File "default/.lock/_unknown_", line 1, characters 0-0:
   Error: Couldn't solve the package dependency formula.
   Selected candidates: foo.dev
   - bar -> (problem)
@@ -30,7 +29,6 @@ Now add an additional conflict on a non-existant package "baz". Dune should cont
   >  (depends bar)
   >  (conflicts bar baz))
   > EOF
-  File "default/.lock/_unknown_", line 1, characters 0-0:
   Error: Couldn't solve the package dependency formula.
   Selected candidates: foo.dev
   - bar -> (problem)

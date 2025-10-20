@@ -11,7 +11,7 @@ shouldn't be allowed (for now)
   > opam-version: "2.0"
   > EOF
   $ make_lockdir
-  $ touch ${default_lock_dir}/mypkg.lock
+  $ touch ${source_lock_dir}/mypkg.lock
 
   $ dune build
 

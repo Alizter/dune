@@ -64,12 +64,10 @@ Add a file to the lockdir to cause the parser to fail.
   > foo
   > EOF
   $ dune pkg validate-lockdir
-  Failed to parse lockdir dune.lock:
-  File "dune.lock/bar.pkg", line 1, characters 0-3:
+  File "_build/_private/default/.lock/dune.lock/bar.pkg", line 1, characters 0-3:
+  1 | foo
+      ^^^
   Error: S-expression of the form (<name> <values>...) expected
-  
-  Error: Some lockdirs do not contain solutions for local packages:
-  - dune.lock
   [1]
 
 Remove the file but corrupt the lockdir metadata file.
@@ -77,12 +75,10 @@ Remove the file but corrupt the lockdir metadata file.
   $ rm ${source_lock_dir}/bar.pkg
   $ echo foo >> ${source_lock_dir}/lock.dune
   $ dune pkg validate-lockdir
-  Failed to parse lockdir dune.lock:
-  File "dune.lock/lock.dune", line 8, characters 0-3:
+  File "_build/_private/default/.lock/dune.lock/lock.dune", line 8, characters 0-3:
+  8 | foo
+      ^^^
   Error: S-expression of the form (<name> <values>...) expected
-  
-  Error: Some lockdirs do not contain solutions for local packages:
-  - dune.lock
   [1]
 
 Regenerate the lockdir and validate the result.

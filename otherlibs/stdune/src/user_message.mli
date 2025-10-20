@@ -49,6 +49,9 @@ module Annots : sig
 
   (** The message needs a stack trace for clarity. *)
   val needs_stack_trace : unit Key.t
+
+  (** The message is related to a package management failure. *)
+  val package_management_failure : unit Key.t
 end
 
 (** A user message.contents composed of an optional file location and a list of
@@ -124,6 +127,10 @@ val has_embedded_location : t -> bool
 (** Returns [true] if the message's annotations contains
     [Annot.Needs_stack_trace]. *)
 val needs_stack_trace : t -> bool
+
+(** Returns [true] if the message's annotations contains
+    [Annot.package_management_failure]. *)
+val package_management_failure : t -> bool
 
 (** Formatting of shell commands *)
 val command : string -> Style.t Pp.t

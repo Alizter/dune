@@ -139,6 +139,7 @@ let describe_rule (rule : Rule.t) =
     start.pos_fname ^ ":" ^ string_of_int start.pos_lnum
   | Internal -> "<internal location>"
   | Source_file_copy _ -> "file present in source tree"
+  | Package _loc -> "<internal package rule>"
 ;;
 
 let report_rule_src_dir_conflict dir fn (rule : Rule.t) =
@@ -152,6 +153,7 @@ let report_rule_src_dir_conflict dir fn (rule : Rule.t) =
         | Some s -> Path.source s
       in
       Loc.in_dir dir
+    | Package loc -> Option.value loc ~default:(Loc.in_dir (Path.build dir))
   in
   User_error.raise
     ~loc

@@ -1433,6 +1433,19 @@ module Solver = struct
   ;;
 end
 
+let user_message_with_pkg_annot msg =
+  { msg with
+    User_message.annots =
+      User_message.Annots.singleton User_message.Annots.package_management_failure ()
+  }
+;;
+
+let exn_with_pkg_annot exn =
+  Exn_with_backtrace.map exn ~f:(function
+    | User_error.E msg -> User_error.E (user_message_with_pkg_annot msg)
+    | x -> x)
+;;
+
 let solve_package_list packages ~context =
   Fiber.collect_errors (fun () ->
     (* [Solver.solve] returns [Error] when it's unable to find a solution to
@@ -1447,6 +1460,7 @@ let solve_package_list packages ~context =
    | Ok (Error e) -> Error (`Diagnostics e)
    | Error [] -> assert false
    | Error (exn :: _) ->
+     let exn = exn_with_pkg_annot exn in
      (* CR-rgrinberg: this needs to be handled right *)
      Error (`Exn exn))
   >>= function
@@ -1458,7 +1472,12 @@ let solve_package_list packages ~context =
     (match exn.exn with
      | OpamPp.(Bad_format _ | Bad_format_list _ | Bad_version _) as bad_format ->
        (* CR-rgrinberg: needs to include locations *)
-       User_error.raise [ Pp.text (OpamPp.string_of_bad_format bad_format) ]
+       User_error.raise
+         ~annots:
+           (User_message.Annots.singleton
+              User_message.Annots.package_management_failure
+              ())
+         [ Pp.text (OpamPp.string_of_bad_format bad_format) ]
      | User_error.E _ -> Exn_with_backtrace.reraise exn
      | _ ->
        Code_error.raise
@@ -1580,6 +1599,10 @@ let reject_unreachable_packages =
                     project's dependency on the "dune" package which are not
                     satisfied by the current version of Dune. *)
                  User_error.raise
+                   ~annots:
+                     (User_message.Annots.singleton
+                        User_message.Annots.package_management_failure
+                        ())
                    [ Pp.text
                        "The current version of Dune does not satisfy the version \
                         constraints for Dune in this project's dependencies."
@@ -1778,6 +1801,10 @@ let solve_lock_dir
               if (not (is_dune dep_name)) && Package_name.Map.mem local_packages dep_name
               then
                 User_error.raise
+                  ~annots:
+                    (User_message.Annots.singleton
+                       User_message.Annots.package_management_failure
+                       ())
                   ~loc
                   [ Pp.textf
                       "Dune does not support packages outside the workspace depending on \

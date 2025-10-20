@@ -173,7 +173,13 @@ module Spec = struct
         ~portable_lock_dir
     in
     match solver_result with
-    | Error (`Diagnostic_message diagnostic) -> User_error.raise [ diagnostic ]
+    | Error (`Diagnostic_message diagnostic) -> User_error.raise 
+
+         ~annots:
+           (User_message.Annots.singleton
+              User_message.Annots.package_management_failure
+              ())
+      [ diagnostic ]
     | Ok { pinned_packages; files; lock_dir; _ } ->
       let lock_dir_path = Path.build target in
       let* lock_dir =
@@ -233,9 +239,7 @@ let action_builder_with_dir_targets ~directory_targets =
 let copy_lock_dir ~target ~lock_dir ~deps ~files =
   let open Action_builder.O in
   Action_builder.deps deps
-  >>> (
-
-    Path.Set.to_list_map files ~f:(fun src ->
+  >>> (Path.Set.to_list_map files ~f:(fun src ->
          let suffix = Path.drop_prefix_exn src ~prefix:(Path.source lock_dir) in
          let dst = Path.Build.append_local target suffix in
          let parent = Path.Build.parent_exn dst in
@@ -256,7 +260,12 @@ let setup_copy_rules ~dir:target ~lock_dir =
       let { Action_builder.With_targets.build; targets } =
         copy_lock_dir ~target ~lock_dir ~deps ~files
       in
-      let rule = Rule.make ~targets build in
+      let rule =
+        Rule.make
+          ~info:(Package (Some (Loc.in_file (Path.source lock_dir))))
+          ~targets
+          build
+      in
       directory_targets, Rules.of_rules [ rule ]
   in
   Gen_rules.make ~directory_targets (Memo.return rules)
@@ -421,8 +430,10 @@ let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
                   |> List.fold_left ~init:[] ~f:(fun acc (_repo_name, pkg_map) ->
                     pkg_map
                     |> Dune_lang.Package_name.Map.to_list
-                    |> List.fold_left ~init:acc ~f:(fun acc (pkg_name, ((loc, _url), _pkg)) ->
-                      (loc, Dune_lang.Package_name.to_string pkg_name) :: acc))
+                    |> List.fold_left
+                         ~init:acc
+                         ~f:(fun acc (pkg_name, ((loc, _url), _pkg)) ->
+                           (loc, Dune_lang.Package_name.to_string pkg_name) :: acc))
                 in
                 Dune_pkg.Pin.DB.Workspace.extract workspace_pins ~names:all_pin_names
               in
@@ -454,7 +465,7 @@ let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
       |> Action_builder.with_no_targets
       |> Action_builder.With_targets.add_directories ~directory_targets:[ target ]
     in
-    let rule = Rule.make ~targets build in
+    let rule = Rule.make ~info:(Package None) ~targets build in
     Rules.of_rules [ rule ]
   in
   let directory_targets = Path.Build.Map.singleton target Loc.none in

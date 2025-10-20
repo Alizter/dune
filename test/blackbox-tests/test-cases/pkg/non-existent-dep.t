@@ -34,7 +34,6 @@ A few packages here so the errors could get large.
   > EOF
 
   $ dune pkg lock
-  File "default/.lock/_unknown_", line 1, characters 0-0:
   Error: Couldn't solve the package dependency formula.
   The following packages couldn't be found: foobar
   [1]
