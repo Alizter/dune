@@ -54,7 +54,8 @@ let show_solution () =
 let run_lock_command ~(common : Common.t) ~config =
   let open Fiber.O in
   let once () =
-    let request (setup : Import.Main.build_system) =
+    Pkg_common.check_pkg_management_enabled ()
+    >>> let request (setup : Import.Main.build_system) =
       let dir = Path.(relative root) (Common.prefix_target common ".") in
       let open Action_builder.O in
       let* () =
