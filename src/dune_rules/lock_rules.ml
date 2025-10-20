@@ -233,7 +233,9 @@ let action_builder_with_dir_targets ~directory_targets =
 let copy_lock_dir ~target ~lock_dir ~deps ~files =
   let open Action_builder.O in
   Action_builder.deps deps
-  >>> (Path.Set.to_list_map files ~f:(fun src ->
+  >>> (
+
+    Path.Set.to_list_map files ~f:(fun src ->
          let suffix = Path.drop_prefix_exn src ~prefix:(Path.source lock_dir) in
          let dst = Path.Build.append_local target suffix in
          let parent = Path.Build.parent_exn dst in
@@ -411,7 +413,6 @@ let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
               let* workspace = Workspace.workspace () in
               let* project_pins_db = project_pins in
               let workspace_pins_db =
-                (* Convert all workspace pins to regular DB format *)
                 let workspace_pins = Dune_pkg.Pin.DB.Workspace.of_stanza workspace.pins in
                 let pin_map = Dune_lang.Pin_stanza.Workspace.map workspace.pins in
                 let all_pin_names =

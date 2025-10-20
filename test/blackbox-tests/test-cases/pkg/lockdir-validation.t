@@ -30,11 +30,12 @@ package graph then it's caught when loading the lockdir.
   > EOF
 
   $ dune describe pkg lock
-  File "dune.lock/c.pkg", line 2, characters 11-12:
+  File "_build/_private/default/.lock/dune.lock/c.pkg", line 2, characters
+  11-12:
   The package "c" depends on the package "d", but "d" does not appear in the
-  lockdir dune.lock.
+  lockdir _build/_private/default/.lock/dune.lock.
   Error: At least one package dependency is itself not present as a package in
-  the lockdir dune.lock.
+  the lockdir _build/_private/default/.lock/dune.lock.
   Hint: This could indicate that the lockdir is corrupted. Delete it and then
   regenerate it by running: 'dune pkg lock'
   [1]
@@ -42,14 +43,16 @@ package graph then it's caught when loading the lockdir.
   $ rm ${source_lock_dir}/a.pkg
 
   $ dune describe pkg lock
-  File "dune.lock/c.pkg", line 2, characters 9-10:
+  File "_build/_private/default/.lock/dune.lock/c.pkg", line 2, characters
+  9-10:
   The package "c" depends on the package "a", but "a" does not appear in the
-  lockdir dune.lock.
-  File "dune.lock/c.pkg", line 2, characters 11-12:
+  lockdir _build/_private/default/.lock/dune.lock.
+  File "_build/_private/default/.lock/dune.lock/c.pkg", line 2, characters
+  11-12:
   The package "c" depends on the package "d", but "d" does not appear in the
-  lockdir dune.lock.
+  lockdir _build/_private/default/.lock/dune.lock.
   Error: At least one package dependency is itself not present as a package in
-  the lockdir dune.lock.
+  the lockdir _build/_private/default/.lock/dune.lock.
   Hint: This could indicate that the lockdir is corrupted. Delete it and then
   regenerate it by running: 'dune pkg lock'
   [1]
