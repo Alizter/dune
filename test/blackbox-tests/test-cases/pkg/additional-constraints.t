@@ -3,7 +3,8 @@ It's possible to include additional packages or constraints in workspace files:
   $ . ./helpers.sh
 
   $ cat >dune-workspace <<EOF
-  > (lang dune 3.11)
+  > (lang dune 3.20)
+  > (pkg enabled)
   > (lock_dir
   >  (constraints doesnotexist foo (bar (= 1.0.0)))
   >  (repositories mock))
@@ -34,7 +35,8 @@ Notice that the constraints field doesn't introduce additional packages. The
 Constraint negation is supported since 3.18:
 
   $ cat >dune-workspace <<EOF
-  > (lang dune 3.18)
+  > (lang dune 3.20)
+  > (pkg enabled)
   > (lock_dir
   >  (constraints doesnotexist (foo (not (= 1.0.0))) (bar (not (= 1.0.0))))
   >  (repositories mock))

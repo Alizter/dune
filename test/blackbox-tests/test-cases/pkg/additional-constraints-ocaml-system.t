@@ -41,7 +41,8 @@ Try solving without additional constraints:
 
 Now make a workspace file adding the constarint on ocaml-system:
   $ cat >dune-workspace <<EOF
-  > (lang dune 3.13)
+  > (lang dune 3.20)
+  > (pkg enabled)
   > (lock_dir
   >  (constraints ocaml-system)
   >  (repositories mock))
