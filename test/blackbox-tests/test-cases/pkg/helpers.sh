@@ -124,7 +124,7 @@ EOF
     if ! grep '(name mock)' dune-workspace > /dev/null
     then
       add_mock_repo "${repo}"
- 
+
       # reference the repo - only add lock_dir if no existing lock_dir references mock
       if ! grep '(repositories' dune-workspace | grep 'mock' > /dev/null
       then
@@ -133,7 +133,7 @@ EOF
  (repositories mock))
 EOF
       fi
-  
+
     fi
   fi
 }
@@ -201,6 +201,17 @@ print_source() {
 solve() {
   make_project $@ | solve_project
 }
+
+promote_lockdir() {
+  cp -r "${default_lock_dir}" "${source_lock_dir}"
+  chmod -R u+w "${source_lock_dir}"
+}
+
+solve_with_source() {
+  make_project $@ | solve_project
+  promote_lockdir
+}
+
 
 # Pass a string of the form PACKAGE_NAME.PACKAGE_VERSION and replaces the
 # hashes in all package digests matching the specified package with

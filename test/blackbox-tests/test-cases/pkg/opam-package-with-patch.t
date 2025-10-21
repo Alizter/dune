@@ -22,18 +22,18 @@ Make a package with a patch
   > +This is right
   > EOF
 
-  $ solve with-patch
+  $ solve_with_source with-patch
   Solution for dune.lock:
   - with-patch.0.0.1
   $ append_to_lockpkg with-patch <<EOF
   > (source (copy $PWD/source))
   > EOF
 
-The lockfile should contain the patch action. 
+The lockfile should contain the patch action.
 
-  $ cat ${default_lock_dir}/with-patch.pkg 
+  $ cat ${source_lock_dir}/with-patch.pkg
   (version 0.0.1)
-  
+
   (build
    (progn
     (patch foo.patch)
@@ -45,5 +45,5 @@ The lockfile should contain the patch action.
   > This is wrong
   > EOF
 
-  $ build_pkg with-patch 
+  $ build_pkg with-patch
   This is right
