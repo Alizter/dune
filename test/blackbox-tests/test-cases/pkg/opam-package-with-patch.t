@@ -33,7 +33,7 @@ The lockfile should contain the patch action.
 
   $ cat ${source_lock_dir}/with-patch.pkg
   (version 0.0.1)
-
+  
   (build
    (progn
     (patch foo.patch)
