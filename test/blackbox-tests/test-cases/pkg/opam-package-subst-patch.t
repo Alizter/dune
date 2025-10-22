@@ -14,7 +14,7 @@ Make a package with a substs and patches field field
 
   $ opam_repo=$mock_packages/with-substs-and-patches/with-substs-and-patches.0.0.1
 
-  $ solve with-substs-and-patches
+  $ solve_with_promote with-substs-and-patches
   Solution for dune.lock:
   - with-substs-and-patches.0.0.1
   $ append_to_lockpkg with-substs-and-patches <<EOF
@@ -23,7 +23,7 @@ Make a package with a substs and patches field field
 
 The lockfile should contain the substitute and patch actions.
 
-  $ cat ${default_lock_dir}/with-substs-and-patches.pkg 
+  $ cat ${source_lock_dir}/with-substs-and-patches.pkg
   (version 0.0.1)
   
   (build
