@@ -4,10 +4,10 @@ file copying step rather than the build step.
   $ . ./helpers.sh
 
   $ make_lockdir
-  $ mkdir -p ${default_lock_dir}/foo.files
+  $ mkdir -p ${source_lock_dir}/foo.files
 
-  $ touch ${default_lock_dir}/foo.files/foo.install
-  $ echo "(version 0.0.1)" > ${default_lock_dir}/foo.pkg
+  $ touch ${source_lock_dir}/foo.files/foo.install
+  $ echo "(version 0.0.1)" > ${source_lock_dir}/foo.pkg
 
 The foo.install file in files/ should have been copied over.
-  $ build_pkg foo 2>&1 | sed 's/copyfile/open/'
+  $ build_pkg foo 2>&1
