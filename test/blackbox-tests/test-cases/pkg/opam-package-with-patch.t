@@ -22,7 +22,7 @@ Make a package with a patch
   > +This is right
   > EOF
 
-  $ solve_with_source with-patch
+  $ solve_with_promote with-patch
   Solution for dune.lock:
   - with-patch.0.0.1
   $ append_to_lockpkg with-patch <<EOF

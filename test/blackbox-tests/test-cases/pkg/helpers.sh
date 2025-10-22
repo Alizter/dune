@@ -207,7 +207,7 @@ promote_lockdir() {
   chmod -R u+w "${source_lock_dir}"
 }
 
-solve_with_source() {
+solve_with_promote() {
   make_project $@ | solve_project
   promote_lockdir
 }
