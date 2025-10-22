@@ -30,7 +30,7 @@ Make a package with an extra-source field and multiple checksums
   > }
   > EOF
 
-  $ solve with-extra-source with-extra-source-md5 with-extra-source-multiple-checksums
+  $ solve_with_promote with-extra-source with-extra-source-md5 with-extra-source-multiple-checksums
   Solution for dune.lock:
   - with-extra-source.0.0.1
   - with-extra-source-md5.0.0.1
@@ -41,7 +41,7 @@ Make a package with an extra-source field and multiple checksums
 
 The lockfile should contain the fetching of extra sources.
 
-  $ cat ${default_lock_dir}/with-extra-source.pkg 
+  $ cat ${source_lock_dir}/with-extra-source.pkg
   (version 0.0.1)
   
   (extra_sources
