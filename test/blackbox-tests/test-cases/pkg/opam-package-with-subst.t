@@ -9,7 +9,7 @@ Make a package with a substs field
   > build: [ "sh" "-c" "[ -e foo.ml ] && cat foo.ml" ]
   > EOF
 
-  $ solve with-substs
+  $ solve_with_promote with-substs
   Solution for dune.lock:
   - with-substs.0.0.1
   $ append_to_lockpkg with-substs <<EOF
@@ -17,7 +17,7 @@ Make a package with a substs field
   > EOF
 
 The lockfile should contain the substitute action.
-  $ cat ${default_lock_dir}/with-substs.pkg
+  $ cat ${source_lock_dir}/with-substs.pkg
   (version 0.0.1)
   
   (build
