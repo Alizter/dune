@@ -24,15 +24,18 @@ let show_solution_for lock_dir =
      | [] -> Console.print [ Pp.text "(no dependencies to lock)" ]
      | lock_files ->
        lock_files
-       |> List.filter_map ~f:(fun (pkg_name, filename) ->
+       |> List.map ~f:(fun (pkg_name, filename) ->
          let path = Path.Build.relative solution_dir filename |> Path.build in
          let mode = Dune_sexp.Parser.Mode.Many in
          let pkg_file = Dune_sexp.Parser.load path ~mode in
-         List.find_map pkg_file ~f:(fun item ->
+         List.filter_map pkg_file ~f:(fun item ->
            match (item : Dune_sexp.Ast.t) with
            | List (_, [ Atom (_, A "version"); Atom (_, A ver) ]) ->
              Some (Pp.textf "- %s.%s" pkg_name ver)
-           | _ -> None))
+           | List (_, [ Atom (_, A "avoid") ]) ->
+             Some (Pp.textf "(this version should be avoided)")
+           | _ -> None)
+         |> Pp.concat ~sep:Pp.space)
        |> Console.print)
   | Error (ENOENT, _, _) -> Console.print [ Pp.text "(no solution found)" ]
   | Error detailed ->
