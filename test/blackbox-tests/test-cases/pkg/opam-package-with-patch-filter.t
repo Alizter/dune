@@ -21,7 +21,7 @@ Make a package with a patch behind a filter
   > +This is wrong; this patch should have been filtered out.
   > EOF
 
-  $ solve with-patch-filter
+  $ solve_with_promote with-patch-filter
   Solution for dune.lock:
   - with-patch-filter.0.0.1
   $ append_to_lockpkg with-patch-filter <<EOF
@@ -30,7 +30,7 @@ Make a package with a patch behind a filter
 
 The lockfile should contain the patch action with the appropriate filter. 
 
-  $ cat ${default_lock_dir}/with-patch-filter.pkg 
+  $ cat ${source_lock_dir}/with-patch-filter.pkg
   (version 0.0.1)
   
   (build
