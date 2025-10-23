@@ -155,7 +155,6 @@ Regenerate the `dune-project` file introducing an unsatisfiable constraint.
 
 Run the solver again. This time it will fail.
   $ dune pkg lock
-  File "default/.lock/_unknown_", line 1, characters 0-0:
   Error: Couldn't solve the package dependency formula.
   Selected candidates: baz.0.1.0 foo.0.0.1 lockfile_generation_test.dev
   - bar -> (problem)
@@ -190,8 +189,8 @@ both.
 
   $ dune pkg lock
   Solution for dune.lock:
-  - bar-or-baz.0.0.1
   - bar.0.5.0
+  - bar-or-baz.0.0.1
 
 Top level OR is simple, but does nested OR work? `nested-or` defines nested OR
 patterns that can't be simplified
