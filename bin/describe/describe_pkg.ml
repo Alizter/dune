@@ -223,8 +223,35 @@ module List_locked_dependencies = struct
                are displayed)")
     and+ lock_dirs = Pkg.Pkg_common.Lock_dirs_arg.term in
     let common, config = Common.init builder in
-    Scheduler.go_with_rpc_server ~common ~config
-    @@ list_locked_dependencies ~transitive ~lock_dirs
+    let once () =
+      let request (setup : Import.Main.build_system) =
+        let dir = Path.(relative root) (Common.prefix_target common ".") in
+        let open Action_builder.O in
+        (* CR-someday Alizter: We shouldn't be building anything here ideally,
+         only listing the locked dependencies. See also Pkg.Validate_lock_dir *)
+        let* () =
+          Alias.in_dir
+            ~name:Dune_rules.Alias.pkg_lock
+            ~recursive:true
+            ~contexts:setup.contexts
+            dir
+          |> Alias.request
+        in
+        Action_builder.of_memo
+          (Memo.of_thunk (fun () ->
+             Memo.of_reproducible_fiber
+             @@
+             let open Fiber.O in
+             Pkg.Pkg_common.check_pkg_management_enabled ()
+             >>> list_locked_dependencies ~transitive ~lock_dirs ()))
+      in
+      let open Fiber.O in
+      Build.run_build_system ~common ~request
+      >>| function
+      | Ok () -> ()
+      | Error `Already_reported -> raise Dune_util.Report_error.Already_reported
+    in
+    Scheduler.go_with_rpc_server ~common ~config once
   ;;
 
   let command = Cmd.v info term
