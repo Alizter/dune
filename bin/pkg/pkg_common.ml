@@ -155,9 +155,9 @@ let load_lock_dir lock_dir_path =
   Dune_rules.Lock_dir.load path
 ;;
 
-let load_lock_dir_exn lock_dir_path =
+let load_source_lock_dir_exn lock_dir_path =
   let open Memo.O in
-  load_lock_dir lock_dir_path >>| User_error.ok_exn
+  Dune_rules.Lock_dir.load_from_source lock_dir_path >>| User_error.ok_exn
 ;;
 
 let pp_package { Lock_dir.Pkg.info = { Lock_dir.Pkg_info.name; version; avoid; _ }; _ } =

@@ -56,7 +56,7 @@ val find_local_packages : Dune_pkg.Local_package.t Package_name.Map.t Memo.t
 val load_lock_dir
   :  Path.Source.t -> (Dune_pkg.Lock_dir.t, User_message.t) result Memo.t
 
-val load_lock_dir_exn : Path.Source.t -> Dune_pkg.Lock_dir.t Memo.t
+val load_source_lock_dir_exn : Path.Source.t -> Dune_pkg.Lock_dir.t Memo.t
 
 module Lock_dirs_arg : sig
   (** [Lock_dirs_arg.t] is the type of lock directory arguments. This can be

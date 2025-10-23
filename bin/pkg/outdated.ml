@@ -25,7 +25,7 @@ let find_outdated_packages ~transitive ~lock_dirs_arg () =
             ~repositories:(repositories_of_lock_dir workspace ~lock_dir_path)
         and+ local_packages = Memo.run find_local_packages
         and+ platform = solver_env_from_system_and_context ~lock_dir_path in
-        let* lock_dir = Pkg_common.load_lock_dir_exn lock_dir_source |> Memo.run in
+        let* lock_dir = Pkg_common.load_source_lock_dir_exn lock_dir_source |> Memo.run in
         let packages =
           Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
         in
@@ -96,9 +96,11 @@ let info =
   let man =
     [ `S "DESCRIPTION"
     ; `P
-        "List packages in from lock directory that have newer versions available. By \
-         default, only direct dependencies are checked. The $(b,--transitive) flag can \
-         be used to check transitive dependencies as well."
+        "List packages from a lock directory (in the source directory) that have newer \
+         versions available. By default, only direct dependencies are checked. The \
+         $(b,--transitive) flag can be used to check transitive dependencies as well. \
+         NOTE: The command does not run when the lock directory is only preesnt in the \
+         build directory."
     ; `P "For example:"
     ; `Pre "    \\$ dune pkg outdated"
     ; `Noblank
