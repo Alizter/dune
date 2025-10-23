@@ -140,6 +140,9 @@ let content_digest t =
        let stats_for_digest = Dune_digest.Stats_for_digest.of_unix_stats stats in
        (match Dune_digest.path_with_stats ~allow_dirs:true path stats_for_digest with
         | Ok digest -> digest
+        | Error (Unix_error ((EACCES | EPERM), _, _)) ->
+          (* CR-someday Alizter: This is a temporary workaround *)
+          Path.to_string path |> Dune_digest.string
         | Error path_digest_error ->
           Code_error.raise
             "Couldn't digest path"
