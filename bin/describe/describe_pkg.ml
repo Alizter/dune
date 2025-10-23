@@ -152,7 +152,8 @@ module List_locked_dependencies = struct
     in
     let open Memo.O in
     Memo.List.filter_map lock_dirs ~f:(fun lock_dir_path ->
-      if not (Path.exists (Path.source lock_dir_path))
+      let path = Dune_rules.Lock_dir.build_path_of_source lock_dir_path in
+      if not (Path.exists path)
       then Memo.return None
       else
         let+ result = Pkg.Pkg_common.load_lock_dir lock_dir_path in
