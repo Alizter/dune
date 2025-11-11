@@ -111,14 +111,31 @@ How to display the output of commands as they run?
 
 When Dune runs external commands, it redirects and saves their output, then
 displays it when complete. This ensures that there's no interleaving when
-writing to the console.
+writing to the console. Additionally, Dune truncates output at 100KB by default
+to keep logs manageable.
 
-But this might not be what the you want. For example, when you debug a hanging
-build.
+However, this buffering and truncation behavior might not be what you want in
+certain situations:
 
-In that case, one can pass ``-j1 --no-buffer`` so the commands are directly
-printed on the console (and the parallelism is disabled so the output stays
-readable).
+- When debugging a hanging build and you need to see output in real-time
+- When you need the full, untruncated output from long-running commands
+- When redirecting output to a file for later analysis
+
+In these cases, you can pass ``-j1 --no-buffer`` to Dune. This flag causes
+commands to print directly to the terminal without capturing their output.
+Since output isn't captured, it won't be buffered, truncated, or saved to log
+files (``-j1`` disables parallelism so the output stays readable). You should
+typically use this option with ``--verbose`` to see commands before they
+execute.
+
+**Disabling ANSI color codes:** When redirecting Dune's output to a file, you
+may want to disable ANSI color escape codes. Set the ``CLICOLOR=0`` environment
+variable to disable colors, or use ``CLICOLOR_FORCE=1`` to force colors even
+when output is piped. For example:
+
+.. code:: console
+
+   $ CLICOLOR=0 dune build --verbose 2> error.txt
 
 How can I generate an ``mli`` file from an ``ml`` file?
 =======================================================
