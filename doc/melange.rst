@@ -234,6 +234,9 @@ The resulting layout in ``_build/default/output`` will be as follows:
   The dependency specification is described in the :doc:`concepts/dependency-spec`
   section.
 
+- ``(lint <preprocess-spec>)`` is the same as the ``(lint ...)`` field of
+  :doc:`/reference/dune/library`.
+
 - ``(compile_flags <flags>)`` specifies compilation flags specific to
   ``melc``, the main Melange executable.
   ``<flags>`` is described in detail in the

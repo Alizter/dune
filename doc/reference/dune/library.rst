@@ -104,6 +104,17 @@ order to declare a multi-directory library, you need to use the
    The default is ``no_preprocessing``, and other options are described
    in :doc:`/reference/preprocessing-spec`.
 
+.. describe:: (lint <preprocess-spec>)
+
+   Specifies linting tools to run on the library's modules. The syntax is the
+   same as the ``(preprocess)`` field (see :doc:`/reference/preprocessing-spec`).
+
+   Linting rules are added to the :doc:`@lint </reference/aliases/lint>` alias
+   and can be run with ``dune build @lint``. Linters that produce corrections
+   can be promoted using ``dune promote``.
+
+   The default is ``no_preprocessing``.
+
 .. describe:: (preprocessor_deps (<deps-conf list>))
 
    Specifies extra preprocessor dependencies preprocessor, i.e., if the

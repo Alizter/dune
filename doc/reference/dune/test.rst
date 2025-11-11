@@ -36,8 +36,9 @@ executed and its output will be compared to ``expect_test.expected``.
 
 The optional fields supported are a subset of the alias and executables fields.
 In particular, all fields except for ``public_names`` are supported from the
-:ref:`executables stanza <shared-exe-fields>`. Alias fields apart from ``name``
-are allowed.
+:ref:`executables stanza <shared-exe-fields>`. This includes the ``(lint)``
+field for specifying linting tools (see :doc:`library`). Alias fields apart
+from ``name`` are allowed.
 
 The ``(enabled_if)`` field has special semantics: when present, it only applies
 to running the tests. The test executable is always built by default.
