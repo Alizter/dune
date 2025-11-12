@@ -32,7 +32,12 @@ Now change the workspace to use a custom lock directory:
   > EOF
 
   $ dune build
-  Error: No rule found for default/.lock/dune.lock (context _private)
+  Error: The package myproject does not have any user defined stanzas attached
+  to it. If this is intentional, add (allow_empty) to the package definition in
+  the dune-project file
+  -> required by _build/default/myproject.install
+  -> required by alias all
+  -> required by alias default
   [1]
 
 Now try with a context stanza that references the custom lock directory with a
