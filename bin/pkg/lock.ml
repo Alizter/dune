@@ -55,35 +55,6 @@ module Progress_indicator = struct
   let add_overlay (t : t) = Console.Status_line.add_overlay (Live (fun () -> pp t))
 end
 
-let project_and_package_pins project =
-  let dir = Dune_project.root project in
-  let pins = Dune_project.pins project in
-  let packages = Dune_project.packages project in
-  Pin.DB.add_opam_pins (Pin.DB.of_stanza ~dir pins) packages
-;;
-
-(* For recursive pins, we must traverse the pinned sources. The [project_pins]
-   are the initial pins that we have in our project. *)
-let resolve_project_pins project_pins =
-  let scan_project ~read ~files =
-    let read file = Memo.of_reproducible_fiber (read file) in
-    let open Memo.O in
-    (* Opam files may never contain recursive pins, so don't both reading them *)
-    Dune_project.gen_load
-      ~read
-      ~files
-      ~dir:Path.Source.root
-      ~infer_from_opam_files:false
-      ~load_opam_file_with_contents:Dune_pkg.Opam_file.load_opam_file_with_contents
-    >>| Option.map ~f:(fun project ->
-      let packages = Dune_project.packages project in
-      let pins = project_and_package_pins project in
-      pins, packages)
-    |> Memo.run
-  in
-  Pin.resolve project_pins ~scan_project
-;;
-
 module Platforms_by_message = struct
   module Message = struct
     type t =
@@ -305,8 +276,8 @@ let pp_solve_errors_by_platforms platforms_by_message =
 
 let solve_lock_dir
       workspace
+      ~projects
       ~local_packages
-      ~project_pins
       ~print_perf_stats
       ~portable_lock_dir
       version_preference
@@ -316,15 +287,13 @@ let solve_lock_dir
   =
   let open Fiber.O in
   let lock_dir = Workspace.find_lock_dir workspace lock_dir_path in
-  let project_pins, solve_for_platforms =
+  let project_pins =
+    Dune_rules.Lock_rules.workspace_pins ~projects ~workspace ~lock_dir
+  in
+  let solve_for_platforms =
     match lock_dir with
-    | None -> project_pins, Solver_env.popular_platform_envs
-    | Some lock_dir ->
-      let workspace =
-        Pin.DB.Workspace.of_stanza workspace.pins
-        |> Pin.DB.Workspace.extract ~names:lock_dir.pins
-      in
-      Pin.DB.combine_exn workspace project_pins, lock_dir.solve_for_platforms
+    | None -> Solver_env.popular_platform_envs
+    | Some lock_dir -> lock_dir.solve_for_platforms
   in
   let solver_env_from_context =
     Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.solver_env)
@@ -359,7 +328,7 @@ let solve_lock_dir
       ~available_repos:repo_map
       ~repositories:(repositories_of_lock_dir workspace ~lock_dir_path)
   in
-  let* pins = resolve_project_pins project_pins in
+  let* pins = Dune_rules.Lock_rules.resolve_project_pins project_pins in
   let time_solve_start = Unix.gettimeofday () in
   progress_state := Some Progress_indicator.Per_lockdir.State.Solving;
   let* result =
@@ -447,8 +416,8 @@ let solve_lock_dir
 
 let solve
       workspace
+      ~projects
       ~local_packages
-      ~project_pins
       ~solver_env_from_current_system
       ~version_preference
       ~lock_dirs
@@ -473,8 +442,8 @@ let solve
             Fiber.parallel_map progress_indicator ~f:(fun { lockdir_path; state } ->
               solve_lock_dir
                 workspace
+                ~projects
                 ~local_packages
-                ~project_pins
                 ~print_perf_stats
                 ~portable_lock_dir
                 version_preference
@@ -516,26 +485,18 @@ let solve
     List.iter write_disk_list ~f:Lock_dir.Write_disk.commit
 ;;
 
-let project_pins =
-  let open Memo.O in
-  Dune_rules.Dune_load.projects ()
-  >>| List.fold_left ~init:Pin.DB.empty ~f:(fun acc project ->
-    let pins = project_and_package_pins project in
-    Pin.DB.combine_exn acc pins)
-;;
-
 let lock ~version_preference ~lock_dirs_arg ~print_perf_stats ~portable_lock_dir =
   let open Fiber.O in
   let* solver_env_from_current_system =
     poll_solver_env_from_current_system () >>| Option.some
-  and* workspace, local_packages, project_pins =
+  and* workspace, projects, local_packages =
     Memo.run
     @@
     let open Memo.O in
     let+ workspace = Workspace.workspace ()
-    and+ local_packages = find_local_packages
-    and+ project_pins = project_pins in
-    workspace, local_packages, project_pins
+    and+ projects = Dune_rules.Dune_load.projects ()
+    and+ local_packages = find_local_packages in
+    workspace, projects, local_packages
   in
   let lock_dirs =
     Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dirs_arg workspace
@@ -543,8 +504,8 @@ let lock ~version_preference ~lock_dirs_arg ~print_perf_stats ~portable_lock_dir
   in
   solve
     workspace
+    ~projects
     ~local_packages
-    ~project_pins
     ~solver_env_from_current_system
     ~version_preference
     ~lock_dirs

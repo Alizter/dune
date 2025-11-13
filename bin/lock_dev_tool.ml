@@ -86,8 +86,8 @@ let solve ~dev_tool ~local_packages =
   Memo.of_reproducible_fiber
   @@ Pkg.Lock.solve
        workspace
+       ~projects:[]
        ~local_packages
-       ~project_pins:Pin.DB.empty
        ~solver_env_from_current_system
        ~version_preference:None
        ~lock_dirs:[ lock_dir ]

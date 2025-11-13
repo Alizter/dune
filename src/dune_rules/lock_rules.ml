@@ -252,17 +252,32 @@ let lock_action
 ;;
 
 let project_and_package_pins project =
-  let dir = Dune_project.root project in
-  let pins = Dune_project.pins project in
-  let packages = Dune_project.packages project in
-  Pin.DB.add_opam_pins (Pin.DB.of_stanza ~dir pins) packages
+  Dune_project.packages project
+  |> Pin.DB.add_opam_pins
+       (Pin.DB.of_stanza ~dir:(Dune_project.root project) (Dune_project.pins project))
 ;;
 
-(* CR-soon Alizter: This function is duplicated in bin/pkg/lock.ml. We should
-   factor out pin handling logic into a shared module in dune_pkg. *)
+let workspace_pins ~projects ~(workspace : Workspace.t) ~lock_dir =
+  let { Workspace.pins = workspace_pins; _ } = workspace in
+  let project_pins =
+    List.fold_left projects ~init:Pin.DB.empty ~f:(fun acc project ->
+      project_and_package_pins project |> Pin.DB.combine_exn acc)
+  in
+  match lock_dir with
+  | None -> project_pins
+  | Some { Workspace.Lock_dir.pins = pin_names; _ } ->
+    Pin.DB.combine_exn
+      (Pin.DB.Workspace.of_stanza workspace_pins
+       |> Pin.DB.Workspace.extract ~names:pin_names)
+      project_pins
+;;
+
+(* For recursive pins, we must traverse the pinned sources. The [project_pins]
+   are the initial pins that we have in our project. *)
 let resolve_project_pins project_pins =
   let scan_project ~read ~files =
     let read file = Memo.of_reproducible_fiber (read file) in
+    (* Opam files may never contain recursive pins, so don't both reading them *)
     Dune_project.gen_load
       ~read
       ~files
@@ -276,15 +291,6 @@ let resolve_project_pins project_pins =
     |> Memo.run
   in
   Pin.resolve project_pins ~scan_project
-;;
-
-(* CR-soon Alizter: This function is duplicated in bin/pkg/lock.ml. We should
-   factor out pin handling logic into a shared module in dune_pkg. *)
-let project_pins =
-  Dune_load.projects ()
-  >>| List.fold_left ~init:Pin.DB.empty ~f:(fun acc project ->
-    let pins = project_and_package_pins project in
-    Pin.DB.combine_exn acc pins)
 ;;
 
 let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
@@ -334,34 +340,12 @@ let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
               Opam_repo.resolve_repositories ~available_repos ~repositories
               |> Memo.of_non_reproducible_fiber))
        and+ pins =
-         (* CR-soon Alizter: This pin logic (extracting workspace pins,
-            combining with project pins) is duplicated in bin/pkg/lock.ml. The
-            pattern of Pin.DB.Workspace.extract and Pin.DB.combine_exn could be
-            factored into a shared helper. *)
          Action_builder.of_memo
            (Memo.of_thunk (fun () ->
               let open Memo.O in
-              let* project_pins_db = project_pins in
-              let workspace_pins_db =
-                let workspace_pins = Pin.DB.Workspace.of_stanza workspace.pins in
-                let pin_map = Dune_lang.Pin_stanza.Workspace.map workspace.pins in
-                let all_pin_names =
-                  pin_map
-                  |> String.Map.to_list
-                  |> List.fold_left ~init:[] ~f:(fun acc (_repo_name, pkg_map) ->
-                    pkg_map
-                    |> Dune_lang.Package_name.Map.to_list
-                    |> List.fold_left
-                         ~init:acc
-                         ~f:(fun acc (pkg_name, ((loc, _url), _pkg)) ->
-                           (loc, Dune_lang.Package_name.to_string pkg_name) :: acc))
-                in
-                Pin.DB.Workspace.extract workspace_pins ~names:all_pin_names
-              in
-              let combined_pins = Pin.DB.combine_exn workspace_pins_db project_pins_db in
-              Memo.return combined_pins
-              >>| resolve_project_pins
-              >>= Memo.of_reproducible_fiber))
+              let* projects = Dune_load.projects () in
+              let pins = workspace_pins ~projects ~workspace ~lock_dir in
+              Memo.of_reproducible_fiber (resolve_project_pins pins)))
        in
        let version_preference =
          match lock_dir with
