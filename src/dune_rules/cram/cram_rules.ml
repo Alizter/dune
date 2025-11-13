@@ -154,13 +154,18 @@ let test_rule
        @@
        let open Action_builder.O in
        let+ () = List.map ~f:Path.build [ script; output ] |> Action_builder.paths in
-       Action.progn
-         [ Cram_exec.diff ~src:(Path.build script) ~output:(Path.build output)
-         ; Promote.Diff_action.diff
-             ~optional:true
-             ~mode:Text
-             (Path.build script)
-             (Path.Build.extend_basename script ~suffix:".corrected")
+       (* Use concurrent to run both diff/promote and error checking.
+          This allows partial promotion to work even when there are errors. *)
+       Action.concurrent
+         [ Action.progn
+             [ Cram_exec.diff ~src:(Path.build script) ~output:(Path.build output)
+             ; Promote.Diff_action.diff
+                 ~optional:true
+                 ~mode:Text
+                 (Path.build script)
+                 (Path.Build.extend_basename script ~suffix:".corrected")
+             ]
+         ; Cram_exec.check_error (Path.build script)
          ]
        |> Action.Full.make)
 ;;

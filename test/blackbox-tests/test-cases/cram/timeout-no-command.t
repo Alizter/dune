@@ -19,17 +19,25 @@ Create a cram test with multiple commands, where the second one will timeout:
   >   $ echo "This is the problematic command" && sleep 2
   > EOF
 
-Run the test and verify that the timeout error doesn't mention 
-which specific command caused the timeout:
+Run the test and verify that the timeout error shows which command timed out:
 
   $ dune test test.t
   File "test.t", line 1, characters 0-0:
-  Error: Cram test timed out while running command:
-    $ echo "This is the problematic command" && sleep 2
+  Error: Files _build/default/test.t and _build/default/test.t.corrected
+  differ.
+  File "test.t", line 2, characters 2-53:
+  2 |   $ echo "This is the problematic command" && sleep 2
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: Cram test timed out
   A time limit of 0.10s has been set in dune:2
   [1]
 
-The error message above shows that we get a generic timeout message but no
-indication that it was the "echo && sleep 2" command that caused the timeout.
-This makes debugging timeout issues difficult when there are multiple commands
-in a test.
+Try to promote the partial output from commands that ran before the timeout:
+  $ dune promote
+  Promoting _build/default/test.t.corrected to test.t.
+
+Check if the first command's output was captured before the timeout:
+  $ cat test.t
+    $ echo "This command runs fine"
+    This command runs fine
+    $ echo "This is the problematic command" && sleep 2
