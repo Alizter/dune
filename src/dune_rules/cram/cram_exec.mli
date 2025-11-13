@@ -19,6 +19,9 @@ val run
 (** Produces a diff if [src] needs to be updated *)
 val diff : src:Path.t -> output:Path.t -> Action.t
 
+(** Checks for and raises cram test errors (timeout, script exit) *)
+val check_error : Path.t -> Action.t
+
 (** Corresponds the user written cram action *)
 val action : Path.t -> Action.t
 

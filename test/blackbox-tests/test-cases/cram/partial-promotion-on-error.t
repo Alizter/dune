@@ -16,17 +16,23 @@ commands:
   >   $ echo "Neither will this"
   > EOF
 
-The test should fail but still capture output from executed commands:
+The test should fail with script exit error, but the corrected file should contain
+partial output from commands that executed successfully:
   $ dune runtest
   File "test.t", line 1, characters 0-0:
   Error: Files _build/default/test.t and _build/default/test.t.corrected
   differ.
+  File "test.t", line 3, characters 2-10:
+  3 |   $ exit 1
+        ^^^^^^^^
+  Error: Command exited the shell. Subsequent commands in this test are
+  unreachable.
   [1]
+
   $ dune promote
   Promoting _build/default/test.t.corrected to test.t.
 
-After promotion, the test file should have output from successful commands and
-UNREACHABLE markers for the rest:
+After promotion, the test file should have output from successful commands:
   $ cat test.t
     $ echo "First command"
     First command
@@ -35,7 +41,5 @@ UNREACHABLE markers for the rest:
     $ exit 1
     ***** UNREACHABLE *****
     $ echo "This will never execute"
-    ***** UNREACHABLE *****
     $ echo "Neither will this"
-    ***** UNREACHABLE *****
 

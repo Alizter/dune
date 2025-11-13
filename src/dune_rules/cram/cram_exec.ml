@@ -96,6 +96,77 @@ module For_tests = struct
   ;;
 end
 
+type metadata_entry =
+  { exit_code : int
+  ; build_path_prefix_map : string
+  }
+
+let dyn_of_metadata_entry { exit_code; build_path_prefix_map } =
+  let open Dyn in
+  record
+    [ "exit_code", int exit_code; "build_path_prefix_map", string build_path_prefix_map ]
+;;
+
+type metadata_presence =
+  | Present of metadata_entry
+  | Missing_unreachable
+
+type command_out =
+  { command : string list
+  ; metadata : metadata_presence
+  ; output : string
+  }
+
+let dyn_of_command_out { command; metadata; output } =
+  let open Dyn in
+  record
+    [ "command", (list string) command
+    ; ( "metadata"
+      , match metadata with
+        | Present m -> variant "Present" [ dyn_of_metadata_entry m ]
+        | Missing_unreachable -> variant "Missing_unreachable" [] )
+    ; "output", string output
+    ]
+;;
+
+type cram_error =
+  | Script_exit of
+      { loc : Loc.t
+      ; partial_blocks : (Loc.t * command_out Cram_lexer.block) list
+      }
+  | Timeout of
+      { loc : Loc.t
+      ; timeout : float
+      ; timeout_loc : Loc.t
+      ; partial_blocks : (Loc.t * command_out Cram_lexer.block) list
+      }
+
+let compose_cram_output (cram_to_output : (Loc.t * _ Cram_lexer.block) list) =
+  let buf = Buffer.create 256 in
+  let add_line line =
+    Buffer.add_string buf line;
+    Buffer.add_char buf '\n'
+  in
+  let add_line_prefixed_with_two_space line =
+    Buffer.add_string buf "  ";
+    add_line line
+  in
+  List.iter cram_to_output ~f:(fun (_loc, block) ->
+    match (block : _ Cram_lexer.block) with
+    | Comment lines -> List.iter lines ~f:add_line
+    | Command { command; metadata; output } ->
+      List.iteri command ~f:(fun i line ->
+        let line = sprintf "%c %s" (if i = 0 then '$' else '>') line in
+        add_line_prefixed_with_two_space line);
+      String.split_lines output |> List.iter ~f:add_line_prefixed_with_two_space;
+      (match metadata with
+       | Missing_unreachable -> ()
+       | Present { exit_code = 0; build_path_prefix_map = _ } -> ()
+       | Present { exit_code; build_path_prefix_map = _ } ->
+         add_line_prefixed_with_two_space (sprintf "[%d]" exit_code)));
+  Buffer.contents buf
+;;
+
 let run_expect_test file ~f =
   let open Fiber.O in
   let* file_contents =
@@ -109,19 +180,46 @@ let run_expect_test file ~f =
       Path.unlink_no_err file;
       file_contents)
   in
-  let* expected =
+  let* result =
     let lexbuf = Lexbuf.from_string file_contents ~fname:(Path.to_string file) in
     f lexbuf
   in
+  let expected =
+    match result with
+    | Ok output -> output
+    | Error (Script_exit { loc = _; partial_blocks }) ->
+      compose_cram_output partial_blocks
+    | Error (Timeout { loc = _; partial_blocks; timeout = _; timeout_loc = _ }) ->
+      compose_cram_output partial_blocks
+  in
   let corrected_file = Path.extend_basename file ~suffix:".corrected" in
-  Dune_engine.Scheduler.async_exn (fun () ->
-    if file_contents <> expected
-    then (
-      (* we only need to restore the test file so the diff doesn't fail *)
-      let () = Io.write_file file file_contents in
-      Io.write_file ~binary:false corrected_file expected)
-    else if Path.Untracked.exists corrected_file
-    then Path.rm_rf corrected_file)
+  (* Write corrected file synchronously before raising any errors *)
+  if file_contents <> expected
+  then (
+    (* we only need to restore the test file so the diff doesn't fail *)
+    let () = Io.write_file file file_contents in
+    Io.write_file ~binary:false corrected_file expected)
+  else if Path.Untracked.exists corrected_file
+  then Path.rm_rf corrected_file;
+  (* After writing the corrected file, raise any errors *)
+  match result with
+  | Ok _ -> Fiber.return ()
+  | Error (Script_exit { loc; partial_blocks = _ }) ->
+    User_error.raise
+      ~loc
+      [ Pp.text
+          "Command exited the shell. Subsequent commands in this test are unreachable."
+      ]
+  | Error (Timeout { loc; partial_blocks = _; timeout; timeout_loc }) ->
+    User_error.raise
+      ~loc
+      [ Pp.text "Cram test timed out"
+      ; [ Pp.textf "A time limit of %.2fs has been set in " timeout
+        ; Pp.tag User_message.Style.Loc @@ Loc.pp_file_colon_line timeout_loc
+        ]
+        |> Pp.concat
+        |> Pp.hovbox
+      ]
 ;;
 
 let fprln oc fmt = Printf.fprintf oc (fmt ^^ "\n")
@@ -149,33 +247,18 @@ type block_result =
   ; script : Path.t
   }
 
-type metadata_entry =
-  { exit_code : int
-  ; build_path_prefix_map : string
-  }
+type full_block_result = block_result * metadata_presence
 
-let dyn_of_metadata_entry { exit_code; build_path_prefix_map } =
-  let open Dyn in
-  record
-    [ "exit_code", int exit_code; "build_path_prefix_map", string build_path_prefix_map ]
-;;
-
-type metadata_result =
-  | Present of metadata_entry
-  | Missing_unreachable
-
-let dyn_of_metadata_result =
-  let open Dyn in
-  function
-  | Missing_unreachable -> variant "Missing_unreachable" []
-  | Present p -> variant "Present" [ dyn_of_metadata_entry p ]
-;;
-
-type full_block_result = block_result * metadata_result
+type attach_result =
+  | Complete of (Loc.t * full_block_result Cram_lexer.block) list
+  | Partial_exit of
+      { completed : (Loc.t * full_block_result Cram_lexer.block) list
+      ; exit_loc : Loc.t
+      }
 
 type sh_script =
   { script : Path.t
-  ; cram_to_output : block_result Cram_lexer.block list
+  ; cram_to_output : (Loc.t * block_result Cram_lexer.block) list
   ; metadata_file : Path.t option
   }
 
@@ -207,19 +290,30 @@ let read_exit_codes_and_prefix_maps file =
   loop [] (String.split ~on:'\000' s)
 ;;
 
-let read_and_attach_exit_codes (sh_script : sh_script)
-  : full_block_result Cram_lexer.block list
+let read_and_attach_exit_codes (sh_script : sh_script) ~(command_locs : Loc.t list)
+  : attach_result
   =
+  let _ = command_locs in
   let metadata_entries = read_exit_codes_and_prefix_maps sh_script.metadata_file in
-  let rec loop acc entries blocks =
+  let rec loop (acc : (Loc.t * full_block_result Cram_lexer.block) list) entries blocks
+    : attach_result
+    =
     match blocks, entries with
-    | [], [] -> List.rev acc
-    | (Cram_lexer.Comment _ as comment) :: blocks, _ ->
-      loop (comment :: acc) entries blocks
-    | Command block_result :: blocks, metadata_entry :: entries ->
-      loop (Command (block_result, Present metadata_entry) :: acc) entries blocks
-    | Cram_lexer.Command block_result :: blocks, [] ->
-      loop (Command (block_result, Missing_unreachable) :: acc) entries blocks
+    | [], [] -> Complete (List.rev acc)
+    | (loc, (Cram_lexer.Comment _ as comment)) :: blocks, _ ->
+      loop ((loc, comment) :: acc) entries blocks
+    | (loc, Cram_lexer.Command block_result) :: blocks, metadata_entry :: entries ->
+      let entry : full_block_result Cram_lexer.block =
+        Cram_lexer.Command (block_result, Present metadata_entry)
+      in
+      loop ((loc, entry) :: acc) entries blocks
+    | (loc, Cram_lexer.Command block_result) :: _blocks, [] ->
+      let exit_loc = loc in
+      Partial_exit
+        { completed =
+            List.rev ((loc, Cram_lexer.Command (block_result, Missing_unreachable)) :: acc)
+        ; exit_loc
+        }
     | [], _ :: _ -> Code_error.raise "more blocks than metadata" []
   in
   loop [] metadata_entries sh_script.cram_to_output
@@ -257,64 +351,25 @@ let rewrite_paths build_path_prefix_map ~parent_script ~command_script s =
     |> Re.replace_string error_msg ~by:""
 ;;
 
-type command_out =
-  { command : string list
-  ; metadata : metadata_result
-  ; output : string
-  }
-
-let dyn_of_command_out { command; metadata; output } =
-  let open Dyn in
-  record
-    [ "command", (list string) command
-    ; "metadata", dyn_of_metadata_result metadata
-    ; "output", string output
-    ]
-;;
-
-let sanitize ~parent_script cram_to_output : command_out Cram_lexer.block list =
-  List.map cram_to_output ~f:(fun (t : (block_result * _) Cram_lexer.block) ->
-    match t with
-    | Cram_lexer.Comment t -> Cram_lexer.Comment t
-    | Command (block_result, metadata) ->
-      let output =
-        match metadata with
-        | Missing_unreachable -> "***** UNREACHABLE *****"
-        | Present { build_path_prefix_map; exit_code = _ } ->
-          Io.read_file ~binary:false block_result.output_file
-          |> Ansi_color.strip
-          |> rewrite_paths
-               ~parent_script
-               ~command_script:block_result.script
-               build_path_prefix_map
-      in
-      Command { command = block_result.command; metadata; output })
-;;
-
-(* Compose user written cram stanzas to output *)
-let compose_cram_output (cram_to_output : _ Cram_lexer.block list) =
-  let buf = Buffer.create 256 in
-  let add_line line =
-    Buffer.add_string buf line;
-    Buffer.add_char buf '\n'
-  in
-  let add_line_prefixed_with_two_space line =
-    Buffer.add_string buf "  ";
-    add_line line
-  in
-  List.iter cram_to_output ~f:(fun block ->
-    match (block : _ Cram_lexer.block) with
-    | Comment lines -> List.iter lines ~f:add_line
-    | Command { command; metadata; output } ->
-      List.iteri command ~f:(fun i line ->
-        let line = sprintf "%c %s" (if i = 0 then '$' else '>') line in
-        add_line_prefixed_with_two_space line);
-      String.split_lines output |> List.iter ~f:add_line_prefixed_with_two_space;
-      (match metadata with
-       | Missing_unreachable | Present { exit_code = 0; build_path_prefix_map = _ } -> ()
-       | Present { exit_code; build_path_prefix_map = _ } ->
-         add_line_prefixed_with_two_space (sprintf "[%d]" exit_code)));
-  Buffer.contents buf
+let sanitize ~parent_script cram_to_output : (Loc.t * command_out Cram_lexer.block) list =
+  List.map
+    cram_to_output
+    ~f:(fun ((loc, t) : Loc.t * (block_result * _) Cram_lexer.block) ->
+      match t with
+      | Cram_lexer.Comment t -> loc, Cram_lexer.Comment t
+      | Command (block_result, metadata) ->
+        let output =
+          match metadata with
+          | Missing_unreachable -> "***** UNREACHABLE *****"
+          | Present { build_path_prefix_map; exit_code = _ } ->
+            Io.read_file ~binary:false block_result.output_file
+            |> Ansi_color.strip
+            |> rewrite_paths
+                 ~parent_script
+                 ~command_script:block_result.script
+                 build_path_prefix_map
+        in
+        loc, Command { command = block_result.command; metadata; output })
 ;;
 
 (* Compose user written cram stanzas to output *)
@@ -349,9 +404,9 @@ let create_sh_script cram_stanzas ~temp_dir : sh_script Fiber.t =
   let metadata_file = file "cram.metadata" in
   let* metadata_file_sh_path = sh_path metadata_file in
   let i = ref 0 in
-  let loop block =
-    match (block : _ Cram_lexer.block) with
-    | Comment _ as comment -> Fiber.return comment
+  let loop (loc, block) =
+    match (block : string list Cram_lexer.block) with
+    | Comment _ as comment -> Fiber.return (loc, comment)
     | Command lines ->
       incr i;
       let i = !i in
@@ -377,11 +432,12 @@ let create_sh_script cram_stanzas ~temp_dir : sh_script Fiber.t =
         {|printf "%%d\0%%s\0" $? "$%s" >> %s|}
         Dune_util.Build_path_prefix_map._BUILD_PATH_PREFIX_MAP
         metadata_file_sh_path;
-      Cram_lexer.Command
-        { command = lines
-        ; output_file = user_shell_code_output_file
-        ; script = user_shell_code_file
-        }
+      ( loc
+      , Cram_lexer.Command
+          { command = lines
+          ; output_file = user_shell_code_output_file
+          ; script = user_shell_code_file
+          } )
   in
   fprln oc "trap 'exit 0' EXIT";
   let+ cram_to_output = Fiber.sequential_map ~f:loop cram_stanzas in
@@ -423,8 +479,15 @@ let make_temp_dir ~script =
   temp_dir
 ;;
 
-let run_cram_test env ~src ~script ~cram_stanzas ~temp_dir ~cwd ~timeout =
+let run_cram_test env ~src ~script ~cram_stanzas ~temp_dir ~cwd ~timeout
+  : ((Loc.t * command_out Cram_lexer.block) list, cram_error) result Fiber.t
+  =
   let open Fiber.O in
+  let command_locs =
+    List.filter_map cram_stanzas ~f:(function
+      | _loc, Cram_lexer.Comment _ -> None
+      | loc, Cram_lexer.Command _ -> Some loc)
+  in
   let* sh_script = create_sh_script cram_stanzas ~temp_dir in
   let env = make_run_env env ~temp_dir ~cwd in
   let open Fiber.O in
@@ -453,83 +516,179 @@ let run_cram_test env ~src ~script ~cram_stanzas ~temp_dir ~cwd ~timeout =
     sh
     [ Path.to_string sh_script.script ]
   >>| function
-  | Ok () -> read_and_attach_exit_codes sh_script |> sanitize ~parent_script:script
+  | Ok () ->
+    (match read_and_attach_exit_codes sh_script ~command_locs with
+     | Complete blocks -> Ok (sanitize ~parent_script:script blocks)
+     | Partial_exit { completed; exit_loc } ->
+       let partial_blocks = sanitize ~parent_script:script completed in
+       Error (Script_exit { loc = exit_loc; partial_blocks }))
   | Error `Timed_out ->
     let timeout_loc, timeout = Option.value_exn timeout in
-    let timeout_set_message =
-      [ Pp.textf "A time limit of %.2fs has been set in " timeout
-      ; Pp.tag User_message.Style.Loc @@ Loc.pp_file_colon_line timeout_loc
-      ]
-      |> Pp.concat
-      |> Pp.hovbox
+    (* Collect partial output from completed commands *)
+    let partial_blocks =
+      match read_and_attach_exit_codes sh_script ~command_locs with
+      | Complete blocks -> blocks
+      | Partial_exit { completed; _ } ->
+        (* For timeouts, filter out the incomplete command with Missing_unreachable *)
+        List.filter completed ~f:(fun (_loc, block) ->
+          match block with
+          | Cram_lexer.Comment _ -> true
+          | Cram_lexer.Command (_block_result, metadata) ->
+            (match metadata with
+             | Present _ -> true
+             | Missing_unreachable -> false))
     in
-    let timeout_msg =
+    let partial_blocks = sanitize ~parent_script:script partial_blocks in
+    let loc =
       match
         let completed_count =
           read_exit_codes_and_prefix_maps sh_script.metadata_file |> List.length
         in
-        let command_blocks_only =
-          List.filter_map sh_script.cram_to_output ~f:(function
-            | Cram_lexer.Comment _ -> None
-            | Cram_lexer.Command block_result -> Some block_result)
+        (* Find the N-th command in the original list *)
+        let rec find_nth_command n = function
+          | [] -> None
+          | (loc, Cram_lexer.Command _) :: _ when n = 0 -> Some loc
+          | (_, Cram_lexer.Command _) :: rest -> find_nth_command (n - 1) rest
+          | (_, Cram_lexer.Comment _) :: rest -> find_nth_command n rest
         in
-        let total_commands = List.length command_blocks_only in
-        if completed_count < total_commands
-        then (
-          (* Find the command that got stuck - it's the one at index completed_count *)
-          match List.nth command_blocks_only completed_count with
-          | Some { command; _ } -> Some (String.concat ~sep:" " command)
-          | None -> None)
-        else None
+        find_nth_command completed_count cram_stanzas
       with
-      | None -> [ Pp.text "Cram test timed out" ]
-      | Some cmd ->
-        [ Pp.textf "Cram test timed out while running command:"
-        ; Pp.verbatimf "  $ %s" cmd
-        ]
+      | None -> Loc.in_file (Path.drop_optional_build_context_maybe_sandboxed src)
+      | Some loc -> loc
     in
-    User_error.raise
-      ~loc:(Loc.in_file (Path.drop_optional_build_context_maybe_sandboxed src))
-      (timeout_msg @ [ timeout_set_message ])
+    Error (Timeout { loc; timeout; timeout_loc; partial_blocks })
 ;;
 
-let run_produce_correction ~conflict_markers ~src ~env ~script ~timeout lexbuf =
+let run_produce_correction ~conflict_markers ~src ~env ~script ~timeout lexbuf
+  : (string, cram_error) result Fiber.t
+  =
   let temp_dir = make_temp_dir ~script in
-  let cram_stanzas = cram_stanzas lexbuf ~conflict_markers |> List.map ~f:snd in
+  let cram_stanzas = cram_stanzas lexbuf ~conflict_markers in
   let cwd = Path.parent_exn script in
   let env = make_run_env env ~temp_dir ~cwd in
   let open Fiber.O in
   run_cram_test env ~src ~script ~cram_stanzas ~temp_dir ~cwd ~timeout
-  >>| compose_cram_output
+  >>| function
+  | Ok blocks -> Ok (compose_cram_output blocks)
+  | Error err -> Error err
+;;
+
+let encode_loc loc =
+  let { Lexing.pos_fname; pos_lnum; pos_bol; pos_cnum } = Loc.start loc in
+  let start_line = pos_lnum in
+  let start_col = pos_cnum - pos_bol in
+  let stop = Loc.stop loc in
+  let stop_line = stop.pos_lnum in
+  let stop_col = stop.pos_cnum - stop.pos_bol in
+  Sexp.List
+    [ Sexp.Atom pos_fname
+    ; Sexp.Atom (string_of_int start_line)
+    ; Sexp.Atom (string_of_int start_col)
+    ; Sexp.Atom (string_of_int stop_line)
+    ; Sexp.Atom (string_of_int stop_col)
+    ]
+;;
+
+let decode_loc = function
+  | Sexp.List
+      [ Sexp.Atom fname
+      ; Sexp.Atom start_line
+      ; Sexp.Atom start_col
+      ; Sexp.Atom stop_line
+      ; Sexp.Atom stop_col
+      ] ->
+    let start_line = int_of_string start_line in
+    let start_col = int_of_string start_col in
+    let stop_line = int_of_string stop_line in
+    let stop_col = int_of_string stop_col in
+    let start : Lexing.position =
+      { pos_fname = fname; pos_lnum = start_line; pos_bol = 0; pos_cnum = start_col }
+    in
+    let stop : Lexing.position =
+      { pos_fname = fname; pos_lnum = stop_line; pos_bol = 0; pos_cnum = stop_col }
+    in
+    Loc.create ~start ~stop
+  | _ -> Code_error.raise "invalid location encoding" []
+;;
+
+type script_result =
+  { commands : command_out list
+  ; error : cram_error option
+  }
+
+let dyn_of_script_result { commands; error } =
+  let open Dyn in
+  record
+    [ "commands", list dyn_of_command_out commands
+    ; ( "error"
+      , match error with
+        | None -> variant "None" []
+        | Some (Script_exit { loc; partial_blocks = _ }) ->
+          variant "Script_exit" [ Dyn.record [ "loc", Loc.to_dyn loc ] ]
+        | Some (Timeout { loc; timeout; timeout_loc; partial_blocks = _ }) ->
+          variant
+            "Timeout"
+            [ Dyn.record
+                [ "loc", Loc.to_dyn loc
+                ; "timeout", Dyn.float timeout
+                ; "timeout_loc", Loc.to_dyn timeout_loc
+                ]
+            ] )
+    ]
 ;;
 
 module Script = Persistent.Make (struct
-    type nonrec t = command_out list
+    type nonrec t = script_result
 
     let name = "CRAM-RESULT"
-    let version = 1
-    let to_dyn = Dyn.list dyn_of_command_out
-    let test_example () = []
+    let version = 2
+    let to_dyn = dyn_of_script_result
+    let test_example () = { commands = []; error = None }
   end)
 
 let run_and_produce_output ~conflict_markers ~src ~env ~dir:cwd ~script ~dst ~timeout =
-  let script_contents = Io.read_file ~binary:false script in
-  let lexbuf = Lexbuf.from_string script_contents ~fname:(Path.to_string script) in
+  let script_contents = Io.read_file ~binary:false src in
+  let clean_src_name = Path.Source.to_string (Path.drop_build_context_exn src) in
+  let lexbuf = Lexbuf.from_string script_contents ~fname:clean_src_name in
   let temp_dir = make_temp_dir ~script in
-  let cram_stanzas = cram_stanzas lexbuf ~conflict_markers |> List.map ~f:snd in
+  let cram_stanzas = cram_stanzas lexbuf ~conflict_markers in
   (* We don't want the ".cram.run.t" dir around when executing the script. *)
   Path.rm_rf (Path.parent_exn script);
   let env = make_run_env env ~temp_dir ~cwd in
   let open Fiber.O in
-  let+ commands =
-    run_cram_test env ~src ~script ~cram_stanzas ~temp_dir ~cwd ~timeout
-    >>| List.filter_map ~f:(function
-      | Cram_lexer.Command c -> Some c
-      | Comment _ -> None)
+  let* result = run_cram_test env ~src ~script ~cram_stanzas ~temp_dir ~cwd ~timeout in
+  (* Extract commands and error from the result *)
+  let commands, error =
+    match result with
+    | Ok blocks ->
+      let commands =
+        List.filter_map blocks ~f:(function
+          | _loc, Cram_lexer.Command c -> Some c
+          | _loc, Comment _ -> None)
+      in
+      commands, None
+    | Error (Script_exit { loc = _; partial_blocks = blocks } as err) ->
+      let commands =
+        List.filter_map blocks ~f:(function
+          | _loc, Cram_lexer.Command c -> Some c
+          | _loc, Comment _ -> None)
+      in
+      commands, Some err
+    | Error
+        (Timeout { loc = _; timeout = _; timeout_loc = _; partial_blocks = blocks } as err)
+      ->
+      let commands =
+        List.filter_map blocks ~f:(function
+          | _loc, Cram_lexer.Command c -> Some c
+          | _loc, Comment _ -> None)
+      in
+      commands, Some err
   in
+  (* Write the output file with partial results and error information *)
   let dst = Path.build dst in
   Path.mkdir_p (Path.parent_exn dst);
-  Script.dump dst commands
+  Script.dump dst { commands; error };
+  Fiber.return ()
 ;;
 
 module Run = struct
@@ -543,7 +702,7 @@ module Run = struct
       }
 
     let name = "cram-run"
-    let version = 2
+    let version = 3
 
     let bimap ({ src = _; dir; script; output; timeout } as t) f g =
       { t with dir = f dir; script = f script; output = g output; timeout }
@@ -642,36 +801,66 @@ module Diff = struct
 
     let action { script; out } ~ectx:_ ~eenv:_ =
       let current = Io.read_file ~binary:false script in
+      let script_result =
+        match Script.load out with
+        | Some s -> s
+        | None ->
+          User_error.raise
+            [ Pp.textf "%s does not exist or is corrupted" (Path.to_string out) ]
+      in
       let combined =
-        let out =
-          match Script.load out with
-          | Some s -> s
-          | None ->
-            User_error.raise
-              [ Pp.textf "%s does not exist or is corrupted" (Path.to_string out) ]
-        in
         let current_stanzas =
           Lexbuf.from_string ~fname:(Path.to_string script) current
           |> cram_stanzas ~conflict_markers:Ignore
-          |> List.map ~f:snd
         in
         let rec loop acc current expected =
           match current with
           | [] -> acc
-          | Cram_lexer.Comment x :: current ->
-            loop (Cram_lexer.Comment x :: acc) current expected
-          | Command _ :: current ->
+          | (loc, Cram_lexer.Comment x) :: current ->
+            loop ((loc, Cram_lexer.Comment x) :: acc) current expected
+          | (loc, Command cmd) :: current ->
             (match expected with
-             | [] -> acc
-             | out :: expected -> loop (Cram_lexer.Command out :: acc) current expected)
+             | [] ->
+               (* No more expected output - keep the command but mark as unreachable *)
+               let unreachable_cmd : command_out =
+                 { command = cmd; metadata = Missing_unreachable; output = "" }
+               in
+               loop ((loc, Cram_lexer.Command unreachable_cmd) :: acc) current expected
+             | out :: expected ->
+               loop ((loc, Cram_lexer.Command out) :: acc) current expected)
         in
-        loop [] current_stanzas out |> List.rev
+        loop [] current_stanzas script_result.commands |> List.rev
       in
       let expected = compose_cram_output combined in
       let corrected_file = Path.extend_basename script ~suffix:".corrected" in
-      if String.equal current expected
-      then Path.rm_rf corrected_file
-      else Io.write_file ~binary:false corrected_file expected;
+      (* Write corrected file, including for partial results *)
+      let files_differ = not (String.equal current expected) in
+      if files_differ
+      then Io.write_file ~binary:false corrected_file expected
+      else Path.rm_rf corrected_file;
+      (* Write error marker file if there was an error *)
+      let error_file = Path.extend_basename script ~suffix:".error" in
+      (match script_result.error with
+       | None -> Path.rm_rf error_file
+       | Some err ->
+         let error_sexp =
+           match err with
+           | Script_exit { loc; partial_blocks = _ } ->
+             Sexp.List
+               [ Sexp.Atom "script_exit"
+               ; encode_loc loc
+               ; Sexp.Atom (Path.to_string corrected_file)
+               ]
+           | Timeout { loc; timeout; timeout_loc; partial_blocks = _ } ->
+             Sexp.List
+               [ Sexp.Atom "timeout"
+               ; encode_loc loc
+               ; Sexp.Atom (string_of_float timeout)
+               ; Sexp.Atom (Loc.to_file_colon_line timeout_loc)
+               ; Sexp.Atom (Path.to_string corrected_file)
+               ]
+         in
+         Io.write_file error_file (Csexp.to_string error_sexp));
       Fiber.return ()
     ;;
   end
@@ -680,6 +869,60 @@ module Diff = struct
 end
 
 let diff ~src ~output = Diff.action { script = src; out = output }
+
+module Check_error = struct
+  module Spec = struct
+    type ('path, _) t = 'path
+
+    let name = "cram-check-error"
+    let version = 1
+    let bimap path f _ = f path
+    let is_useful_to ~memoize:_ = true
+    let encode script path _ : Sexp.t = List [ path script ]
+
+    let action script ~ectx:_ ~eenv:_ =
+      let error_file = Path.extend_basename script ~suffix:".error" in
+      if not (Path.Untracked.exists error_file)
+      then Fiber.return ()
+      else (
+        let error_content = Io.read_file error_file in
+        match Csexp.parse_string error_content with
+        | Error _ -> Fiber.return ()
+        | Ok error_sexp ->
+          (match error_sexp with
+           | List [ Atom "script_exit"; loc_sexp; Atom _corrected_file ] ->
+             let loc = decode_loc loc_sexp in
+             User_error.raise
+               ~loc
+               [ Pp.text
+                   "Command exited the shell. Subsequent commands in this test are \
+                    unreachable."
+               ]
+           | List
+               [ Atom "timeout"
+               ; loc_sexp
+               ; Atom timeout_str
+               ; Atom timeout_loc_str
+               ; Atom _corrected_file
+               ] ->
+             let loc = decode_loc loc_sexp in
+             let timeout = float_of_string timeout_str in
+             User_error.raise
+               ~loc
+               [ Pp.text "Cram test timed out"
+               ; Pp.textf
+                   "A time limit of %.2fs has been set in %s"
+                   timeout
+                   timeout_loc_str
+               ]
+           | _ -> Fiber.return ()))
+    ;;
+  end
+
+  include Action_ext.Make (Spec)
+end
+
+let check_error script = Check_error.action script
 
 module Action = struct
   module Spec = struct
