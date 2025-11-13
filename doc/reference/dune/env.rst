@@ -49,7 +49,7 @@ Fields supported in ``<settings>`` are:
   or not where ``<mode>`` is either ``no``, ``file`` (to generate sourcemap in a ``.map`` file next to the generated javascript file) or ``inline`` (to inline the sourcemap at the end of the generated JavaScript file).
 
 - ``(js_of_ocaml (runtest_alias <alias-name>))`` specifies the alias under which
-  :ref:`inline_tests` and tests (:ref:`tests-stanza`) run for the ``js`` mode.
+  inline tests (:doc:`/reference/dune/inline-tests-field`) and tests (:doc:`/reference/dune/test`) run for the ``js`` mode.
 
 - ``(js_of_ocaml (enabled_if <blang expression>))`` specifies whether the ``js`` mode is enabled. It is enabled by default.
 
@@ -64,7 +64,7 @@ Fields supported in ``<settings>`` are:
   or not where ``<mode>`` is either ``no``, ``file`` (to generate sourcemap in a ``.map`` file next to the generated javascript file) or ``inline`` (to inline the sourcemap at the end of the generated JavaScript file).
 
 - ``(wasm_of_ocaml (runtest_alias <alias-name>))`` specifies the alias under which
-  :ref:`inline_tests` and tests (:ref:`tests-stanza`) run for the ``wasm`` mode.
+  inline tests (:doc:`/reference/dune/inline-tests-field`) and tests (:doc:`/reference/dune/test`) run for the ``wasm`` mode.
 
 - ``(wasm_of_ocaml (enabled_if <blang expression>))`` specifies whether the ``wasm`` mode is enabled. It is enabled by default.
 

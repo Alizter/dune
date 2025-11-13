@@ -240,7 +240,7 @@ inline tests you might be wondering how to do the OCaml equivalent of:
    fn test_of_foo() { ... }
 
 That is, writing tests for private functions right next to the definition of
-those functions. The :ref:`inline_tests` documentation describes how to do this
+those functions. The :doc:`inline tests </howto/inline-tests>` documentation describes how to do this
 using the ``ppx_inline_test`` package; however, if you do this in your package,
 then your package must `unconditionally` depend on the ``ppx_inline_test``
 package. Opam has a notion of test-only dependencies (its ``with-test`` flag),

@@ -7,4 +7,4 @@ is used by the ``(test)`` stanza.
 ``dune runtest`` is a shortcut for ``dune build @runtest`` but is also able to
 run individual tests.
 
-.. seealso:: :doc:`/tests`
+.. seealso:: :doc:`/explanation/testing-overview`

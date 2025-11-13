@@ -1,205 +1,125 @@
 Cram Tests
 ==========
 
-Synopsis
---------
+Cram tests are expectation tests that describe a shell session. They contain
+commands and expected outputs. When executed, the commands run and the actual
+output is compared to the expected output.
 
-Cram tests are integrations tests that describe a shell session. These tests
-contain commands and expected outputs. When executed, the commands are executed
-and the actual output is compared to the expected output.
+.. seealso:: :doc:`/howto/cram-tests` for a practical guide with examples.
 
-Here is an example showing how ``echo``, ``cat``, and ``rm`` interact.
+.. _cram-syntax:
 
-.. code:: cram
+Syntax
+------
 
-   Create a file:
+Cram tests are parsed line by line. Each line type is identified by its
+indentation and first characters:
 
-     $ echo contents > data.txt
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
 
-   Display it:
+   * - Prefix
+     - Type
+     - Description
+   * - ``··$·``
+     - Command
+     - Shell command to execute.
+   * - ``··>·``
+     - Continuation
+     - Continuation of the previous command.
+   * - ``··``
+     - Output
+     - Expected output or exit code (e.g., ``[1]``).
+   * - (none)
+     - Comment
+     - Documentation text, ignored by the test runner.
 
-     $ cat data.txt
-     contents
-
-   Remove it:
-
-     $ rm data.txt
-
-   Try to remove it again:
-
-     $ rm data.txt
-     rm: cannot remove 'data.txt': No such file or directory
-     [1]
-
-The syntax mimics a shell session: there are comments and shell commands with
-their output.
-
-Examples
---------
-
-Simple Commands
-^^^^^^^^^^^^^^^
-
-This is the simplest test case: it executes the command ``touch
-this-file.txt`` and expects that the command has no output.
-
-.. code:: console
-
-   $ touch this-file.txt
-
-Output
-^^^^^^
-
-This executes ``ls`` and expects it to display ``this-file.txt``:
-
-.. code:: console
-
-   $ ls
-   this-file.txt
-
-There can be several output lines if the command is expected to print several
-lines.
-Also, note that if a command has no output, the next one can come in the next
-line.
-
-.. code:: console
-
-   $ touch other-file.txt
-   $ ls
-   other-file.txt
-   this-file.txt
-
-Comments
-^^^^^^^^
-
-Lines that are not indented are ignored. These act as comments.
-
-.. code:: cram
-
-   "touch" will create an empty file:
-
-     $ touch data.txt
-
-   Printing it will do nothing:
-
-     $ cat data.txt
-
-Continuation Lines
-^^^^^^^^^^^^^^^^^^
-
-Continuation lines are used when a command fits on several lines. This can
-happen in all the cases where pressing Enter would not run the command. For
-example, when passing a backslash character to escape the line ending. In that
-case, all the continuation lines are grouped together as a single command.
-
-This syntax mimics the PS2 prompt in shells - the ">" character is not passed
-to the command.
-
-.. code:: console
-
-   $ echo \
-   >   a \
-   >   b \
-   >   d \
-   >   c
-   a b c d
-
-This is often used with shell "heredocs" to create files:
-
-.. code:: console
-
-   $ cat > file.txt << EOF
-   > Everything
-   > here will
-   > written to
-   > the file
-   > EOF
-
-   $ cat file.txt
-   Everything
-   here will
-   written to
-   the file
-
-Exit Codes
-^^^^^^^^^^
-
-When a command exits with a nonzero exit code, it is displayed between square
-brackets after its output:
-
-.. code:: console
-
-   $ false
-   [1]
-
-   $ echo hello; false
-   hello
-   [1]
-
-Syntax Details
---------------
-
-Cram tests are parsed line by line, depending on the first characters of
-each line:
-
-- If a line starts with ``␣␣$␣`` (``␣`` denoting a space character), the rest
-  is a command.
-- If it starts with ``␣␣>␣``, the rest is the continuation of a command
-  (continuation lines must immediately follow a command).
-- If it start with ``␣␣`` and something else, the rest is the expected output
-  or exit code of the previous command.
-- Everything else is a comment.
+The ``·`` character represents a space. See :ref:`cram-syntax-basics` for
+examples.
 
 File and Directory Tests
 ------------------------
 
-There are two types of Cram tests: file tests and directory tests. File tests
-are files with a ``.t`` extension. Directory tests are files named ``run.t``
-within a directory with a name that ends with ``.t``.
+Cram tests come in two forms:
 
-A Cram test begins its execution in a temporary directory where its
-dependencies (as listed in the corresponding :doc:`cram stanzas <dune/cram>`,
-if any) are available. In the case of a directory test, the contents of the
-directory are also available.
+*File tests* are standalone ``.t`` files:
 
-File tests have the nice property that they are self-contained: everything
-happens in a single file. This is handy because it does not make a deep file
-hierarchy in a project. But if the test requires some files, these need to be
-created using ``cat`` and heredocs. Directory tests, on the other hand, allow
-creating these test fixtures as normal files. This can be more comfortable
-because it makes the usual tooling (syntax highlighting, completion, etc.)
-available.
+.. code::
 
-Executing Cram Tests
---------------------
+   mytest.t
 
-Every Cram test has a name. For file tests, the name of ``something.t`` is
-``something``, and for directory tests, the name of ``something.t/run.t`` is
-``something``.
+*Directory tests* are ``.t`` directories containing a ``run.t`` file and
+optional test data:
 
-There are several ways to execute Cram tests:
+.. code::
 
-- Running ``dune runtest something.t`` will run the cram test with filename
-  ``something.t``.
-- All Cram tests are attached to the :doc:`/reference/aliases/runtest` alias.
-  So ``dune runtest`` will run all Cram tests.
-- Every Cram test creates an alias after its name. So, ``dune build
-  @something`` will run tests named ``something``.
+   mytest.t/
+   ├── run.t       (required)
+   └── data.txt    (test data)
 
+See :ref:`cram-file-vs-directory` for guidance on choosing between them.
 
-When a Cram test is executed, the commands it contains are executed, and a
-corrected file is created where the command outputs are inserted after
-each command. This corrected file is then offered for :doc:`promotion
-<../concepts/promotion>` by Dune.
+Running Cram Tests
+------------------
 
-Concretely, this means that Dune will display the difference between the
-Cram test's current contents and the latest run's output. This diff
-can be applied by running ``dune promote``, as usual.
+Each cram test creates an alias from its name (``something.t`` creates
+``@something``) and is added to the :doc:`@runtest </reference/aliases/runtest>`
+alias. Tests are run with ``dune runtest``. See :ref:`cram-running-promoting`
+for examples.
 
-.. code:: diff
+Configuration
+-------------
 
-   $ touch changed-name.txt
-   $ ls
-  -other-file.txt
-  +changed-name.txt
-   this-file.txt
+Cram tests can be configured using the :doc:`(cram) stanza <dune/cram>`.
+
+Execution Process
+-----------------
+
+When a Cram test runs:
+
+1. Dune creates a temporary :doc:`sandbox </concepts/sandboxing>` directory.
+2. :ref:`Declared dependencies <cram-deps-field>` are made available from
+   within the sandbox.
+3. Each command is executed by the shell (``sh`` by default, configurable via
+   the :ref:`shell field <cram-shell-field>`).
+4. Output is captured and sanitized:
+
+   - The test directory is replaced with ``$TESTCASE_ROOT``.
+   - The temporary directory is replaced with ``$TMPDIR``.
+   - Custom paths can be added via ``BUILD_PATH_PREFIX_MAP``.
+
+   See :ref:`cram-output-sanitation` for further details.
+
+5. A corrected ``.t`` file is generated with actual output inserted after
+   each command.
+
+If the actual output differs from the expected output, Dune displays a diff:
+
+.. code-block:: diff
+
+   File "test.t", line 1, characters 0-0:
+   diff --git a/_build/default/test.t b/_build/default/test.t.corrected
+   --- a/_build/default/test.t
+   +++ b/_build/default/test.t.corrected
+   @@ -1,2 +1,3 @@
+      $ echo hello
+   -  goodbye
+   +  hello
+
+Accept the new output with ``dune promote``. See :doc:`/concepts/promotion`
+for details.
+
+If a :ref:`timeout <cram-timeout-field>` is configured and exceeded, Dune
+terminates the test early. The error message indicates which command was
+running and the location of the configured time limit.
+
+If a command exits the shell early (e.g., ``exit 1``), the shell terminates
+immediately. The output of that command and all subsequent commands is replaced
+with ``***** UNREACHABLE *****`` in the corrected file. Output from commands
+that executed before the exit can still be promoted.
+
+If :ref:`conflict_markers <cram-conflict-markers-field>` is set to ``error``,
+Dune will refuse to run tests containing unresolved conflict markers from Git,
+diff3, or Jujutsu.
+

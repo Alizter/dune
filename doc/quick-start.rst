@@ -91,7 +91,7 @@ which you can dive deeper into Dune's capabilities:
   placeholder values. See :doc:`/reference/dune-project/index` for
   details.
 * The ``test`` directory contains a skeleton for your project's tests. Add to
-  the tests by editing ``test/test_project_name.ml``. See :ref:`writing-tests` for
+  the tests by editing ``test/test_project_name.ml``. See :doc:`/explanation/testing-overview` for
   details on testing.
 * The ``lib`` directory will hold the library you write to provide your executable's core
   functionality. Add modules to your library by creating new

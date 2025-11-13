@@ -33,6 +33,8 @@ The following pages describe the available stanzas and their meanings.
 
       executable
       library
+      inline-tests-field
+      inline-tests-backend
       foreign_library
       deprecated_library_name
       generate_sites_module

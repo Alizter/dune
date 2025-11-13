@@ -11,6 +11,8 @@ Cram
 
    .. seealso:: :doc:`/reference/cram`
 
+   .. _cram-deps-field:
+
    .. describe:: (deps <dep-spec>)
 
       Specify the dependencies of the test.
@@ -50,6 +52,8 @@ Cram
 
       .. seealso:: :doc:`/reference/predicate-language`
 
+   .. _cram-enabled-if-field:
+
    .. describe:: (enabled_if <blang>)
 
       Control whether the tests are enabled.
@@ -81,6 +85,8 @@ Cram
       The default is to add every Cram test to ``runtest``, but this is not
       always desired.
 
+   .. _cram-timeout-field:
+
    .. describe:: (timeout <float>)
 
       .. versionadded:: 3.20
@@ -110,14 +116,16 @@ Cram
 
       This limits each selected test to at most 2.5 seconds of execution time.
 
+   .. _cram-conflict-markers-field:
+
    .. describe:: (conflict_markers <ignore|error>)
 
       .. versionadded:: 3.21
 
-      Determines how conflict markers inserted by version control systems are
-      inserted. The default behavior is to ``ignore`` them. Setting ``error``
-      will make the test runner reject such conflicts and refuse to run the
-      test.
+      Determines how conflict markers are handled. Git, diff3, and Jujutsu
+      conflict markers are detected. The default behavior is to ``ignore``
+      them. Setting ``error`` will make the test runner reject such conflicts
+      and refuse to run the test.
 
    .. describe:: (setup_scripts <files-list>)
 
@@ -129,6 +137,8 @@ Cram
       in this field. The order of evaluation for these scripts is deterministic
       but is left undefined, so it is not recommended that these scripts have
       side effects.
+
+   .. _cram-shell-field:
 
    .. describe:: (shell <sh|bash>)
 

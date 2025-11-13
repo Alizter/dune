@@ -316,7 +316,7 @@ order to declare a multi-directory library, you need to use the
 
    They can be configured through options using ``(inline_tests <options>)``.
 
-   See :ref:`inline_tests` for a reference of corresponding options.
+   See :doc:`/reference/dune/inline-tests-field` for a reference of corresponding options.
 
 .. describe:: (root_module <module>)
 

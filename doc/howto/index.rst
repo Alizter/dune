@@ -18,7 +18,13 @@ These guides will help you use Dune's features in your project.
    ../wasmoo
    ../melange
    ../virtual-libraries
-   ../tests
+   inline-tests
+   expect-tests
+   tests-stanza
+   cram-tests
+   custom-test-rules
+   custom-inline-test-backend
+   test-with-alcotest
    bundle
    toplevel
    rule-generation

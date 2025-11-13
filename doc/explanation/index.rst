@@ -10,6 +10,7 @@ the rest of the OCaml ecosystem.
    mental-model
    scopes
    preprocessing
+   testing-overview
    ocaml-ecosystem
    package-management
    opam-integration
