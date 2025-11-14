@@ -74,7 +74,7 @@ let pp ppf ~fields sexps =
 
 let term =
   let+ builder = Common.Builder.term
-  and+ dir = Arg.(value & pos 0 dir "" & info [] ~docv:"PATH")
+  and+ dir = Arg.(value & pos 0 dir "" & info [] ~docv:"PATH" ~doc:None)
   and+ fields =
     Arg.(
       value
@@ -83,8 +83,9 @@ let term =
           [ "field" ]
           ~docv:"FIELD"
           ~doc:
-            "Only print this field. This option can be repeated multiple times to print \
-             multiple fields.")
+            (Some
+               "Only print this field. This option can be repeated multiple times to \
+                print multiple fields."))
   in
   let common, config = Common.init builder in
   Scheduler.go_with_rpc_server ~common ~config (fun () ->

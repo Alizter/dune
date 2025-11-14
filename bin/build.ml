@@ -162,12 +162,13 @@ let build =
         ]
     ]
   in
-  let name_ = Arg.info [] ~docv:"TARGET" in
+  let name_ = Arg.info [] ~docv:"TARGET" ~doc:None in
   let term =
     let+ builder = Common.Builder.term
     and+ targets = Arg.(value & pos_all dep [] name_)
-    and+ aliases_rec = Arg.(value & opt_all Dep.alias_rec_arg [] & info [ "alias-rec" ])
-    and+ aliases = Arg.(value & opt_all Dep.alias_arg [] & info [ "alias" ]) in
+    and+ aliases_rec =
+      Arg.(value & opt_all Dep.alias_rec_arg [] & info [ "alias-rec" ] ~doc:None)
+    and+ aliases = Arg.(value & opt_all Dep.alias_arg [] & info [ "alias" ] ~doc:None) in
     let targets = List.concat [ targets; aliases; aliases_rec ] in
     let targets =
       match targets with

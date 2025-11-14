@@ -22,9 +22,10 @@ let info = Cmd.info "location" ~doc ~man
 
 let term : unit Term.t =
   let+ builder = Common.Builder.term
-  and+ context = Common.context_arg ~doc:{|Run the command in this build context.|}
+  and+ context = Common.context_arg ~doc:(Some {|Run the command in this build context.|})
   and+ prog =
-    Arg.(required & pos 0 (some Exec.Cmd_arg.conv) None (Arg.info [] ~docv:"PROG"))
+    Arg.(
+      required & pos 0 (some Exec.Cmd_arg.conv) None (Arg.info [] ~docv:"PROG" ~doc:None))
   in
   let common, config = Common.init builder in
   Scheduler.go_with_rpc_server ~common ~config
