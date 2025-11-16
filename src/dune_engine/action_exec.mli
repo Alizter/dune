@@ -19,6 +19,8 @@ module Exec_result : sig
            facts map. We don't do it because conversion isn't free *)
         (Dep.Set.t * Dep.Facts.t) list
     ; duration : float option
+    ; captured_stdout : string option
+    ; captured_stderr : string option
     }
 
   type t = (ok, Error.t list) Result.t

@@ -5,12 +5,13 @@ open Import
     shared cache, Dune copes or hardlinks them into the build directory. *)
 module type S = sig
   (** Check if the shared cache contains results for a rule and decide whether
-      to use these results or rerun the rule for a reproducibility check. *)
+      to use these results or rerun the rule for a reproducibility check.
+      Returns the produced targets along with any captured stdout/stderr. *)
   val lookup
     :  can_go_in_shared_cache:bool
     -> rule_digest:Digest.t
     -> targets:Targets.Validated.t
-    -> Digest.t Targets.Produced.t option Fiber.t
+    -> (Digest.t Targets.Produced.t * string option * string option) option Fiber.t
 
   (** This function performs the following steps:
 
@@ -20,7 +21,7 @@ module type S = sig
 
       - Remove write permissions from the targets;
 
-      - Store results to the shared cache if needed. *)
+      - Store results to the shared cache if needed, including any captured output. *)
   val examine_targets_and_store
     :  can_go_in_shared_cache:bool
     -> loc:Loc.t
@@ -28,5 +29,7 @@ module type S = sig
     -> should_remove_write_permissions_on_generated_files:bool
     -> action:(unit -> User_message.Style.t Pp.t)
     -> produced_targets:unit Targets.Produced.t
+    -> captured_stdout:string option
+    -> captured_stderr:string option
     -> Digest.t Targets.Produced.t Fiber.t
 end

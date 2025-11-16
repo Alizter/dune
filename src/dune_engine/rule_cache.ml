@@ -9,14 +9,18 @@ module Workspace_local = struct
         { rule_digest : Digest.t
         ; dynamic_deps_stages : (Dep.Set.t * Digest.t) list
         ; targets_digest : Digest.t
+        ; captured_stdout : string option
+        ; captured_stderr : string option
         }
 
-      let to_dyn { rule_digest; dynamic_deps_stages; targets_digest } =
+      let to_dyn { rule_digest; dynamic_deps_stages; targets_digest; captured_stdout; captured_stderr } =
         Dyn.Record
           [ "rule_digest", Digest.to_dyn rule_digest
           ; ( "dynamic_deps_stages"
             , Dyn.list (Dyn.pair Dep.Set.to_dyn Digest.to_dyn) dynamic_deps_stages )
           ; "targets_digest", Digest.to_dyn targets_digest
+          ; "captured_stdout", Dyn.option Dyn.string captured_stdout
+          ; "captured_stderr", Dyn.option Dyn.string captured_stderr
           ]
       ;;
     end
@@ -31,7 +35,7 @@ module Workspace_local = struct
         type nonrec t = t
 
         let name = "INCREMENTAL-DB"
-        let version = 6
+        let version = 7
         let to_dyn = to_dyn
 
         let test_example () =
@@ -42,6 +46,8 @@ module Workspace_local = struct
             { Entry.rule_digest = Digest.string "foo"
             ; dynamic_deps_stages = [ Dep.Set.empty, Digest.string "bar" ]
             ; targets_digest = Digest.string "zzz"
+            ; captured_stdout = None
+            ; captured_stderr = None
             };
           table
         ;;
@@ -87,10 +93,10 @@ module Workspace_local = struct
     ;;
   end
 
-  let store ~head_target ~rule_digest ~dynamic_deps_stages ~targets_digest =
+  let store ~head_target ~rule_digest ~dynamic_deps_stages ~targets_digest ~captured_stdout ~captured_stderr =
     Database.set
       (Path.build head_target)
-      { rule_digest; dynamic_deps_stages; targets_digest }
+      { rule_digest; dynamic_deps_stages; targets_digest; captured_stdout; captured_stderr }
   ;;
 
   module Miss_reason = struct
@@ -181,7 +187,9 @@ module Workspace_local = struct
          later stages). *)
       let rec loop stages =
         match stages with
-        | [] -> Fiber.return (Hit produced_targets)
+        | [] ->
+          Fiber.return
+            (Hit (produced_targets, prev_trace.captured_stdout, prev_trace.captured_stderr))
         | (deps, old_digest) :: rest ->
           let open Fiber.O in
           let* deps = Memo.run (build_deps deps) in
@@ -194,7 +202,7 @@ module Workspace_local = struct
   ;;
 
   let lookup ~always_rerun ~rule_digest ~targets ~env ~build_deps
-    : Digest.t Targets.Produced.t option Fiber.t
+    : (Digest.t Targets.Produced.t * string option * string option) option Fiber.t
     =
     let open Fiber.O in
     let+ result =
@@ -203,7 +211,8 @@ module Workspace_local = struct
       | false -> lookup_impl ~rule_digest ~targets ~env ~build_deps
     in
     match result with
-    | Hit result -> Some result
+    | Hit (produced_targets, captured_stdout, captured_stderr) ->
+      Some (produced_targets, captured_stdout, captured_stderr)
     | Miss reason ->
       let t = Build_config.get () in
       if t.cache_debug_flags.workspace_local_cache
@@ -226,6 +235,8 @@ module Shared = struct
         ~should_remove_write_permissions_on_generated_files
         ~action
         ~produced_targets
+        ~captured_stdout
+        ~captured_stderr
     =
     let config = Build_config.get () in
     let module Shared_cache = (val config.shared_cache) in
@@ -236,5 +247,7 @@ module Shared = struct
       ~should_remove_write_permissions_on_generated_files
       ~action
       ~produced_targets
+      ~captured_stdout
+      ~captured_stderr
   ;;
 end

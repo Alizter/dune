@@ -29,3 +29,25 @@ let%expect_test "null output" =
   let _res = go run in
   [%expect {||}]
 ;;
+
+let%expect_test "capture stderr with TEE" =
+  let sh = Bin.which "sh" ~path:(Env_path.path Env.initial) |> Option.value_exn in
+  let run () =
+    let open Fiber.O in
+    let+ (_times, _stdout, stderr), _exit_code =
+      Process.run_with_times_and_optional_capture
+        ~display:Quiet
+        ~capture_stderr:true
+        Return
+        sh
+        [ "-c"; "echo 'error message' >&2" ]
+    in
+    (* Verify stderr was captured *)
+    print_endline ("Captured: " ^ stderr)
+  in
+  let () = go run in
+  [%expect {|
+    error message
+    Captured: error message
+    |}]
+;;

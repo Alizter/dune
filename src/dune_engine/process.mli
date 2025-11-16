@@ -122,6 +122,23 @@ val run_with_times
   -> string list
   -> 'a Fiber.t
 
+(** Run a command with timing info and optionally capture stdout/stderr for later replay.
+    This is useful for capturing diagnostics/warnings that should be replayed
+    even when the action result is cached. *)
+val run_with_times_and_optional_capture
+  :  ?dir:Path.t
+  -> display:Display.t
+  -> ?capture_stdout:bool (** default: false *)
+  -> ?capture_stderr:bool (** default: false *)
+  -> ?stdin_from:Io.input Io.t
+  -> ?env:Env.t
+  -> ?metadata:metadata
+  -> (Proc.Times.t * string * string, 'a) Failure_mode.t
+       (** Returns (times, captured_stdout, captured_stderr) *)
+  -> Path.t
+  -> string list
+  -> 'a Fiber.t
+
 (** Run a command and capture its output *)
 val run_capture
   :  ?dir:Path.t

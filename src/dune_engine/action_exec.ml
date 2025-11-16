@@ -29,10 +29,19 @@ end
 
 module Produce = struct
   module State = struct
-    type t = { duration : Duration.t }
+    type t =
+      { duration : Duration.t
+      ; captured_stdout : string list
+      ; captured_stderr : string list
+      }
 
-    let empty = { duration = Duration.empty }
-    let combine x { duration } = { duration = Duration.combine x.duration duration }
+    let empty = { duration = Duration.empty; captured_stdout = []; captured_stderr = [] }
+
+    let combine x y =
+      { duration = Duration.combine x.duration y.duration
+      ; captured_stdout = x.captured_stdout @ y.captured_stdout
+      ; captured_stderr = x.captured_stderr @ y.captured_stderr
+      }
   end
 
   type 'a t = State.t -> ('a * State.t) Fiber.t
@@ -41,7 +50,16 @@ module Produce = struct
 
   let incr_duration : float -> 'a t =
     fun how_much state ->
-    Fiber.return ((), State.combine state { duration = Some how_much })
+    Fiber.return
+      ((), State.combine state { duration = Some how_much; captured_stdout = []; captured_stderr = [] })
+  ;;
+
+  let add_captured_output : stdout:string option -> stderr:string option -> 'a t =
+    fun ~stdout ~stderr state ->
+    let captured_stdout = match stdout with Some s when s <> "" -> [s] | _ -> [] in
+    let captured_stderr = match stderr with Some s when s <> "" -> [s] | _ -> [] in
+    Fiber.return
+      ((), State.combine state { duration = None; captured_stdout; captured_stderr })
   ;;
 
   let of_fiber (type a) (x : a Fiber.t) state : (a * State.t) Fiber.t =
@@ -126,6 +144,8 @@ module Exec_result = struct
   type ok =
     { dynamic_deps_stages : (Dep.Set.t * Dep.Facts.t) list
     ; duration : float option
+    ; captured_stdout : string option
+    ; captured_stderr : string option
     }
 
   type t = (ok, Error.t list) Result.t
@@ -142,15 +162,15 @@ end
 open Produce.O
 
 let exec_run ~(ectx : context) ~(eenv : env) prog args : _ Produce.t =
-  let* (res : (Proc.Times.t, int) result) =
+  let* (res : (Proc.Times.t * string * string, int) result) =
     Produce.of_fiber
-    @@ Process.run_with_times
+    @@ Process.run_with_times_and_optional_capture
          ~display:!Clflags.display
+         ~capture_stdout:false
+         ~capture_stderr:true
          (Accept eenv.exit_codes)
          ~dir:eenv.working_dir
          ~env:eenv.env
-         ~stdout_to:eenv.stdout_to
-         ~stderr_to:eenv.stderr_to
          ~stdin_from:eenv.stdin_from
          ~metadata:ectx.metadata
          prog
@@ -158,7 +178,11 @@ let exec_run ~(ectx : context) ~(eenv : env) prog args : _ Produce.t =
   in
   match res with
   | Error _ -> Produce.return ()
-  | Ok times -> Produce.incr_duration times.elapsed_time
+  | Ok (times, stdout, stderr) ->
+    let* () = Produce.incr_duration times.elapsed_time in
+    Produce.add_captured_output
+      ~stdout:(if stdout = "" then None else Some stdout)
+      ~stderr:(if stderr = "" then None else Some stderr)
 ;;
 
 let exec_echo stdout_to str =
@@ -369,7 +393,21 @@ let exec_until_all_deps_ready ~ectx ~eenv t =
   in
   let open Fiber.O in
   let+ stages, state = Produce.run Produce.State.empty (loop ~eenv []) in
-  { Exec_result.dynamic_deps_stages = List.rev stages; duration = state.duration }
+  let captured_stdout =
+    match state.captured_stdout with
+    | [] -> None
+    | parts -> Some (String.concat ~sep:"" parts)
+  in
+  let captured_stderr =
+    match state.captured_stderr with
+    | [] -> None
+    | parts -> Some (String.concat ~sep:"" parts)
+  in
+  { Exec_result.dynamic_deps_stages = List.rev stages
+  ; duration = state.duration
+  ; captured_stdout
+  ; captured_stderr
+  }
 ;;
 
 type input =

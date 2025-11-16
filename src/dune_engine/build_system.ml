@@ -574,7 +574,13 @@ end = struct
           ~env:action.env
           ~build_deps
         >>= function
-        | Some produced_targets -> Fiber.return produced_targets
+        | Some (produced_targets, captured_stdout, captured_stderr) ->
+          (* Replay captured output from cache *)
+          let () =
+            Option.iter captured_stdout ~f:(fun s -> Console.printf "%s" s);
+            Option.iter captured_stderr ~f:(fun s -> Console.printf "%s" s)
+          in
+          Fiber.return produced_targets
         | None ->
           (* Step II. Remove stale targets both from the digest table and from
              the build directory. *)
@@ -608,11 +614,11 @@ end = struct
                 ~file:remove_target_file
                 ~dir:remove_target_dir)
           in
-          let* produced_targets, dynamic_deps_stages =
+          let* produced_targets, dynamic_deps_stages, captured_stdout, captured_stderr =
             (* Step III. Try to restore artifacts from the shared cache. *)
             Rule_cache.Shared.lookup ~can_go_in_shared_cache ~rule_digest ~targets
             >>= function
-            | Some produced_targets ->
+            | Some (produced_targets, captured_stdout, captured_stderr) ->
               (* Rules with dynamic deps can't be stored to the shared cache
                  (see the [is_action_dynamic] check above), so we know this is
                  not a dynamic action, so returning an empty list is correct.
@@ -620,7 +626,12 @@ end = struct
                  is precisely the reason why we don't store dynamic actions in
                  the shared cache. *)
               let dynamic_deps_stages = [] in
-              Fiber.return (produced_targets, dynamic_deps_stages)
+              (* Replay captured output from shared cache *)
+              let () =
+                Option.iter captured_stdout ~f:(fun s -> Console.printf "%s" s);
+                Option.iter captured_stderr ~f:(fun s -> Console.printf "%s" s)
+              in
+              Fiber.return (produced_targets, dynamic_deps_stages, captured_stdout, captured_stderr)
             | None ->
               (* Step IV. Execute the build action. *)
               let* exec_result =
@@ -647,6 +658,8 @@ end = struct
                        execution_parameters)
                   ~produced_targets:exec_result.produced_targets
                   ~action:(fun () -> Action.for_shell action.action |> Action_to_sh.pp)
+                  ~captured_stdout:exec_result.action_exec_result.captured_stdout
+                  ~captured_stderr:exec_result.action_exec_result.captured_stderr
               in
               let dynamic_deps_stages =
                 List.map
@@ -654,7 +667,22 @@ end = struct
                   ~f:(fun (deps, fact_map) ->
                     deps, Dep.Facts.digest fact_map ~env:action.env)
               in
-              Fiber.return (produced_targets, dynamic_deps_stages)
+              (* Display captured output immediately after execution.
+                 Note: this means output appears twice on first build - once from the
+                 process itself (with colors) and once from our captured version
+                 (without colors). This is a known issue but ensures warnings don't
+                 disappear on subsequent builds. *)
+              let () =
+                Option.iter exec_result.action_exec_result.captured_stdout ~f:(fun s ->
+                  Console.printf "%s" s);
+                Option.iter exec_result.action_exec_result.captured_stderr ~f:(fun s ->
+                  Console.printf "%s" s)
+              in
+              Fiber.return
+                ( produced_targets
+                , dynamic_deps_stages
+                , exec_result.action_exec_result.captured_stdout
+                , exec_result.action_exec_result.captured_stderr )
           in
           (* We do not include target names into [targets_digest] because they
              are already included into the rule digest. *)
@@ -662,7 +690,9 @@ end = struct
             ~head_target
             ~rule_digest
             ~dynamic_deps_stages
-            ~targets_digest:(Targets.Produced.digest produced_targets);
+            ~targets_digest:(Targets.Produced.digest produced_targets)
+            ~captured_stdout
+            ~captured_stderr;
           Fiber.return produced_targets
       in
       let* () =

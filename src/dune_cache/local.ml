@@ -230,10 +230,30 @@ module Artifacts = struct
               Store_artifacts_result.of_store_result ~artifacts result)))
   ;;
 
-  let store ~mode ~rule_digest ~compute_digest targets : Store_artifacts_result.t Fiber.t =
+  let store
+        ~mode
+        ~rule_digest
+        ~compute_digest
+        ~captured_stdout
+        ~captured_stderr
+        targets
+    : Store_artifacts_result.t Fiber.t
+    =
     let+ result = store_skipping_metadata ~mode ~targets ~compute_digest in
     Store_artifacts_result.bind result ~f:(fun artifacts ->
-      let result = store_metadata ~mode ~rule_digest ~metadata:[] artifacts in
+      let metadata =
+        let open Sexp in
+        List.filter_map
+          ~f:(fun x -> x)
+          [ (match captured_stdout with
+             | None -> None
+             | Some s -> Some (List [ Atom "captured_stdout"; Atom s ]))
+          ; (match captured_stderr with
+             | None -> None
+             | Some s -> Some (List [ Atom "captured_stderr"; Atom s ]))
+          ]
+      in
+      let result = store_metadata ~mode ~rule_digest ~metadata artifacts in
       Store_artifacts_result.of_store_result ~artifacts result)
   ;;
 
@@ -302,8 +322,24 @@ module Artifacts = struct
     ;;
   end
 
+  let extract_captured_output metadata =
+    let open Sexp in
+    let rec extract_field field_name = function
+      | [] -> None
+      | List [ Atom name; Atom value ] :: _ when String.equal name field_name ->
+        Some value
+      | _ :: rest -> extract_field field_name rest
+    in
+    let captured_stdout = extract_field "captured_stdout" metadata in
+    let captured_stderr = extract_field "captured_stderr" metadata in
+    captured_stdout, captured_stderr
+  ;;
+
   let restore ~mode ~rule_digest ~target_dir =
-    Restore_result.bind (list ~rule_digest) ~f:(fun (entries : Metadata_entry.t list) ->
+    Restore_result.bind
+      (Metadata_file.restore ~rule_digest)
+      ~f:(fun ({ metadata; entries } : Metadata_file.t) ->
+      let captured_stdout, captured_stderr = extract_captured_output metadata in
       let artifacts =
         Path.Local.Map.of_list_map_exn entries ~f:(fun { Metadata_entry.path; digest } ->
           Path.Local.of_string path, digest)
@@ -311,14 +347,20 @@ module Artifacts = struct
       in
       try
         File_restore.create_all_or_none mode artifacts;
-        Restored artifacts
+        Restored (artifacts, captured_stdout, captured_stderr)
       with
       | File_restore.E result ->
         (* If [result] is [Not_found_in_cache] then one of the entries mentioned in
            the metadata is missing. The trimmer will eventually delete such "broken"
            metadata, so it is reasonable to consider that this [rule_digest] is not
            found in the cache. *)
-        result)
+        (match result with
+         | Restored _ ->
+           Code_error.raise
+             "File_restore.E should not contain Restored"
+             [ "rule_digest", Digest.to_dyn rule_digest ]
+         | Not_found_in_cache -> Not_found_in_cache
+         | Error exn -> Error exn))
   ;;
 end
 

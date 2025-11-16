@@ -12,14 +12,15 @@ open Import
     to date results for a given rule. *)
 module Workspace_local : sig
   (** Check if the workspace-local cache contains up-to-date results for a rule
-      using the information stored in the rule database. *)
+      using the information stored in the rule database. Returns the produced
+      targets and any captured output from the previous build. *)
   val lookup
     :  always_rerun:bool
     -> rule_digest:Digest.t
     -> targets:Targets.Validated.t
     -> env:Env.t
     -> build_deps:(Dep.Set.t -> Dep.Facts.t Memo.t)
-    -> Digest.t Targets.Produced.t option Fiber.t
+    -> (Digest.t Targets.Produced.t * string option * string option) option Fiber.t
 
   (** Add a new record to the rule database. *)
   val store
@@ -27,6 +28,8 @@ module Workspace_local : sig
     -> rule_digest:Digest.t
     -> dynamic_deps_stages:(Dep.Set.t * Digest.t) list
     -> targets_digest:Digest.t
+    -> captured_stdout:string option
+    -> captured_stderr:string option
     -> unit
 end
 

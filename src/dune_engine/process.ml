@@ -1177,6 +1177,67 @@ let run_with_times
   Failure_mode.map_result fail_mode code ~f:(fun () -> times)
 ;;
 
+let run_with_times_and_optional_capture
+      ?dir
+      ~display
+      ?(capture_stdout = false)
+      ?(capture_stderr = false)
+      ?stdin_from
+      ?env
+      ?metadata
+      fail_mode
+      prog
+      args
+  =
+  let stdout_fn = if capture_stdout then Some (Temp.create File ~prefix:"dune" ~suffix:"stdout") else None in
+  let stderr_fn = if capture_stderr then Some (Temp.create File ~prefix:"dune" ~suffix:"stderr") else None in
+  let stdout_to = match stdout_fn with
+    | Some fn -> Io.file fn Io.Out
+    | None -> Io.stdout
+  in
+  let stderr_to = match stderr_fn with
+    | Some fn -> Io.file fn Io.Out
+    | None -> Io.stderr
+  in
+  let+ code, times =
+    run_internal
+      ?dir
+      ~display
+      ~stdout_to
+      ~stderr_to
+      ?stdin_from
+      ?env
+      ?metadata
+      fail_mode
+      prog
+      args
+  in
+  (* TEE mode: read captured output and replay to stderr/stdout BEFORE map_result
+     so it happens regardless of process success/failure *)
+  let stdout_content = match stdout_fn with
+    | Some fn ->
+      let content = Stdune.Io.read_file fn in
+      if content <> "" then (
+        output_string stdout content;
+        flush stdout);
+      Temp.destroy File fn;
+      content
+    | None -> ""
+  in
+  let stderr_content = match stderr_fn with
+    | Some fn ->
+      let content = Stdune.Io.read_file fn in
+      if content <> "" then (
+        output_string stderr content;
+        flush stderr);
+      Temp.destroy File fn;
+      content
+    | None -> ""
+  in
+  Failure_mode.map_result fail_mode code ~f:(fun () ->
+    (times, stdout_content, stderr_content))
+;;
+
 let run_capture_gen
       ?dir
       ~display

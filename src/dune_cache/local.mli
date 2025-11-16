@@ -43,7 +43,7 @@ end
 
 (** Store targets produced by a rule with a given digest. If successful, this
     operation will create one metadata entry plus one file entry per target in
-    the cache.
+    the cache. The metadata will also include any captured stdout/stderr.
 
     The [compute_digest] function is passed explicitly because the caller might
     want to memoize and/or throttle file digest computations. *)
@@ -51,16 +51,18 @@ val store_artifacts
   :  mode:Dune_cache_storage.Mode.t
   -> rule_digest:Digest.t
   -> compute_digest:(executable:bool -> Path.t -> Digest.t Fiber.t)
+  -> captured_stdout:string option
+  -> captured_stderr:string option
   -> Target.t Targets.Produced.t
   -> Store_artifacts_result.t Fiber.t
 
 (** Restore targets produced by a rule with a given digest. If successful, this
     operation will restore the targets on disk, in the [target_dir] directory,
-    and will also return their paths and digests. The caller is responsible for
-    removing stale versions of the targets, if any, before calling this
-    function. *)
+    and will also return their paths and digests along with any captured
+    stdout/stderr from the metadata. The caller is responsible for removing
+    stale versions of the targets, if any, before calling this function. *)
 val restore_artifacts
   :  mode:Dune_cache_storage.Mode.t
   -> rule_digest:Digest.t
   -> target_dir:Path.Build.t
-  -> Digest.t Targets.Produced.t Restore_result.t
+  -> (Digest.t Targets.Produced.t * string option * string option) Restore_result.t
