@@ -135,6 +135,18 @@ let local_libraries =
     ; special_builtin_support = None
     ; root_module = None
     }
+  ; { path = "otherlibs/ocamlc-loc/src"
+    ; main_module_name = Some "Ocamlc_loc"
+    ; include_subdirs = No
+    ; special_builtin_support = None
+    ; root_module = None
+    }
+  ; { path = "otherlibs/dune-rpc/private"
+    ; main_module_name = Some "Dune_rpc_private"
+    ; include_subdirs = No
+    ; special_builtin_support = None
+    ; root_module = None
+    }
   ; { path = "src/dune_sexp"
     ; main_module_name = Some "Dune_sexp"
     ; include_subdirs = No
@@ -179,18 +191,6 @@ let local_libraries =
     }
   ; { path = "src/dune_cache"
     ; main_module_name = Some "Dune_cache"
-    ; include_subdirs = No
-    ; special_builtin_support = None
-    ; root_module = None
-    }
-  ; { path = "otherlibs/ocamlc-loc/src"
-    ; main_module_name = Some "Ocamlc_loc"
-    ; include_subdirs = No
-    ; special_builtin_support = None
-    ; root_module = None
-    }
-  ; { path = "otherlibs/dune-rpc/private"
-    ; main_module_name = Some "Dune_rpc_private"
     ; include_subdirs = No
     ; special_builtin_support = None
     ; root_module = None

@@ -57,11 +57,21 @@ struct
 
     let parse first_line : Instance.t =
       let { First_line.lang = name_loc, name; version = ver_loc, ver } = first_line in
+      let ver_atom =
+        match Atom.parse ver with
+        | Some atom -> atom
+        | None ->
+          let major, minor = Dune_rpc_private.Version.latest in
+          User_error.raise
+            ~loc:ver_loc
+            ~hints:[ Pp.textf "(lang dune %d.%d)" major minor ]
+            [ Pp.text
+                "Invalid version. Version must contain only ASCII characters and be two \
+                 numbers separated by a dot."
+            ]
+      in
       let dune_lang_ver =
-        Decoder.parse
-          Syntax.Version.decode
-          Univ_map.empty
-          (Atom (ver_loc, Atom.of_string ver))
+        Decoder.parse Syntax.Version.decode Univ_map.empty (Atom (ver_loc, ver_atom))
       in
       match Table.find langs name with
       | None ->
