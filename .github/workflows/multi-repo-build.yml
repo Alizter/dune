@@ -90,4 +90,7 @@ jobs:
         run: cd workspace && nix run .. -- pkg lock
 
       - name: Build
-        run: cd workspace && nix run .. -- build
+        # CR-someday Alizter: nix run won't work here because dune does not put
+        # itself in PATH for package builds. Therefore we have to run it in an
+        # env where it is already in PATH.
+        run: cd workspace && nix develop .#default -c "dune build"
