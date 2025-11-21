@@ -100,6 +100,7 @@ module Dune_config : sig
       ; project_defaults : Project_defaults.t field
       ; pkg_enabled : Pkg_enabled.t field
       ; experimental : (string * (Loc.t * string)) list field
+      ; workspace_lang_version : Dune_lang.Syntax.Version.t option field
       }
   end
 

@@ -59,12 +59,24 @@ let init
       ~sandboxing_preference
       ~cache_config
       ~(cache_debug_flags : Dune_engine.Cache_debug_flags.t)
+      ~workspace_lang_version
       ()
   : unit
   =
   let promote_source ~chmod ~delete_dst_if_it_is_a_directory ~src ~dst =
     let open Fiber.O in
     let* ctx = Path.Build.parent_exn src |> Context.DB.by_dir |> Memo.run in
+    (* Use the workspace lang version to determine whether promoted files
+       should be read-only (3.21+) or writable (<3.21).
+       None means no workspace file, which defaults to latest behavior (read-only). *)
+    let chmod =
+      match workspace_lang_version with
+      | None -> chmod (* No workspace file: use latest behavior (read-only) *)
+      | Some version ->
+        if version >= (3, 21)
+        then chmod (* read-only *)
+        else Path.Permissions.add Path.Permissions.write (* writable *)
+    in
     let conf = Artifact_substitution.Conf.of_context ctx in
     let src = Path.build src in
     let dst = Path.source dst in

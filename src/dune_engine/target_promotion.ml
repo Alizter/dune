@@ -82,9 +82,10 @@ let promote_target_if_not_up_to_date
         ];
       if promote_until_clean then To_delete.add dst;
       (* The file in the build directory might be read-only if it comes from the
-         shared cache. We don't want the file in the source tree to be writable
-         by the user, since a new promotion will overwrite it, so we explicitly
-         remove the write permission. *)
+         shared cache. For dune-lang >= 3.21, we don't want the file in the source
+         tree to be writable by the user, since a new promotion will overwrite it,
+         so we explicitly remove the write permission. For older versions, files
+         remain writable to avoid breaking existing workflows. *)
       let chmod = Path.Permissions.remove Path.Permissions.write in
       let+ () = promote_source ~chmod ~delete_dst_if_it_is_a_directory:true ~src ~dst in
       true

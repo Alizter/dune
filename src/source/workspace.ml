@@ -970,6 +970,7 @@ let step1 clflags =
     lazy (Option.value cl ~default:(Lazy.force x))
   in
   let* () = Dune_lang.Versioned_file.no_more_lang
+  and+ lang_version = Dune_lang.Syntax.get_exn syntax
   and+ env = env_field_lazy
   and+ profile =
     superpose_with_command_line
@@ -993,6 +994,7 @@ let step1 clflags =
       ~config_from_config_file
       ~config_from_command_line
   in
+  let config = { config with workspace_lang_version = Some lang_version } in
   let t =
     lazy
       (let profile = Lazy.force profile in

@@ -539,6 +539,7 @@ let shared_with_config_file =
   ; project_defaults = None
   ; pkg_enabled = None
   ; experimental = None
+  ; workspace_lang_version = None
   }
 ;;
 
@@ -1388,6 +1389,7 @@ let init_with_root ~(root : Workspace_root.t) (builder : Builder.t) =
     ~sandboxing_preference:config.sandboxing_preference
     ~cache_config:(maybe_init_cache cache_config)
     ~cache_debug_flags:c.builder.cache_debug_flags
+    ~workspace_lang_version:config.workspace_lang_version
     ();
   Only_packages.Clflags.set c.builder.only_packages;
   Report_error.print_memo_stacks := c.builder.debug_dep_path;

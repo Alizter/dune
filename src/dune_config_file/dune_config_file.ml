@@ -262,6 +262,7 @@ module Dune_config = struct
       ; project_defaults : Project_defaults.t field
       ; pkg_enabled : Pkg_enabled.t field
       ; experimental : (string * (Loc.t * string)) list field
+      ; workspace_lang_version : Dune_lang.Syntax.Version.t option field
       }
   end
 
@@ -287,6 +288,7 @@ module Dune_config = struct
           ; project_defaults
           ; pkg_enabled
           ; experimental
+          ; workspace_lang_version
           }
       =
       field Display.equal t.display display
@@ -314,6 +316,10 @@ module Dune_config = struct
            t.experimental
            experimental
       && field Pkg_enabled.equal t.pkg_enabled pkg_enabled
+      && field
+           (Option.equal Dune_lang.Syntax.Version.equal)
+           t.workspace_lang_version
+           workspace_lang_version
     ;;
   end
 
@@ -343,6 +349,7 @@ module Dune_config = struct
       ; project_defaults = field a.project_defaults b.project_defaults
       ; pkg_enabled = field a.pkg_enabled b.pkg_enabled
       ; experimental = field a.experimental b.experimental
+      ; workspace_lang_version = field a.workspace_lang_version b.workspace_lang_version
       }
     ;;
   end
@@ -368,6 +375,7 @@ module Dune_config = struct
           ; project_defaults
           ; pkg_enabled
           ; experimental
+          ; workspace_lang_version
           }
       =
       Dyn.record
@@ -390,6 +398,8 @@ module Dune_config = struct
         ; "pkg_enabled", field Pkg_enabled.to_dyn pkg_enabled
         ; ( "experimental"
           , field Dyn.(list (pair string (fun (_, v) -> string v))) experimental )
+        ; ( "workspace_lang_version"
+          , field (Dyn.option Dune_lang.Syntax.Version.to_dyn) workspace_lang_version )
         ]
     ;;
   end
@@ -414,6 +424,7 @@ module Dune_config = struct
       ; project_defaults = None
       ; pkg_enabled = None
       ; experimental = None
+      ; workspace_lang_version = None
       }
     ;;
 
@@ -500,6 +511,7 @@ module Dune_config = struct
         }
     ; pkg_enabled = Unset
     ; experimental = []
+    ; workspace_lang_version = None
     }
   ;;
 
@@ -589,6 +601,7 @@ module Dune_config = struct
     ; project_defaults
     ; pkg_enabled
     ; experimental
+    ; workspace_lang_version = None
     }
   ;;
 
