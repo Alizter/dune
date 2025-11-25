@@ -119,6 +119,10 @@ test-ox: $(BIN)
 check: $(BIN)
 	@$(BIN) build @check
 
+.PHONY: index
+index: $(BIN)
+	@$(BIN) build @ocaml-index
+
 .PHONY: fmt
 fmt: $(BIN)
 	@$(BIN) fmt
