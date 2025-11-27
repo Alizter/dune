@@ -178,6 +178,13 @@ Alternatively, you can set the environment variable ``DUNE_ROOT``.
 The ``--root`` option has a higher priority than ``DUNE_ROOT`` environment
 variable.
 
+.. note::
+
+   Dune also sets the ``DUNE_SOURCEROOT`` environment variable when running
+   executables or tests. This variable provides the workspace root to generated
+   modules that use the ``sourceroot`` facility. See
+   :doc:`/reference/dune/generate_sites_module` for details.
+
 Interpretation of Targets
 =========================
 

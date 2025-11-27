@@ -29,6 +29,22 @@ The available ``<facilities>`` are:
   locally when executed with ``dune exec`` or after promotion. The value is
   ``None`` once it has been installed.
 
+  .. note::
+
+     The ``sourceroot`` value is determined through two mechanisms:
+
+     1. At build time, Dune encodes the workspace root into the generated module
+     2. At runtime, if the encoded value is not available (e.g., when the binary
+        is run from ``_build`` but not via ``dune exec``), the module checks the
+        ``DUNE_SOURCEROOT`` environment variable
+
+     Dune automatically sets ``DUNE_SOURCEROOT`` when running executables via
+     ``dune exec``, ``dune test``, or within build rules. After installation,
+     neither mechanism provides a value, so ``sourceroot`` returns ``None``.
+
+     Users can manually set ``DUNE_SOURCEROOT`` to override the workspace root
+     location if needed for testing or development purposes.
+
 - ``relocatable`` adds a value ``val relocatable: bool`` in the generated
   module, which indicates if the binary has been installed in the relocatable
   mode.
