@@ -148,8 +148,8 @@ type failure =
 
 let label = "dune-fetch"
 
-let unpack_archive ~archive_driver ~target ~archive =
-  Archive_driver.extract archive_driver ~archive ~target
+let unpack_archive ~target ~archive =
+  Archive.extract ~archive ~target
   >>| Result.map_error ~f:(fun () ->
     Pp.textf "Unable to extract %s" (Path.to_string_maybe_quoted archive))
 ;;
@@ -194,11 +194,7 @@ let fetch_curl ~unpack:unpack_flag ~checksum ~target (url : OpamUrl.t) =
       Path.rename output target;
       Fiber.return @@ Ok ()
     | true ->
-      unpack_archive
-        ~archive_driver:
-          (Archive_driver.choose_for_filename_default_to_tar (OpamUrl0.to_string url))
-        ~target
-        ~archive:output
+      unpack_archive ~target ~archive:output
       >>| (function
        | Ok () -> Ok ()
        | Error msg ->
@@ -238,13 +234,7 @@ let fetch_local ~checksum ~target (url, url_loc) =
   match check_checksum checksum path with
   | Error _ as e -> Fiber.return e
   | Ok () ->
-    let+ unpack_result =
-      unpack_archive
-        ~archive_driver:
-          (Archive_driver.choose_for_filename_default_to_tar (OpamUrl0.to_string url))
-        ~target
-        ~archive:path
-    in
+    let+ unpack_result = unpack_archive ~target ~archive:path in
     Result.map_error unpack_result ~f:(fun pp ->
       Unavailable (Some (User_message.make [ Pp.text "Could not unpack:"; pp ])))
 ;;
