@@ -3,6 +3,10 @@ open Action_intf.Exec
 open Done_or_more_deps
 module Dependency = Dune_action_plugin.Private.Protocol.Dependency
 
+(* The abstract 'action' type from Action_intf.Exec is actually Action.t.
+   We use Obj.magic to cast since we know they are the same type at runtime. *)
+let action_of_abstract (a : action) : Action.t = Obj.magic a
+
 let maybe_async =
   let maybe_async =
     lazy
@@ -386,9 +390,19 @@ let exec
       { targets; root; context; env; rule_loc; execution_parameters; action = t }
       ~build_deps
   =
-  let ectx =
-    let metadata = Process.create_metadata ~purpose:(Build_job targets) () in
-    { targets; metadata; context; rule_loc; build_deps }
+  let metadata = Process.create_metadata ~purpose:(Build_job targets) () in
+  (* We need to define ectx and exec_action_impl together since exec_action needs
+     to reference ectx and eenv, and ectx contains exec_action. *)
+  let rec ectx =
+    { targets; metadata; context; rule_loc; build_deps; exec_action = exec_action_impl }
+  and exec_action_impl action =
+    (* Execute a sub-action using the same ectx and eenv.
+       This converts from Produce.t to Fiber.t by running with empty state.
+       We need to cast the abstract 'action' type to Action.t. *)
+    let action = action_of_abstract action in
+    let open Fiber.O in
+    let+ result, _state = Produce.run Produce.State.empty (exec action ~ectx ~eenv) in
+    result
   and eenv =
     let env =
       match

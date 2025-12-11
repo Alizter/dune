@@ -46,7 +46,6 @@ module Diff : sig
 end
 
 module Ext : module type of Action_intf.Ext
-include module type of Action_intf.Exec
 
 (** result of the lookup of a program, the path to it or information about the
     failure and possibly a hint how to fix it *)
@@ -94,6 +93,18 @@ include
   with type t := t
 
 include Monoid with type t := t
+
+(** Execution context for action extensions *)
+type context =
+  { targets : Targets.Validated.t option
+  ; context : Build_context.t option
+  ; metadata : Process.metadata
+  ; rule_loc : Loc.t
+  ; build_deps : Dep.Set.t -> Dep.Facts.t Fiber.t
+  ; exec_action : t -> Done_or_more_deps.t Fiber.t
+  }
+
+type env = Action_intf.Exec.env
 
 module For_shell : sig
   include

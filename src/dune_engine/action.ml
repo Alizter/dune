@@ -6,8 +6,6 @@ module type T = sig
   type t
 end
 
-include Action_intf.Exec
-
 module Make
     (Program : T)
     (Path : T)
@@ -124,6 +122,18 @@ include Monoid.Make (struct
   end)
 
 type string = String.t
+
+(* Execution context with concrete Action.t type *)
+type context =
+  { targets : Targets.Validated.t option
+  ; context : Build_context.t option
+  ; metadata : Process.metadata
+  ; rule_loc : Loc.t
+  ; build_deps : Dep.Set.t -> Dep.Facts.t Fiber.t
+  ; exec_action : t -> Done_or_more_deps.t Fiber.t
+  }
+
+type env = Action_intf.Exec.env
 
 module For_shell = struct
   module type Ast =

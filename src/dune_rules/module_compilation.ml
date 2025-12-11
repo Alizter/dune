@@ -283,6 +283,142 @@ let build_cm
      Obj_dir.all_obj_dirs obj_dir ~mode
      |> List.concat_map ~f:(fun p -> [ Command.Args.A "-I"; Path (Path.build p) ])
    in
+   (* The compilation action *)
+   let compile_action =
+     let open Action_builder.With_targets.O in
+     Command.run
+       ~dir:(Path.build (Context.build_dir ctx))
+       compiler
+       [ flags
+       ; pp_flags
+       ; cmt_args
+       ; Command.Args.S obj_dirs
+       ; Command.Args.as_any
+           (Lib_mode.Cm_kind.Map.get (Compilation_context.includes cctx) cm_kind)
+       ; extra_args
+       ; As as_parameter_arg
+       ; as_argument_for
+       ; parameters
+       ; S (melange_args cctx cm_kind m)
+       ; A "-no-alias-deps"
+       ; opaque_arg
+       ; As (Fdo.phase_flags phase)
+       ; opens
+       ; As
+           (match Compilation_context.stdlib cctx with
+            | None -> []
+            | Some _ ->
+              (* XXX why aren't these just normal library flags? *)
+              [ "-nopervasives"; "-nostdlib" ])
+       ; A "-o"
+       ; Target output
+       ; A "-c"
+       ; Command.Ml_kind.flag ml_kind
+       ; Dep src
+       ; (* We add a hidden dependency on the original, pre-PPX source
+            file, which the compiler wants to find to display error
+            location snippets. *)
+         Hidden_deps (Dep.Set.of_files (Option.to_list original))
+       ; other_targets
+       ]
+     >>| Action.Full.add_sandbox sandbox
+   in
+   (* Get dependency library obj_dirs for cross-library .cmi lookup *)
+   let* dep_obj_dirs =
+     Resolve.Memo.read_memo (Compilation_context.requires_compile cctx)
+     >>| List.filter_map ~f:(fun lib ->
+       Lib.Local.of_lib lib
+       |> Option.map ~f:(fun local_lib -> Obj_dir.byte_dir (Lib.Local.obj_dir local_lib)))
+   in
+   (* Check fine-grained cache before compiling *)
+   let action_with_fine_cache =
+     let base_action =
+       let open Action_builder.With_targets.O in
+       Action_builder.with_no_targets other_cm_files >>> compile_action
+     in
+     match Config.get Config.fine_grained_ocaml_cache with
+     | `Disabled -> base_action
+     | `Enabled ->
+       (* Skip fine-grained cache for:
+          1. Generated modules (Root, Alias, Wrapped_compat) - no stable source files
+          2. Cmi compilation - ocamlobjinfo only works on .cmo/.cmx, not .cmi *)
+       let use_fine_cache =
+         match Module.kind m, cm_kind with
+         | (Root | Alias _ | Wrapped_compat), _ -> false
+         | _, Ocaml Cmi -> false
+         | _, Melange Cmi -> false
+         | (Impl | Intf_only | Virtual | Impl_vmodule | Parameter), _ -> true
+       in
+       if not use_fine_cache
+       then base_action
+       else
+         (* Wrap the compilation action with cache lookup.
+            The wrapper checks the fine-grained cache at action execution time:
+            - On cache hit: restores artifacts from cache
+            - On cache miss: executes the wrapped compilation action *)
+         Action_builder.With_targets.map base_action ~f:(fun action ->
+           let module_name = Module.name m |> Module_name.to_string in
+           let path_to_digest =
+             match original with
+             | Some p -> p
+             | None -> src
+           in
+           (* Compute digests for cache key *)
+           let source_digest =
+             match Digest.file path_to_digest with
+             | d -> d
+             | exception _ -> Digest.string ""
+           in
+           let ocaml_digest =
+             Digest.generic (Path.to_string ocaml.ocamlc, ocaml.version)
+           in
+           let flags_digest = Digest.string "" in
+           let fine_deps_key = Digest.generic ("fine-deps-v1", source_digest) in
+           (* Targets for this compilation - must match what we store *)
+           let cmi_file = Obj_dir.Module.cm_file obj_dir m ~kind:(Ocaml Cmi) in
+           let cmt_file = Obj_dir.Module.cmt_file obj_dir m ~cm_kind ~ml_kind in
+           (* For native compilation, also include the .o file *)
+           let obj_file =
+             match cm_kind with
+             | Ocaml Cmx ->
+               Some
+                 (Obj_dir.Module.obj_file
+                    obj_dir
+                    m
+                    ~kind:(Ocaml Cmx)
+                    ~ext:ocaml.lib_config.ext_obj)
+             | _ -> None
+           in
+           let targets =
+             List.filter_map [ Some dst; cmi_file; cmt_file; obj_file ] ~f:Fun.id
+           in
+           let cm_kind_str =
+             match cm_kind with
+             | Ocaml Cmo -> "cmo"
+             | Ocaml Cmx -> "cmx"
+             | Ocaml Cmi -> "cmi"
+             | Melange Cmi -> "melange-cmi"
+             | Melange Cmj -> "cmj"
+           in
+           (* Wrap the action with cache check *)
+           let ocamlobjinfo_path = Action.Prog.ok_exn ocaml.ocamlobjinfo in
+           (* Get the object directory for finding .cmi files during cache validation *)
+           let cache_obj_dir = Obj_dir.byte_dir obj_dir in
+           Action.Full.map action ~f:(fun wrapped_action ->
+             Cache_wrapper_action.wrap
+               ~wrapped_action
+               ~source_digest
+               ~ocaml_digest
+               ~flags_digest
+               ~fine_deps_key
+               ~targets
+               ~module_name
+               ~cm_kind_str
+               ~cm_file:dst
+               ~ocamlobjinfo_path
+               ~obj_dir:cache_obj_dir
+               ~dep_obj_dirs))
+   in
    Super_context.add_rule
      sctx
      ~dir:
@@ -292,44 +428,7 @@ let build_cm
         (* TODO DUNE4 get rid of the old behavior *)
         if dune_version >= (3, 7) then dir else Context.build_dir ctx)
      ?loc:(Compilation_context.loc cctx)
-     (let open Action_builder.With_targets.O in
-      Action_builder.with_no_targets other_cm_files
-      >>> Command.run
-            ~dir:(Path.build (Context.build_dir ctx))
-            compiler
-            [ flags
-            ; pp_flags
-            ; cmt_args
-            ; Command.Args.S obj_dirs
-            ; Command.Args.as_any
-                (Lib_mode.Cm_kind.Map.get (Compilation_context.includes cctx) cm_kind)
-            ; extra_args
-            ; As as_parameter_arg
-            ; as_argument_for
-            ; parameters
-            ; S (melange_args cctx cm_kind m)
-            ; A "-no-alias-deps"
-            ; opaque_arg
-            ; As (Fdo.phase_flags phase)
-            ; opens
-            ; As
-                (match Compilation_context.stdlib cctx with
-                 | None -> []
-                 | Some _ ->
-                   (* XXX why aren't these just normal library flags? *)
-                   [ "-nopervasives"; "-nostdlib" ])
-            ; A "-o"
-            ; Target output
-            ; A "-c"
-            ; Command.Ml_kind.flag ml_kind
-            ; Dep src
-            ; (* We add a hidden dependency on the original, pre-PPX source
-                 file, which the compiler wants to find to display error
-                 location snippets. *)
-              Hidden_deps (Dep.Set.of_files (Option.to_list original))
-            ; other_targets
-            ]
-      >>| Action.Full.add_sandbox sandbox))
+     action_with_fine_cache)
   |> Memo.Option.iter ~f:Fun.id
 ;;
 
@@ -358,6 +457,7 @@ let build_module ?(force_write_cmi = false) ?(precompiled_cmi = false) cctx m =
         Memo.when_ (not precompiled_cmi) (fun () ->
           build_cm ~cm_kind:(Ocaml Cmi) ~phase:None)
       in
+      (* Fine-grained deps are now stored by cache_wrapper_action after compilation *)
       let obj_dir = Compilation_context.obj_dir cctx in
       match Obj_dir.Module.cm_file obj_dir m ~kind:(Ocaml Cmo) with
       | None -> Memo.return ()

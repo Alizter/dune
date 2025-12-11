@@ -84,12 +84,18 @@ module type Helpers = sig
 end
 
 module Exec = struct
+  (** Abstract type for actions, to break circular dependency.
+      Instantiated to [Action.t] in [action_exec.ml]. *)
+  type action
+
   type context =
     { targets : Targets.Validated.t option
     ; context : Build_context.t option
     ; metadata : Process.metadata
     ; rule_loc : Loc.t
     ; build_deps : Dep.Set.t -> Dep.Facts.t Fiber.t
+    ; exec_action : action -> Done_or_more_deps.t Fiber.t
+      (** Execute a sub-action. Used by cache wrapper extensions. *)
     }
 
   type env =
