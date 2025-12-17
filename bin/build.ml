@@ -156,43 +156,64 @@ let build =
       | _ :: _ -> targets
     in
     let common, config = Common.init builder in
-    (* Here we need to find out whether another instance of dune already holds
-       the global build lock, as this will determine whether the current
-       instance of dune will perform the build itself or send a build request
-       to the RPC server in an already-running dune process. The method of
-       checking whether another dune instance holds the lock is to simply try
-       to take the lock. If taking the lock succeeds then the current process
-       will perform the build itself, and future attempts by this process to
-       take the lock are guaranteed to succeed. If taking the lock fails then
-       we know that another instance of dune must have it, and the current
-       process will send a build RPC request to that dune instance. Checking
-       the status of the lock by taking prevents a race condition where the
-       state of the lock could otherwise change between checking it and taking
-       it. *)
-    match Global_lock.lock ~timeout:None with
-    | Error lock_held_by ->
-      (* This case is reached if dune detects that another instance of dune
-         is already running. Rather than performing the build itself, the
-         current instance of dune will instruct the already-running instance to
-         perform the build by sending an RPC message. As only one RPC server
-         can run at a time we need to use a fiber scheduler which does not run
-         an RPC server in the background to schedule the fiber which will
-         perform the RPC call.
-      *)
+    match config.daemon.enabled, Common.watch common with
+    | true, No ->
+      (* Daemon mode: ensure something responsive is running, then forward the
+         build request to it. We don't try to acquire the lock ourselves - the
+         daemon (or another dune in watch mode) will hold it. *)
       let targets = Rpc.Rpc_common.prepare_targets targets in
       Scheduler_setup.go_without_rpc_server ~common ~config (fun () ->
         let open Fiber.O in
+        let* running = Dune_daemon.ping () in
+        let* () = if running then Fiber.return () else Dune_daemon.spawn_and_wait () in
         Rpc.Rpc_common.fire_request
           ~name:"build"
           ~wait:false
-          ~lock_held_by
+          ~warn_forwarding:false
           builder
           Dune_rpc_impl.Decl.build
           targets
         >>| Rpc.Rpc_common.wrap_build_outcome_exn ~print_on_success:true)
-    | Ok () ->
-      let request setup = Target.interpret_targets (Common.root common) setup targets in
-      run_build_command ~common ~config ~request
+    | _, _ ->
+      (* Here we need to find out whether another instance of dune already holds
+         the global build lock, as this will determine whether the current
+         instance of dune will perform the build itself or send a build request
+         to the RPC server in an already-running dune process. The method of
+         checking whether another dune instance holds the lock is to simply try
+         to take the lock. If taking the lock succeeds then the current process
+         will perform the build itself, and future attempts by this process to
+         take the lock are guaranteed to succeed. If taking the lock fails then
+         we know that another instance of dune must have it, and the current
+         process will send a build RPC request to that dune instance. Checking
+         the status of the lock by taking prevents a race condition where the
+         state of the lock could otherwise change between checking it and taking
+         it. *)
+      (match Global_lock.lock ~timeout:None with
+       | Error lock_held_by ->
+         (* This case is reached if dune detects that another instance of dune
+            is already running. Rather than performing the build itself, the
+            current instance of dune will instruct the already-running instance to
+            perform the build by sending an RPC message. As only one RPC server
+            can run at a time we need to use a fiber scheduler which does not run
+            an RPC server in the background to schedule the fiber which will
+            perform the RPC call.
+         *)
+         let targets = Rpc.Rpc_common.prepare_targets targets in
+         Scheduler_setup.go_without_rpc_server ~common ~config (fun () ->
+           let open Fiber.O in
+           Rpc.Rpc_common.fire_request
+             ~name:"build"
+             ~wait:false
+             ~lock_held_by
+             builder
+             Dune_rpc_impl.Decl.build
+             targets
+           >>| Rpc.Rpc_common.wrap_build_outcome_exn ~print_on_success:true)
+       | Ok () ->
+         let request setup =
+           Target.interpret_targets (Common.root common) setup targets
+         in
+         run_build_command ~common ~config ~request)
   in
   Cmd.v (Cmd.info "build" ~doc ~man ~envs:Common.envs) term
 ;;

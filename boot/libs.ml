@@ -459,6 +459,12 @@ let local_libraries =
     ; special_builtin_support = None
     ; root_module = None
     }
+  ; { path = "src/dune_daemon"
+    ; main_module_name = Some "Dune_daemon"
+    ; include_subdirs = No
+    ; special_builtin_support = None
+    ; root_module = None
+    }
   ]
 
 let main =
@@ -523,6 +529,7 @@ let main =
             ; "Dune_rpc_impl"
             ; "Dune_rpc_private"
             ; "Dune_rpc_client"
+            ; "Dune_daemon"
             ; "Spawn"
             ; "OpamCompat"
             ; "OpamConsole"

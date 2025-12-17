@@ -125,7 +125,7 @@ let send_request ~f connection name =
 let raise_rpc_not_found ~lock_held_by =
   User_error.raise
     (match lock_held_by with
-     | Dune_util.Global_lock.Lock_held_by.Unknown -> [ Pp.text "RPC server not running." ]
+     | Global_lock.Lock_held_by.Unknown -> [ Pp.text "RPC server not running." ]
      | Pid_from_lockfile pid ->
        [ Pp.textf
            "Another dune instance (pid: %d) has the build directory locked but is not \

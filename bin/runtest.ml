@@ -39,24 +39,39 @@ let runtest_term =
   let+ builder = Common.Builder.term
   and+ test_paths = Arg.(value & pos_all string [ "." ] name) in
   let common, config = Common.init builder in
-  match Global_lock.lock ~timeout:None with
-  | Ok () ->
-    Build.run_build_command ~common ~config ~request:(fun setup ->
-      Runtest_common.make_request
-        ~scontexts:setup.scontexts
-        ~to_cwd:(Common.root common).to_cwd
-        ~test_paths)
-  | Error lock_held_by ->
-    Scheduler_setup.no_build_no_rpc ~config (fun () ->
+  match config.daemon.enabled, Common.watch common with
+  | true, No ->
+    Scheduler_setup.go_without_rpc_server ~common ~config (fun () ->
       let open Fiber.O in
+      let* running = Dune_daemon.ping () in
+      let* () = if running then Fiber.return () else Dune_daemon.spawn_and_wait () in
       Rpc.Rpc_common.fire_request
         ~name:"runtest"
         ~wait:false
-        ~lock_held_by
+        ~warn_forwarding:false
         builder
         Dune_rpc.Procedures.Public.runtest
         test_paths
       >>| Rpc.Rpc_common.wrap_build_outcome_exn ~print_on_success:true)
+  | _, _ ->
+    (match Global_lock.lock ~timeout:None with
+     | Ok () ->
+       Build.run_build_command ~common ~config ~request:(fun setup ->
+         Runtest_common.make_request
+           ~scontexts:setup.scontexts
+           ~to_cwd:(Common.root common).to_cwd
+           ~test_paths)
+     | Error lock_held_by ->
+       Scheduler_setup.no_build_no_rpc ~config (fun () ->
+         let open Fiber.O in
+         Rpc.Rpc_common.fire_request
+           ~name:"runtest"
+           ~wait:false
+           ~lock_held_by
+           builder
+           Dune_rpc.Procedures.Public.runtest
+           test_paths
+         >>| Rpc.Rpc_common.wrap_build_outcome_exn ~print_on_success:true))
 ;;
 
 let commands =

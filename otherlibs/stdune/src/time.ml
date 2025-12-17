@@ -16,12 +16,15 @@ module Span = struct
   let zero = 0
   let max = max
   let compare a b = Int.compare a b
+  let equal a b = Ordering.is_eq (compare a b)
   let of_secs x = int_of_float (x *. ns_per_sec_float)
+  let of_int_sec secs = float_of_int secs |> of_secs
   let to_secs t = float_of_int t /. ns_per_sec_float
   let of_ns x = x
   let to_ns x = x
   let add = ( + )
   let diff = ( - )
+  let to_dyn t = Dyn.int t
 end
 
 let add t span = t + span

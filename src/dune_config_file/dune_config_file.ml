@@ -76,6 +76,37 @@ module Dune_config = struct
     ;;
   end
 
+  module Daemon = struct
+    type t =
+      { enabled : bool
+      ; idle_timeout : Time.Span.t option
+      }
+
+    let equal { enabled; idle_timeout } t =
+      Bool.equal enabled t.enabled
+      && Option.equal Time.Span.equal idle_timeout t.idle_timeout
+    ;;
+
+    let to_dyn { enabled; idle_timeout } =
+      Dyn.record
+        [ "enabled", Dyn.bool enabled
+        ; "idle_timeout", Dyn.option Time.Span.to_dyn idle_timeout
+        ]
+    ;;
+
+    let decode =
+      let open Dune_lang.Decoder in
+      fields
+        (let+ enabled = field_o "enabled" bool
+         and+ idle_timeout = field_o "idle-timeout" duration in
+         { enabled = Option.value enabled ~default:false
+         ; idle_timeout = Option.map idle_timeout ~f:Time.Span.of_int_sec
+         })
+    ;;
+
+    let default = { enabled = false; idle_timeout = Some (Time.Span.of_secs 3600.0) }
+  end
+
   module Terminal_persistence = struct
     type t =
       | Preserve
@@ -261,6 +292,7 @@ module Dune_config = struct
       ; project_defaults : Project_defaults.t field
       ; pkg_enabled : Pkg_enabled.t field
       ; experimental : (string * (Loc.t * string)) list field
+      ; daemon : Daemon.t field
       }
   end
 
@@ -286,6 +318,7 @@ module Dune_config = struct
           ; project_defaults
           ; pkg_enabled
           ; experimental
+          ; daemon
           }
       =
       field Display.equal t.display display
@@ -313,6 +346,7 @@ module Dune_config = struct
            t.experimental
            experimental
       && field Pkg_enabled.equal t.pkg_enabled pkg_enabled
+      && field Daemon.equal t.daemon daemon
     ;;
   end
 
@@ -342,6 +376,7 @@ module Dune_config = struct
       ; project_defaults = field a.project_defaults b.project_defaults
       ; pkg_enabled = field a.pkg_enabled b.pkg_enabled
       ; experimental = field a.experimental b.experimental
+      ; daemon = field a.daemon b.daemon
       }
     ;;
   end
@@ -367,6 +402,7 @@ module Dune_config = struct
           ; project_defaults
           ; pkg_enabled
           ; experimental
+          ; daemon
           }
       =
       Dyn.record
@@ -389,6 +425,7 @@ module Dune_config = struct
         ; "pkg_enabled", field Pkg_enabled.to_dyn pkg_enabled
         ; ( "experimental"
           , field Dyn.(list (pair string (fun (_, v) -> string v))) experimental )
+        ; "daemon", field Daemon.to_dyn daemon
         ]
     ;;
   end
@@ -413,6 +450,7 @@ module Dune_config = struct
       ; project_defaults = None
       ; pkg_enabled = None
       ; experimental = None
+      ; daemon = None
       }
     ;;
 
@@ -499,6 +537,7 @@ module Dune_config = struct
         }
     ; pkg_enabled = Unset
     ; experimental = []
+    ; daemon = Daemon.default
     }
   ;;
 
@@ -567,7 +606,8 @@ module Dune_config = struct
     and+ pkg_enabled = field_o "pkg" (3, 20) Pkg_enabled.decode
     and+ experimental =
       field_o "experimental" (3, 8) (repeat (pair string (located string)))
-    in
+    (* CR-before-PR Alizter: bump to (3, 22) before release *)
+    and+ daemon = field_o "daemon" (3, 21) Daemon.decode in
     let cache_storage_mode =
       Option.merge cache_duplication cache_storage_mode ~f:(fun _ _ ->
         Code_error.raise "Both cache_duplication and cache_storage_mode are set" [])
@@ -588,6 +628,7 @@ module Dune_config = struct
     ; project_defaults
     ; pkg_enabled
     ; experimental
+    ; daemon
     }
   ;;
 

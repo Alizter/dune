@@ -59,17 +59,32 @@ module Dune_config : sig
 
   module Pkg_enabled : sig
     (** Configuration for Dune's package management features.
-        
-        - [Set (loc, `Enabled)]: Package management is explicitly enabled. Forces package 
+
+        - [Set (loc, `Enabled)]: Package management is explicitly enabled. Forces package
           management to be active even if no lock directories are present.
 
-        - [Set (loc, `Disabled)]: Package management is explicitly disabled. Forces package 
+        - [Set (loc, `Disabled)]: Package management is explicitly disabled. Forces package
           management to be inactive even if lock directories are present.
 
         - [Unset]: Package management enablement is not explicitly configured.  *)
     type t =
       | Set of Loc.t * Config.Toggle.t
       | Unset
+  end
+
+  module Daemon : sig
+    (** Configuration for the build daemon.
+
+        When enabled, Dune starts a background daemon process on the first build
+        invocation that serves all subsequent build requests via RPC. The daemon
+        terminates after an idle timeout. *)
+    type t =
+      { enabled : bool
+      ; idle_timeout : Time.Span.t option (** None = never timeout *)
+      }
+
+    val equal : t -> t -> bool
+    val to_dyn : t -> Dyn.t
   end
 
   module Terminal_persistence : sig
@@ -103,6 +118,7 @@ module Dune_config : sig
       ; project_defaults : Project_defaults.t field
       ; pkg_enabled : Pkg_enabled.t field
       ; experimental : (string * (Loc.t * string)) list field
+      ; daemon : Daemon.t field
       }
   end
 

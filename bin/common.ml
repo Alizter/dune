@@ -544,6 +544,7 @@ let shared_with_config_file =
   ; project_defaults = None
   ; pkg_enabled = None
   ; experimental = None
+  ; daemon = None
   }
 ;;
 

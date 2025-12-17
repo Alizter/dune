@@ -243,26 +243,48 @@ let build_prog_via_rpc_if_necessary ~dir ~no_rebuild builder lock_held_by prog =
     else not_found ~hints:[] ~prog
 ;;
 
+(* CR-soon Alizter: lift this restriction for daemon mode where the daemon
+   could expand variables. *)
+let ensure_terminal v =
+  match (v : Cmd_arg.t) with
+  | Terminal s -> s
+  | Expandable (_, raw) ->
+    (* Variables cannot be expanded without running the build system. *)
+    User_error.raise
+      [ Pp.textf
+          "The term %S contains a variable but Dune is unable to expand variables when \
+           building via RPC."
+          raw
+      ]
+;;
+
 let exec_building_via_rpc_server ~common ~prog ~args ~no_rebuild builder lock_held_by =
   let open Fiber.O in
-  let ensure_terminal v =
-    match (v : Cmd_arg.t) with
-    | Terminal s -> s
-    | Expandable (_, raw) ->
-      (* Variables cannot be expanded without running the build system. *)
-      User_error.raise
-        [ Pp.textf
-            "The term %S contains a variable but Dune is unable to expand variables when \
-             building via RPC."
-            raw
-        ]
-  in
   let context = Common.x common |> Option.value ~default:Context_name.default in
   let dir = Context_name.build_dir context in
   let prog = ensure_terminal prog in
   let args = List.map args ~f:ensure_terminal in
   let+ prog =
     build_prog_via_rpc_if_necessary ~dir ~no_rebuild builder lock_held_by prog
+  in
+  restore_cwd_and_execve (Common.root common) prog args Env.initial
+;;
+
+let exec_building_via_daemon ~common ~prog ~args ~no_rebuild builder =
+  let open Fiber.O in
+  let* running = Dune_daemon.ping () in
+  let* () = if running then Fiber.return () else Dune_daemon.spawn_and_wait () in
+  let context = Common.x common |> Option.value ~default:Context_name.default in
+  let dir = Context_name.build_dir context in
+  let prog = ensure_terminal prog in
+  let args = List.map args ~f:ensure_terminal in
+  let+ prog =
+    build_prog_via_rpc_if_necessary
+      ~dir
+      ~no_rebuild
+      builder
+      Global_lock.Lock_held_by.Unknown
+      prog
   in
   restore_cwd_and_execve (Common.root common) prog args Env.initial
 ;;
@@ -317,23 +339,34 @@ let term : unit Term.t =
      For watch mode, we should finalize the backend and then restart it in between
      runs. *)
   let common, config = Common.init builder in
-  match Global_lock.lock ~timeout:None with
-  | Error lock_held_by ->
-    (match Common.watch common with
-     | Yes _ ->
-       User_error.raise
-         [ Pp.textf
-             "Another instance of dune%s has locked the _build directory. Refusing to \
-              start a new watch server until no other instances of dune are running."
-             (match lock_held_by with
-              | Unknown -> ""
-              | Pid_from_lockfile pid -> sprintf " (pid: %d)" pid)
-         ]
-     | No ->
-       Scheduler_setup.go_without_rpc_server ~common ~config
-       @@ fun () ->
-       exec_building_via_rpc_server ~common ~prog ~args ~no_rebuild builder lock_held_by)
-  | Ok () -> exec_building_directly ~common ~config ~context ~prog ~args ~no_rebuild
+  match config.daemon.enabled, Common.watch common with
+  | true, No ->
+    Scheduler_setup.go_without_rpc_server ~common ~config
+    @@ fun () -> exec_building_via_daemon ~common ~prog ~args ~no_rebuild builder
+  | _, _ ->
+    (match Global_lock.lock ~timeout:None with
+     | Error lock_held_by ->
+       (match Common.watch common with
+        | Yes _ ->
+          User_error.raise
+            [ Pp.textf
+                "Another instance of dune%s has locked the _build directory. Refusing to \
+                 start a new watch server until no other instances of dune are running."
+                (match lock_held_by with
+                 | Unknown -> ""
+                 | Pid_from_lockfile pid -> sprintf " (pid: %d)" pid)
+            ]
+        | No ->
+          Scheduler_setup.go_without_rpc_server ~common ~config
+          @@ fun () ->
+          exec_building_via_rpc_server
+            ~common
+            ~prog
+            ~args
+            ~no_rebuild
+            builder
+            lock_held_by)
+     | Ok () -> exec_building_directly ~common ~config ~context ~prog ~args ~no_rebuild)
 ;;
 
 let command = Cmd.v info term

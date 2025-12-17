@@ -1,0 +1,11 @@
+(library
+ (name dune_daemon)
+ (libraries
+  stdune
+  fiber
+  dune_rpc_private
+  dune_rpc_client
+  csexp_rpc
+  unix
+  spawn)
+ (synopsis "Build daemon management for Dune"))
