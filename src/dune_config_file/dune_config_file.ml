@@ -79,32 +79,31 @@ module Dune_config = struct
   module Daemon = struct
     type t =
       { enabled : bool
-      ; idle_timeout : Time.Span.t option
+      ; timeout : Time.Span.t option
       }
 
-    let equal { enabled; idle_timeout } t =
-      Bool.equal enabled t.enabled
-      && Option.equal Time.Span.equal idle_timeout t.idle_timeout
+    let equal { enabled; timeout } t =
+      Bool.equal enabled t.enabled && Option.equal Time.Span.equal timeout t.timeout
     ;;
 
-    let to_dyn { enabled; idle_timeout } =
+    let to_dyn { enabled; timeout } =
       Dyn.record
-        [ "enabled", Dyn.bool enabled
-        ; "idle_timeout", Dyn.option Time.Span.to_dyn idle_timeout
-        ]
+        [ "enabled", Dyn.bool enabled; "timeout", Dyn.option Time.Span.to_dyn timeout ]
     ;;
+
+    let default = { enabled = false; timeout = Some (Time.Span.of_secs 3600.0) }
 
     let decode =
       let open Dune_lang.Decoder in
+      let timeout_decoder =
+        sum [ "none", return None ] <|> (float >>| fun f -> Some (Time.Span.of_secs f))
+      in
       fields
         (let+ enabled = field_o "enabled" bool
-         and+ idle_timeout = field_o "idle-timeout" duration in
+         and+ timeout = field_o "timeout" timeout_decoder in
          { enabled = Option.value enabled ~default:false
-         ; idle_timeout = Option.map idle_timeout ~f:Time.Span.of_int_sec
+         ; timeout = Option.value timeout ~default:default.timeout
          })
-    ;;
-
-    let default = { enabled = false; idle_timeout = Some (Time.Span.of_secs 3600.0) }
   end
 
   module Terminal_persistence = struct

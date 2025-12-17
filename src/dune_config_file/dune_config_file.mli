@@ -80,7 +80,7 @@ module Dune_config : sig
         terminates after an idle timeout. *)
     type t =
       { enabled : bool
-      ; idle_timeout : Time.Span.t option (** None = never timeout *)
+      ; timeout : Time.Span.t option (** None = never timeout *)
       }
 
     val equal : t -> t -> bool

@@ -35,7 +35,7 @@ let run_build_system ~request =
       Fiber.return ())
 ;;
 
-let poll_handling_rpc_build_requests ~(common : Common.t) =
+let poll_handling_rpc_build_requests ~(common : Common.t) ?idle_timeout () =
   let open Fiber.O in
   let rpc =
     match Common.rpc common with
@@ -56,6 +56,8 @@ let poll_handling_rpc_build_requests ~(common : Common.t) =
              ~test_paths
        in
        run_build_system ~request, outcome)
+    ?idle_timeout
+    ()
 ;;
 
 let run_build_command_poll_eager ~(common : Common.t) ~config ~request : unit =
@@ -68,17 +70,17 @@ let run_build_command_poll_eager ~(common : Common.t) ~config ~request : unit =
        named on the command line in reaction to file system changes. The other
        is responsible for building targets named in RPC build requests. *)
        let+ () = Scheduler.Run.poll (run_build_system ~request)
-       and+ () = poll_handling_rpc_build_requests ~common in
+       and+ () = poll_handling_rpc_build_requests ~common () in
        ())
 ;;
 
-let run_build_command_poll_passive ~common ~config ~request:_ : unit =
+let run_build_command_poll_passive ~common ~config ~request:_ ?idle_timeout () : unit =
   (* CR-someday aalekseyev: It would've been better to complain if [request] is
      non-empty, but we can't check that here because [request] is a function.*)
   Scheduler_setup.go_with_rpc_server_and_console_status_reporting
     ~common
     ~config
-    (fun () -> poll_handling_rpc_build_requests ~common)
+    (fun () -> poll_handling_rpc_build_requests ~common ?idle_timeout ())
 ;;
 
 let run_build_command_once ~(common : Common.t) ~config ~request =
@@ -93,13 +95,12 @@ let run_build_command_once ~(common : Common.t) ~config ~request =
 ;;
 
 let run_build_command ~(common : Common.t) ~config ~request =
-  (match Common.watch common with
-   | Yes Eager -> run_build_command_poll_eager
-   | Yes Passive -> run_build_command_poll_passive
-   | No -> run_build_command_once)
-    ~common
-    ~config
-    ~request
+  match Common.watch common with
+  | Yes Eager -> run_build_command_poll_eager ~common ~config ~request
+  | Yes Passive ->
+    let idle_timeout = if config.daemon.enabled then config.daemon.timeout else None in
+    run_build_command_poll_passive ~common ~config ~request ?idle_timeout ()
+  | No -> run_build_command_once ~common ~config ~request
 ;;
 
 let build =

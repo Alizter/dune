@@ -59,11 +59,17 @@ module Run : sig
 
   (** [poll_passive] is similar to [poll], but it can be used to drive the
       polling loop explicitly instead of starting new iterations automatically.
-
+ 
       The fiber [get_build_request] is run at the beginning of every iteration
-      to wait for the build signal. *)
+      to wait for the build signal.
+
+      If [idle_timeout] is provided, the scheduler will shut down after the
+      specified duration of inactivity (no build requests). The timeout resets
+      each time a build request is received. *)
   val poll_passive
     :  get_build_request:(step * Build_outcome.t Fiber.Ivar.t) Fiber.t
+    -> ?idle_timeout:Time.Span.t
+    -> unit
     -> unit Fiber.t
 
   val go
