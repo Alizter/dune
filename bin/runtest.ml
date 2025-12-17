@@ -45,7 +45,7 @@ let runtest_term =
       let open Fiber.O in
       let* running = Dune_daemon.ping () in
       let* () = if running then Fiber.return () else Dune_daemon.spawn_and_wait () in
-      Rpc.Rpc_common.fire_request
+      Rpc.Rpc_common.fire_request_with_progress
         ~name:"runtest"
         ~wait:false
         ~warn_forwarding:false
@@ -64,7 +64,7 @@ let runtest_term =
      | Error lock_held_by ->
        Scheduler_setup.no_build_no_rpc ~config (fun () ->
          let open Fiber.O in
-         Rpc.Rpc_common.fire_request
+         Rpc.Rpc_common.fire_request_with_progress
            ~name:"runtest"
            ~wait:false
            ~lock_held_by

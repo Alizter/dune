@@ -227,7 +227,7 @@ let build_prog_via_rpc_if_necessary ~dir ~no_rebuild builder lock_held_by prog =
         in
         let targets = Rpc.Rpc_common.prepare_targets [ target ] in
         let open Fiber.O in
-        Rpc.Rpc_common.fire_request
+        Rpc.Rpc_common.fire_request_with_progress
           ~name:"build"
           ~wait:false
           ~lock_held_by

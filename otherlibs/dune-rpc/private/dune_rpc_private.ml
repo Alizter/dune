@@ -345,7 +345,8 @@ module Client = struct
       match Table.find t.requests id with
       | None | Some `Cancelled -> Fiber.return ()
       | Some (`Pending ivar) ->
-        Table.remove t.requests id;
+        (* Mark as cancelled instead of removing, so late responses don't cause errors *)
+        Table.set t.requests id `Cancelled;
         Fiber.Ivar.fill ivar `Cancelled
     ;;
 

@@ -157,6 +157,31 @@ let fire_request
   send_request connection name ~f:(fun client -> request_exn client request arg)
 ;;
 
+let fire_request_with_progress
+      ~name
+      ~wait
+      ?(warn_forwarding = true)
+      ?(lock_held_by = Global_lock.Lock_held_by.Unknown)
+      builder
+      request
+      arg
+  =
+  let open Fiber.O in
+  let* connection =
+    Fiber.map_reduce_errors
+      (module Monoid.Unit)
+      ~on_error:(fun _ -> Fiber.return ())
+      (fun () -> establish_client_session ~wait)
+    >>| function
+    | Ok conn -> conn
+    | Error () -> raise_rpc_not_found ~lock_held_by
+  in
+  if should_warn ~warn_forwarding builder then warn_ignore_arguments lock_held_by;
+  send_request connection name ~f:(fun client ->
+    Rpc_progress.run_with_progress ~client ~request:(fun () ->
+      request_exn client request arg))
+;;
+
 let fire_notification
       ~name
       ~wait

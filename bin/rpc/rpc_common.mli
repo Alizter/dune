@@ -32,6 +32,19 @@ val fire_request
   -> 'a
   -> 'b Fiber.t
 
+(** Like [fire_request], but displays live progress, diagnostics, and job information
+    while the build is running. This provides the same user experience as local builds
+    even when the build is happening in another dune process (daemon mode, lock contention). *)
+val fire_request_with_progress
+  :  name:string
+  -> wait:bool
+  -> ?warn_forwarding:bool
+  -> ?lock_held_by:Global_lock.Lock_held_by.t
+  -> Common.Builder.t
+  -> ('a, 'b) Dune_rpc.Decl.request
+  -> 'a
+  -> 'b Fiber.t
+
 (** Send a notification to the RPC server. If [wait], it will poll forever until a server is listening.
     Should be scheduled by a scheduler that does not come with a RPC server on its own.
 

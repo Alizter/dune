@@ -104,6 +104,7 @@ module Dune_config = struct
          { enabled = Option.value enabled ~default:false
          ; timeout = Option.value timeout ~default:default.timeout
          })
+    ;;
   end
 
   module Terminal_persistence = struct

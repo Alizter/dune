@@ -35,6 +35,7 @@ let%expect_test "cache-check-probability 0.1" =
         }
     ; pkg_enabled = Unset
     ; experimental = []
+    ; daemon = { enabled = false; timeout = Some 3600. }
     }
     |}]
 ;;
@@ -60,6 +61,7 @@ let%expect_test "cache-storage-mode copy" =
         }
     ; pkg_enabled = Unset
     ; experimental = []
+    ; daemon = { enabled = false; timeout = Some 3600. }
     }
     |}]
 ;;
@@ -85,6 +87,7 @@ let%expect_test "cache-storage-mode hardlink" =
         }
     ; pkg_enabled = Unset
     ; experimental = []
+    ; daemon = { enabled = false; timeout = Some 3600. }
     }
     |}]
 ;;
