@@ -311,7 +311,7 @@ end = struct
     Dune_trace.emit Debug (fun () ->
       let rule_total =
         match Fiber.Svar.read State.t with
-        | Building progress -> progress.number_of_rules_discovered
+        | Building progress -> progress.number_of_rules_executed
         | _ -> assert false
       in
       Dune_trace.Event.evalauted_rules ~rule_total)
