@@ -17,7 +17,7 @@
 
 #ifdef _WIN32
 #include <malloc.h>
-#elif defined(__FreeBSD__)
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__) || defined(__HAIKU__)
 #include <stdlib.h>
 #else
 #include <alloca.h>
