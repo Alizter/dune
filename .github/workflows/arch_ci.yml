@@ -1,0 +1,101 @@
+name: CI-exotic
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: freebsd
+            arch: x86-64
+            version: '14.3'
+            install_cmd: |
+              sudo pkg update
+              sudo pkg install -y ocaml git
+
+          - os: freebsd
+            arch: arm64
+            version: '14.3'
+            install_cmd: |
+              sudo pkg update
+              sudo pkg install -y ocaml git
+
+          - os: openbsd
+            arch: x86-64
+            version: '7.7'
+            install_cmd: |
+              sudo pkg_add ocaml git
+
+          - os: openbsd
+            arch: arm64
+            version: '7.7'
+            install_cmd: |
+              sudo pkg_add ocaml git
+
+          - os: netbsd
+            arch: x86-64
+            version: '10.1'
+            install_cmd: |
+              sudo pkgin update
+              sudo pkgin -y install ocaml git
+
+          - os: netbsd
+            arch: arm64
+            version: '10.1'
+            install_cmd: |
+              sudo pkgin update
+              sudo pkgin -y install ocaml git
+
+          - os: haiku
+            arch: x86-64
+            version: 'r1beta5'
+            install_cmd: |
+              export PATH=$PATH:/boot/home/config/non-packaged/bin
+              cd ..
+              git clone https://github.com/ocaml/ocaml.git --depth 1 -b 4.14
+              cd ocaml
+              ./configure --prefix=/boot/home/config/non-packaged
+              make -j
+              make install
+              cd ../dune
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run on ${{ matrix.os }} ${{ matrix.arch }}
+        uses: cross-platform-actions/action@v0.32.0
+        with:
+          operating_system: ${{ matrix.os }}
+          architecture: ${{ matrix.arch }}
+          version: ${{ matrix.version }}
+          shell: bash
+          memory: 8G
+          cpu_count: 4
+          shutdown_vm: false
+          run: |
+            set -xeuo pipefail
+            echo "::group::System Info"
+            uname -a
+            echo $SHELL
+            whoami
+            env | sort
+            echo "::endgroup::"
+            echo "::group::Install OCaml"
+            ${{ matrix.install_cmd }}
+            echo "::endgroup::"
+            echo "::group::OCaml Version"
+            which ocaml
+            ocaml -version
+            ocamlc -config
+            echo "::endgroup::"
+            echo "::group::Build Dune"
+            ocaml boot/bootstrap.ml
+            echo "::endgroup::"
