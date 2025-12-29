@@ -17,6 +17,14 @@ on:
         required: false
         type: string
         default: ''
+      lock_mode:
+        description: 'Dependency locking mode'
+        required: true
+        type: choice
+        options:
+          - lock
+          - autolock
+        default: lock
       main_command:
         description: 'Main command to run (default: "dune build --display short")'
         required: false
@@ -45,6 +53,7 @@ jobs:
           echo "Repos: ${{ inputs.repos }}"
           echo "Depext Linux: ${{ inputs.depext_linux || '(auto-detect)' }}"
           echo "Depext macOS: ${{ inputs.depext_macos || '(auto-detect)' }}"
+          echo "Lock mode: ${{ inputs.lock_mode }}"
           echo "Main command: ${{ inputs.main_command }}"
           echo "==============================="
 
@@ -88,6 +97,10 @@ jobs:
 
           echo "Generated dune-workspace:"
           cat dune-workspace
+
+      - name: Lock dependencies
+        if: inputs.lock_mode == 'lock'
+        run: cd workspace && nix shell .. -c dune pkg lock
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
