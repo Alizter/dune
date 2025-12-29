@@ -30,6 +30,11 @@ on:
         required: false
         type: string
         default: 'dune build --display short'
+      dune_workspace:
+        description: 'Contents of dune-workspace file'
+        required: false
+        type: string
+        default: '(lang dune 3.21)\n(pkg enabled)'
 
 env:
   EXTRA_NIX_CONFIG: |
@@ -51,6 +56,8 @@ jobs:
         run: |
           echo "=== Multi-Repo Build Inputs ==="
           echo "Repos: ${{ inputs.repos }}"
+          echo "Dune workspace:"
+          echo -e "${{ inputs.dune_workspace }}"
           echo "Depext Linux: ${{ inputs.depext_linux || '(auto-detect)' }}"
           echo "Depext macOS: ${{ inputs.depext_macos || '(auto-detect)' }}"
           echo "Lock mode: ${{ inputs.lock_mode }}"
@@ -90,11 +97,7 @@ jobs:
       - name: Generate dune-workspace
         run: |
           cd workspace
-          cat > dune-workspace <<EOF
-          (lang dune 3.21)
-          (pkg enabled)
-          EOF
-
+          echo -e "${{ inputs.dune_workspace }}" > dune-workspace
           echo "Generated dune-workspace:"
           cat dune-workspace
 
