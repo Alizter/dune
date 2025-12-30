@@ -84,6 +84,7 @@ Enumerate the contents of the fake toolchains directory:
   $ find fake-cache/dune/toolchains | sort | remove_hash
   fake-cache/dune/toolchains
   fake-cache/dune/toolchains/ocaml-base-compiler.1-HASH
+  fake-cache/dune/toolchains/ocaml-base-compiler.1-HASH/cookie
   fake-cache/dune/toolchains/ocaml-base-compiler.1-HASH/target
   fake-cache/dune/toolchains/ocaml-base-compiler.1-HASH/target/bin
   fake-cache/dune/toolchains/ocaml-base-compiler.1-HASH/target/bin/ocamlc
@@ -95,6 +96,7 @@ Enumerate the contents of the fake toolchains directory:
   $ find other-fake-cache/toolchains/ | sort | remove_hash
   other-fake-cache/toolchains/
   other-fake-cache/toolchains/ocaml-base-compiler.1-HASH
+  other-fake-cache/toolchains/ocaml-base-compiler.1-HASH/cookie
   other-fake-cache/toolchains/ocaml-base-compiler.1-HASH/target
   other-fake-cache/toolchains/ocaml-base-compiler.1-HASH/target/bin
   other-fake-cache/toolchains/ocaml-base-compiler.1-HASH/target/bin/ocamlc

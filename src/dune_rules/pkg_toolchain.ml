@@ -42,11 +42,6 @@ let pkg_dir (pkg : Dune_pkg.Lock_dir.Pkg.t) =
   Path.Outside_build_dir.relative (base_dir ()) dir_name
 ;;
 
-let installation_prefix pkg =
-  let pkg_dir = pkg_dir pkg in
-  Path.Outside_build_dir.relative pkg_dir "target"
-;;
-
 let is_compiler_and_toolchains_enabled name =
   match Config.get Compile_time.toolchains with
   | `Enabled -> Dune_pkg.Dev_tool.is_compiler_package name

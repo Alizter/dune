@@ -199,6 +199,7 @@ module Paths = struct
     ; install_roots : 'a Install.Roots.t Lazy.t
     ; install_paths : 'a Install.Paths.t Lazy.t
     ; prefix : 'a
+    ; cookie_path : 'a
     }
 
   let map_path t ~f =
@@ -209,6 +210,7 @@ module Paths = struct
     ; install_roots = Lazy.map ~f:(Install.Roots.map ~f) t.install_roots
     ; install_paths = Lazy.map ~f:(Install.Paths.map ~f) t.install_paths
     ; prefix = f t.prefix
+    ; cookie_path = f t.cookie_path
     }
   ;;
 
@@ -224,6 +226,7 @@ module Paths = struct
     let extra_sources = relative root "extra_source" in
     let install_roots = lazy (install_roots ~target_dir ~relative) in
     let install_paths = lazy (install_paths (Lazy.force install_roots) name ~relative) in
+    let cookie_path = relative target_dir "cookie" in
     { source_dir
     ; target_dir
     ; extra_sources
@@ -231,6 +234,7 @@ module Paths = struct
     ; install_paths
     ; install_roots
     ; prefix = target_dir
+    ; cookie_path
     }
   ;;
 
@@ -251,14 +255,6 @@ module Paths = struct
     in
     of_root pkg_digest.name ~root
   ;;
-
-  let make_install_cookie target_dir ~relative = relative target_dir "cookie"
-
-  let install_cookie' target_dir =
-    make_install_cookie target_dir ~relative:Path.Build.relative
-  ;;
-
-  let install_cookie t = make_install_cookie t.target_dir ~relative:Path.relative
 
   let install_file t =
     Path.Build.relative
@@ -285,6 +281,10 @@ module Install_cookie = struct
      It is constructed after we've built and installed the packages. In this
      sense, it is the "installation trace" that we must refer to so that we
      don't have to know anything about the installation procedure.
+
+     The cookie file is named "cookie" and is computed relative to:
+     - Internal: target_dir (in _build)
+     - External: toolchain_dir (from Pkg_toolchain.pkg_dir)
   *)
 
   module Gen = struct
@@ -435,6 +435,9 @@ end
 module Pkg = struct
   module Id = Id.Make ()
 
+  (* For toolchain packages, toolchain_dir stores the pkg_dir from which we derive
+     prefix and cookie paths using Pkg_toolchain helpers. *)
+
   type t =
     { id : Id.t
     ; build_command : Build_command.t option
@@ -449,6 +452,7 @@ module Pkg = struct
     ; files_dir : Path.Build.t option
     ; pkg_digest : Pkg_digest.t
     ; mutable exported_env : string Env_update.t list
+    ; toolchain_dir : Path.Outside_build_dir.t option
     }
 
   module Top_closure = Top_closure.Make (Id.Set) (Monad.Id)
@@ -593,7 +597,7 @@ module Pkg_installed = struct
   let of_paths (paths : Path.t Paths.t) =
     let cookie =
       let open Action_builder.O in
-      let path = Paths.install_cookie paths in
+      let path = paths.cookie_path in
       let+ () = path |> Dep.file |> Action_builder.dep in
       Install_cookie.load_exn path
     in
@@ -1579,10 +1583,10 @@ end = struct
       let install_command = Option.map install_command ~f:relocate in
       let build_command = choose_for_current_platform build_command in
       let build_command = Option.map build_command ~f:relocate_build in
-      let paths =
+      let paths, toolchain_dir =
         let paths = Paths.map_path write_paths ~f:Path.build in
         match Pkg_toolchain.is_compiler_and_toolchains_enabled info.name with
-        | false -> paths
+        | false -> paths, None
         | true ->
           (* Modify the environment as well as build and install commands for
              the compiler package. The specific changes are:
@@ -1594,16 +1598,22 @@ end = struct
                toolchain directory
              - if a matching version of the compiler is
                already installed in the user's toolchain directory then the
-               build and install commands are replaced with no-ops *)
-          let prefix = Pkg_toolchain.installation_prefix pkg in
+               build and install commands are replaced with no-ops
+             - the cookie is also stored in the toolchain directory so it
+               persists across _build deletions (written by Install_action) *)
+          let toolchain_dir = Pkg_toolchain.pkg_dir pkg in
+          let prefix = Path.Outside_build_dir.relative toolchain_dir "target" in
           let install_roots =
             Pkg_toolchain.install_roots ~prefix
             |> Install.Roots.map ~f:Path.outside_build_dir
           in
-          { paths with
-            prefix = Path.outside_build_dir prefix
-          ; install_roots = Lazy.from_val install_roots
-          }
+          let paths =
+            { paths with
+              prefix = Path.outside_build_dir prefix
+            ; install_roots = Lazy.from_val install_roots
+            }
+          in
+          paths, Some toolchain_dir
       in
       let t =
         { Pkg.id
@@ -1618,6 +1628,7 @@ end = struct
         ; files_dir
         ; pkg_digest
         ; exported_env = []
+        ; toolchain_dir
         }
       in
       let+ exported_env =
@@ -1676,19 +1687,23 @@ module Install_action = struct
            dir, it's stored here and will be used instead of [target_dir]
            as the location of insntalled artifacts *)
         prefix_outside_build_dir : Path.Outside_build_dir.t option
+      ; (* if the package's cookie should be written outside the build
+           dir (e.g., for toolchain packages), it's stored here *)
+        cookie_outside_build_dir : Path.Outside_build_dir.t option
       ; (* does the package have its own install command? *)
         install_action : [ `Has_install_action | `No_install_action ]
       ; package : Package.Name.t
       }
 
     let name = "install-file-run"
-    let version = 1
+    let version = 2
 
     let bimap
           ({ install_file
            ; config_file
            ; target_dir
            ; prefix_outside_build_dir = _
+           ; cookie_outside_build_dir = _
            ; install_action = _
            ; package = _
            } as t)
@@ -1709,6 +1724,7 @@ module Install_action = struct
           ; config_file
           ; target_dir
           ; prefix_outside_build_dir
+          ; cookie_outside_build_dir
           ; install_action
           ; package
           }
@@ -1723,6 +1739,13 @@ module Install_action = struct
         ; (match
              Option.map
                prefix_outside_build_dir
+               ~f:Path.Outside_build_dir.to_string_maybe_quoted
+           with
+           | None -> List []
+           | Some s -> List [ Atom s ])
+        ; (match
+             Option.map
+               cookie_outside_build_dir
                ~f:Path.Outside_build_dir.to_string_maybe_quoted
            with
            | None -> List []
@@ -1930,6 +1953,7 @@ module Install_action = struct
           ; config_file
           ; target_dir
           ; prefix_outside_build_dir
+          ; cookie_outside_build_dir
           ; install_action
           }
           ~ectx:_
@@ -2011,25 +2035,147 @@ module Install_action = struct
         let+ variables = Async.async (fun () -> read_variables config_file) in
         { Install_cookie.Gen.files; variables }
       in
-      (* Produce the cookie file in the standard path *)
-      let cookie_file = Path.build @@ Paths.install_cookie' target_dir in
+      let cookie_file_internal = Path.build @@ Path.Build.relative target_dir "cookie" in
       Async.async (fun () ->
-        cookie_file |> Path.parent_exn |> Path.mkdir_p;
-        Install_cookie.dump cookie_file cookies)
+        cookie_file_internal |> Path.parent_exn |> Path.mkdir_p;
+        Install_cookie.dump cookie_file_internal cookies;
+        (* For toolchain packages, also write the cookie to the external cache.
+           If this write fails (e.g., disk full), the internal cookie already
+           exists. This is safe because
+           [Restore_toolchain_cookie_from_cache_action.can_restore] checks that
+           both the external prefix and cookie exist before restoring. An
+           missing external cookie will trigger a rebuild from source. *)
+        match cookie_outside_build_dir with
+        | None -> ()
+        | Some external_cookie_path ->
+          let cookie_file_external = Path.outside_build_dir external_cookie_path in
+          cookie_file_external |> Path.parent_exn |> Path.mkdir_p;
+          Install_cookie.dump cookie_file_external cookies)
     ;;
   end
 
   module A = Action_ext.Make (Spec)
 
-  let action (p : Path.Build.t Paths.t) install_action ~prefix_outside_build_dir =
+  let action
+        (p : Path.Build.t Paths.t)
+        install_action
+        ~prefix_outside_build_dir
+        ~cookie_outside_build_dir
+    =
     A.action
       { Spec.install_file = Path.build @@ Paths.install_file p
       ; config_file = Path.build @@ Paths.config_file p
       ; target_dir = p.target_dir
       ; prefix_outside_build_dir
+      ; cookie_outside_build_dir
       ; install_action
       ; package = p.name
       }
+  ;;
+end
+
+(* Action to restore a toolchain package from external cache.
+
+   Design note: This action only copies the cookie file, NOT the binaries.
+   This works because for toolchain packages, [pkg.paths.prefix] points to the
+   external toolchain directory (e.g., ~/.cache/dune/toolchains/ocaml.5.2.1-xxx/target)
+   rather than inside _build. When downstream code needs compiler binaries, it
+   reads paths from the cookie which point to the external prefix.
+
+   The _build/.pkg/<pkg>/target/ directory only needs to exist (for build system
+   bookkeeping) and contain a valid cookie. The actual binaries remain in the
+   external toolchain directory and are accessed directly from there.
+
+   Limitations:
+   - Concurrent builds: If multiple dune processes build the same toolchain
+     package simultaneously, they will both write to the same external
+     location. The last writer wins, which is acceptable since they're
+     building identical content.
+   - Disk full: If writing the external cookie fails (see Install_action),
+     the internal cookie may exist without a corresponding external one.
+     This is safe because can_restore checks both files exist. *)
+module Restore_toolchain_cookie_from_cache_action = struct
+  module Spec = struct
+    type ('path, 'target) t =
+      { (* The external toolchain directory (pkg_dir) from which we derive
+           prefix and cookie paths using Pkg_toolchain helpers *)
+        toolchain_dir : Path.Outside_build_dir.t
+      ; (* The target directory inside _build to restore to *)
+        target_dir : 'target
+      ; package : Package.Name.t
+      }
+
+    let name = "restore-toolchain-cookie"
+    let version = 1
+    let bimap ({ target_dir; _ } as t) _f g = { t with target_dir = g target_dir }
+    let is_useful_to ~memoize = memoize
+
+    let encode { toolchain_dir; target_dir; package } _path target : Sexp.t =
+      List
+        [ Atom
+            (Path.Outside_build_dir.to_string_maybe_quoted
+               (Path.Outside_build_dir.relative toolchain_dir "target"))
+        ; Atom
+            (Path.Outside_build_dir.to_string_maybe_quoted
+               (Path.Outside_build_dir.relative toolchain_dir "cookie"))
+        ; target target_dir
+        ; Atom (Package.Name.to_string package)
+        ]
+    ;;
+
+    let action { toolchain_dir; target_dir; package } ~ectx:_ ~eenv:_ =
+      let open Fiber.O in
+      let* () = Fiber.return () in
+      let external_cookie =
+        Path.Outside_build_dir.relative toolchain_dir "cookie" |> Path.outside_build_dir
+      in
+      let target_path = Path.build target_dir in
+      (* For toolchain packages, the actual binaries are installed to an external
+         prefix and referenced via paths stored in the cookie. We only need to:
+         1. Create the target directory (to satisfy build system expectations)
+         2. Copy the cookie (so Pkg_installed can read it) *)
+      Async.async (fun () ->
+        Path.mkdir_p target_path;
+        let internal_cookie = Path.relative target_path "cookie" in
+        try Io.copy_file ~src:external_cookie ~dst:internal_cookie () with
+        | Unix.Unix_error (err, _, _) ->
+          User_error.raise
+            [ Pp.textf
+                "Failed to restore package %s from cache"
+                (Package.Name.to_string package)
+            ; Pp.textf
+                "Could not copy cookie from %s to %s: %s"
+                (Path.to_string external_cookie)
+                (Path.to_string internal_cookie)
+                (Unix.error_message err)
+            ])
+    ;;
+  end
+
+  module A = Action_ext.Make (Spec)
+
+  let action ~toolchain_dir ~target_dir ~package =
+    A.action { Spec.toolchain_dir; target_dir; package }
+  ;;
+
+  (* Check if we can restore from external cache. Returns Some toolchain_dir
+     only if both the prefix directory and cookie file exist. If either is
+     missing (cache corruption), returns None to trigger a rebuild from source.
+
+     Limitation: This only checks file existence, not validity. If the external
+     cookie file exists but is corrupted/malformed, we'll copy it and the error
+     will surface later when something tries to read the cookie via
+     Install_cookie.load_exn. The error message will reference the internal
+     path, not the external source. *)
+  let can_restore (pkg : Pkg.t) =
+    match pkg.toolchain_dir with
+    | None -> Memo.return None
+    | Some toolchain_dir ->
+      let prefix = Path.Outside_build_dir.relative toolchain_dir "target" in
+      let cookie = Path.Outside_build_dir.relative toolchain_dir "cookie" in
+      let* prefix_exists = Fs_memo.dir_exists prefix in
+      let* cookie_exists = Fs_memo.file_exists cookie in
+      Memo.return (if prefix_exists && cookie_exists then Some toolchain_dir else None)
   ;;
 end
 
@@ -2158,111 +2304,132 @@ let dune_dep =
 ;;
 
 let build_rule context_name ~source_deps (pkg : Pkg.t) =
+  (* First check if we can restore from external cache *)
+  let* restore_from_cache = Restore_toolchain_cookie_from_cache_action.can_restore pkg in
   let+ build_action =
-    let+ copy_action, build_action, install_action =
-      let+ copy_action =
+    match restore_from_cache with
+    | Some toolchain_dir ->
+      (* Restore from external cache instead of building *)
+      Restore_toolchain_cookie_from_cache_action.action
+        ~toolchain_dir
+        ~target_dir:pkg.write_paths.target_dir
+        ~package:pkg.info.name
+      |> Action.Full.make
+      |> Action_builder.return
+      |> Action_builder.with_no_targets
+      |> Memo.return
+    | None ->
+      let+ copy_action, build_action, install_action =
         let+ copy_action =
-          let+ () = Memo.return () in
-          let open Action_builder.O in
-          [ Action_builder.with_no_targets
-            @@ ((match pkg.files_dir with
-                 | Some files_dir -> Action_builder.path (Path.build files_dir)
-                 | None -> Action_builder.return ())
-                >>> Action_builder.of_memo
-                      (Memo.of_thunk (fun () ->
-                         match pkg.files_dir with
-                         | None -> Memo.return (Path.Set.empty, Dep.Set.empty)
-                         | Some files_dir ->
-                           let deps, source_deps = files files_dir in
-                           Memo.return (source_deps, deps)))
-                |> Action_builder.dyn_deps
-                >>= fun source_deps ->
-                Path.Set.to_list_map source_deps ~f:(fun src ->
-                  let dst =
-                    let prefix = pkg.files_dir |> Option.value_exn |> Path.build in
-                    let local_path = Path.drop_prefix_exn src ~prefix in
-                    Path.Build.append_local pkg.write_paths.source_dir local_path
-                  in
-                  Action.progn
-                    [ Action.mkdir (Path.Build.parent_exn dst); Action.copy src dst ])
-                |> Action.concurrent
-                |> Action.Full.make
-                |> Action_builder.return)
-          ]
-        in
-        copy_action
-        @ List.map pkg.info.extra_sources ~f:(fun (local, _) ->
-          (* If the package has extra sources, they will be
+          let+ copy_action =
+            let+ () = Memo.return () in
+            let open Action_builder.O in
+            [ Action_builder.with_no_targets
+              @@ ((match pkg.files_dir with
+                   | Some files_dir -> Action_builder.path (Path.build files_dir)
+                   | None -> Action_builder.return ())
+                  >>> Action_builder.of_memo
+                        (Memo.of_thunk (fun () ->
+                           match pkg.files_dir with
+                           | None -> Memo.return (Path.Set.empty, Dep.Set.empty)
+                           | Some files_dir ->
+                             let deps, source_deps = files files_dir in
+                             Memo.return (source_deps, deps)))
+                  |> Action_builder.dyn_deps
+                  >>= fun source_deps ->
+                  Path.Set.to_list_map source_deps ~f:(fun src ->
+                    let dst =
+                      let prefix = pkg.files_dir |> Option.value_exn |> Path.build in
+                      let local_path = Path.drop_prefix_exn src ~prefix in
+                      Path.Build.append_local pkg.write_paths.source_dir local_path
+                    in
+                    Action.progn
+                      [ Action.mkdir (Path.Build.parent_exn dst); Action.copy src dst ])
+                  |> Action.concurrent
+                  |> Action.Full.make
+                  |> Action_builder.return)
+            ]
+          in
+          copy_action
+          @ List.map pkg.info.extra_sources ~f:(fun (local, _) ->
+            (* If the package has extra sources, they will be
              initially stored in the extra_sources directory for that
              package. Prior to building, the contents of
              extra_sources must be copied into the package's source
              directory. *)
-          let src = Paths.extra_source pkg.paths local in
-          let dst = Path.Build.append_local pkg.write_paths.source_dir local in
-          Action.progn
-            [ (* If the package has no source directory (some
+            let src = Paths.extra_source pkg.paths local in
+            let dst = Path.Build.append_local pkg.write_paths.source_dir local in
+            Action.progn
+              [ (* If the package has no source directory (some
                  low-level packages are exclusively made up of extra
                  sources), the source directory is first created. *)
-              Action.mkdir pkg.write_paths.source_dir
-            ; (* It's possible for some extra sources to already be at
+                Action.mkdir pkg.write_paths.source_dir
+              ; (* It's possible for some extra sources to already be at
                  the destination. If these files are write-protected
                  then the copy action will fail if we don't first remove
                  them. *)
-              Action.remove_tree dst
-            ; Action.copy src dst
-            ]
-          |> Action.Full.make
-          |> Action_builder.With_targets.return)
-      and+ build_action =
-        match Action_expander.build_command context_name pkg with
-        | None -> Memo.return []
-        | Some build_command -> build_command >>| List.singleton
-      and+ install_action =
-        match Action_expander.install_command context_name pkg with
-        | None -> Memo.return []
-        | Some install_action ->
-          let+ install_action = install_action in
-          let mkdir_install_dirs =
-            let install_paths = Paths.install_paths pkg.write_paths in
-            Install_action.installable_sections
-            |> List.rev_map ~f:(fun section ->
-              Install.Paths.get install_paths section |> Action.mkdir)
-            |> Action.progn
+                Action.remove_tree dst
+              ; Action.copy src dst
+              ]
             |> Action.Full.make
-            |> Action_builder.With_targets.return
-          in
-          [ mkdir_install_dirs; install_action ]
+            |> Action_builder.With_targets.return)
+        and+ build_action =
+          match Action_expander.build_command context_name pkg with
+          | None -> Memo.return []
+          | Some build_command -> build_command >>| List.singleton
+        and+ install_action =
+          match Action_expander.install_command context_name pkg with
+          | None -> Memo.return []
+          | Some install_action ->
+            let+ install_action = install_action in
+            let mkdir_install_dirs =
+              let install_paths = Paths.install_paths pkg.write_paths in
+              Install_action.installable_sections
+              |> List.rev_map ~f:(fun section ->
+                Install.Paths.get install_paths section |> Action.mkdir)
+              |> Action.progn
+              |> Action.Full.make
+              |> Action_builder.With_targets.return
+            in
+            [ mkdir_install_dirs; install_action ]
+        in
+        copy_action, build_action, install_action
       in
-      copy_action, build_action, install_action
-    in
-    let install_file_action =
-      let prefix_outside_build_dir = Path.as_outside_build_dir pkg.paths.prefix in
-      Install_action.action
-        pkg.write_paths
-        (match Action_expander.install_command context_name pkg with
-         | None -> `No_install_action
-         | Some _ -> `Has_install_action)
-        ~prefix_outside_build_dir
-      |> Action.Full.make
-      |> Action_builder.return
-      |> Action_builder.with_no_targets
-    in
-    (* Action to print a "Building" message for the package if its
+      let install_file_action =
+        let prefix_outside_build_dir, cookie_outside_build_dir =
+          match pkg.toolchain_dir with
+          | None -> None, None
+          | Some toolchain_dir ->
+            ( Some (Path.Outside_build_dir.relative toolchain_dir "target")
+            , Some (Path.Outside_build_dir.relative toolchain_dir "cookie") )
+        in
+        Install_action.action
+          pkg.write_paths
+          (match Action_expander.install_command context_name pkg with
+           | None -> `No_install_action
+           | Some _ -> `Has_install_action)
+          ~prefix_outside_build_dir
+          ~cookie_outside_build_dir
+        |> Action.Full.make
+        |> Action_builder.return
+        |> Action_builder.with_no_targets
+      in
+      (* Action to print a "Building" message for the package if its
        target directory is not yet created. *)
-    let progress_building =
-      Pkg_build_progress.progress_action pkg.info.name pkg.info.version `Building
-      |> Action.Full.make
-      |> Action_builder.return
-      |> Action_builder.with_no_targets
-    in
-    [ copy_action
-    ; [ progress_building ]
-    ; build_action
-    ; install_action
-    ; [ install_file_action ]
-    ]
-    |> List.concat
-    |> Action_builder.progn
+      let progress_building =
+        Pkg_build_progress.progress_action pkg.info.name pkg.info.version `Building
+        |> Action.Full.make
+        |> Action_builder.return
+        |> Action_builder.with_no_targets
+      in
+      [ copy_action
+      ; [ progress_building ]
+      ; build_action
+      ; install_action
+      ; [ install_file_action ]
+      ]
+      |> List.concat
+      |> Action_builder.progn
   in
   let open Action_builder.With_targets.O in
   (let deps =
