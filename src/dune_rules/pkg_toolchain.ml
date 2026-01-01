@@ -56,8 +56,7 @@ let is_relocatable_compiler dep_names =
 let is_compiler_and_toolchains_enabled name ~dep_names =
   match Config.get Compile_time.toolchains with
   | `Enabled when is_relocatable_compiler dep_names -> false
-  | `Enabled ->
-    Dune_pkg.Dev_tool.is_compiler_package name
+  | `Enabled -> Dune_pkg.Dev_tool.is_compiler_package name
   | `Disabled -> false
 ;;
 

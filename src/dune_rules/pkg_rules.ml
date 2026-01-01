@@ -1129,10 +1129,13 @@ module Action_expander = struct
     let env = Pkg.exported_value_env pkg in
     let depends =
       Memo.Lazy.map closure ~f:(fun { Artifacts_and_deps.dep_info; _ } ->
-        Package.Name.Map.add_exn
-          dep_info
-          pkg.info.name
-          (Pkg_info.variables pkg.info, pkg.paths))
+        let variables =
+          Package_variable_name.Map.add_exn
+            (Pkg_info.variables pkg.info)
+            (Package_variable_name.of_string "build-id")
+            (OpamVariable.S (Pkg_digest.to_string pkg.pkg_digest))
+        in
+        Package.Name.Map.add_exn dep_info pkg.info.name (variables, pkg.paths))
       |> Memo.Lazy.force
     in
     let artifacts =
