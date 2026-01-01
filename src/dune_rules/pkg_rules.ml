@@ -525,7 +525,8 @@ module Pkg = struct
 
   let install_roots t =
     let default_install_roots = Paths.install_roots t.paths in
-    match Pkg_toolchain.is_compiler_and_toolchains_enabled t.info.name with
+    let dep_names = List.map t.depends ~f:(fun dep -> dep.info.name) in
+    match Pkg_toolchain.is_compiler_and_toolchains_enabled t.info.name ~dep_names with
     | false -> default_install_roots
     | true ->
       (* Compiler packages store their libraries in a subdirectory named "ocaml". *)
@@ -1581,7 +1582,12 @@ end = struct
       let build_command = Option.map build_command ~f:relocate_build in
       let paths =
         let paths = Paths.map_path write_paths ~f:Path.build in
-        match Pkg_toolchain.is_compiler_and_toolchains_enabled info.name with
+        let dep_names =
+          choose_for_current_platform pkg.depends
+          |> Option.value ~default:[]
+          |> List.map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) -> dep.name)
+        in
+        match Pkg_toolchain.is_compiler_and_toolchains_enabled info.name ~dep_names with
         | false -> paths
         | true ->
           (* Modify the environment as well as build and install commands for
