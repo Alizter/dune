@@ -449,6 +449,9 @@ module Pkg = struct
     ; files_dir : Path.Build.t option
     ; pkg_digest : Pkg_digest.t
     ; mutable exported_env : string Env_update.t list
+    ; is_relocatable_compiler_context : bool
+      (* true if relocatable-compiler is in the lock directory, meaning
+         the compiler should be treated as a regular package *)
     }
 
   module Top_closure = Top_closure.Make (Id.Set) (Monad.Id)
@@ -525,14 +528,17 @@ module Pkg = struct
 
   let install_roots t =
     let default_install_roots = Paths.install_roots t.paths in
-    let dep_names = List.map t.depends ~f:(fun dep -> dep.info.name) in
-    match Pkg_toolchain.is_compiler_and_toolchains_enabled t.info.name ~dep_names with
-    | false -> default_install_roots
-    | true ->
-      (* Compiler packages store their libraries in a subdirectory named "ocaml". *)
-      { default_install_roots with
-        lib_root = Path.relative default_install_roots.lib_root "ocaml"
-      }
+    (* Skip toolchain handling if this is a relocatable compiler context *)
+    if t.is_relocatable_compiler_context
+    then default_install_roots
+    else (
+      match Pkg_toolchain.is_compiler_and_toolchains_enabled t.info.name ~dep_names:[] with
+      | false -> default_install_roots
+      | true ->
+        (* Compiler packages store their libraries in a subdirectory named "ocaml". *)
+        { default_install_roots with
+          lib_root = Path.relative default_install_roots.lib_root "ocaml"
+        })
   ;;
 
   (* Given a list of packages, construct an env containing variables
@@ -1359,6 +1365,11 @@ module DB = struct
     { id = Id.gen (); pkg_digest_table; system_provided }
   ;;
 
+  let all_package_names t =
+    Pkg_digest.Map.fold t.pkg_digest_table ~init:[] ~f:(fun entry acc ->
+      entry.pkg.info.name :: acc)
+  ;;
+
   let pkg_digest_of_name lock_dir platform pkg_name ~system_provided =
     let entries_by_name =
       Pkg_table.entries_by_name_of_lock_dir lock_dir ~platform ~system_provided
@@ -1583,14 +1594,14 @@ end = struct
       let install_command = Option.map install_command ~f:relocate in
       let build_command = choose_for_current_platform build_command in
       let build_command = Option.map build_command ~f:relocate_build in
+      (* Check if relocatable-compiler is in the lock directory. This means
+         the compiler should be treated as a regular package, not cached in
+         the toolchains directory. *)
+      let all_pkg_names = DB.all_package_names db in
+      let is_relocatable_compiler_context = Pkg_toolchain.is_relocatable_compiler all_pkg_names in
       let paths =
         let paths = Paths.map_path write_paths ~f:Path.build in
-        let dep_names =
-          choose_for_current_platform pkg.depends
-          |> Option.value ~default:[]
-          |> List.map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) -> dep.name)
-        in
-        match Pkg_toolchain.is_compiler_and_toolchains_enabled info.name ~dep_names with
+        match Pkg_toolchain.is_compiler_and_toolchains_enabled info.name ~dep_names:all_pkg_names with
         | false -> paths
         | true ->
           (* Modify the environment as well as build and install commands for
@@ -1627,6 +1638,7 @@ end = struct
         ; files_dir
         ; pkg_digest
         ; exported_env = []
+        ; is_relocatable_compiler_context
         }
       in
       let+ exported_env =

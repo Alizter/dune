@@ -5,6 +5,10 @@ open Import
     Set to [Dune_util.cache_home_dir/toolchains]. *)
 val base_dir : unit -> Path.Outside_build_dir.t
 
+(** Returns true if relocatable-compiler is in the given list of package names.
+    When true, the compiler should be treated as a regular package. *)
+val is_relocatable_compiler : Package.Name.t list -> bool
+
 (** Dune will download and build the ocaml-base-compiler and
     ocaml-variants packages into a user-wide directory (shared among
     projects) rather than using the usual package management mechanism to
