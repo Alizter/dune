@@ -1,4 +1,4 @@
-Installing multiple directories into share_root currently crashes dune
+Installing multiple directories into the same location merges their contents.
 Originally reported as https://github.com/ocaml/dune/issues/13307
 
   $ cat >dune-project <<EOF
@@ -7,8 +7,8 @@ Originally reported as https://github.com/ocaml/dune/issues/13307
   > (package (name shared_files))
   > EOF
 
-Create two rules that create directories and an install stanza that 
-tries place the contents of both at the same location
+Create two rules that create directories and an install stanza that
+places the contents of both at the same location.
 
   $ cat >dune <<EOF
   > (rule
@@ -34,8 +34,42 @@ tries place the contents of both at the same location
   >   (a/share as .)))
   > EOF
 
-This would ideally produce a _build/install/default/share/ with both .txt files,
-or perhaps an error about two rules targetting the same thing, but crashes instead.
-  $ dune build @install 2>&1 | grep "must not crash"
-  I must not crash.  Uncertainty is the mind-killer. Exceptions are the
+The merged directory contains files from both sources:
+
+  $ dune build @install
+  $ ls _build/install/default/share/
+  readme_a.txt
+  readme_b.txt
+
+Test conflict detection when both directories contain a file with the same name:
+
+  $ cat >dune <<EOF
+  > (rule
+  >  (target (dir a))
+  >  (action
+  >   (progn
+  >    (run mkdir -p a/share)
+  >    (run touch a/share/readme.txt))))
+  > 
+  > (rule
+  >  (target (dir b))
+  >  (action
+  >   (progn
+  >    (run mkdir -p b/share)
+  >    (run touch b/share/readme.txt))))
+  > 
+  > (install
+  >  (section share_root)
+  >  (dirs
+  >   (b/share as .)
+  >   (a/share as .)))
+  > EOF
+
+  $ dune clean
+  $ dune build @install 2>&1 | head -5
+  File "dune", line 19, characters 3-10:
+  19 |   (a/share as .)))
+          ^^^^^^^
+  Error: Conflict: file readme.txt would be installed from multiple
+  directories:
   [1]

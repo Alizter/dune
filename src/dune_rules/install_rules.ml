@@ -1051,6 +1051,111 @@ end
 
 include Meta_and_dune_package
 
+(* Module for creating a directory tree of file symlinks from one or more source directories.
+   This is used instead of directory symlinks to allow merging multiple source directories
+   into a single destination. *)
+include (
+struct
+  module Symlink_tree_spec = struct
+    (* List of (source_dir, loc) pairs and destination directory *)
+    type ('path, 'target) t = ('path * Loc.t) list * 'target
+
+    let name = "symlink-tree"
+    let version = 1
+    let bimap (srcs, dst) f g = List.map srcs ~f:(fun (p, loc) -> f p, loc), g dst
+    let is_useful_to ~memoize = memoize
+
+    let encode (srcs, dst) path target : Sexp.t =
+      List [ List (List.map srcs ~f:(fun (p, _) -> path p)); target dst ]
+    ;;
+
+    (* Recursively enumerate all files in a directory, returning (local_path, absolute_path) pairs *)
+    let read_dir_recursively src_dir =
+      let rec loop acc dirs =
+        match dirs with
+        | [] -> List.rev acc
+        | (dir, comps) :: dirs ->
+          (match Path.Untracked.readdir_unsorted_with_kinds dir with
+           | Error (e, x, y) -> raise (Unix.Unix_error (e, x, y))
+           | Ok files ->
+             let files, new_dirs =
+               List.partition_map files ~f:(fun (name, kind) ->
+                 let path = Path.relative dir name in
+                 let comps = name :: comps in
+                 match kind with
+                 | Unix.S_DIR -> Right (path, comps)
+                 | _ -> Left (path, comps))
+             in
+             let acc =
+               List.rev_append
+                 (List.rev_map files ~f:(fun (path, comps) ->
+                    let local = Path.Local.L.relative Path.Local.root (List.rev comps) in
+                    local, path))
+                 acc
+             in
+             let dirs = List.rev_append new_dirs dirs in
+             loop acc dirs)
+      in
+      loop [] [ src_dir, [] ]
+    ;;
+
+    let action (srcs, dst) ~ectx:_ ~eenv:_ =
+      let open Fiber.O in
+      (* Enumerate all files from all source directories *)
+      let* all_files =
+        Fiber.parallel_map srcs ~f:(fun (src_dir, loc) ->
+          Fiber.return
+            (List.map (read_dir_recursively src_dir) ~f:(fun (local, abs) ->
+               local, abs, src_dir, loc)))
+        >>| List.concat
+      in
+      (* Group by relative path to detect conflicts *)
+      let by_rel_path =
+        List.fold_left
+          all_files
+          ~init:String.Map.empty
+          ~f:(fun acc (local, abs, src, loc) ->
+            let key = Path.Local.to_string local in
+            String.Map.update acc key ~f:(function
+              | None -> Some [ local, abs, src, loc ]
+              | Some existing -> Some ((local, abs, src, loc) :: existing)))
+      in
+      (* Check for conflicts and collect files to symlink *)
+      let files_to_symlink =
+        String.Map.foldi by_rel_path ~init:[] ~f:(fun rel_path sources acc ->
+          match sources with
+          | [ (local, abs_path, _, _) ] -> (local, abs_path) :: acc
+          | multiple ->
+            let source_dirs =
+              List.map multiple ~f:(fun (_, _, src_dir, loc) ->
+                Pp.textf "- %s (%s)" (Path.to_string src_dir) (Loc.to_file_colon_line loc))
+            in
+            User_error.raise
+              [ Pp.textf
+                  "Conflict: file %s would be installed from multiple directories:"
+                  rel_path
+              ; Pp.vbox (Pp.concat ~sep:Pp.newline source_dirs)
+              ])
+      in
+      (* Create the destination directory and symlinks *)
+      Async.async (fun () ->
+        Path.mkdir_p (Path.build dst);
+        List.iter files_to_symlink ~f:(fun (local, src_path) ->
+          let dst_path = Path.Build.append_local dst local in
+          Path.mkdir_p (Path.build (Path.Build.parent_exn dst_path));
+          (* Use portable_symlink which handles relative path computation *)
+          Io.portable_symlink ~src:src_path ~dst:(Path.build dst_path)))
+    ;;
+  end
+
+  module Symlink_tree_action = Action_ext.Make (Symlink_tree_spec)
+
+  let symlink_tree ~srcs ~dst = Symlink_tree_action.action (srcs, dst)
+end :
+sig
+  val symlink_tree : srcs:(Path.t * Loc.t) list -> dst:Path.Build.t -> Action.t
+end)
+
 let symlink_source_dir ~dir ~dst =
   let+ _, files = Source_deps.files dir in
   Path.Set.to_list_map files ~f:(fun src ->
@@ -1065,26 +1170,45 @@ let symlink_installed_artifacts_to_build_install
       ~install_paths
   =
   let install_dir = Install.Context.dir ~context:ctx.name in
-  Memo.parallel_map entries ~f:(fun (s : Install.Entry.Sourced.Unexpanded.t) ->
-    let entry = s.entry in
-    let dst =
-      let relative =
-        Install.Entry.relative_installed_path entry ~paths:install_paths
-        |> Path.as_in_source_tree_exn
+  (* Helper to compute destination path for an entry *)
+  let compute_dst entry =
+    let relative =
+      Install.Entry.relative_installed_path entry ~paths:install_paths
+      |> Path.as_in_source_tree_exn
+    in
+    Path.Build.append_source install_dir relative
+  in
+  (* Helper to get location from sourced entry *)
+  let get_loc (s : Install.Entry.Sourced.Unexpanded.t) =
+    match s.source with
+    | User l -> l
+    | Dune -> Loc.in_file (Path.build s.entry.src)
+  in
+  (* Partition entries by kind *)
+  let (source_trees, files, directories)
+    : Install.Entry.Sourced.Unexpanded.t list
+      * Install.Entry.Sourced.Unexpanded.t list
+      * Install.Entry.Sourced.Unexpanded.t list
+    =
+    List.fold_left
+      entries
+      ~init:([], [], [])
+      ~f:(fun (st, f, d) (s : Install.Entry.Sourced.Unexpanded.t) ->
+        match s.entry.kind with
+        | Install.Entry.Unexpanded.Source_tree -> s :: st, f, d
+        | File -> st, s :: f, d
+        | Directory -> st, f, s :: d)
+  in
+  (* Process Source_tree entries (unchanged) *)
+  let* source_tree_results =
+    Memo.parallel_map source_trees ~f:(fun s ->
+      let entry = s.entry in
+      let dst = compute_dst entry in
+      let loc = get_loc s in
+      let src = Path.build entry.src in
+      let rule { Action_builder.With_targets.targets; build } =
+        Rule.make ~info:(From_dune_file loc) ~targets build
       in
-      Path.Build.append_source install_dir relative
-    in
-    let loc =
-      match s.source with
-      | User l -> l
-      | Dune -> Loc.in_file (Path.build entry.src)
-    in
-    let src = Path.build entry.src in
-    let rule { Action_builder.With_targets.targets; build } =
-      Rule.make ~info:(From_dune_file loc) ~targets build
-    in
-    match entry.kind with
-    | Install.Entry.Unexpanded.Source_tree ->
       symlink_source_dir ~dir:src ~dst
       >>| List.map ~f:(fun (suffix, dst, build) ->
         let rule = rule build in
@@ -1096,23 +1220,85 @@ let symlink_installed_artifacts_to_build_install
           let entry = Install.Entry.Unexpanded.expand entry in
           Install.Entry.Expanded.set_src entry dst
         in
-        { s with entry }, rule)
-    | File ->
+        { s with entry }, rule))
+  in
+  (* Process File entries (unchanged) *)
+  let file_results =
+    List.map files ~f:(fun (s : Install.Entry.Sourced.Unexpanded.t) ->
+      let entry = s.entry in
+      let dst = compute_dst entry in
+      let loc = get_loc s in
+      let src = Path.build entry.src in
+      let rule { Action_builder.With_targets.targets; build } =
+        Rule.make ~info:(From_dune_file loc) ~targets build
+      in
       let entry =
         let entry = Install.Entry.Unexpanded.expand entry in
         let entry = Install.Entry.Expanded.set_src entry dst in
         { s with entry }
       in
       let action = Action_builder.symlink ~src ~dst in
-      Memo.return [ entry, rule action ]
-    | Directory ->
+      [ entry, rule action ])
+  in
+  (* Process Directory entries - group by destination and merge *)
+  let directory_results =
+    (* Group directory entries by destination path *)
+    let by_dst =
+      List.fold_left
+        directories
+        ~init:Path.Build.Map.empty
+        ~f:(fun acc (s : Install.Entry.Sourced.Unexpanded.t) ->
+          let dst = compute_dst s.entry in
+          Path.Build.Map.update acc dst ~f:(function
+            | None -> Some [ s ]
+            | Some existing -> Some (s :: existing)))
+    in
+    (* For each destination, create a merged symlink tree rule *)
+    Path.Build.Map.to_list by_dst
+    |> List.map ~f:(fun (dst, entries_for_dst) ->
+      (* Collect all sources and their locations *)
+      let srcs =
+        List.map entries_for_dst ~f:(fun (s : Install.Entry.Sourced.Unexpanded.t) ->
+          Path.build s.entry.src, get_loc s)
+      in
+      (* Use the first entry's location for the rule info *)
+      let primary_entry = List.hd entries_for_dst in
+      let loc = get_loc primary_entry in
+      (* Create the merged symlink tree action *)
+      let action =
+        Action_builder.with_targets
+          ~targets:
+            (Targets.create
+               ~files:Path.Build.Set.empty
+               ~dirs:(Path.Build.Set.singleton dst))
+          (let open Action_builder.O in
+           let+ () =
+             Action_builder.all_unit
+               (List.map srcs ~f:(fun (src, _) -> Action_builder.path src))
+           in
+           Action.Full.make (symlink_tree ~srcs ~dst))
+      in
+      let rule =
+        Rule.make ~info:(From_dune_file loc) ~targets:action.targets action.build
+      in
+      (* Create a single entry for the merged destination directory.
+         We use the first source entry as the basis. *)
       let entry =
-        let entry = Install.Entry.Unexpanded.expand entry in
-        let entry = Install.Entry.Expanded.set_src entry dst in
+        let s = primary_entry in
+        let entry =
+          let entry = Install.Entry.Unexpanded.expand s.entry in
+          Install.Entry.Expanded.set_src entry dst
+        in
         { s with entry }
       in
-      let action = Action_builder.symlink_dir ~src ~dst in
-      Memo.return [ entry, rule action ])
+      [ entry, rule ])
+  in
+  Memo.return
+    (List.concat
+       [ List.concat source_tree_results
+       ; List.concat file_results
+       ; List.concat directory_results
+       ])
 ;;
 
 let promote_install_file (ctx : Context.t) =
@@ -1175,7 +1361,6 @@ let symlinked_entries sctx package =
   let build_context = Super_context.context sctx |> Context.build_context in
   install_entries sctx package
   >>= symlink_installed_artifacts_to_build_install build_context ~install_paths
-  >>| List.rev_concat
   >>| List.split
 ;;
 
