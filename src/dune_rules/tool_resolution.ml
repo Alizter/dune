@@ -1,0 +1,142 @@
+open Import
+open Memo.O
+
+(** Unified tool resolution.
+
+    This module provides a unified interface for resolving and building tools,
+    regardless of whether they're configured via (tool) stanza, legacy Dev_tool,
+    or should fall back to system PATH.
+*)
+
+(** A resolved tool ready for execution *)
+type resolved =
+  { package : Package.Name.t
+  ; exe_path : Path.Build.t
+  ; env : Env.t Memo.t
+  }
+
+let to_dyn { package; exe_path; env = _ } =
+  Dyn.record
+    [ "package", Package.Name.to_dyn package
+    ; "exe_path", Path.Build.to_dyn exe_path
+    ]
+;;
+
+(** Resolution source - how the tool was resolved *)
+type resolution_source =
+  | From_workspace_stanza of Tool_stanza.t
+  | From_legacy_dev_tool of Dune_pkg.Dev_tool.t
+  | From_system_path
+
+let resolution_source_to_dyn = function
+  | From_workspace_stanza stanza ->
+    Dyn.variant "From_workspace_stanza" [ Tool_stanza.to_dyn stanza ]
+  | From_legacy_dev_tool tool ->
+    Dyn.variant "From_legacy_dev_tool" [ Dune_pkg.Dev_tool.to_dyn tool ]
+  | From_system_path -> Dyn.variant "From_system_path" []
+;;
+
+(** Try to find a tool in the workspace's (tool) stanzas *)
+let find_in_workspace package_name =
+  let+ workspace = Workspace.workspace () in
+  Workspace.find_tool workspace package_name
+;;
+
+(** Try to convert to a legacy Dev_tool *)
+let find_legacy_dev_tool package_name =
+  Dune_pkg.Dev_tool.of_package_name_opt package_name
+;;
+
+(** Check if a legacy dev tool's lock directory exists.
+    This mimics the original dev_tool_lock_dir_exists() check. *)
+let legacy_dev_tool_lock_dir_exists dev_tool =
+  match Config.get Compile_time.lock_dev_tools with
+  | `Enabled -> Memo.return true
+  | `Disabled ->
+    let path = Lock_dir.dev_tool_external_lock_dir dev_tool in
+    Fs_memo.dir_exists (Path.Outside_build_dir.External path)
+;;
+
+(** Resolve a tool by package name.
+
+    Resolution priority:
+    1. Check workspace (tool) stanza
+    2. Check legacy Dev_tool.t (only if its lock dir exists)
+    3. Check if tool has a lock directory (new-style .tools.lock/)
+    4. Fall back to system PATH (returns None in that case)
+*)
+let resolve_opt ~package_name =
+  let* stanza_opt = find_in_workspace package_name in
+  match stanza_opt with
+  | Some stanza ->
+    (* Found in workspace stanza *)
+    let exe_path = Tool_build.exe_path_of_stanza stanza in
+    let env = Tool_build.tool_env package_name in
+    Memo.return (Some ({ package = package_name; exe_path; env }, From_workspace_stanza stanza))
+  | None ->
+    (* Check for legacy dev tool *)
+    (match find_legacy_dev_tool package_name with
+     | Some dev_tool ->
+       (* Only use legacy dev tool if its lock dir exists *)
+       let* lock_exists = legacy_dev_tool_lock_dir_exists dev_tool in
+       if lock_exists
+       then (
+         let exe_path = Pkg_dev_tool.exe_path dev_tool in
+         let env = Pkg_rules.dev_tool_env dev_tool in
+         Memo.return
+           (Some ({ package = package_name; exe_path; env }, From_legacy_dev_tool dev_tool)))
+       else
+         (* Legacy dev tool exists but no lock dir - fall back to system PATH *)
+         Memo.return None
+     | None ->
+       (* Check if there's a lock directory for this package (new-style) *)
+       let* has_lock = Tool_lock.lock_dir_exists package_name in
+       if has_lock
+       then (
+         (* New-style tool with lock dir but no stanza - use default executable name *)
+         let executable = Package.Name.to_string package_name in
+         let exe_path = Tool_build.exe_path ~package_name ~executable in
+         let env = Tool_build.tool_env package_name in
+         Memo.return (Some ({ package = package_name; exe_path; env }, From_system_path)))
+       else
+         (* No lock dir - tool should be on system PATH *)
+         Memo.return None)
+;;
+
+(** Resolve a tool, raising an error if not found *)
+let resolve ~package_name =
+  let+ result = resolve_opt ~package_name in
+  match result with
+  | Some (resolved, _source) -> resolved
+  | None ->
+    User_error.raise
+      [ Pp.textf
+          "Tool %S is not configured. Add a (tool) stanza to your dune-workspace or \
+           install it on your system PATH."
+          (Package.Name.to_string package_name)
+      ]
+;;
+
+(** Resolve a tool specifically for formatting (like ocamlformat).
+    This also reads the version from .ocamlformat config if present. *)
+let resolve_for_formatting ~package_name =
+  resolve_opt ~package_name
+;;
+
+(** Ensure a resolved tool is built and return its executable path.
+    This is meant to be used in Action_builder context. *)
+let ensure_built (resolved : resolved) =
+  let exe_path = Path.build resolved.exe_path in
+  let open Action_builder.O in
+  let+ () = Action_builder.path exe_path in
+  exe_path
+;;
+
+(** Get the full action builder for running a resolved tool.
+    Includes ensuring the tool is built and adding its environment. *)
+let with_tool_env (resolved : resolved) ~f =
+  let open Action_builder.O in
+  let* exe_path = ensure_built resolved in
+  let+ env = Action_builder.of_memo resolved.env in
+  f ~exe_path ~env
+;;

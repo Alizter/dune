@@ -1,10 +1,13 @@
 open Import
 module Pkg_dev_tool = Dune_rules.Pkg_dev_tool
+module Tool_build = Dune_rules.Tool_build
+module Tool_stanza = Source.Tool_stanza
 
 let dev_tool_bin_dirs =
   List.map Pkg_dev_tool.all ~f:(fun tool ->
     Pkg_dev_tool.exe_path tool |> Path.Build.parent_exn |> Path.build)
 ;;
+
 
 let add_dev_tools_to_path env =
   List.fold_left dev_tool_bin_dirs ~init:env ~f:(fun acc dir -> Env_path.cons acc ~dir)
@@ -188,4 +191,188 @@ let env_command =
     Cmd.info "env" ~doc
   in
   Cmd.v info term
+;;
+
+(* ========== Generic Tool Support ========== *)
+
+(** Get the exe path for a generic tool package *)
+let generic_tool_exe_path package_name =
+  let executable = Package_name.to_string package_name in
+  Path.build @@ Tool_build.exe_path ~package_name ~executable
+;;
+
+(** Build target for a generic tool *)
+let generic_tool_build_target package_name =
+  Dune_lang.Dep_conf.File
+    (Dune_lang.String_with_vars.make_text
+       Loc.none
+       (Path.to_string (generic_tool_exe_path package_name)))
+;;
+
+let build_generic_tool_directly common package_name =
+  let open Fiber.O in
+  let+ result =
+    Build.run_build_system ~common ~request:(fun _build_system ->
+      let open Action_builder.O in
+      (* Only lock if lock dir doesn't exist - don't re-lock on every run *)
+      let* () = package_name |> Lock_tool.lock_tool_if_needed |> Action_builder.of_memo in
+      Action_builder.path (generic_tool_exe_path package_name))
+  in
+  match result with
+  | Error `Already_reported -> raise Dune_util.Report_error.Already_reported
+  | Ok () -> ()
+;;
+
+let build_generic_tool_via_rpc builder lock_held_by package_name =
+  let target = generic_tool_build_target package_name in
+  let targets = Rpc.Rpc_common.prepare_targets [ target ] in
+  let open Fiber.O in
+  Rpc.Rpc_common.fire_request
+    ~name:"build"
+    ~wait:true
+    ~lock_held_by
+    builder
+    Dune_rpc_impl.Decl.build
+    targets
+  >>| Rpc.Rpc_common.wrap_build_outcome_exn ~print_on_success:false
+;;
+
+let lock_and_build_generic_tool ~common ~config builder package_name =
+  let open Fiber.O in
+  match Dune_util.Global_lock.lock ~timeout:None with
+  | Error lock_held_by ->
+    Scheduler_setup.no_build_no_rpc ~config (fun () ->
+      let* () = Lock_tool.lock_tool package_name |> Memo.run in
+      build_generic_tool_via_rpc builder lock_held_by package_name)
+  | Ok () ->
+    Scheduler_setup.go_with_rpc_server ~common ~config (fun () ->
+      build_generic_tool_directly common package_name)
+;;
+
+let run_generic_tool workspace_root package_name ~args =
+  let exe_name = Package_name.to_string package_name in
+  let exe_path_string = Path.to_string (generic_tool_exe_path package_name) in
+  Console.print_user_message
+    (Dune_rules.Pkg_build_progress.format_user_message
+       ~verb:"Running"
+       ~object_:(User_message.command (String.concat ~sep:" " (exe_name :: args))));
+  Console.finish ();
+  let env = add_dev_tools_to_path Env.initial in
+  restore_cwd_and_execve workspace_root exe_path_string args env
+;;
+
+let lock_build_and_run_generic_tool ~common ~config builder package_name ~args =
+  lock_and_build_generic_tool ~common ~config builder package_name;
+  run_generic_tool (Common.root common) package_name ~args
+;;
+
+(** Generic exec term for any package (used as default in group) *)
+let generic_exec_term =
+  let+ builder = Common.Builder.term
+  and+ package =
+    Arg.(required & pos 0 (some string) None (info [] ~docv:"PACKAGE" ~doc:(Some "The opam package name to execute")))
+  and+ args = Arg.(value & pos_right 0 string [] (info [] ~docv:"ARGS" ~doc:None)) in
+  let common, config = Common.init builder in
+  let package_name = Package_name.of_string package in
+  lock_build_and_run_generic_tool ~common ~config builder package_name ~args
+;;
+
+(** Generic exec command for any package *)
+let generic_exec_command =
+  let info =
+    let doc =
+      "Execute any opam package as a tool. The package will be locked and built if \
+       necessary. Pass arguments to the tool after '--'."
+    in
+    Cmd.info "exec" ~doc
+  in
+  Cmd.v info generic_exec_term
+;;
+
+(** Lock a generic tool (no build) *)
+let lock_generic_tool ~common ~config package_name =
+  let open Fiber.O in
+  Scheduler_setup.go_with_rpc_server ~common ~config (fun () ->
+    let+ () = Lock_tool.lock_tool package_name |> Memo.run in
+    Console.print_user_message
+      (User_message.make
+         [ Pp.textf "Locked %s. Run 'dune tools run %s' to build and execute."
+             (Package_name.to_string package_name)
+             (Package_name.to_string package_name)
+         ]))
+;;
+
+(** Lock a generic tool at a specific version (no build) *)
+let lock_generic_tool_at_version ~common ~config package_name ~version =
+  let open Fiber.O in
+  Scheduler_setup.go_with_rpc_server ~common ~config (fun () ->
+    let+ () =
+      Lock_tool.lock_tool_at_version ~package_name ~version ~compiler_compatible:false
+      |> Memo.run
+    in
+    let version_str =
+      match version with
+      | Some v -> Printf.sprintf " (%s)" (Package_version.to_string v)
+      | None -> ""
+    in
+    Console.print_user_message
+      (User_message.make
+         [ Pp.textf "Locked %s%s. Run 'dune tools run %s' to build and execute."
+             (Package_name.to_string package_name)
+             version_str
+             (Package_name.to_string package_name)
+         ]))
+;;
+
+(** Generic lock term for any package *)
+let generic_lock_term =
+  let+ builder = Common.Builder.term
+  and+ package =
+    Arg.(required & pos 0 (some string) None (info [] ~docv:"PACKAGE" ~doc:(Some "The opam package name to lock")))
+  and+ version =
+    Arg.(value & opt (some string) None (info [ "version" ] ~docv:"VERSION" ~doc:"Version constraint (e.g., 0.26.2)"))
+  in
+  let common, config = Common.init builder in
+  let package_name = Package_name.of_string package in
+  let version = Option.map version ~f:Package_version.of_string in
+  lock_generic_tool_at_version ~common ~config package_name ~version
+;;
+
+(** Generic lock command for any package *)
+let generic_lock_command =
+  let info =
+    let doc = "Lock any opam package as a tool. Creates a lock directory without building." in
+    Cmd.info "lock" ~doc
+  in
+  Cmd.v info generic_lock_term
+;;
+
+(** Generic which term for any package (used as default in group) *)
+let generic_which_term =
+  let+ builder = Common.Builder.term
+  and+ package =
+    Arg.(required & pos 0 (some string) None (info [] ~docv:"PACKAGE" ~doc:(Some "The opam package name")))
+  and+ allow_not_installed =
+    Arg.(
+      value
+      & flag
+      & info
+          [ "allow-not-installed" ]
+          ~doc:(Some "Print where the tool would be installed even if not installed yet."))
+  in
+  let _ : Common.t * Dune_config_file.Dune_config.t = Common.init builder in
+  let package_name = Package_name.of_string package in
+  let exe_path = generic_tool_exe_path package_name in
+  if allow_not_installed || Path.exists exe_path
+  then print_endline (Path.to_string exe_path)
+  else User_error.raise [ Pp.textf "%s is not installed as a tool" package ]
+;;
+
+(** Generic which command for any package *)
+let generic_which_command =
+  let info =
+    let doc = "Print the path to a tool's executable. Errors if the tool is not installed." in
+    Cmd.info "which" ~doc
+  in
+  Cmd.v info generic_which_term
 ;;

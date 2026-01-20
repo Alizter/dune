@@ -254,17 +254,59 @@ let of_dev_tool dev_tool =
 ;;
 
 let of_dev_tool_if_lock_dir_exists dev_tool =
-  let path = dev_tool |> dev_tool_external_lock_dir |> Path.external_ in
-  let exists =
-    (* Note we use [Path.Untracked] here rather than [Fs_memo] because a tool's
-       lockdir may be generated part way through a build. *)
-    Path.Untracked.exists path
-  in
-  if exists
-  then
-    let+ t = Load.load_exn path in
+  let path = dev_tool |> dev_tool_external_lock_dir in
+  Fs_memo.dir_exists (Path.Outside_build_dir.External path)
+  >>= function
+  | false -> Memo.return None
+  | true ->
+    let+ t = Load.load_exn (Path.external_ path) in
     Some t
-  else Memo.return None
+;;
+
+(* Generic tool lock directory support *)
+
+let tool_to_path_segment package_name =
+  package_name |> Package.Name.to_string |> Path.Local.of_string
+;;
+
+(** Base directory for all tool locks: _build/.tools.lock/ *)
+let tools_lock_base () =
+  let external_root =
+    Path.Build.root |> Path.build |> Path.to_absolute_filename |> Path.External.of_string
+  in
+  Path.External.relative external_root ".tools.lock"
+;;
+
+(** External lock directory for generic tools: _build/.tools.lock/<package>/
+    TODO: Add version to path once solver can write to dynamic paths *)
+let tool_external_lock_dir package_name =
+  let package_segment = tool_to_path_segment package_name in
+  Path.External.append_local (tools_lock_base ()) package_segment
+;;
+
+(** Internal lock directory for generic tools: _build/default/.tool-locks/<package>/ *)
+let tool_lock_dir package_name =
+  let ctx_name = Context_name.default |> Context_name.to_string in
+  let package_segment = tool_to_path_segment package_name in
+  let lock_dir =
+    Path.Build.L.relative Private_context.t.build_dir [ ctx_name; ".tool-locks" ]
+  in
+  Path.Build.append_local lock_dir package_segment |> Path.build
+;;
+
+let of_tool package_name =
+  let path = tool_external_lock_dir package_name |> Path.external_ in
+  Load.load_exn path
+;;
+
+let of_tool_if_lock_dir_exists package_name =
+  let path = tool_external_lock_dir package_name in
+  Fs_memo.dir_exists (Path.Outside_build_dir.External path)
+  >>= function
+  | false -> Memo.return None
+  | true ->
+    let+ t = Load.load_exn (Path.external_ path) in
+    Some t
 ;;
 
 let lock_dirs_of_workspace (workspace : Workspace.t) =

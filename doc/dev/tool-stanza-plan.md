@@ -13,424 +13,250 @@ This document outlines the plan to overhaul dune's developer tools system to sup
 5. Match compiler constraints from dune_rules (pkg or system)
 6. Decouple from package management while reusing per-tool lock directories
 
-## Current Implementation Shortcomings
+---
 
-| Issue | Location | Problem |
-|-------|----------|---------|
-| Hardcoded 10 tools | `src/dune_pkg/dev_tool.ml:3-13` | Can't add arbitrary packages |
-| Deep pkg coupling | `bin/lock_dev_tool.ml` | Uses full solver, synthetic packages |
-| No multi-version | `src/dune_rules/pkg_dev_tool.ml` | Single global version per tool |
-| Confusing dirs | `.dev-tools.locks/` | GitHub #10955 |
-| Special-cased format | `src/dune_rules/format_rules.ml:34-102` | Two paths (locked/unlocked) |
+## Current Status
+
+### Working ✅
+
+1. **Tool stanza parsing**: `(tool (package ocamlformat))` works in dune-workspace
+2. **CLI commands**: `dune tools lock <pkg>`, `dune tools run <pkg>`, `dune tools path <pkg>`
+3. **Lock directory creation**: `.tools.lock/<package>/` created correctly
+4. **Compiler detection**: System OCaml version detected via `Sys_vars.poll.sys_ocaml_version`
+5. **Fs_memo tracking**: Lock directory existence tracked properly for memo invalidation
+6. **Checksum collection**: Tool lock dirs included in fetch rules checksum map
+7. **`.pkg/` rules always generated**: No longer gated by `lock_dir_active`
+
+### In Progress 🔄
+
+1. **System OCaml preference**: Changed to require `ocaml-system` directly instead of `ocaml`
+2. **Build system isolation**: `compiler_package_opt()` now reads from disk directly to avoid triggering builds
+
+### Blocked/Issues 🔴
+
+1. **Internal error on lock**: "Unexpected build progress state" when calling lock - may be related to how memo/fiber interact with the scheduler
 
 ---
 
-## Related GitHub Issues
+## Key Lessons Learned
 
-This implementation addresses numerous GitHub issues. Issues are grouped by theme.
+### 1. Avoid Build System Triggers in Lock Commands
 
-### Core Dev Tools Redesign
+**Problem**: `Lock_tool.lock_tool` was calling `Lock_dir.get context` which triggers the build system to load the project lock dir.
 
-| Issue | Title | How Tool Stanza Helps |
-|-------|-------|----------------------|
-| [#12914](https://github.com/ocaml/dune/issues/12914) | **pkg: reworking dev tools** | Umbrella issue - this plan implements the redesign |
-| [#12913](https://github.com/ocaml/dune/issues/12913) | **pkg: general support for installing tools** | `(tool)` stanza allows any opam package, not just hardcoded ones |
-| [#12741](https://github.com/ocaml/dune/issues/12741) | **Replace auto-installation of dev tools with autolocking** | Explicit `(tool)` stanza avoids race conditions from on-the-fly locking |
-
-### Tool Versioning and Constraints
-
-| Issue | Title | How Tool Stanza Helps |
-|-------|-------|----------------------|
-| [#12777](https://github.com/ocaml/dune/issues/12777) | **pkg: specifying constraints for dev tools** | `(tool (package (ocamlformat (= 0.26.2))))` provides robust version constraints in workspace |
-| [#12866](https://github.com/ocaml/dune/issues/12866) | **Adding constraint to ocamlformat developer tool fails** | New stanza-based constraints avoid path-based approach that causes internal errors |
-| [#12868](https://github.com/ocaml/dune/issues/12868) | **Dev tools and special compiler branches** | `Tool_compiler` module properly detects `ocaml-variants`, `ocaml-base-compiler`, and pinned compilers |
-
-### Directory Structure
-
-| Issue | Title | How Tool Stanza Helps |
-|-------|-------|----------------------|
-| [#10955](https://github.com/ocaml/dune/issues/10955) | **Kind of annoying to have both `dune.lock` and `dev-tools.locks`** | New `.tools.lock/` directory with cleaner naming |
-
-### Format Rules and Formatter Issues
-
-| Issue | Title | How Tool Stanza Helps |
-|-------|-------|----------------------|
-| [#10688](https://github.com/ocaml/dune/issues/10688) | **pkg: avoid `dune fmt` capturing `ocamlformat` from the PATH** | `Tool_resolution` uses locked version, only falls back to PATH if no stanza/lock |
-| [#11038](https://github.com/ocaml/dune/issues/11038) | **`dune fmt` requires `ocamlc` to be in path** | `Tool_build.tool_env` provides proper environment including compiler |
-| [#11037](https://github.com/ocaml/dune/issues/11037) | **`dune fmt` builds all project dependencies when lockdir present** | Tools are isolated in `_build/default/.tools/`, separate from project |
-| [#3642](https://github.com/ocaml/dune/issues/3642) | **adding new formatters can break older projects** | Explicit `(tool)` stanza means formatters are opt-in per project |
-| [#7619](https://github.com/ocaml/dune/issues/7619) | **Possibility to specify another formatter for OCaml/ReasonML** | Generic tool mechanism can be extended for custom formatters |
-| [#10578](https://github.com/ocaml/dune/issues/10578) | **`dune build @fmt` exits with 1 if `ocamlformat` not installed** | `Tool_resolution` graceful fallback prevents hard failures |
-| [#10863](https://github.com/ocaml/dune/issues/10863) | **use a custom command to format dune files** | General tool abstraction enables per-project formatter customization |
-| [#3836](https://github.com/ocaml/dune/issues/3836) | **More general support for formatters?** | `(tool)` provides the generic mechanism this issue requested |
-
-### Tool Installation and Execution UX
-
-| Issue | Title | How Tool Stanza Helps |
-|-------|-------|----------------------|
-| [#12135](https://github.com/ocaml/dune/issues/12135) | **`dune tools setup` to install `:with-dev-setup` deps** | Workspace `(tool)` stanzas can be batch-installed |
-| [#12557](https://github.com/ocaml/dune/issues/12557) | **`dune tools install` should take multiple package arguments** | New CLI design supports this |
-| [#12818](https://github.com/ocaml/dune/issues/12818) | **If dune tools install fails it can break environment** | Cleaner lock directory structure enables atomic operations |
-| [#12975](https://github.com/ocaml/dune/issues/12975) | **running `dune tools exec <p>` when not installed should suggest install** | Unified resolution can provide better error messages |
-| [#13235](https://github.com/ocaml/dune/issues/13235) | **dune build @doc should hint installation of odoc dev tool** | Generic tool system provides consistent messaging |
-
-### Tool Isolation and Conflicts
-
-| Issue | Title | How Tool Stanza Helps |
-|-------|-------|----------------------|
-| [#12551](https://github.com/ocaml/dune/issues/12551) | **pkg: `dune utop src/...` fails because of duplicate .cmas** | Tools built in isolated `_build/default/.tools/<pkg>/` avoid conflicts |
-| [#11229](https://github.com/ocaml/dune/issues/11229) | **ocamllsp cannot read stdlib.cmi (corrupted compiled interface)** | `compiler_compatible` flag ensures tools are built with matching compiler |
-
-### Scoping
-
-| Issue | Title | How Tool Stanza Helps |
-|-------|-------|----------------------|
-| [#12777](https://github.com/ocaml/dune/issues/12777) (note) | Different projects need different ocamlformat versions | Per-project tool scoping via workspace stanzas |
-
----
-
-## Syntax
-
-```lisp
-;; Simple - just package name
-(tool (package ocamlformat))
-
-;; With version constraint
-(tool (package (ocamlformat (= 0.26.2))))
-
-;; With additional options
-(tool
-  (package (ocamlformat (= 0.26.2)))
-  (executable ocamlformat-rpc)
-  (compiler_compatible))
-```
-
----
-
-## Implementation Status
-
-### Completed (Phases 1-6)
-
-#### Phase 1-2: Tool Configuration Module ✅
-
-**Created `src/source/tool_stanza.ml` and `.mli`**
+**Solution**: Read lock dir directly from disk using `Lock_dir.read_disk` instead of going through the memo system.
 
 ```ocaml
-type t =
-  { package : Package.Name.t
-  ; version : Package_constraint.t option
-  ; executable : string option
-  ; compiler_compatible : bool
-  ; loc : Loc.t
-  }
+(* BAD - triggers build system *)
+let* result = Dune_rules.Lock_dir.get context in
+
+(* GOOD - reads directly from disk *)
+let lock_dir_path = Path.source (Path.Source.relative workspace.dir "dune.lock") in
+match Lock_dir.read_disk lock_dir_path with
 ```
 
-**Modified `src/source/workspace.ml`**
-- Added `tools : Tool_stanza.t list` field to workspace type
-- Added `(tool)` stanza parsing via `multi_field "tool" Tool_stanza.decode`
-- Added `find_tool : t -> Package.Name.t -> Tool_stanza.t option`
+### 2. Use Fs_memo for Tracked Filesystem Operations
 
-**Modified `src/source/workspace.mli`**
-- Exposed `tools` field and `find_tool` function
+**Problem**: `Path.Untracked.exists` doesn't invalidate memos when files change.
 
-#### Phase 3: Tool Lock Directory Management ✅
-
-**Created `src/dune_rules/tool_lock.ml` and `.mli`**
+**Solution**: Use `Fs_memo.dir_exists` for any filesystem check that affects memoized computations.
 
 ```ocaml
-(* Lock directory paths *)
-val external_lock_dir : Package.Name.t -> Path.External.t  (* .tools.lock/<pkg>/ *)
-val build_lock_dir : Package.Name.t -> Path.t              (* _build/default/.tools/<pkg>/ *)
+(* BAD - untracked *)
+Path.Untracked.exists (Path.external_ dir)
 
-(* Lock directory operations *)
-val lock_dir_exists : Package.Name.t -> bool Memo.t
-val load : Package.Name.t -> Dune_pkg.Lock_dir.t Memo.t
-val load_if_exists : Package.Name.t -> Dune_pkg.Lock_dir.t option Memo.t
+(* GOOD - tracked *)
+Fs_memo.dir_exists (Path.Outside_build_dir.External path)
 ```
 
-#### Phase 4: Compiler Detection ✅
+### 3. Checksum Collection Must Include All Lock Dirs
 
-**Created `src/dune_rules/tool_compiler.ml` and `.mli`**
+**Problem**: Fetch rules only collected checksums from dev tools and project lock dirs, not generic tools.
+
+**Solution**: Added scanning of `.tools.lock/` directory in `fetch_rules.ml`:
 
 ```ocaml
-type compiler_source =
-  | From_pkg of { name : Package.Name.t; version : Package_version.t }
-  | From_system of { version : string }
-  | From_opam_switch of { prefix : string }
-  | Unknown
-
-val detect : unit -> compiler_source Memo.t
-val constraints_for_tool : compiler_source -> Package_dependency.t list
-val get_constraints : unit -> Package_dependency.t list Memo.t
+(* Scan .tools.lock/ for generic tool lock dirs *)
+let* init =
+  match Path.Untracked.readdir_unsorted_with_kinds tools_lock_path with
+  | Error _ -> Memo.return init
+  | Ok entries -> ...
 ```
 
-#### Phase 5: Tool Build Infrastructure ✅
+### 4. `.pkg/` Rules Should Always Generate
 
-**Created `src/dune_rules/tool_build.ml` and `.mli`**
+**Problem**: `.pkg/` rules were gated by `lock_dir_active`, which fails when only tools (not project) have dependencies.
+
+**Solution**: Always generate `.pkg/` rules. When no project lock dir exists, create a tools-only DB:
 
 ```ocaml
-(* Installation paths *)
-val install_path : Package.Name.t -> Path.Build.t
-val exe_path : package_name:Package.Name.t -> executable:string -> Path.Build.t
-val exe_path_of_stanza : Tool_stanza.t -> Path.Build.t
-
-(* Environment *)
-val tool_env : Package.Name.t -> Env.t Memo.t
-val tool_bin_dirs : Tool_stanza.t list -> Path.t list
-val add_tools_to_path : Tool_stanza.t list -> Env.t -> Env.t
+if lock_dir_active then DB.of_ctx ctx ~allow_sharing:true
+else
+  (* Create DB from just tool packages *)
+  let+ dev_tools_table = Memo.Lazy.force DB.Pkg_table.all_existing_dev_tools
+  and+ tools_table = Memo.Lazy.force DB.Pkg_table.all_existing_tools in
+  DB.create ~pkg_digest_table:(DB.Pkg_table.union dev_tools_table tools_table) ...
 ```
 
-#### Phase 6: Tool Resolution ✅
+### 5. System OCaml Requires `ocaml-system` Package
 
-**Created `src/dune_rules/tool_resolution.ml` and `.mli`**
+**Problem**: Constraining `ocaml = 5.4.0` allows solver to pick `ocaml-base-compiler` instead of using system.
+
+**Solution**: Require `ocaml-system` explicitly when system OCaml is available:
 
 ```ocaml
-type resolved =
-  { package : Package.Name.t
-  ; exe_path : Path.Build.t
-  ; env : Env.t Memo.t
-  }
-
-type resolution_source =
-  | From_workspace_stanza of Tool_stanza.t
-  | From_legacy_dev_tool of Dune_pkg.Dev_tool.t
-  | From_system_path
-
-val resolve_opt : package_name:Package.Name.t -> (resolved * resolution_source) option Memo.t
-val resolve : package_name:Package.Name.t -> resolved Memo.t
-val ensure_built : resolved -> Path.t Action_builder.t
-val with_tool_env : resolved -> f:(exe_path:Path.t -> env:Env.t -> 'a) -> 'a Action_builder.t
+[ { Package_dependency.name = Package_name.of_string "ocaml-system"; constraint_ } ]
 ```
 
-**Modified `src/dune_rules/import.ml`**
-- Added `Tool_stanza` to imports from Source
+### 6. Lock Command Should Always Re-solve
 
----
+**Problem**: `dune tools add` was checking if lock dir exists and skipping solve.
 
-### Remaining Work (Phases 10-11)
+**Solution**: `dune tools lock` always re-solves (like `dune pkg lock`). Separate `lock_tool` and `lock_tool_if_needed`:
 
-#### Phase 7: Refactor format_rules.ml ✅
-
-**Completed**. Refactored `src/dune_rules/format_rules.ml` to use the unified `Tool_resolution` system.
-
-**Changes Made**:
-1. Removed `dev_tool_lock_dir_exists()` check
-2. Replaced `action_when_ocamlformat_is_locked` with `action_when_resolved` using `Tool_resolution.with_tool_env`
-3. Renamed `action_when_ocamlformat_isn't_locked` to `action_when_not_resolved`
-4. Rewrote `format_action` to take `~ocamlformat_resolved` parameter
-5. Updated `gen_rules_output` to call `Ocamlformat.resolve()` via `Tool_resolution.resolve_for_formatting`
-6. Removed dependencies on `Lock_dir.dev_tool_external_lock_dir`, `Pkg_dev_tool.exe_path`, `Pkg_rules.dev_tool_env`, and `Config.get Compile_time.lock_dev_tools`
-
-**New Flow**:
-- `Ocamlformat.resolve()` calls `Tool_resolution.resolve_for_formatting`
-- Returns `Some (resolved, source)` when tool is configured via stanza, legacy dev tool, or lock dir
-- Returns `None` when tool should come from system PATH
-- `action_when_resolved` uses `Tool_resolution.with_tool_env` to get exe path and environment
-- `action_when_not_resolved` uses system PATH lookup via expander
-
-#### Phase 8-9: CLI Updates ✅
-
-**Completed**. Created generic tool locking and updated CLI commands.
-
-**Created `bin/lock_tool.ml` and `.mli`**:
-- Generalized version of `lock_dev_tool.ml` that works with any package
-- `lock_tool : Package_name.t -> unit Memo.t` - lock any package
-- `lock_tool_at_version` - lock with explicit version constraint
-- `lock_tool_from_stanza` - lock using Tool_stanza configuration
-- Uses new `.tools.lock/<package>/` directory structure
-- Supports `compiler_compatible` flag for matching project compiler
-
-**Modified `bin/tools/tools_common.ml`**:
-- Added generic tool support functions:
-  - `generic_tool_exe_path` - get exe path for any package
-  - `build_generic_tool_directly` - build using Lock_tool
-  - `lock_and_build_generic_tool` - full lock + build flow
-  - `run_generic_tool` - run any package
-- Added generic command terms:
-  - `generic_exec_term` - execute any package
-  - `generic_install_term` - install any package
-  - `generic_which_term` - find any package's exe path
-
-**Modified `bin/tools/group.ml`**:
-- Updated Exec, Install, and Which modules with generic defaults
-- `dune tools exec <package>` now works for any opam package
-- `dune tools install <package>` now works for any opam package
-- `dune tools which <package>` now works for any opam package
-- Legacy tool-specific commands still available as subcommands
-
-**Exported from `dune_rules.ml`**:
-- `Tool_build`, `Tool_resolution`, `Tool_lock`, `Tool_compiler`
-
-#### Phase 8 (original): Create Generic Tool Locking Command
-
-**Goal**: Generalize `bin/lock_dev_tool.ml` for any package.
-
-**Create `bin/lock_tool.ml`**:
 ```ocaml
-(* Lock a tool package with compiler constraints *)
-val lock_tool :
-  package:Package.Name.t ->
-  version:Package_version.t option ->
-  compiler_compatible:bool ->
-  unit Memo.t
-```
+(* For explicit lock command - always re-solve *)
+val lock_tool : Package_name.t -> unit Memo.t
 
-**Key Changes from `lock_dev_tool.ml`**:
-1. Remove hardcoded `Dev_tool.t` references
-2. Use `Tool_compiler.detect` for compiler constraints
-3. Write to `.tools.lock/<package>/` instead of `.dev-tools.locks/`
-4. Read version from `(tool)` stanza if present
-
-#### Phase 9: Update CLI Commands
-
-**Modify `bin/tools/group.ml`**:
-```ocaml
-(* New: dune tools exec <package> [-- args] *)
-let generic_exec =
-  Cmd.v (Cmd.info "exec")
-    (let+ package = Arg.pos 0 string ...
-     and+ args = Arg.pos_right 0 string [] ... in
-     (* Use Tool_resolution to find and run the tool *)
-     ...)
-
-(* New: dune tools lock <package> *)
-let generic_lock = ...
-
-(* Keep legacy commands for backward compatibility *)
-```
-
-**Modify `bin/tools/tools_common.ml`**:
-- Update `dev_tool_bin_dirs` to include tools from workspace stanzas
-- Update `run_dev_tool` to work with any package via `Tool_resolution`
-
-#### Phase 10: Backward Compatibility
-
-**Modify `src/dune_pkg/dev_tool.ml`**:
-```ocaml
-(* Convert legacy tool to Tool_stanza.t *)
-val to_tool_stanza : t -> Tool_stanza.t
-
-(* Check if package matches a legacy tool *)
-val of_package_name_opt : Package.Name.t -> t option
-```
-
-**Modify `src/dune_rules/pkg_dev_tool.ml`**:
-- Delegate path calculations to `Tool_build`
-- Keep `exe_path` working for existing code
-
-#### Phase 11: Migration and Directory Structure
-
-**Directory structure change**:
-```
-OLD: .dev-tools.locks/ocamlformat/
-NEW: .tools.lock/ocamlformat/
-
-OLD: _build/default/.dev-tool-locks/
-NEW: _build/default/.tools/
-```
-
-**Add migration helper in `Tool_lock`**:
-```ocaml
-val migrate_legacy_lock_dir : Dev_tool.t -> unit
+(* For run command - only lock if missing *)
+val lock_tool_if_needed : Package_name.t -> unit Memo.t
 ```
 
 ---
 
-## Testing Plan
+## Architecture Decisions
 
-### Unit Tests (parsing)
+### Lock Directory Location
 
-Location: `test/blackbox-tests/test-cases/pkg/tool-stanza/`
+| Type | External (Source) | Internal (Build) |
+|------|------------------|------------------|
+| Project | `dune.lock/` | `_build/default/.lock/dune.lock/` |
+| Dev tools | `_build/.dev-tools.locks/<pkg>/` | `_build/default/.dev-tool-locks/<pkg>/` |
+| Generic tools | `_build/.tools.lock/<pkg>/` | `_build/default/.tool-locks/<pkg>/` |
 
-1. **Parsing tests**: Valid syntax variations
-2. **Error tests**: Missing fields, invalid values
+Copy rules move from external to internal location.
 
-### Integration Tests (with mock repo)
+### CLI Commands
 
-Location: `test/blackbox-tests/test-cases/pkg/tool-stanza/`
+```bash
+# Lock a tool (always re-solves)
+dune tools lock <package>
 
-Using the existing test infrastructure (`mkrepo`, `mkpkg`, etc.):
+# Run a tool (locks if needed, then builds and executes)
+dune tools run <package> [-- args]
 
-1. **Basic tool locking**:
-   - Create mock repo with fake tool package
-   - Configure via `(tool (package foo))`
-   - Run `dune tools lock foo`
-   - Verify `.tools.lock/foo/` created
+# Print tool executable path
+dune tools path <package>
 
-2. **Tool building**:
-   - Lock a tool
-   - Run `dune tools exec foo`
-   - Verify tool builds and executes
+# Legacy dev tool commands still available
+dune tools exec ocamlformat
+dune tools install odoc
+```
 
-3. **Version constraints**:
-   - Create multiple versions in mock repo
-   - Use `(tool (package (foo (= 1.0))))`
-   - Verify correct version locked
+### Compiler Constraints
 
-4. **Compiler compatibility**:
-   - Use `(compiler_compatible)` flag
-   - Verify compiler constraints in lock file
+1. **Project has lock dir with compiler**: Use that exact compiler version
+2. **No project lock dir, system OCaml available**: Require `ocaml-system` at system version
+3. **Neither**: No compiler constraints (solver picks freely)
 
-5. **PATH integration**:
-   - Run `dune tools env`
-   - Verify tool bin dirs in PATH output
+### Multiple Versions
 
-6. **Format rules integration**:
-   - Configure ocamlformat via `(tool)` stanza
-   - Run `dune fmt`
-   - Verify uses configured version
-
-### Example Test Structure
+**Target**: Version in lock dir path.
 
 ```
-test/blackbox-tests/test-cases/pkg/tool-stanza/
-├── dune
-├── helpers.sh
-├── tool-stanza-basic.t
-├── tool-stanza-version.t
-├── tool-stanza-compiler.t
-├── tool-stanza-format.t
-└── tool-stanza-env.t
+_build/.tools.lock/<package>/<version>/
+_build/.tools.lock/ocamlformat/0.26.2/
+_build/.tools.lock/ocamlformat/0.27.0/
 ```
+
+**Implementation challenge**: The solver (`Pkg.Lock.solve`) takes the lock dir path upfront, but we don't know the version until after solving.
+
+**Solution options**:
+1. **Two-phase**: Solve to temp location, read version from result, move to final path
+2. **Callback**: Pass a function `version -> path` to solver, called after resolution
+3. **Return-then-write**: Have solver return solution without writing, caller writes to versioned path
+
+**Current implementation**: One version per package (`_build/.tools.lock/<package>/`). Marked as TODO.
+
+**CLI support added**: `dune tools lock <pkg> --version <ver>` (constraint passed to solver)
+
+### Binary Discovery
+
+Package names and binary names are not 1-to-1. After building a package, we discover available binaries:
+
+1. **Single binary**: Use automatically (e.g., `ocamlformat` package → `ocamlformat` binary)
+2. **Multiple binaries**: Require `--bin <name>` flag to disambiguate
+3. **Binary location**: Check `<install_path>/bin/` for available executables
+
+```bash
+# Single binary - works automatically
+dune tools run ocamlformat
+
+# Multiple binaries - need to specify
+dune tools run menhir --bin menhir
+dune tools run menhir --bin menhirLib  # error: not a binary
+
+# Stanza can specify default
+(tool (package menhir) (executable menhir))
+```
+
+The `(executable ...)` field in `(tool)` stanza provides a default when the package has multiple binaries.
 
 ---
 
-## Files Summary
+## Remaining Work
 
-### Created
+### High Priority
+
+1. **Fix internal error on lock**: Investigate "Unexpected build progress state" error
+   - May need different scheduler invocation for lock-only operation
+   - Compare with how `dune pkg lock` is invoked
+
+2. **Test tool building end-to-end**: Once lock works, verify dependencies build correctly
+
+### Medium Priority
+
+3. **Migration from dev tools**: Helper to migrate `.dev-tools.locks/` to `.tools.lock/`
+
+4. **Test compiler matching**: Verify tools work when project has lock dir with specific compiler
+
+### Low Priority
+
+5. **Performance**: Consider caching tool builds across projects
+
+6. **Documentation**: User-facing docs for `(tool)` stanza
+
+---
+
+## Files Modified
+
+### Core Changes
+
+| File | Changes |
+|------|---------|
+| `bin/lock_tool.ml` | Simplified locking, system OCaml detection, avoid build triggers |
+| `bin/lock_tool.mli` | Added `lock_tool_if_needed` |
+| `bin/tools/tools_common.ml` | CLI terms, use `lock_tool_if_needed` for run |
+| `bin/tools/group.ml` | Simplified CLI (removed `add`, kept `lock`) |
+| `src/dune_rules/pkg_rules.ml` | Always generate `.pkg/` rules, tools-only DB |
+| `src/dune_rules/fetch_rules.ml` | Include tool lock dirs in checksum collection |
+| `src/dune_rules/lock_dir.ml` | Use `Fs_memo` instead of `Path.Untracked` |
+
+### New Modules
+
 | File | Purpose |
 |------|---------|
-| `src/source/tool_stanza.ml` | Tool configuration types and parsing |
-| `src/source/tool_stanza.mli` | Interface |
+| `src/source/tool_stanza.ml` | `(tool)` stanza parsing |
 | `src/dune_rules/tool_lock.ml` | Lock directory management |
-| `src/dune_rules/tool_lock.mli` | Interface |
 | `src/dune_rules/tool_compiler.ml` | Compiler detection |
-| `src/dune_rules/tool_compiler.mli` | Interface |
 | `src/dune_rules/tool_build.ml` | Build paths and environment |
-| `src/dune_rules/tool_build.mli` | Interface |
 | `src/dune_rules/tool_resolution.ml` | Unified resolution |
-| `src/dune_rules/tool_resolution.mli` | Interface |
 
-### Modified
-| File | Changes |
-|------|---------|
-| `src/source/workspace.ml` | Added `tools` field, `(tool)` stanza |
-| `src/source/workspace.mli` | Exposed `tools` field |
-| `src/source/source.ml` | Exported `Tool_stanza` |
-| `src/dune_rules/import.ml` | Added `Tool_stanza` import |
-| `src/dune_rules/format_rules.ml` | Use `Tool_resolution` for unified ocamlformat handling |
+---
 
-### To Be Modified (Phases 8-11)
-| File | Changes |
-|------|---------|
-| `src/dune_pkg/dev_tool.ml` | Add backward compat functions |
-| `src/dune_rules/pkg_dev_tool.ml` | Delegate to Tool_build |
-| `bin/tools/group.ml` | Add generic commands |
-| `bin/tools/tools_common.ml` | Use Tool_resolution |
-| `bin/lock_dev_tool.ml` | Delegate to new lock_tool |
+## Next Steps
 
-### To Be Created (Phases 7-11)
-| File | Purpose |
-|------|---------|
-| `bin/lock_tool.ml` | Generic tool locking command |
-| `test/blackbox-tests/test-cases/pkg/tool-stanza/*` | Test suite |
+1. Debug the internal error when running `dune tools lock`
+2. Compare invocation pattern with `dune pkg lock`
+3. Once locking works, test full build cycle
+4. Add cram tests for tool stanza functionality

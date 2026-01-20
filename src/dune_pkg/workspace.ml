@@ -79,7 +79,8 @@ let dev_tool_path_to_source_dir path =
       [ "external", Path.External.to_dyn path ]
   | In_build_dir b ->
     (match Path.Build.explode b with
-     | (".dev-tools.locks" as prefix) :: dev_tool_name :: components ->
+     | (".dev-tools.locks" as prefix) :: dev_tool_name :: components
+     | (".tools.lock" as prefix) :: dev_tool_name :: components ->
        let build_as_source = Path.build_dir |> Path.to_string |> Path.Source.of_string in
        Path.Source.L.relative build_as_source (prefix :: dev_tool_name :: components)
      | components ->

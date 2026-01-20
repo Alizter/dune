@@ -199,6 +199,33 @@ let find_checksum, find_url =
             | false -> Memo.return acc
             | true -> Lock_dir.of_dev_tool dev_tool >>| add_checksums_and_urls acc)
       in
+      (* Also collect checksums from generic tool lock dirs in .tools.lock/ *)
+      let* init =
+        let tools_lock_base =
+          let external_root =
+            Path.Build.root
+            |> Path.build
+            |> Path.to_absolute_filename
+            |> Path.External.of_string
+          in
+          Path.External.relative external_root ".tools.lock"
+        in
+        let tools_lock_path = Path.external_ tools_lock_base in
+        match Path.Untracked.readdir_unsorted_with_kinds tools_lock_path with
+        | Error _ -> Memo.return init
+        | Ok entries ->
+          let tool_dirs =
+            List.filter_map entries ~f:(fun (name, kind) ->
+              match kind with
+              | Unix.S_DIR -> Some (Dune_lang.Package_name.of_string name)
+              | _ -> None)
+          in
+          Memo.List.fold_left tool_dirs ~init ~f:(fun acc pkg_name ->
+            let* lock_dir_opt = Lock_dir.of_tool_if_lock_dir_exists pkg_name in
+            match lock_dir_opt with
+            | None -> Memo.return acc
+            | Some lock_dir -> Memo.return (add_checksums_and_urls acc lock_dir))
+      in
       Per_context.list ()
       >>= Memo.parallel_map ~f:(fun ctx_name ->
         let* active = Lock_dir.lock_dir_active ctx_name in

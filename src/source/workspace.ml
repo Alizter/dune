@@ -733,9 +733,10 @@ type t =
   ; lock_dirs : Lock_dir.t list
   ; dir : Path.Source.t
   ; pins : Pin_stanza.Workspace.t
+  ; tools : Tool_stanza.t list
   }
 
-let to_dyn { merlin_context; contexts; env; config; repos; lock_dirs; pins; dir } =
+let to_dyn { merlin_context; contexts; env; config; repos; lock_dirs; pins; dir; tools } =
   let open Dyn in
   record
     [ "merlin_context", option Context_name.to_dyn merlin_context
@@ -746,10 +747,11 @@ let to_dyn { merlin_context; contexts; env; config; repos; lock_dirs; pins; dir 
     ; "solver", (list Lock_dir.to_dyn) lock_dirs
     ; "dir", Path.Source.to_dyn dir
     ; "pins", Pin_stanza.Workspace.to_dyn pins
+    ; "tools", list Tool_stanza.to_dyn tools
     ]
 ;;
 
-let equal { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins } w =
+let equal { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins; tools } w =
   Option.equal Context_name.equal merlin_context w.merlin_context
   && List.equal Context.equal contexts w.contexts
   && Option.equal Dune_env.equal env w.env
@@ -758,9 +760,10 @@ let equal { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins }
   && List.equal Lock_dir.equal lock_dirs w.lock_dirs
   && Path.Source.equal dir w.dir
   && Pin_stanza.Workspace.equal pins w.pins
+  && List.equal Tool_stanza.equal tools w.tools
 ;;
 
-let hash { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins } =
+let hash { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins; tools } =
   Poly.hash
     ( Option.hash Context_name.hash merlin_context
     , List.hash Context.hash contexts
@@ -769,7 +772,8 @@ let hash { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins } 
     , List.hash Repository.hash repos
     , List.hash Lock_dir.hash lock_dirs
     , Path.Source.hash dir
-    , Pin_stanza.Workspace.hash pins )
+    , Pin_stanza.Workspace.hash pins
+    , List.hash Tool_stanza.hash tools )
 ;;
 
 let source_path_of_lock_dir_path path =
@@ -780,6 +784,8 @@ let source_path_of_lock_dir_path path =
      | [ _; _; ".lock"; lock_dir ] -> Path.Source.of_string lock_dir
      | [ ".dev-tools.locks"; dev_tool ] ->
        Path.Source.L.relative Path.Source.root [ "_build"; ".dev-tools.locks"; dev_tool ]
+     | [ ".tools.lock"; tool_name ] ->
+       Path.Source.L.relative Path.Source.root [ "_build"; ".tools.lock"; tool_name ]
      | components ->
        Code_error.raise
          "Unsupported build path"
@@ -793,6 +799,11 @@ let find_lock_dir t path =
 ;;
 
 let add_repo t repo = { t with repos = repo :: t.repos }
+
+let find_tool t package_name =
+  List.find t.tools ~f:(fun tool ->
+    Package.Name.equal (Tool_stanza.package_name tool) package_name)
+;;
 
 include Dune_lang.Versioned_file.Make (struct
     type t = unit
@@ -1025,7 +1036,8 @@ let step1 clflags =
          ~default:(lazy []))
   and+ config_from_workspace_file = Dune_config.decode_fields_of_workspace_file
   and+ lock_dirs = multi_field "lock_dir" (Lock_dir.decode ~dir)
-  and+ pins = Pin_stanza.Workspace.decode in
+  and+ pins = Pin_stanza.Workspace.decode
+  and+ tools = multi_field "tool" Tool_stanza.decode in
   let+ contexts = multi_field "context" (lazy_ Context.decode) in
   let config =
     create_final_config
@@ -1106,6 +1118,7 @@ let step1 clflags =
        ; lock_dirs
        ; dir
        ; pins
+       ; tools
        })
   in
   { Step1.t; config }
@@ -1141,6 +1154,7 @@ let default clflags =
   ; lock_dirs = []
   ; dir = Path.Source.root
   ; pins = Pin_stanza.Workspace.empty
+  ; tools = []
   }
 ;;
 

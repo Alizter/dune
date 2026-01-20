@@ -8,3 +8,4 @@ module Only_packages = Only_packages
 module Opam_switch = Opam_switch
 module Workspace = Workspace
 module Blang_expand = Blang_expand
+module Tool_stanza = Tool_stanza

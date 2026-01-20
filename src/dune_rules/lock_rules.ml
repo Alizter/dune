@@ -495,6 +495,35 @@ let setup_dev_tool_lock_rules ~dir dev_tool =
   setup_copy_rules ~dir ~lock_dir
 ;;
 
+let setup_tool_lock_rules ~dir package_name =
+  let tool_name = Dune_lang.Package_name.to_string package_name in
+  let dir = Path.Build.relative dir tool_name in
+  let lock_dir = package_name |> Lock_dir.tool_external_lock_dir |> Path.external_ in
+  setup_copy_rules ~dir ~lock_dir
+;;
+
+let scan_tool_lock_dirs () =
+  let tools_lock_base =
+    let external_root =
+      Path.Build.root
+      |> Path.build
+      |> Path.to_absolute_filename
+      |> Path.External.of_string
+    in
+    Path.External.relative external_root ".tools.lock"
+  in
+  let tools_lock_path = Path.external_ tools_lock_base in
+  if not (Path.Untracked.exists tools_lock_path)
+  then Memo.return []
+  else (
+    match Readdir.read_directory (Path.to_string tools_lock_path) with
+    | Error _ -> Memo.return []
+    | Ok entries ->
+      entries
+      |> List.map ~f:Dune_lang.Package_name.of_string
+      |> Memo.return)
+;;
+
 let setup_rules ~components ~dir =
   let empty = Gen_rules.rules_here Gen_rules.Rules.empty in
   match components with
@@ -510,8 +539,19 @@ let setup_rules ~components ~dir =
     Memo.List.fold_left Dev_tool.all ~init:empty ~f:(fun rules dev_tool ->
       let+ dev_tool_rules = setup_dev_tool_lock_rules ~dir dev_tool in
       Gen_rules.combine rules dev_tool_rules)
+  | [ ".tool-locks" ] ->
+    let* tool_names = scan_tool_lock_dirs () in
+    Memo.List.fold_left tool_names ~init:empty ~f:(fun rules package_name ->
+      let+ tool_rules = setup_tool_lock_rules ~dir package_name in
+      Gen_rules.combine rules tool_rules)
+  | ".dev-tool-locks" :: _ :: _ ->
+    (* Subdirectories of dev-tool-locks are handled by copy rules *)
+    Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
+  | ".tool-locks" :: _ :: _ ->
+    (* Subdirectories of tool-locks are handled by copy rules *)
+    Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | [] ->
-    let sub_dirs = [ ".lock"; ".dev-tool-locks" ] in
+    let sub_dirs = [ ".lock"; ".dev-tool-locks"; ".tool-locks" ] in
     let build_dir_only_sub_dirs =
       Gen_rules.Build_only_sub_dirs.singleton ~dir @@ Subdir_set.of_list sub_dirs
     in
