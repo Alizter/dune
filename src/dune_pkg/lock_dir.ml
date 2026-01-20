@@ -526,7 +526,8 @@ let in_source_tree path =
        Path.Source.L.relative Path.Source.root components
      | source_components ->
        (match Path.Build.explode b with
-        | (".dev-tools.locks" as prefix) :: dev_tool :: components ->
+        | (".dev-tools.locks" as prefix) :: dev_tool :: components
+        | (".tools.lock" as prefix) :: dev_tool :: components ->
           let build_as_source =
             Path.build_dir |> Path.to_string |> Path.Source.of_string
           in

@@ -15,7 +15,13 @@ val all : t list
 val equal : t -> t -> bool
 val hash : t -> int
 val package_name : t -> Package_name.t
+
+(** Returns the dev tool for a package name, or None if not a known dev tool *)
+val of_package_name_opt : Package_name.t -> t option
+
+(** Returns the dev tool for a package name, or raises if not a known dev tool *)
 val of_package_name : Package_name.t -> t
+
 val exe_name : t -> string
 
 (** Returns the path to this tool's executable relative to the root of

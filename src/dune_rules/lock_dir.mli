@@ -27,6 +27,34 @@ val dev_tool_external_lock_dir : Dune_pkg.Dev_tool.t -> Path.External.t
     given dev tool *)
 val dev_tool_lock_dir : Dune_pkg.Dev_tool.t -> Path.t
 
+(** Generic tool lock directory support *)
+
+(** Base directory for all tool locks: _build/.tools.lock/ *)
+val tools_lock_base : unit -> Path.External.t
+
+(** Base directory for all versions of a tool: _build/.tools.lock/<package>/ *)
+val tool_external_lock_dir_base : Package.Name.t -> Path.External.t
+
+(** Lock directory for generic tools: _build/.tools.lock/<package>/<version>/ *)
+val tool_external_lock_dir
+  :  Package.Name.t
+  -> version:Package_version.t
+  -> Path.External.t
+
+(** Build directory for generic tools: _build/default/.tool-locks/<package>/<version>/ *)
+val tool_lock_dir : Package.Name.t -> version:Package_version.t -> Path.t
+
+(** Scan for all locked versions of a tool. Returns list of (version, path). *)
+val tool_locked_versions : Package.Name.t -> (Package_version.t * Path.t) list Memo.t
+
+val of_tool : Package.Name.t -> version:Package_version.t -> t Memo.t
+
+(** Returns [None] if the lock_dir for the specified tool version does not exist. *)
+val of_tool_if_lock_dir_exists
+  :  Package.Name.t
+  -> version:Package_version.t
+  -> t option Memo.t
+
 val select_lock_dir : Workspace.Lock_dir_selection.t -> Path.Source.t Memo.t
 
 (** Returns the lock directories present in the given workspace. *)

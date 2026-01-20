@@ -14,6 +14,7 @@ include struct
   module Workspace = Workspace
   module Opam_switch = Opam_switch
   module Blang_expand = Blang_expand
+  module Tool_stanza = Tool_stanza
 end
 
 include struct

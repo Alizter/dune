@@ -81,6 +81,11 @@ module Pkg_rules = struct
   module Pkg_digest = Pkg_rules.Pkg_digest
 end
 
+module Tool_build = Tool_build
+module Tool_resolution = Tool_resolution
+module Tool_lock = Tool_lock
+module Tool_compiler = Tool_compiler
+
 module For_tests = struct
   module Dynlink_supported = Dynlink_supported
   module Ocamlobjinfo = Ocamlobjinfo

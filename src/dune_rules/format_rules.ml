@@ -32,18 +32,8 @@ module Alias = struct
 end
 
 module Ocamlformat = struct
-  let dev_tool_lock_dir_exists () =
-    (* we assume that if lock_dev_tools is set, then the lock dir was created
-       via locking and can expect it to exist. If it doesn't, it's a bug
-    *)
-    match Config.get Compile_time.lock_dev_tools with
-    | `Enabled -> Memo.return true
-    | `Disabled ->
-      (* even if lock_dev_tools might be disabled, there might be a lock dir
-         created by `dune tools install` *)
-      let path = Lock_dir.dev_tool_external_lock_dir Ocamlformat in
-      Fs_memo.dir_exists (Path.Outside_build_dir.External path)
-  ;;
+  let exe_name = "ocamlformat"
+  let package_name = Package.Name.of_string "ocamlformat"
 
   (* Config files for ocamlformat. When these are changed, running
      `dune fmt` should cause ocamlformat to re-format the ocaml files
@@ -51,8 +41,6 @@ module Ocamlformat = struct
   let config_files = [ ".ocamlformat"; ".ocamlformat-ignore"; ".ocamlformat-enable" ]
 
   let extra_deps dir =
-    (* Set up the dependency on ocamlformat config files so changing
-       these files triggers ocamlformat to run again. *)
     depend_on_files ~named:config_files (Path.build dir) |> Action_builder.with_no_targets
   ;;
 
@@ -61,39 +49,51 @@ module Ocamlformat = struct
     | Intf -> "--intf"
   ;;
 
-  let action_when_ocamlformat_is_locked ~input ~output kind =
-    let path = Path.build @@ Pkg_dev_tool.exe_path Ocamlformat in
+  (** Check if the required version is locked.
+      Returns Some version if locked, None otherwise. *)
+  let find_locked_version ~source_dir =
+    match Dune_pkg.Ocamlformat.version_for_dir source_dir with
+    | None ->
+      (* No version specified in .ocamlformat - use system PATH *)
+      Memo.return None
+    | Some required_version ->
+      (* Check if this version is locked *)
+      let+ versions = Tool_lock.get_locked_versions package_name in
+      List.find_map versions ~f:(fun (v, _path) ->
+        if Package_version.equal v required_version then Some v else None)
+  ;;
+
+  (** Action when ocamlformat is locked - use Pkg_rules.tool_exe_path *)
+  let action_when_locked ~version ~input ~output kind =
     let dir = Path.Build.parent_exn input in
     let action =
-      (* An action which runs at on the file at [input] and stores the
-         resulting diff in the file at [output] *)
       Action_builder.with_stdout_to
         output
         (let open Action_builder.O in
-         (* This ensures that at is installed as a dev tool before
-            running it. *)
-         let+ () = Action_builder.path path
-         (* Declare the dependency on the input file so changes to the input
-            file trigger ocamlformat to run again on the updated file. *)
+         let+ exe_path =
+           Pkg_rules.tool_exe_path ~package_name ~version ~executable:exe_name
          and+ () = Action_builder.path (Path.build input) in
          let args = [ flag_of_kind kind; Path.Build.basename input ] in
-         Action.chdir (Path.build dir) @@ Action.run (Ok path) args |> Action.Full.make)
+         let bin_dir = Path.parent_exn exe_path in
+         let env = Env_path.cons Env.empty ~dir:bin_dir in
+         Action.chdir (Path.build dir) @@ Action.run (Ok exe_path) args
+         |> Action.Full.make
+         |> Action.Full.add_env env)
     in
     let open Action_builder.With_targets.O in
-    (* Depend on [extra_deps] so if the ocamlformat config file
-       changes then ocamlformat will run again. *)
     extra_deps dir
     >>> action
     |> With_targets.map ~f:(Action.Full.add_sandbox Sandbox_config.needs_sandboxing)
   ;;
 
-  let action_when_ocamlformat_isn't_locked ~input kind =
+  (** Action when ocamlformat is not locked (use system PATH) *)
+  let action_when_not_locked ~input kind =
     let module S = String_with_vars in
     let dir = Path.Build.parent_exn input in
     ( Dune_lang.Action.chdir
         (S.make_pform Loc.none (Var Workspace_root))
         (Dune_lang.Action.run
-           (S.make_text Loc.none (Pkg_dev_tool.exe_name Ocamlformat))
+           (S.make_text Loc.none exe_name)
            [ S.make_text Loc.none (flag_of_kind kind)
            ; S.make_pform Loc.none (Var Input_file)
            ])
@@ -101,21 +101,31 @@ module Ocamlformat = struct
   ;;
 end
 
-let format_action format ~ocamlformat_is_locked ~input ~output ~expander kind =
+let format_action format ~ocamlformat_version ~input ~output ~expander kind =
   match (format : Dialect.Format.t) with
-  | Ocamlformat when ocamlformat_is_locked ->
-    Memo.return (Ocamlformat.action_when_ocamlformat_is_locked ~input ~output kind)
-  | _ ->
-    assert (not ocamlformat_is_locked);
-    let loc, (action, extra_deps) =
-      match format with
-      | Ocamlformat ->
-        Loc.none, Ocamlformat.action_when_ocamlformat_isn't_locked ~input kind
-      | Action (loc, action) -> loc, (action, With_targets.return ())
-    in
+  | Ocamlformat ->
+    (match ocamlformat_version with
+     | Some version ->
+       (* Tool is locked - use Pkg_rules.tool_exe_path *)
+       Memo.return (Ocamlformat.action_when_locked ~version ~input ~output kind)
+     | None ->
+       (* Fall back to system PATH *)
+       let loc = Loc.none in
+       let action, extra_deps = Ocamlformat.action_when_not_locked ~input kind in
+       let+ expander = expander in
+       let open Action_builder.With_targets.O in
+       extra_deps
+       >>> Pp_spec_rules.action_for_pp_with_target
+             ~sandbox:Sandbox_config.default
+             ~loc
+             ~expander
+             ~action
+             ~src:input
+             ~target:output)
+  | Action (loc, action) ->
     let+ expander = expander in
     let open Action_builder.With_targets.O in
-    extra_deps
+    Action_builder.With_targets.return ()
     >>> Pp_spec_rules.action_for_pp_with_target
           ~sandbox:Sandbox_config.default
           ~loc
@@ -137,7 +147,11 @@ let gen_rules_output
   let loc = Format_config.loc config in
   let dir = Path.Build.parent_exn output_dir in
   let alias_formatted = Alias.fmt ~dir:output_dir in
-  let* ocamlformat_is_locked = Ocamlformat.dev_tool_lock_dir_exists () in
+  let source_dir_path = Path.Build.drop_build_context_exn dir in
+  (* Check if ocamlformat is locked for this directory *)
+  let* ocamlformat_version =
+    Ocamlformat.find_locked_version ~source_dir:source_dir_path
+  in
   let setup_formatting file =
     (let input_basename = Path.Source.basename file in
      let input = Path.Build.relative dir input_basename in
@@ -159,19 +173,15 @@ let gen_rules_output
           | None -> Dialect.format Dialect.ocaml kind
           | Some _ -> None)
      in
-     format_action format ~ocamlformat_is_locked ~input ~output ~expander kind
+     format_action format ~ocamlformat_version ~input ~output ~expander kind
      |> Memo.bind ~f:(fun rule ->
-       if ocamlformat_is_locked
-       then (
+       match ocamlformat_version with
+       | Some _ ->
+         (* Tool is locked - rule is self-contained *)
          let { Action_builder.With_targets.build; targets } = rule in
-         let build =
-           let open Action_builder.O in
-           let+ build = build
-           and+ env = Action_builder.of_memo (Pkg_rules.dev_tool_env Ocamlformat) in
-           Action.Full.add_env env build
-         in
-         Rule.make ~mode:Standard ~targets build |> Rules.Produce.rule)
-       else
+         Rule.make ~mode:Standard ~targets build |> Rules.Produce.rule
+       | None ->
+         (* Fall back to system PATH - use Super_context for rule generation *)
          let open Memo.O in
          let* sctx = sctx in
          Super_context.add_rule sctx ~mode:Standard ~loc ~dir rule)

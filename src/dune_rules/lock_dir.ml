@@ -254,17 +254,91 @@ let of_dev_tool dev_tool =
 ;;
 
 let of_dev_tool_if_lock_dir_exists dev_tool =
-  let path = dev_tool |> dev_tool_external_lock_dir |> Path.external_ in
-  let exists =
-    (* Note we use [Fpath.exists] here rather than [Fs_memo] because a tool's
-       lockdir may be generated part way through a build. *)
-    Fpath.exists (Path.to_string path)
-  in
-  if exists
-  then
-    let+ t = Load.load_exn path in
+  let path = dev_tool |> dev_tool_external_lock_dir in
+  Fs_memo.dir_exists (Path.Outside_build_dir.External path)
+  >>= function
+  | false -> Memo.return None
+  | true ->
+    let+ t = Load.load_exn (Path.external_ path) in
     Some t
-  else Memo.return None
+;;
+
+(* Generic tool lock directory support *)
+
+let tool_to_path_segment package_name =
+  package_name |> Package.Name.to_string |> Path.Local.of_string
+;;
+
+(** Base directory for all tool locks: _build/.tools.lock/ *)
+let tools_lock_base () =
+  let external_root =
+    Path.Build.root |> Path.build |> Path.to_absolute_filename |> Path.External.of_string
+  in
+  Path.External.relative external_root ".tools.lock"
+;;
+
+(** Base directory for all versions of a tool: _build/.tools.lock/<package>/ *)
+let tool_external_lock_dir_base package_name =
+  let package_segment = tool_to_path_segment package_name in
+  Path.External.append_local (tools_lock_base ()) package_segment
+;;
+
+(** External lock directory for generic tools: _build/.tools.lock/<package>/<version>/ *)
+let tool_external_lock_dir package_name ~version =
+  let version_segment = Package_version.to_string version |> Path.Local.of_string in
+  Path.External.append_local (tool_external_lock_dir_base package_name) version_segment
+;;
+
+(** Internal lock directory for generic tools: _build/default/.tool-locks/<package>/<version>/ *)
+let tool_lock_dir package_name ~version =
+  let ctx_name = Context_name.default |> Context_name.to_string in
+  let package_segment = tool_to_path_segment package_name in
+  let version_segment = Package_version.to_string version |> Path.Local.of_string in
+  let lock_dir =
+    Path.Build.L.relative Private_context.t.build_dir [ ctx_name; ".tool-locks" ]
+  in
+  Path.Build.append_local lock_dir package_segment
+  |> Fun.flip Path.Build.append_local version_segment
+  |> Path.build
+;;
+
+(** Scan for all locked versions of a tool. Returns list of (version, lock_dir). *)
+let tool_locked_versions package_name =
+  let base = tool_external_lock_dir_base package_name in
+  let base_path = Path.external_ base in
+  Fs_memo.dir_exists (Path.Outside_build_dir.External base)
+  >>= function
+  | false -> Memo.return []
+  | true ->
+    let+ contents = Fs_memo.dir_contents (Path.Outside_build_dir.External base) in
+    (match contents with
+     | Error _ -> []
+     | Ok dir_contents ->
+       Fs_cache.Dir_contents.to_list dir_contents
+       |> List.filter_map ~f:(fun (name, kind) ->
+         match kind with
+         | Unix.S_DIR ->
+           let version_path = Path.relative base_path name in
+           let lock_dune = Path.relative version_path "lock.dune" in
+           if Fpath.exists (Path.to_string lock_dune)
+           then Some (Package_version.of_string name, version_path)
+           else None
+         | _ -> None))
+;;
+
+let of_tool package_name ~version =
+  let path = tool_external_lock_dir package_name ~version |> Path.external_ in
+  Load.load_exn path
+;;
+
+let of_tool_if_lock_dir_exists package_name ~version =
+  let path = tool_external_lock_dir package_name ~version in
+  Fs_memo.dir_exists (Path.Outside_build_dir.External path)
+  >>= function
+  | false -> Memo.return None
+  | true ->
+    let+ t = Load.load_exn (Path.external_ path) in
+    Some t
 ;;
 
 let lock_dirs_of_workspace (workspace : Workspace.t) =
