@@ -19,3 +19,4 @@ Run the program. The program takes care of shutting down the build server.
   Shutting down RPC server...
 
   $ wait
+  $ dune shutdown
