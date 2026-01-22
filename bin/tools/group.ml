@@ -47,9 +47,9 @@ module Run = struct
   let command = Cmd.v info Tools_common.generic_exec_term
 end
 
-module Lock = struct
-  let doc = "Lock any opam package as a tool. Always re-solves dependencies."
-  let info = Cmd.info ~doc "lock"
+module Add = struct
+  let doc = "Add opam packages as tools. Use package.version syntax for specific versions."
+  let info = Cmd.info ~doc "add"
   let command = Cmd.v info Tools_common.generic_lock_term
 end
 
@@ -57,6 +57,18 @@ module Path = struct
   let doc = "Print the path to any tool's executable."
   let info = Cmd.info ~doc "path"
   let command = Cmd.v info Tools_common.generic_which_term
+end
+
+module List_ = struct
+  let doc = "List all locked tools and their versions."
+  let info = Cmd.info ~doc "list"
+  let command = Cmd.v info Tools_common.generic_list_term
+end
+
+module Remove = struct
+  let doc = "Remove a locked tool (all versions or specific version with package.version)."
+  let info = Cmd.info ~doc "remove"
+  let command = Cmd.v info Tools_common.generic_remove_term
 end
 
 let doc = "Command group for wrapped tools."
@@ -69,8 +81,10 @@ let group =
     ; Install.group
     ; Which.group
     ; Run.command      (* dune tools run <package> *)
-    ; Lock.command     (* dune tools lock <package> *)
+    ; Add.command      (* dune tools add <package.version>... *)
     ; Path.command     (* dune tools path <package> *)
+    ; List_.command    (* dune tools list *)
+    ; Remove.command   (* dune tools remove <package> or <package.version> *)
     ; Tools_common.env_command
     ]
 ;;

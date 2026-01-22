@@ -82,12 +82,28 @@ let select_version package_name ~(versions : (Package_version.t * Path.t) list) 
       ]
 ;;
 
+(** Check for new-style tool lock dirs (.tools.lock/<package>/<version>/) *)
+let check_new_style_lock_dir ~package_name =
+  let* versions = Tool_lock.get_locked_versions package_name in
+  let* version_opt = select_version package_name ~versions in
+  match version_opt with
+  | Some version ->
+    (* New-style tool with lock dir - discover binary from cookie *)
+    let install_cookie = Tool_build.install_cookie ~package_name ~version in
+    let env = Tool_build.tool_env package_name ~version in
+    Memo.return
+      (Some ({ package = package_name; version; install_cookie; executable_hint = None; env }, From_locked_version))
+  | None ->
+    (* No lock dir - tool should be on system PATH *)
+    Memo.return None
+;;
+
 (** Resolve a tool by package name.
 
     Resolution priority:
     1. Check workspace (tool) stanza with version constraint
-    2. Check legacy Dev_tool.t (only if its lock dir exists)
-    3. Check if tool has locked versions (new-style .tools.lock/)
+    2. Check new-style .tools.lock/ directories
+    3. Check legacy Dev_tool.t (only if its lock dir exists)
     4. Fall back to system PATH (returns None in that case)
 *)
 let resolve_opt ~package_name =
@@ -108,42 +124,36 @@ let resolve_opt ~package_name =
        (* Stanza exists but no locked versions - return None (system PATH) *)
        Memo.return None)
   | None ->
-    (* Check for legacy dev tool *)
-    (match find_legacy_dev_tool package_name with
-     | Some dev_tool ->
-       (* Only use legacy dev tool if its lock dir exists *)
-       let* lock_exists = legacy_dev_tool_lock_dir_exists dev_tool in
-       if lock_exists
-       then (
-         (* Legacy dev tools: cookie is at <universe_install_path>/target/cookie *)
-         let install_cookie =
-           Path.Build.L.relative (Pkg_dev_tool.universe_install_path dev_tool) [ "target"; "cookie" ]
-         in
-         let env = Pkg_rules.dev_tool_env dev_tool in
-         (* Legacy dev tools have known exe names *)
-         let executable_hint = Some (Dune_pkg.Dev_tool.exe_name dev_tool) in
-         (* Legacy dev tools don't have versioned paths, use a placeholder version *)
-         let version = Package_version.of_string "legacy" in
-         Memo.return
-           (Some
-              ( { package = package_name; version; install_cookie; executable_hint; env }
-              , From_legacy_dev_tool dev_tool )))
-       else
-         (* Legacy dev tool exists but no lock dir - fall back to system PATH *)
-         Memo.return None
+    (* First check for new-style tool lock dirs - they take priority over legacy *)
+    let* new_style_result = check_new_style_lock_dir ~package_name in
+    (match new_style_result with
+     | Some _ as result -> Memo.return result
      | None ->
-       (* Check if there's a lock directory for this package (new-style) *)
-       let* versions = Tool_lock.get_locked_versions package_name in
-       let* version_opt = select_version package_name ~versions in
-       (match version_opt with
-        | Some version ->
-          (* New-style tool with lock dir but no stanza - discover binary from cookie *)
-          let install_cookie = Tool_build.install_cookie ~package_name ~version in
-          let env = Tool_build.tool_env package_name ~version in
-          Memo.return
-            (Some ({ package = package_name; version; install_cookie; executable_hint = None; env }, From_locked_version))
+       (* Check for legacy dev tool *)
+       (match find_legacy_dev_tool package_name with
+        | Some dev_tool ->
+          (* Only use legacy dev tool if its lock dir exists *)
+          let* lock_exists = legacy_dev_tool_lock_dir_exists dev_tool in
+          if lock_exists
+          then (
+            (* Legacy dev tools: cookie is at <universe_install_path>/target/cookie *)
+            let install_cookie =
+              Path.Build.L.relative (Pkg_dev_tool.universe_install_path dev_tool) [ "target"; "cookie" ]
+            in
+            let env = Pkg_rules.dev_tool_env dev_tool in
+            (* Legacy dev tools have known exe names *)
+            let executable_hint = Some (Dune_pkg.Dev_tool.exe_name dev_tool) in
+            (* Legacy dev tools don't have versioned paths, use a placeholder version *)
+            let version = Package_version.of_string "legacy" in
+            Memo.return
+              (Some
+                 ( { package = package_name; version; install_cookie; executable_hint; env }
+                 , From_legacy_dev_tool dev_tool )))
+          else
+            (* Legacy dev tool exists but no lock dir - fall back to system PATH *)
+            Memo.return None
         | None ->
-          (* No lock dir - tool should be on system PATH *)
+          (* Not a legacy dev tool and no new-style lock dir - system PATH *)
           Memo.return None))
 ;;
 
@@ -165,6 +175,58 @@ let resolve ~package_name =
     This also reads the version from .ocamlformat config if present. *)
 let resolve_for_formatting ~package_name =
   resolve_opt ~package_name
+;;
+
+(** Resolve a tool with a specific required version.
+    Returns an error with a helpful message if the version isn't locked. *)
+let resolve_version ~package_name ~required_version ~config_file =
+  let* versions = Tool_lock.get_locked_versions package_name in
+  (* Check if the required version is locked *)
+  match List.find versions ~f:(fun (v, _) -> Package_version.equal v required_version) with
+  | Some (version, _path) ->
+    (* Found the required version *)
+    let install_cookie = Tool_build.install_cookie ~package_name ~version in
+    let env = Tool_build.tool_env package_name ~version in
+    Memo.return
+      (Ok
+         { package = package_name
+         ; version
+         ; install_cookie
+         ; executable_hint = None
+         ; env
+         })
+  | None ->
+    (* Required version not locked - return error *)
+    Memo.return
+      (Error
+         (User_message.make
+            [ Pp.textf
+                "ocamlformat version %s is required by %s"
+                (Package_version.to_string required_version)
+                config_file
+            ; Pp.text "but is not available. Run:"
+            ; Pp.textf "  dune tools add ocamlformat.%s" (Package_version.to_string required_version)
+            ]))
+;;
+
+(** Resolve ocamlformat for a specific source directory.
+    Reads the version from .ocamlformat and ensures that version is locked. *)
+let resolve_ocamlformat_for_dir ~dir =
+  let package_name = Package.Name.of_string "ocamlformat" in
+  match Dune_pkg.Ocamlformat.version_for_dir dir with
+  | None ->
+    (* No version specified in .ocamlformat - use any available version or system PATH *)
+    let+ result = resolve_opt ~package_name in
+    Ok result
+  | Some required_version ->
+    (* Specific version required - must be locked *)
+    let config_file =
+      match Dune_pkg.Ocamlformat.find_ocamlformat_config_for_dir dir with
+      | Some p -> Path.to_string p
+      | None -> ".ocamlformat"
+    in
+    resolve_version ~package_name ~required_version ~config_file
+    >>| Result.map ~f:(fun resolved -> Some (resolved, From_locked_version))
 ;;
 
 (** Ensure a resolved tool is built and return its executable path.

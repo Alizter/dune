@@ -77,8 +77,9 @@ let tool_external_lock_dir ~package_name ~version =
 ;;
 
 (** Solve for a tool and write to versioned directory.
-    Returns the resolved version. *)
-let solve ~package_name ~local_packages =
+    Returns the resolved version.
+    If repository_names is provided, only use those repositories. *)
+let solve ~package_name ~local_packages ~repository_names =
   let open Memo.O in
   let* solver_env_from_current_system =
     Pkg.Pkg_common.poll_solver_env_from_current_system ()
@@ -86,10 +87,24 @@ let solve ~package_name ~local_packages =
     >>| Option.some
   and* workspace =
     let+ workspace = Workspace.workspace () in
-    match Config.get Dune_rules.Compile_time.bin_dev_tools with
-    | `Enabled ->
-      Workspace.add_repo workspace Dune_pkg.Pkg_workspace.Repository.binary_packages
-    | `Disabled -> workspace
+    let workspace =
+      match Config.get Dune_rules.Compile_time.bin_dev_tools with
+      | `Enabled ->
+        Workspace.add_repo workspace Dune_pkg.Pkg_workspace.Repository.binary_packages
+      | `Disabled -> workspace
+    in
+    (* If repository_names is specified, filter to only those repositories *)
+    match repository_names with
+    | None -> workspace
+    | Some names ->
+      let repo_names_set =
+        List.map names ~f:Dune_pkg.Pkg_workspace.Repository.Name.of_string
+        |> Dune_pkg.Pkg_workspace.Repository.Name.Set.of_list
+      in
+      Workspace.filter_repositories workspace ~f:(fun repo ->
+        Dune_pkg.Pkg_workspace.Repository.Name.Set.mem
+          repo_names_set
+          (Dune_pkg.Pkg_workspace.Repository.name repo))
   and* compiler_pins = compiler_pins in
   Memo.of_reproducible_fiber
   @@ (let open Fiber.O in
@@ -212,14 +227,14 @@ let extra_dependencies ~compiler_compatible:_ =
     @param version Optional version constraint
     @param compiler_compatible If true, add compiler constraints to match project's compiler
 *)
-let lock_tool_at_version ~package_name ~version ~compiler_compatible =
+let lock_tool_at_version ~package_name ~version ~compiler_compatible ~repository_names =
   let open Memo.O in
   let* extra_deps = extra_dependencies ~compiler_compatible in
   let local_pkg =
     make_local_package_wrapping_tool ~package_name ~version ~extra_dependencies:extra_deps
   in
   let local_packages = Package_name.Map.singleton local_pkg.name local_pkg in
-  solve ~package_name ~local_packages
+  solve ~package_name ~local_packages ~repository_names
 ;;
 
 (** Lock a tool using configuration from a Tool_stanza.t *)
@@ -238,7 +253,8 @@ let lock_tool_from_stanza (stanza : Tool_stanza.t) =
          None)
   in
   let compiler_compatible = Tool_stanza.needs_matching_compiler stanza in
-  lock_tool_at_version ~package_name ~version ~compiler_compatible
+  let repository_names = Tool_stanza.repositories stanza in
+  lock_tool_at_version ~package_name ~version ~compiler_compatible ~repository_names
 ;;
 
 (** Lock a tool by package name, checking workspace stanzas first.
@@ -250,7 +266,7 @@ let lock_tool package_name =
   | Some stanza -> lock_tool_from_stanza stanza
   | None ->
     (* No stanza - lock with defaults (no version constraint, no compiler matching) *)
-    lock_tool_at_version ~package_name ~version:None ~compiler_compatible:false
+    lock_tool_at_version ~package_name ~version:None ~compiler_compatible:false ~repository_names:None
 ;;
 
 (** Check if any version of a tool is locked.
@@ -286,10 +302,11 @@ let lock_ocamlformat () =
   let version = Dune_pkg.Ocamlformat.version_of_current_project's_ocamlformat_config () in
   let open Memo.O in
   let* workspace = Workspace.workspace () in
-  let compiler_compatible =
+  let compiler_compatible, repository_names =
     match Workspace.find_tool workspace package_name with
-    | Some stanza -> Tool_stanza.needs_matching_compiler stanza
-    | None -> false
+    | Some stanza ->
+      Tool_stanza.needs_matching_compiler stanza, Tool_stanza.repositories stanza
+    | None -> false, None
   in
-  lock_tool_at_version ~package_name ~version ~compiler_compatible
+  lock_tool_at_version ~package_name ~version ~compiler_compatible ~repository_names
 ;;

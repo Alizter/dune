@@ -26,6 +26,7 @@ type t =
   ; version : Package_constraint.t option (** Optional version constraint *)
   ; executable : string option (** Optional: exe name, defaults to package name *)
   ; compiler_compatible : bool (** Whether tool must match project compiler *)
+  ; repositories : string list option (** Repository names to use for this tool *)
   ; loc : Loc.t
   }
 
@@ -44,6 +45,9 @@ val needs_matching_compiler : t -> bool
 
 (** The version constraint for this tool, if specified *)
 val version_constraint : t -> Package_constraint.t option
+
+(** The repository names to use for this tool, if specified *)
+val repositories : t -> string list option
 
 (** Decoder for the (tool ...) stanza *)
 val decode : t Dune_lang.Decoder.t

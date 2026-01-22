@@ -29,11 +29,13 @@ val lock_tool_if_needed : Package_name.t -> unit Memo.t
     @param package_name The opam package name
     @param version Optional specific version to lock
     @param compiler_compatible If true, add compiler constraints to match project's compiler
+    @param repository_names If specified, only use these repositories for solving
 *)
 val lock_tool_at_version
   :  package_name:Package_name.t
   -> version:Package_version.t option
   -> compiler_compatible:bool
+  -> repository_names:string list option
   -> unit Memo.t
 
 (** Lock a tool using configuration from a Tool_stanza.t *)

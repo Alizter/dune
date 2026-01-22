@@ -32,13 +32,13 @@ module Alias = struct
 end
 
 module Ocamlformat = struct
-  let package_name = Package.Name.of_string "ocamlformat"
   let exe_name = "ocamlformat"
 
-  (** Resolve ocamlformat using the unified Tool_resolution system.
-      Returns Some when the tool is configured via (tool) stanza, legacy dev tool,
-      or has a lock directory. Returns None when it should be resolved from PATH. *)
-  let resolve () = Tool_resolution.resolve_for_formatting ~package_name
+  (** Resolve ocamlformat for a specific source directory.
+      If .ocamlformat specifies a version, that exact version must be locked.
+      Otherwise, uses any available locked version or falls back to PATH. *)
+  let resolve_for_dir ~source_dir =
+    Tool_resolution.resolve_ocamlformat_for_dir ~dir:source_dir
 
   (* Config files for ocamlformat. When these are changed, running
      `dune fmt` should cause ocamlformat to re-format the ocaml files
@@ -145,8 +145,17 @@ let gen_rules_output
   let loc = Format_config.loc config in
   let dir = Path.Build.parent_exn output_dir in
   let alias_formatted = Alias.fmt ~dir:output_dir in
-  (* Use unified Tool_resolution to check if ocamlformat is configured *)
-  let* ocamlformat_resolved = Ocamlformat.resolve () in
+  let source_dir_path = Path.Build.drop_build_context_exn dir in
+  (* Resolve ocamlformat for this specific directory.
+     If .ocamlformat specifies a version, that exact version must be locked. *)
+  let* ocamlformat_resolved =
+    let* result = Ocamlformat.resolve_for_dir ~source_dir:source_dir_path in
+    match result with
+    | Ok resolved -> Memo.return resolved
+    | Error msg ->
+      (* Required version not available - raise error *)
+      User_error.raise [ User_message.pp msg ]
+  in
   let setup_formatting file =
     (let input_basename = Path.Source.basename file in
      let input = Path.Build.relative dir input_basename in

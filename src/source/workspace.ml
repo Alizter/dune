@@ -800,6 +800,8 @@ let find_lock_dir t path =
 
 let add_repo t repo = { t with repos = repo :: t.repos }
 
+let filter_repositories t ~f = { t with repos = List.filter t.repos ~f }
+
 let find_tool t package_name =
   List.find t.tools ~f:(fun tool ->
     Package.Name.equal (Tool_stanza.package_name tool) package_name)

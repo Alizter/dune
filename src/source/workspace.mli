@@ -138,6 +138,7 @@ val to_dyn : t -> Dyn.t
 val hash : t -> int
 val find_lock_dir : t -> Path.t -> Lock_dir.t option
 val add_repo : t -> Dune_pkg.Pkg_workspace.Repository.t -> t
+val filter_repositories : t -> f:(Dune_pkg.Pkg_workspace.Repository.t -> bool) -> t
 val default_repositories : Dune_pkg.Pkg_workspace.Repository.t list
 val find_tool : t -> Package.Name.t -> Tool_stanza.t option
 

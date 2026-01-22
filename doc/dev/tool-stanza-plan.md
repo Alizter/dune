@@ -31,11 +31,11 @@ This document outlines the plan to overhaul dune's developer tools system to sup
 10. **Version selection**: 0 versions → error, 1 version → auto-select, N versions → error
 11. **Binary discovery**: Auto-detect binaries from install cookie's `Section.Bin`
 12. **Build dependency via cookie**: Depend on `target/cookie` to ensure package is built before accessing binaries
+13. **`--bin` flag**: CLI flag for `dune tools run` and `dune tools which` to select specific binary
 
 ### In Progress 🔄
 
-1. **Add `--bin` flag**: When multiple binaries exist, require explicit selection
-2. **End-to-end testing**: Verify full lock → build → run cycle works
+1. **End-to-end testing**: Verify full lock → build → run cycle works
 
 ### Blocked/Issues 🔴
 
@@ -323,16 +323,13 @@ The `(executable ...)` field in `(tool)` stanza provides a default when the pack
    - May need different scheduler invocation for lock-only operation
    - Compare with how `dune pkg lock` is invoked
 
-2. **Add `--bin <name>` flag**: For packages with multiple binaries, allow explicit selection
-   - Add to `dune tools run` and `dune tools which` commands
-   - Integrate with `Tool_build.select_executable`
-
-3. **End-to-end testing**: Create cram tests for:
+2. **End-to-end testing**: Create cram tests for:
    - `dune tools lock <pkg>` → creates versioned lock dir
    - `dune tools run <pkg>` → builds and runs
    - `dune tools which <pkg>` → shows path after build
    - Multiple versions coexisting
    - Binary discovery (single and multiple)
+   - `--bin` flag with multi-binary packages
 
 ### Medium Priority
 
@@ -381,19 +378,16 @@ The `(executable ...)` field in `(tool)` stanza provides a default when the pack
 
 ## Next Steps
 
-1. **Add `--bin` flag to CLI**: Allow explicit binary selection for packages with multiple executables
-   - Add to `generic_exec_term` and `generic_which_term` in `tools_common.ml`
-   - Thread through to `Tool_build.select_executable`
-
-2. **Create cram tests**: Start with simple cases
+1. **Create cram tests**: Start with simple cases
    - Lock a tool: `dune tools lock hello`
    - Run a tool: `dune tools run hello`
    - Which a tool: `dune tools which hello`
+   - Test `--bin` flag with multi-binary package
 
-3. **Debug internal error on lock**: Compare with `dune pkg lock` invocation
+2. **Debug internal error on lock**: Compare with `dune pkg lock` invocation
    - The error "Unexpected build progress state" suggests scheduler issue
    - May need to avoid mixing fiber/memo with direct scheduler calls
 
-4. **Integrate with format_rules**: Use `Tool_resolution` for ocamlformat
+3. **Integrate with format_rules**: Use `Tool_resolution` for ocamlformat
    - Replace dual-path (locked/unlocked) logic with unified resolution
    - Test that `dune fmt` works with tool-locked ocamlformat

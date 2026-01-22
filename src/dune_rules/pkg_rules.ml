@@ -53,20 +53,24 @@ module Package_universe = struct
   (* A type of group of packages that are co-installed. Multiple different
      versions of a package may be co-installed into the same universe.
 
-     Note that a dev tool universe just contains the package for the dev tool
-     itself and not its dependencies, which are installed into the
-     [Dependencies _] universe for the default context so they may be
-     shared with the project's dependencies. *)
+     Tools and their dependencies are now fully isolated from the project's
+     dependencies. Each tool has its own universe (Tool) and its dependencies
+     are built in a separate universe (Tool_deps) that does not interact with
+     the project's lock dir or local packages. *)
   type t =
     | Dependencies of Context_name.t
     | Dev_tool of Dune_pkg.Dev_tool.t
     | Tool of Package.Name.t * Package_version.t
+    | Tool_deps of Package.Name.t * Package_version.t
+      (** Dependencies of a generic tool, isolated from project dependencies *)
 
   let equal a b =
     match a, b with
     | Dependencies a, Dependencies b -> Context_name.equal a b
     | Dev_tool a, Dev_tool b -> Dune_pkg.Dev_tool.equal a b
     | Tool (a_name, a_version), Tool (b_name, b_version) ->
+      Package.Name.equal a_name b_name && Package_version.equal a_version b_version
+    | Tool_deps (a_name, a_version), Tool_deps (b_name, b_version) ->
       Package.Name.equal a_name b_name && Package_version.equal a_version b_version
     | _ -> false
   ;;
@@ -78,6 +82,8 @@ module Package_universe = struct
     | Dev_tool dev_tool -> Tuple.T2.hash Int.hash Dune_pkg.Dev_tool.hash (1, dev_tool)
     | Tool (package_name, version) ->
       Tuple.T3.hash Int.hash Package.Name.hash Package_version.hash (2, package_name, version)
+    | Tool_deps (package_name, version) ->
+      Tuple.T3.hash Int.hash Package.Name.hash Package_version.hash (3, package_name, version)
   ;;
 
   let context_name = function
@@ -85,7 +91,7 @@ module Package_universe = struct
     | Dev_tool _ ->
       (* Dev tools can only be built in the default context. *)
       Context_name.default
-    | Tool _ ->
+    | Tool _ | Tool_deps _ ->
       (* Generic tools can only be built in the default context. *)
       Context_name.default
   ;;
@@ -100,7 +106,7 @@ module Package_universe = struct
       |> Path.external_
       |> Option.some
       |> Memo.return
-    | Tool (package_name, version) ->
+    | Tool (package_name, version) | Tool_deps (package_name, version) ->
       Lock_dir.tool_external_lock_dir package_name ~version
       |> Path.external_
       |> Option.some
@@ -269,6 +275,18 @@ module Paths = struct
           ; ".tools"
           ; Package.Name.to_string package_name
           ; Package_version.to_string version
+          ]
+      | Tool_deps (package_name, version) ->
+        (* Tool dependencies are installed in .tools/<package_name>/<version>/.pkg/<digest>/
+           to keep them isolated from project dependencies *)
+        Path.Build.L.relative
+          Private_context.t.build_dir
+          [ Context_name.to_string Context_name.default
+          ; ".tools"
+          ; Package.Name.to_string package_name
+          ; Package_version.to_string version
+          ; ".pkg"
+          ; Pkg_digest.to_string pkg_digest
           ]
     in
     of_root pkg_digest.name ~root
@@ -1563,6 +1581,38 @@ module DB = struct
       and+ pkg_digest = Memo.exec of_tool_memo (package_name, version) in
       db, pkg_digest
   ;;
+
+  (* Returns the db for tool dependencies, fully isolated from project packages.
+     This avoids any interaction with the project's lock dir or local packages. *)
+  let of_tool_deps =
+    let system_provided = default_system_provided in
+    let module Tool_deps_input = struct
+      type t = Package.Name.t * Package_version.t
+
+      let equal (a_name, a_ver) (b_name, b_ver) =
+        Package.Name.equal a_name b_name && Package_version.equal a_ver b_ver
+      ;;
+
+      let hash (name, ver) =
+        Tuple.T2.hash Package.Name.hash Package_version.hash (name, ver)
+      ;;
+
+      let to_dyn (name, ver) =
+        Dyn.Tuple [ Package.Name.to_dyn name; Package_version.to_dyn ver ]
+      ;;
+    end
+    in
+    let of_tool_deps_memo =
+      Memo.create "pkg-db-tool-deps" ~input:(module Tool_deps_input)
+      @@ fun (package_name, version) ->
+      let+ lock_dir = Lock_dir.of_tool package_name ~version
+      and+ platform = Lock_dir.Sys_vars.solver_env in
+      let pkg_table = Pkg_table.of_lock_dir lock_dir ~platform ~system_provided in
+      create ~pkg_digest_table:pkg_table ~system_provided
+    in
+    fun package_name ~version ->
+      Memo.exec of_tool_deps_memo (package_name, version)
+  ;;
 end
 
 module rec Resolve : sig
@@ -1633,11 +1683,14 @@ end = struct
           ~f:(fun { DB.Pkg_table.dep_pkg = _; dep_loc; dep_pkg_digest } ->
             let package_universe =
               match package_universe with
-              | Dev_tool _ | Tool _ ->
-                (* The dependencies of dev tools and generic tools are installed
-                 into the default context so they may be shared with the
-                 project's dependencies. *)
+              | Dev_tool _ ->
+                (* Dev tool dependencies are installed into the default context
+                   so they may be shared with the project's dependencies. *)
                 Package_universe.Dependencies Context_name.default
+              | Tool (name, version) | Tool_deps (name, version) ->
+                (* Generic tool dependencies are kept in their own isolated
+                   universe to avoid interactions with project local packages. *)
+                Package_universe.Tool_deps (name, version)
               | _ -> package_universe
             in
             resolve db dep_loc dep_pkg_digest package_universe)
@@ -2525,6 +2578,30 @@ let setup_rules ~components ~dir ctx =
      | Some _ ->
        let* db, pkg_digest = DB.of_tool pkg_name ~version in
        setup_package_rules db ~package_universe:(Tool (pkg_name, version)) ~dir ~pkg_digest)
+  | true, [ ".tools"; tool_package_name; version_string; ".pkg"; pkg_digest_string ] ->
+    (* Tool dependency package - built in isolated Tool_deps universe *)
+    let pkg_name = Package.Name.of_string tool_package_name in
+    let version = Package_version.of_string version_string in
+    let pkg_digest = Pkg_digest.of_string pkg_digest_string in
+    let* lock_exists = Lock_dir.of_tool_if_lock_dir_exists pkg_name ~version in
+    (match lock_exists with
+     | None -> Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
+     | Some _ ->
+       let* db = DB.of_tool_deps pkg_name ~version in
+       setup_package_rules db ~package_universe:(Tool_deps (pkg_name, version)) ~dir ~pkg_digest)
+  | true, [ ".tools"; tool_package_name; version_string; ".pkg" ] ->
+    (* Tool .pkg directory - allow digest subdirectories *)
+    let pkg_name = Package.Name.of_string tool_package_name in
+    let version = Package_version.of_string version_string in
+    let* lock_exists = Lock_dir.of_tool_if_lock_dir_exists pkg_name ~version in
+    (match lock_exists with
+     | None -> Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
+     | Some _ ->
+       Gen_rules.make
+         ~build_dir_only_sub_dirs:
+           (Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.all)
+         (Memo.return Rules.empty)
+       |> Memo.return)
   | true, [ ".tools"; _tool_package_name ] ->
     (* Tool package dir - allow version subdirectories *)
     Gen_rules.make
@@ -2567,8 +2644,11 @@ let setup_rules ~components ~dir ctx =
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | true, ".dev-tool" :: _ :: _ :: _ ->
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
+  | true, ".tools" :: _ :: _ :: ".pkg" :: _ :: _ :: _ ->
+    (* Redirect deeper paths under .tools/<package>/<version>/.pkg/<digest>/... to parent *)
+    Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | true, ".tools" :: _ :: _ :: _ :: _ ->
-    (* Redirect deeper paths under .tools/<package>/<version>/... to parent *)
+    (* Redirect deeper paths under .tools/<package>/<version>/... to parent (non-.pkg paths) *)
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | is_default, [] ->
     let sub_dirs =
@@ -2630,6 +2710,7 @@ let all_deps universe =
       DB.of_ctx ctx ~allow_sharing:false
     | Dev_tool tool -> DB.of_dev_tool tool >>| fst
     | Tool (package_name, version) -> DB.of_tool package_name ~version >>| fst
+    | Tool_deps (package_name, version) -> DB.of_tool_deps package_name ~version
   in
   Pkg_digest.Map.values db.pkg_digest_table
   |> Memo.parallel_map ~f:(fun { DB.Pkg_table.pkg_digest; _ } ->

@@ -48,6 +48,14 @@ val resolve_for_formatting
   :  package_name:Package.Name.t
   -> (resolved * resolution_source) option Memo.t
 
+(** Resolve ocamlformat for a specific source directory.
+    Reads the version from .ocamlformat in that directory (or parent dirs)
+    and ensures that exact version is locked.
+    Returns Error with helpful message if required version isn't available. *)
+val resolve_ocamlformat_for_dir
+  :  dir:Path.Source.t
+  -> ((resolved * resolution_source) option, User_message.t) result Memo.t
+
 (** Ensure a resolved tool is built and return its executable path.
     This is meant to be used in Action_builder context. *)
 val ensure_built : resolved -> Path.t Action_builder.t
