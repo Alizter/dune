@@ -60,13 +60,14 @@ module Package_universe = struct
   type t =
     | Dependencies of Context_name.t
     | Dev_tool of Dune_pkg.Dev_tool.t
-    | Tool of Package.Name.t
+    | Tool of Package.Name.t * Package_version.t
 
   let equal a b =
     match a, b with
     | Dependencies a, Dependencies b -> Context_name.equal a b
     | Dev_tool a, Dev_tool b -> Dune_pkg.Dev_tool.equal a b
-    | Tool a, Tool b -> Package.Name.equal a b
+    | Tool (a_name, a_version), Tool (b_name, b_version) ->
+      Package.Name.equal a_name b_name && Package_version.equal a_version b_version
     | _ -> false
   ;;
 
@@ -75,7 +76,8 @@ module Package_universe = struct
     | Dependencies context_name ->
       Tuple.T2.hash Int.hash Context_name.hash (0, context_name)
     | Dev_tool dev_tool -> Tuple.T2.hash Int.hash Dune_pkg.Dev_tool.hash (1, dev_tool)
-    | Tool package_name -> Tuple.T2.hash Int.hash Package.Name.hash (2, package_name)
+    | Tool (package_name, version) ->
+      Tuple.T3.hash Int.hash Package.Name.hash Package_version.hash (2, package_name, version)
   ;;
 
   let context_name = function
@@ -98,9 +100,8 @@ module Package_universe = struct
       |> Path.external_
       |> Option.some
       |> Memo.return
-    | Tool package_name ->
-      package_name
-      |> Lock_dir.tool_external_lock_dir
+    | Tool (package_name, version) ->
+      Lock_dir.tool_external_lock_dir package_name ~version
       |> Path.external_
       |> Option.some
       |> Memo.return
@@ -260,13 +261,14 @@ module Paths = struct
           Private_context.t.build_dir
           [ Context_name.to_string ctx; ".pkg"; Pkg_digest.to_string pkg_digest ]
       | Dev_tool dev_tool -> Pkg_dev_tool.universe_install_path dev_tool
-      | Tool package_name ->
-        (* Tool package itself is installed in .tools/<package_name>/ *)
+      | Tool (package_name, version) ->
+        (* Tool package itself is installed in .tools/<package_name>/<version>/ *)
         Path.Build.L.relative
           Private_context.t.build_dir
           [ Context_name.to_string Context_name.default
           ; ".tools"
           ; Package.Name.to_string package_name
+          ; Package_version.to_string version
           ]
     in
     of_root pkg_digest.name ~root
@@ -340,6 +342,8 @@ module Install_cookie = struct
     | Some f -> { f with files = Section.Map.of_list_exn f.files }
     | None -> User_error.raise ~loc:(Loc.in_file f) [ Pp.text "unable to load" ]
   ;;
+
+  let files t = t.Gen.files
 
   let dump path (t : t) =
     Persistent.dump path { t with files = Section.Map.to_list t.files }
@@ -1360,22 +1364,14 @@ module DB = struct
         List.filter_opt xs |> union_all)
     ;;
 
-    (* Scan .tools.lock/ directory for all existing generic tool lock dirs *)
+    (* Scan .tools.lock/<package>/<version>/ for all existing generic tool lock dirs *)
     let all_existing_tools =
       Memo.lazy_ (fun () ->
-        let tools_lock_base =
-          let external_root =
-            Path.Build.root
-            |> Path.build
-            |> Path.to_absolute_filename
-            |> Path.External.of_string
-          in
-          Path.External.relative external_root ".tools.lock"
-        in
+        let tools_lock_base = Lock_dir.tools_lock_base () in
         let tools_lock_path = Path.Outside_build_dir.External tools_lock_base in
         let* platform = Lock_dir.Sys_vars.solver_env in
         let system_provided = default_system_provided in
-        (* Check if .tools.lock/ exists - use Fs_memo for proper invalidation *)
+        (* Check if .tools.lock/ exists *)
         let* exists = Fs_memo.dir_exists tools_lock_path in
         if not exists
         then Memo.return empty
@@ -1384,18 +1380,27 @@ module DB = struct
           match dir_contents with
           | Error _ -> Memo.return empty
           | Ok contents ->
-            let entries =
+            (* First level: package directories *)
+            let package_dirs =
               Fs_cache.Dir_contents.to_list contents
               |> List.filter_map ~f:(fun (name, kind) ->
                 match kind with
-                | Unix.S_DIR -> Some name
+                | Unix.S_DIR when not (String.is_prefix name ~prefix:".") ->
+                  Some (Package.Name.of_string name)
                 | _ -> None)
             in
+            (* For each package, scan version subdirectories *)
             let+ tables =
-              Memo.List.filter_map entries ~f:(fun entry ->
-                let pkg_name = Package.Name.of_string entry in
-                let+ lock_dir_opt = Lock_dir.of_tool_if_lock_dir_exists pkg_name in
-                Option.map lock_dir_opt ~f:(of_lock_dir ~platform ~system_provided))
+              Memo.List.concat_map package_dirs ~f:(fun pkg_name ->
+                let+ versions = Lock_dir.tool_locked_versions pkg_name in
+                List.filter_map versions ~f:(fun (version, _path) ->
+                  (* Load each version's lock dir *)
+                  let lock_dir_path =
+                    Lock_dir.tool_external_lock_dir pkg_name ~version |> Path.external_
+                  in
+                  match Dune_pkg.Lock_dir.read_disk lock_dir_path with
+                  | Error _ -> None
+                  | Ok lock_dir -> Some (of_lock_dir lock_dir ~platform ~system_provided)))
             in
             union_all tables)
     ;;
@@ -1513,15 +1518,31 @@ module DB = struct
   (* Returns the db for a generic tool package and the digest for the tool's package. *)
   let of_tool =
     let system_provided = default_system_provided in
+    let module Tool_input = struct
+      type t = Package.Name.t * Package_version.t
+
+      let equal (a_name, a_ver) (b_name, b_ver) =
+        Package.Name.equal a_name b_name && Package_version.equal a_ver b_ver
+      ;;
+
+      let hash (name, ver) =
+        Tuple.T2.hash Package.Name.hash Package_version.hash (name, ver)
+      ;;
+
+      let to_dyn (name, ver) =
+        Dyn.Tuple [ Package.Name.to_dyn name; Package_version.to_dyn ver ]
+      ;;
+    end
+    in
     let of_tool_memo =
-      Memo.create "pkg-db-tool" ~input:(module Package.Name)
-      @@ fun package_name ->
-      let+ lock_dir = Lock_dir.of_tool package_name
+      Memo.create "pkg-db-tool" ~input:(module Tool_input)
+      @@ fun (package_name, version) ->
+      let+ lock_dir = Lock_dir.of_tool package_name ~version
       and+ platform = Lock_dir.Sys_vars.solver_env in
       pkg_digest_of_name lock_dir platform package_name ~system_provided
     in
-    fun package_name ->
-      let* tool_lock_dir = Lock_dir.of_tool package_name
+    fun package_name ~version ->
+      let* tool_lock_dir = Lock_dir.of_tool package_name ~version
       and* platform = Lock_dir.Sys_vars.solver_env in
       let tool_pkg_table =
         Pkg_table.of_lock_dir tool_lock_dir ~platform ~system_provided
@@ -1539,7 +1560,7 @@ module DB = struct
             Pkg_table.union ctx_db.pkg_digest_table tool_pkg_table
           in
           create ~pkg_digest_table ~system_provided
-      and+ pkg_digest = Memo.exec of_tool_memo package_name in
+      and+ pkg_digest = Memo.exec of_tool_memo (package_name, version) in
       db, pkg_digest
   ;;
 end
@@ -2494,16 +2515,25 @@ let setup_rules ~components ~dir ctx =
         (Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.all)
       (Memo.return Rules.empty)
     |> Memo.return
-  | true, [ ".tools"; tool_package_name ] ->
-    (* Generic tool package - check if lock dir exists *)
+  | true, [ ".tools"; tool_package_name; version_string ] ->
+    (* Generic tool package at specific version - check if lock dir exists *)
     let pkg_name = Package.Name.of_string tool_package_name in
-    let* lock_exists = Lock_dir.of_tool_if_lock_dir_exists pkg_name in
+    let version = Package_version.of_string version_string in
+    let* lock_exists = Lock_dir.of_tool_if_lock_dir_exists pkg_name ~version in
     (match lock_exists with
      | None -> Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
      | Some _ ->
-       let* db, pkg_digest = DB.of_tool pkg_name in
-       setup_package_rules db ~package_universe:(Tool pkg_name) ~dir ~pkg_digest)
+       let* db, pkg_digest = DB.of_tool pkg_name ~version in
+       setup_package_rules db ~package_universe:(Tool (pkg_name, version)) ~dir ~pkg_digest)
+  | true, [ ".tools"; _tool_package_name ] ->
+    (* Tool package dir - allow version subdirectories *)
+    Gen_rules.make
+      ~build_dir_only_sub_dirs:
+        (Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.all)
+      (Memo.return Rules.empty)
+    |> Memo.return
   | true, [ ".tools" ] ->
+    (* Tools dir - allow package subdirectories *)
     Gen_rules.make
       ~build_dir_only_sub_dirs:
         (Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.all)
@@ -2537,7 +2567,8 @@ let setup_rules ~components ~dir ctx =
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | true, ".dev-tool" :: _ :: _ :: _ ->
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
-  | true, ".tools" :: _ :: _ :: _ ->
+  | true, ".tools" :: _ :: _ :: _ :: _ ->
+    (* Redirect deeper paths under .tools/<package>/<version>/... to parent *)
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | is_default, [] ->
     let sub_dirs =
@@ -2598,7 +2629,7 @@ let all_deps universe =
          the universe's respective lock directory. *)
       DB.of_ctx ctx ~allow_sharing:false
     | Dev_tool tool -> DB.of_dev_tool tool >>| fst
-    | Tool package_name -> DB.of_tool package_name >>| fst
+    | Tool (package_name, version) -> DB.of_tool package_name ~version >>| fst
   in
   Pkg_digest.Map.values db.pkg_digest_table
   |> Memo.parallel_map ~f:(fun { DB.Pkg_table.pkg_digest; _ } ->
@@ -2638,7 +2669,7 @@ let ocamlpath universe =
 
 let project_ocamlpath context = ocamlpath (Dependencies context)
 let dev_tool_ocamlpath dev_tool = ocamlpath (Dev_tool dev_tool)
-let tool_ocamlpath package_name = ocamlpath (Tool package_name)
+let tool_ocamlpath package_name ~version = ocamlpath (Tool (package_name, version))
 let lock_dir_active = Lock_dir.lock_dir_active
 let lock_dir_path = Lock_dir.get_path
 
@@ -2654,14 +2685,15 @@ let dev_tool_env tool =
   Pkg.exported_env pkg
 ;;
 
-let tool_env package_name =
+let tool_env package_name ~version =
   Memo.push_stack_frame ~human_readable_description:(fun () ->
     Pp.textf
-      "lock directory environment for tool %S"
-      (Package.Name.to_string package_name))
+      "lock directory environment for tool %S@%s"
+      (Package.Name.to_string package_name)
+      (Package_version.to_string version))
   @@ fun () ->
-  let* db, pkg_digest = DB.of_tool package_name in
-  let+ pkg = Resolve.resolve db Loc.none pkg_digest (Tool package_name) in
+  let* db, pkg_digest = DB.of_tool package_name ~version in
+  let+ pkg = Resolve.resolve db Loc.none pkg_digest (Tool (package_name, version)) in
   Pkg.exported_env pkg
 ;;
 

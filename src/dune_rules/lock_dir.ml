@@ -277,30 +277,62 @@ let tools_lock_base () =
   Path.External.relative external_root ".tools.lock"
 ;;
 
-(** External lock directory for generic tools: _build/.tools.lock/<package>/
-    TODO: Add version to path once solver can write to dynamic paths *)
-let tool_external_lock_dir package_name =
+(** Base directory for all versions of a tool: _build/.tools.lock/<package>/ *)
+let tool_external_lock_dir_base package_name =
   let package_segment = tool_to_path_segment package_name in
   Path.External.append_local (tools_lock_base ()) package_segment
 ;;
 
-(** Internal lock directory for generic tools: _build/default/.tool-locks/<package>/ *)
-let tool_lock_dir package_name =
+(** External lock directory for generic tools: _build/.tools.lock/<package>/<version>/ *)
+let tool_external_lock_dir package_name ~version =
+  let version_segment = Package_version.to_string version |> Path.Local.of_string in
+  Path.External.append_local (tool_external_lock_dir_base package_name) version_segment
+;;
+
+(** Internal lock directory for generic tools: _build/default/.tool-locks/<package>/<version>/ *)
+let tool_lock_dir package_name ~version =
   let ctx_name = Context_name.default |> Context_name.to_string in
   let package_segment = tool_to_path_segment package_name in
+  let version_segment = Package_version.to_string version |> Path.Local.of_string in
   let lock_dir =
     Path.Build.L.relative Private_context.t.build_dir [ ctx_name; ".tool-locks" ]
   in
-  Path.Build.append_local lock_dir package_segment |> Path.build
+  Path.Build.append_local lock_dir package_segment
+  |> Fun.flip Path.Build.append_local version_segment
+  |> Path.build
 ;;
 
-let of_tool package_name =
-  let path = tool_external_lock_dir package_name |> Path.external_ in
+(** Scan for all locked versions of a tool. Returns list of (version, lock_dir). *)
+let tool_locked_versions package_name =
+  let base = tool_external_lock_dir_base package_name in
+  let base_path = Path.external_ base in
+  Fs_memo.dir_exists (Path.Outside_build_dir.External base)
+  >>= function
+  | false -> Memo.return []
+  | true ->
+    let+ contents = Fs_memo.dir_contents (Path.Outside_build_dir.External base) in
+    (match contents with
+     | Error _ -> []
+     | Ok dir_contents ->
+       Fs_cache.Dir_contents.to_list dir_contents
+       |> List.filter_map ~f:(fun (name, kind) ->
+         match kind with
+         | Unix.S_DIR ->
+           let version_path = Path.relative base_path name in
+           let lock_dune = Path.relative version_path "lock.dune" in
+           if Path.Untracked.exists lock_dune
+           then Some (Package_version.of_string name, version_path)
+           else None
+         | _ -> None))
+;;
+
+let of_tool package_name ~version =
+  let path = tool_external_lock_dir package_name ~version |> Path.external_ in
   Load.load_exn path
 ;;
 
-let of_tool_if_lock_dir_exists package_name =
-  let path = tool_external_lock_dir package_name in
+let of_tool_if_lock_dir_exists package_name ~version =
+  let path = tool_external_lock_dir package_name ~version in
   Fs_memo.dir_exists (Path.Outside_build_dir.External path)
   >>= function
   | false -> Memo.return None

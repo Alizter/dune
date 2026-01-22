@@ -8,17 +8,21 @@ open Memo.O
     or should fall back to system PATH.
 *)
 
-(** A resolved tool ready for execution *)
+(** A resolved tool ready for execution.
+    Note: exe_path is determined after build by reading the install cookie. *)
 type resolved =
   { package : Package.Name.t
-  ; exe_path : Path.Build.t
+  ; version : Package_version.t
+  ; install_cookie : Path.Build.t  (** Depend on this to ensure the package is built *)
+  ; executable_hint : string option  (** From stanza, if specified *)
   ; env : Env.t Memo.t
   }
 
-let to_dyn { package; exe_path; env = _ } =
+let to_dyn { package; version; install_cookie = _; executable_hint; env = _ } =
   Dyn.record
     [ "package", Package.Name.to_dyn package
-    ; "exe_path", Path.Build.to_dyn exe_path
+    ; "version", Package_version.to_dyn version
+    ; "executable_hint", Dyn.option Dyn.string executable_hint
     ]
 ;;
 
@@ -26,14 +30,14 @@ let to_dyn { package; exe_path; env = _ } =
 type resolution_source =
   | From_workspace_stanza of Tool_stanza.t
   | From_legacy_dev_tool of Dune_pkg.Dev_tool.t
-  | From_system_path
+  | From_locked_version
 
 let resolution_source_to_dyn = function
   | From_workspace_stanza stanza ->
     Dyn.variant "From_workspace_stanza" [ Tool_stanza.to_dyn stanza ]
   | From_legacy_dev_tool tool ->
     Dyn.variant "From_legacy_dev_tool" [ Dune_pkg.Dev_tool.to_dyn tool ]
-  | From_system_path -> Dyn.variant "From_system_path" []
+  | From_locked_version -> Dyn.variant "From_locked_version" []
 ;;
 
 (** Try to find a tool in the workspace's (tool) stanzas *)
@@ -57,22 +61,52 @@ let legacy_dev_tool_lock_dir_exists dev_tool =
     Fs_memo.dir_exists (Path.Outside_build_dir.External path)
 ;;
 
+(** Select a version from available locked versions.
+    - 0 versions → None (tool not locked)
+    - 1 version → use it
+    - N versions → error (user must specify --version) *)
+let select_version package_name ~(versions : (Package_version.t * Path.t) list) =
+  match versions with
+  | [] -> Memo.return None
+  | [ (version, _path) ] -> Memo.return (Some version)
+  | _ :: _ :: _ as all_versions ->
+    let version_strs =
+      List.map all_versions ~f:(fun (v, _) -> Package_version.to_string v)
+    in
+    User_error.raise
+      [ Pp.textf
+          "Multiple versions of %S are locked: %s"
+          (Package.Name.to_string package_name)
+          (String.concat ~sep:", " version_strs)
+      ; Pp.text "Specify which version to use with --ver or update the (tool) stanza."
+      ]
+;;
+
 (** Resolve a tool by package name.
 
     Resolution priority:
-    1. Check workspace (tool) stanza
+    1. Check workspace (tool) stanza with version constraint
     2. Check legacy Dev_tool.t (only if its lock dir exists)
-    3. Check if tool has a lock directory (new-style .tools.lock/)
+    3. Check if tool has locked versions (new-style .tools.lock/)
     4. Fall back to system PATH (returns None in that case)
 *)
 let resolve_opt ~package_name =
   let* stanza_opt = find_in_workspace package_name in
   match stanza_opt with
   | Some stanza ->
-    (* Found in workspace stanza *)
-    let exe_path = Tool_build.exe_path_of_stanza stanza in
-    let env = Tool_build.tool_env package_name in
-    Memo.return (Some ({ package = package_name; exe_path; env }, From_workspace_stanza stanza))
+    (* Found in workspace stanza - determine version *)
+    let* versions = Tool_lock.get_locked_versions package_name in
+    let* version_opt = select_version package_name ~versions in
+    (match version_opt with
+     | Some version ->
+       let install_cookie = Tool_build.install_cookie ~package_name ~version in
+       let executable_hint = Some (Tool_stanza.exe_name stanza) in
+       let env = Tool_build.tool_env package_name ~version in
+       Memo.return
+         (Some ({ package = package_name; version; install_cookie; executable_hint; env }, From_workspace_stanza stanza))
+     | None ->
+       (* Stanza exists but no locked versions - return None (system PATH) *)
+       Memo.return None)
   | None ->
     (* Check for legacy dev tool *)
     (match find_legacy_dev_tool package_name with
@@ -81,26 +115,36 @@ let resolve_opt ~package_name =
        let* lock_exists = legacy_dev_tool_lock_dir_exists dev_tool in
        if lock_exists
        then (
-         let exe_path = Pkg_dev_tool.exe_path dev_tool in
+         (* Legacy dev tools: cookie is at <universe_install_path>/target/cookie *)
+         let install_cookie =
+           Path.Build.L.relative (Pkg_dev_tool.universe_install_path dev_tool) [ "target"; "cookie" ]
+         in
          let env = Pkg_rules.dev_tool_env dev_tool in
+         (* Legacy dev tools have known exe names *)
+         let executable_hint = Some (Dune_pkg.Dev_tool.exe_name dev_tool) in
+         (* Legacy dev tools don't have versioned paths, use a placeholder version *)
+         let version = Package_version.of_string "legacy" in
          Memo.return
-           (Some ({ package = package_name; exe_path; env }, From_legacy_dev_tool dev_tool)))
+           (Some
+              ( { package = package_name; version; install_cookie; executable_hint; env }
+              , From_legacy_dev_tool dev_tool )))
        else
          (* Legacy dev tool exists but no lock dir - fall back to system PATH *)
          Memo.return None
      | None ->
        (* Check if there's a lock directory for this package (new-style) *)
-       let* has_lock = Tool_lock.lock_dir_exists package_name in
-       if has_lock
-       then (
-         (* New-style tool with lock dir but no stanza - use default executable name *)
-         let executable = Package.Name.to_string package_name in
-         let exe_path = Tool_build.exe_path ~package_name ~executable in
-         let env = Tool_build.tool_env package_name in
-         Memo.return (Some ({ package = package_name; exe_path; env }, From_system_path)))
-       else
-         (* No lock dir - tool should be on system PATH *)
-         Memo.return None)
+       let* versions = Tool_lock.get_locked_versions package_name in
+       let* version_opt = select_version package_name ~versions in
+       (match version_opt with
+        | Some version ->
+          (* New-style tool with lock dir but no stanza - discover binary from cookie *)
+          let install_cookie = Tool_build.install_cookie ~package_name ~version in
+          let env = Tool_build.tool_env package_name ~version in
+          Memo.return
+            (Some ({ package = package_name; version; install_cookie; executable_hint = None; env }, From_locked_version))
+        | None ->
+          (* No lock dir - tool should be on system PATH *)
+          Memo.return None))
 ;;
 
 (** Resolve a tool, raising an error if not found *)
@@ -124,12 +168,25 @@ let resolve_for_formatting ~package_name =
 ;;
 
 (** Ensure a resolved tool is built and return its executable path.
-    This is meant to be used in Action_builder context. *)
+    This is meant to be used in Action_builder context.
+    We depend on the install_cookie (not the exe directly) because the package
+    produces a directory target. The cookie is created when install completes.
+    After build, we read the cookie to discover available binaries. *)
 let ensure_built (resolved : resolved) =
-  let exe_path = Path.build resolved.exe_path in
+  let cookie_path = Path.build resolved.install_cookie in
   let open Action_builder.O in
-  let+ () = Action_builder.path exe_path in
-  exe_path
+  let+ () = Action_builder.path cookie_path in
+  (* After build, determine the executable from the cookie *)
+  let executable =
+    Tool_build.select_executable
+      ~package_name:resolved.package
+      ~version:resolved.version
+      ~executable_opt:resolved.executable_hint
+  in
+  let exe_path =
+    Tool_build.exe_path ~package_name:resolved.package ~version:resolved.version ~executable
+  in
+  Path.build exe_path
 ;;
 
 (** Get the full action builder for running a resolved tool.

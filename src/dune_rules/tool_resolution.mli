@@ -7,10 +7,13 @@ open Import
     or should fall back to system PATH.
 *)
 
-(** A resolved tool ready for execution *)
+(** A resolved tool ready for execution.
+    Note: exe_path is determined after build by reading the install cookie. *)
 type resolved =
   { package : Package.Name.t
-  ; exe_path : Path.Build.t
+  ; version : Package_version.t
+  ; install_cookie : Path.Build.t  (** Depend on this to ensure the package is built *)
+  ; executable_hint : string option  (** From stanza, if specified *)
   ; env : Env.t Memo.t
   }
 
@@ -20,7 +23,7 @@ val to_dyn : resolved -> Dyn.t
 type resolution_source =
   | From_workspace_stanza of Tool_stanza.t
   | From_legacy_dev_tool of Dune_pkg.Dev_tool.t
-  | From_system_path
+  | From_locked_version
 
 val resolution_source_to_dyn : resolution_source -> Dyn.t
 

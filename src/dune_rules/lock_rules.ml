@@ -495,13 +495,16 @@ let setup_dev_tool_lock_rules ~dir dev_tool =
   setup_copy_rules ~dir ~lock_dir
 ;;
 
-let setup_tool_lock_rules ~dir package_name =
+let setup_tool_lock_rules ~dir package_name ~version =
   let tool_name = Dune_lang.Package_name.to_string package_name in
-  let dir = Path.Build.relative dir tool_name in
-  let lock_dir = package_name |> Lock_dir.tool_external_lock_dir |> Path.external_ in
+  let version_str = Package_version.to_string version in
+  let dir = Path.Build.L.relative dir [ tool_name; version_str ] in
+  let lock_dir = Lock_dir.tool_external_lock_dir package_name ~version |> Path.external_ in
   setup_copy_rules ~dir ~lock_dir
 ;;
 
+(** Scan for all tool packages and their versions.
+    Returns list of (package_name, version) pairs. *)
 let scan_tool_lock_dirs () =
   let tools_lock_base =
     let external_root =
@@ -518,10 +521,27 @@ let scan_tool_lock_dirs () =
   else (
     match Readdir.read_directory (Path.to_string tools_lock_path) with
     | Error _ -> Memo.return []
-    | Ok entries ->
-      entries
-      |> List.map ~f:Dune_lang.Package_name.of_string
-      |> Memo.return)
+    | Ok pkg_entries ->
+      (* For each package directory, scan for version subdirectories *)
+      let+ results =
+        Memo.List.concat_map pkg_entries ~f:(fun pkg_name ->
+          let pkg_path = Path.relative tools_lock_path pkg_name in
+          match Readdir.read_directory (Path.to_string pkg_path) with
+          | Error _ -> Memo.return []
+          | Ok version_entries ->
+            version_entries
+            |> List.filter_map ~f:(fun version_str ->
+              let version_path = Path.relative pkg_path version_str in
+              let lock_dune = Path.relative version_path "lock.dune" in
+              if Path.Untracked.exists lock_dune
+              then
+                Some
+                  ( Dune_lang.Package_name.of_string pkg_name
+                  , Package_version.of_string version_str )
+              else None)
+            |> Memo.return)
+      in
+      results)
 ;;
 
 let setup_rules ~components ~dir =
@@ -540,9 +560,9 @@ let setup_rules ~components ~dir =
       let+ dev_tool_rules = setup_dev_tool_lock_rules ~dir dev_tool in
       Gen_rules.combine rules dev_tool_rules)
   | [ ".tool-locks" ] ->
-    let* tool_names = scan_tool_lock_dirs () in
-    Memo.List.fold_left tool_names ~init:empty ~f:(fun rules package_name ->
-      let+ tool_rules = setup_tool_lock_rules ~dir package_name in
+    let* tool_versions = scan_tool_lock_dirs () in
+    Memo.List.fold_left tool_versions ~init:empty ~f:(fun rules (package_name, version) ->
+      let+ tool_rules = setup_tool_lock_rules ~dir package_name ~version in
       Gen_rules.combine rules tool_rules)
   | ".dev-tool-locks" :: _ :: _ ->
     (* Subdirectories of dev-tool-locks are handled by copy rules *)

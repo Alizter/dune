@@ -1,6 +1,7 @@
 open Import
 module Pkg_dev_tool = Dune_rules.Pkg_dev_tool
 module Tool_build = Dune_rules.Tool_build
+module Tool_lock = Dune_rules.Tool_lock
 module Tool_stanza = Source.Tool_stanza
 
 let dev_tool_bin_dirs =
@@ -195,18 +196,50 @@ let env_command =
 
 (* ========== Generic Tool Support ========== *)
 
-(** Get the exe path for a generic tool package *)
-let generic_tool_exe_path package_name =
-  let executable = Package_name.to_string package_name in
-  Path.build @@ Tool_build.exe_path ~package_name ~executable
+(** Get the install cookie path for a generic tool package at a specific version.
+    Depend on this to ensure the package is built. *)
+let generic_tool_cookie_path package_name ~version =
+  Path.build @@ Tool_build.install_cookie ~package_name ~version
 ;;
 
-(** Build target for a generic tool *)
-let generic_tool_build_target package_name =
+(** Get the exe path for a generic tool package at a specific version.
+    Must be called after the package is built (cookie exists). *)
+let generic_tool_exe_path package_name ~version =
+  let executable = Tool_build.select_executable ~package_name ~version ~executable_opt:None in
+  Path.build @@ Tool_build.exe_path ~package_name ~version ~executable
+;;
+
+(** Build target for a generic tool at a specific version - targets the cookie *)
+let generic_tool_build_target package_name ~version =
   Dune_lang.Dep_conf.File
     (Dune_lang.String_with_vars.make_text
        Loc.none
-       (Path.to_string (generic_tool_exe_path package_name)))
+       (Path.to_string (generic_tool_cookie_path package_name ~version)))
+;;
+
+(** Select a version from locked versions.
+    - 0 versions → error
+    - 1 version → use it
+    - N versions → error *)
+let select_locked_version package_name ~versions =
+  match versions with
+  | [] ->
+    User_error.raise
+      [ Pp.textf "No versions of %S are locked." (Package_name.to_string package_name)
+      ; Pp.text "Run 'dune tools lock' first."
+      ]
+  | [ (version, _path) ] -> version
+  | _ :: _ :: _ as all_versions ->
+    let version_strs =
+      List.map all_versions ~f:(fun (v, _) -> Package_version.to_string v)
+    in
+    User_error.raise
+      [ Pp.textf
+          "Multiple versions of %S are locked: %s"
+          (Package_name.to_string package_name)
+          (String.concat ~sep:", " version_strs)
+      ; Pp.text "Specify which version to use with --version."
+      ]
 ;;
 
 let build_generic_tool_directly common package_name =
@@ -216,15 +249,19 @@ let build_generic_tool_directly common package_name =
       let open Action_builder.O in
       (* Only lock if lock dir doesn't exist - don't re-lock on every run *)
       let* () = package_name |> Lock_tool.lock_tool_if_needed |> Action_builder.of_memo in
-      Action_builder.path (generic_tool_exe_path package_name))
+      (* Get locked versions and select one *)
+      let* versions = Tool_lock.get_locked_versions package_name |> Action_builder.of_memo in
+      let version = select_locked_version package_name ~versions in
+      (* Depend on the cookie to build the package *)
+      Action_builder.path (generic_tool_cookie_path package_name ~version))
   in
   match result with
   | Error `Already_reported -> raise Dune_util.Report_error.Already_reported
   | Ok () -> ()
 ;;
 
-let build_generic_tool_via_rpc builder lock_held_by package_name =
-  let target = generic_tool_build_target package_name in
+let build_generic_tool_via_rpc builder lock_held_by package_name ~version =
+  let target = generic_tool_build_target package_name ~version in
   let targets = Rpc.Rpc_common.prepare_targets [ target ] in
   let open Fiber.O in
   Rpc.Rpc_common.fire_request
@@ -237,21 +274,38 @@ let build_generic_tool_via_rpc builder lock_held_by package_name =
   >>| Rpc.Rpc_common.wrap_build_outcome_exn ~print_on_success:false
 ;;
 
+(** Lock a tool and return the version that was selected.
+    Returns the version after locking (either pre-existing or newly created). *)
+let lock_and_get_version package_name =
+  let open Fiber.O in
+  let* () = Lock_tool.lock_tool_if_needed package_name |> Memo.run in
+  let+ versions = Tool_lock.get_locked_versions package_name |> Memo.run in
+  select_locked_version package_name ~versions
+;;
+
+(** Lock and build a generic tool, returning the version that was built. *)
 let lock_and_build_generic_tool ~common ~config builder package_name =
   let open Fiber.O in
   match Dune_util.Global_lock.lock ~timeout:None with
   | Error lock_held_by ->
     Scheduler_setup.no_build_no_rpc ~config (fun () ->
-      let* () = Lock_tool.lock_tool package_name |> Memo.run in
-      build_generic_tool_via_rpc builder lock_held_by package_name)
+      let* version = lock_and_get_version package_name in
+      let+ () = build_generic_tool_via_rpc builder lock_held_by package_name ~version in
+      version)
   | Ok () ->
     Scheduler_setup.go_with_rpc_server ~common ~config (fun () ->
-      build_generic_tool_directly common package_name)
+      let open Fiber.O in
+      let* () = build_generic_tool_directly common package_name in
+      (* Get the version after building *)
+      let+ versions = Tool_lock.get_locked_versions package_name |> Memo.run in
+      select_locked_version package_name ~versions)
 ;;
 
-let run_generic_tool workspace_root package_name ~args =
-  let exe_name = Package_name.to_string package_name in
-  let exe_path_string = Path.to_string (generic_tool_exe_path package_name) in
+let run_generic_tool workspace_root package_name ~version ~args =
+  (* Discover the executable from the install cookie *)
+  let exe_name = Tool_build.select_executable ~package_name ~version ~executable_opt:None in
+  let exe_path = Tool_build.exe_path ~package_name ~version ~executable:exe_name in
+  let exe_path_string = Path.to_string (Path.build exe_path) in
   Console.print_user_message
     (Dune_rules.Pkg_build_progress.format_user_message
        ~verb:"Running"
@@ -262,8 +316,8 @@ let run_generic_tool workspace_root package_name ~args =
 ;;
 
 let lock_build_and_run_generic_tool ~common ~config builder package_name ~args =
-  lock_and_build_generic_tool ~common ~config builder package_name;
-  run_generic_tool (Common.root common) package_name ~args
+  let version = lock_and_build_generic_tool ~common ~config builder package_name in
+  run_generic_tool (Common.root common) package_name ~version ~args
 ;;
 
 (** Generic exec term for any package (used as default in group) *)
@@ -287,19 +341,6 @@ let generic_exec_command =
     Cmd.info "exec" ~doc
   in
   Cmd.v info generic_exec_term
-;;
-
-(** Lock a generic tool (no build) *)
-let lock_generic_tool ~common ~config package_name =
-  let open Fiber.O in
-  Scheduler_setup.go_with_rpc_server ~common ~config (fun () ->
-    let+ () = Lock_tool.lock_tool package_name |> Memo.run in
-    Console.print_user_message
-      (User_message.make
-         [ Pp.textf "Locked %s. Run 'dune tools run %s' to build and execute."
-             (Package_name.to_string package_name)
-             (Package_name.to_string package_name)
-         ]))
 ;;
 
 (** Lock a generic tool at a specific version (no build) *)
@@ -330,7 +371,7 @@ let generic_lock_term =
   and+ package =
     Arg.(required & pos 0 (some string) None (info [] ~docv:"PACKAGE" ~doc:(Some "The opam package name to lock")))
   and+ version =
-    Arg.(value & opt (some string) None (info [ "version" ] ~docv:"VERSION" ~doc:"Version constraint (e.g., 0.26.2)"))
+    Arg.(value & opt (some string) None (info [ "ver" ] ~docv:"VERSION" ~doc:(Some "Version constraint (e.g., 0.26.2)")))
   in
   let common, config = Common.init builder in
   let package_name = Package_name.of_string package in
@@ -345,6 +386,32 @@ let generic_lock_command =
     Cmd.info "lock" ~doc
   in
   Cmd.v info generic_lock_term
+;;
+
+(** Synchronously scan for locked versions of a tool.
+    Used by "which" command which doesn't have Fiber/Memo context. *)
+let scan_locked_versions_sync package_name =
+  (* Compute the base path for this tool's versions *)
+  let external_root =
+    Path.Build.root |> Path.build |> Path.to_absolute_filename |> Path.External.of_string
+  in
+  let tools_lock_base = Path.External.relative external_root ".tools.lock" in
+  let package_dir =
+    Path.External.relative tools_lock_base (Package_name.to_string package_name)
+  in
+  let base = Path.external_ package_dir in
+  if not (Path.exists base)
+  then []
+  else
+    match Path.readdir_unsorted base with
+    | Error _ -> []
+    | Ok entries ->
+      List.filter_map entries ~f:(fun version_str ->
+        let version_path = Path.relative base version_str in
+        let lock_dune = Path.relative version_path "lock.dune" in
+        if Path.exists lock_dune
+        then Some (Package_version.of_string version_str)
+        else None)
 ;;
 
 (** Generic which term for any package (used as default in group) *)
@@ -362,10 +429,48 @@ let generic_which_term =
   in
   let _ : Common.t * Dune_config_file.Dune_config.t = Common.init builder in
   let package_name = Package_name.of_string package in
-  let exe_path = generic_tool_exe_path package_name in
-  if allow_not_installed || Path.exists exe_path
-  then print_endline (Path.to_string exe_path)
-  else User_error.raise [ Pp.textf "%s is not installed as a tool" package ]
+  let versions = scan_locked_versions_sync package_name in
+  match versions with
+  | [] ->
+    if allow_not_installed
+    then (
+      (* No version locked - print hypothetical bin directory *)
+      let hypothetical_version = Package_version.of_string "0.0.0" in
+      let bin_dir =
+        Tool_build.exe_path ~package_name ~version:hypothetical_version ~executable:""
+        |> Path.Build.parent_exn
+        |> Path.build
+      in
+      print_endline (Path.to_string bin_dir ^ "/<binary>"))
+    else User_error.raise [ Pp.textf "%s is not locked as a tool" package ]
+  | [ version ] ->
+    let cookie_path = generic_tool_cookie_path package_name ~version in
+    if Path.exists cookie_path
+    then (
+      (* Package is built - discover binary from cookie *)
+      let exe_path = generic_tool_exe_path package_name ~version in
+      print_endline (Path.to_string exe_path))
+    else if allow_not_installed
+    then (
+      (* Package not built yet - show bin directory *)
+      let bin_dir =
+        Tool_build.exe_path ~package_name ~version ~executable:""
+        |> Path.Build.parent_exn
+        |> Path.build
+      in
+      print_endline (Path.to_string bin_dir ^ "/<binary>"))
+    else User_error.raise [ Pp.textf "%s is not installed as a tool" package ]
+  | _ :: _ :: _ as all_versions ->
+    let version_strs =
+      List.map all_versions ~f:(fun v -> Package_version.to_string v)
+    in
+    User_error.raise
+      [ Pp.textf
+          "Multiple versions of %S are locked: %s"
+          package
+          (String.concat ~sep:", " version_strs)
+      ; Pp.text "Specify which version with --ver."
+      ]
 ;;
 
 (** Generic which command for any package *)

@@ -20,21 +20,23 @@ This document outlines the plan to overhaul dune's developer tools system to sup
 ### Working ✅
 
 1. **Tool stanza parsing**: `(tool (package ocamlformat))` works in dune-workspace
-2. **CLI commands**: `dune tools lock <pkg>`, `dune tools run <pkg>`, `dune tools path <pkg>`
-3. **Lock directory creation**: `.tools.lock/<package>/` created correctly
+2. **CLI commands**: `dune tools lock <pkg>`, `dune tools run <pkg>`, `dune tools which <pkg>`
+3. **Versioned lock directories**: `.tools.lock/<package>/<version>/` structure implemented
 4. **Compiler detection**: System OCaml version detected via `Sys_vars.poll.sys_ocaml_version`
 5. **Fs_memo tracking**: Lock directory existence tracked properly for memo invalidation
 6. **Checksum collection**: Tool lock dirs included in fetch rules checksum map
 7. **`.pkg/` rules always generated**: No longer gated by `lock_dir_active`
+8. **System OCaml preference**: Requires `ocaml-system` when system OCaml is available
+9. **Build system isolation**: `compiler_package_opt()` reads from disk directly to avoid triggering builds
+10. **Version selection**: 0 versions → error, 1 version → auto-select, N versions → error
 
 ### In Progress 🔄
 
-1. **System OCaml preference**: Changed to require `ocaml-system` directly instead of `ocaml`
-2. **Build system isolation**: `compiler_package_opt()` now reads from disk directly to avoid triggering builds
+1. **Testing**: Need to test end-to-end tool locking and building
 
 ### Blocked/Issues 🔴
 
-1. **Internal error on lock**: "Unexpected build progress state" when calling lock - may be related to how memo/fiber interact with the scheduler
+1. **Internal error on lock**: "Unexpected build progress state" when calling lock - may be related to how memo/fiber interact with the scheduler (needs investigation)
 
 ---
 
@@ -159,9 +161,9 @@ dune tools install odoc
 2. **No project lock dir, system OCaml available**: Require `ocaml-system` at system version
 3. **Neither**: No compiler constraints (solver picks freely)
 
-### Multiple Versions
+### Multiple Versions ✅
 
-**Target**: Version in lock dir path.
+**Implemented**: Version in lock dir path.
 
 ```
 _build/.tools.lock/<package>/<version>/
@@ -169,16 +171,31 @@ _build/.tools.lock/ocamlformat/0.26.2/
 _build/.tools.lock/ocamlformat/0.27.0/
 ```
 
-**Implementation challenge**: The solver (`Pkg.Lock.solve`) takes the lock dir path upfront, but we don't know the version until after solving.
+**Implementation**:
+1. Solve to temp location (`.tools.lock/.solving/`)
+2. Read solved lock dir, extract tool version from packages
+3. Move to final versioned path using `Unix.rename`
 
-**Solution options**:
-1. **Two-phase**: Solve to temp location, read version from result, move to final path
-2. **Callback**: Pass a function `version -> path` to solver, called after resolution
-3. **Return-then-write**: Have solver return solution without writing, caller writes to versioned path
+**Files updated for versioned paths**:
+- `lock_tool.ml:solve` - solves to temp, moves to versioned path
+- `lock_dir.ml` - `tool_external_lock_dir` and `tool_lock_dir` require `~version`
+- `lock_dir.ml` - `tool_locked_versions` scans for all versions
+- `pkg_rules.ml` - `Package_universe.Tool` includes version, rule generation handles versioned paths
+- `fetch_rules.ml` - checksum collection scans versioned structure
+- `lock_rules.ml` - copy rules iterate over all package/version pairs
+- `tool_lock.ml` - updated for versioned external/build paths
+- `tool_build.ml` - install paths include version
+- `tool_resolution.ml` - resolves version (0→error, 1→use it, N→error)
+- `tools_common.ml` - CLI commands handle versioned paths
 
-**Current implementation**: One version per package (`_build/.tools.lock/<package>/`). Marked as TODO.
+**Run command logic**:
+```
+If 0 versions locked → error
+If 1 version locked → use it automatically
+If N versions locked → error (user must specify --version)
+```
 
-**CLI support added**: `dune tools lock <pkg> --version <ver>` (constraint passed to solver)
+**CLI**: `dune tools lock <pkg> --ver <version>` passes constraint to solver
 
 ### Binary Discovery
 
@@ -212,19 +229,25 @@ The `(executable ...)` field in `(tool)` stanza provides a default when the pack
    - May need different scheduler invocation for lock-only operation
    - Compare with how `dune pkg lock` is invoked
 
-2. **Test tool building end-to-end**: Once lock works, verify dependencies build correctly
+2. **Test tool building end-to-end**: Verify dependencies build correctly with versioned paths
+
+3. **Binary discovery**: Implement auto-detection of available binaries after build
+   - Single binary → use automatically
+   - Multiple binaries → require `--bin <name>` flag
 
 ### Medium Priority
 
-3. **Migration from dev tools**: Helper to migrate `.dev-tools.locks/` to `.tools.lock/`
+4. **Migration from dev tools**: Helper to migrate `.dev-tools.locks/` to `.tools.lock/`
 
-4. **Test compiler matching**: Verify tools work when project has lock dir with specific compiler
+5. **Test compiler matching**: Verify tools work when project has lock dir with specific compiler
+
+6. **--version flag for run**: Allow `dune tools run <pkg> --version <ver>` when multiple versions locked
 
 ### Low Priority
 
-5. **Performance**: Consider caching tool builds across projects
+7. **Performance**: Consider caching tool builds across projects
 
-6. **Documentation**: User-facing docs for `(tool)` stanza
+8. **Documentation**: User-facing docs for `(tool)` stanza
 
 ---
 
