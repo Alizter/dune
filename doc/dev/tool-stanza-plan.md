@@ -29,10 +29,13 @@ This document outlines the plan to overhaul dune's developer tools system to sup
 8. **System OCaml preference**: Requires `ocaml-system` when system OCaml is available
 9. **Build system isolation**: `compiler_package_opt()` reads from disk directly to avoid triggering builds
 10. **Version selection**: 0 versions → error, 1 version → auto-select, N versions → error
+11. **Binary discovery**: Auto-detect binaries from install cookie's `Section.Bin`
+12. **Build dependency via cookie**: Depend on `target/cookie` to ensure package is built before accessing binaries
 
 ### In Progress 🔄
 
-1. **Testing**: Need to test end-to-end tool locking and building
+1. **Add `--bin` flag**: When multiple binaries exist, require explicit selection
+2. **End-to-end testing**: Verify full lock → build → run cycle works
 
 ### Blocked/Issues 🔴
 
@@ -124,6 +127,84 @@ val lock_tool : Package_name.t -> unit Memo.t
 val lock_tool_if_needed : Package_name.t -> unit Memo.t
 ```
 
+### 7. Directory Targets - Depend on Cookie, Not Files Inside
+
+**Problem**: Depending directly on `_build/default/.tools/<pkg>/<ver>/target/bin/<exe>` fails because it's inside a directory target. Dune's error: "This rule defines a directory target... but the rule's action didn't produce it".
+
+**Solution**: Depend on the install cookie (`target/cookie`) instead. The cookie is created when the package is fully installed, so depending on it ensures:
+1. The package is fully built
+2. All files in `target/` are available
+3. We can then read the cookie to discover available binaries
+
+```ocaml
+(* BAD - depends on file inside directory target *)
+let exe_path = Tool_build.exe_path ~package_name ~version ~executable in
+Action_builder.path (Path.build exe_path)
+
+(* GOOD - depend on cookie, then discover binaries *)
+let cookie_path = Tool_build.install_cookie ~package_name ~version in
+let+ () = Action_builder.path (Path.build cookie_path) in
+(* Now safe to read cookie and access files *)
+let exe = Tool_build.select_executable ~package_name ~version ~executable_opt:None in
+Tool_build.exe_path ~package_name ~version ~executable:exe
+```
+
+### 8. Binary Discovery from Install Cookie
+
+**Problem**: Package name doesn't always match binary name (e.g., `menhir` package installs `menhir` and potentially other binaries).
+
+**Solution**: After building, read installed binaries from the install cookie's `Section.Bin`:
+
+```ocaml
+let read_binaries_from_cookie ~package_name ~version =
+  let cookie_path = Path.build (install_cookie ~package_name ~version) in
+  let cookie = Pkg_rules.Install_cookie.load_exn cookie_path in
+  let files = Pkg_rules.Install_cookie.files cookie in
+  match Section.Map.find files Bin with
+  | None -> []
+  | Some paths -> List.map paths ~f:Path.basename
+
+let select_executable ~package_name ~version ~executable_opt =
+  let binaries = read_binaries_from_cookie ~package_name ~version in
+  match executable_opt, binaries with
+  | Some exe, _ -> exe                   (* Explicit choice *)
+  | None, [] -> error "no binaries"
+  | None, [ single ] -> single           (* Auto-select singleton *)
+  | None, multiple -> error "specify --bin"
+```
+
+### 9. Expose Install_cookie in pkg_rules.mli
+
+**Problem**: `Pkg_rules.Install_cookie` wasn't exposed, causing "Unbound module" errors.
+
+**Solution**: Add to `pkg_rules.mli`:
+
+```ocaml
+module Install_cookie : sig
+  type t
+  val load_exn : Path.t -> t
+  val files : t -> Path.t list Section.Map.t
+end
+```
+
+### 10. Path.rm_rf Requires Path.Build for Build Directory Paths
+
+**Problem**: `Path.rm_rf (Path.external_ some_path)` fails when the path is inside `_build/` because it's technically a build path, not an external path.
+
+**Solution**: For paths inside `_build/`, construct as `Path.Build` then convert:
+
+```ocaml
+(* BAD - external path for _build/ directory *)
+let final_path = Path.External.relative external_root ".tools.lock/..." in
+Path.rm_rf (Path.external_ final_path)
+
+(* GOOD - use Path.Build for _build/ paths *)
+let final_build_path =
+  Path.Build.L.relative Path.Build.root [ ".tools.lock"; package; version ]
+in
+Path.rm_rf (Path.build final_build_path)
+```
+
 ---
 
 ## Architecture Decisions
@@ -197,21 +278,34 @@ If N versions locked → error (user must specify --version)
 
 **CLI**: `dune tools lock <pkg> --ver <version>` passes constraint to solver
 
-### Binary Discovery
+### Binary Discovery ✅
 
-Package names and binary names are not 1-to-1. After building a package, we discover available binaries:
+Package names and binary names are not 1-to-1. After building a package, we discover available binaries from the install cookie:
 
-1. **Single binary**: Use automatically (e.g., `ocamlformat` package → `ocamlformat` binary)
-2. **Multiple binaries**: Require `--bin <name>` flag to disambiguate
-3. **Binary location**: Check `<install_path>/bin/` for available executables
+**Implementation**:
+1. Depend on `target/cookie` to ensure package is built
+2. Read `Pkg_rules.Install_cookie.files cookie`
+3. Look up `Section.Bin` to get list of installed binaries
+4. Auto-select if single binary, error if multiple
 
+```ocaml
+(* In tool_build.ml *)
+let select_executable ~package_name ~version ~executable_opt =
+  let binaries = read_binaries_from_cookie ~package_name ~version in
+  match executable_opt, binaries with
+  | Some exe, _ -> exe
+  | None, [] -> error "no binaries"
+  | None, [ single ] -> single
+  | None, multiple -> error "specify --bin"
+```
+
+**CLI behavior**:
 ```bash
 # Single binary - works automatically
 dune tools run ocamlformat
 
-# Multiple binaries - need to specify
+# Multiple binaries - need to specify (TODO: add --bin flag)
 dune tools run menhir --bin menhir
-dune tools run menhir --bin menhirLib  # error: not a binary
 
 # Stanza can specify default
 (tool (package menhir) (executable menhir))
@@ -229,19 +323,24 @@ The `(executable ...)` field in `(tool)` stanza provides a default when the pack
    - May need different scheduler invocation for lock-only operation
    - Compare with how `dune pkg lock` is invoked
 
-2. **Test tool building end-to-end**: Verify dependencies build correctly with versioned paths
+2. **Add `--bin <name>` flag**: For packages with multiple binaries, allow explicit selection
+   - Add to `dune tools run` and `dune tools which` commands
+   - Integrate with `Tool_build.select_executable`
 
-3. **Binary discovery**: Implement auto-detection of available binaries after build
-   - Single binary → use automatically
-   - Multiple binaries → require `--bin <name>` flag
+3. **End-to-end testing**: Create cram tests for:
+   - `dune tools lock <pkg>` → creates versioned lock dir
+   - `dune tools run <pkg>` → builds and runs
+   - `dune tools which <pkg>` → shows path after build
+   - Multiple versions coexisting
+   - Binary discovery (single and multiple)
 
 ### Medium Priority
 
-4. **Migration from dev tools**: Helper to migrate `.dev-tools.locks/` to `.tools.lock/`
+4. **`--ver` flag for run**: Allow `dune tools run <pkg> --ver <ver>` when multiple versions locked
 
-5. **Test compiler matching**: Verify tools work when project has lock dir with specific compiler
+5. **Migration from dev tools**: Helper to migrate `.dev-tools.locks/` to `.tools.lock/`
 
-6. **--version flag for run**: Allow `dune tools run <pkg> --version <ver>` when multiple versions locked
+6. **Test compiler matching**: Verify tools work when project has lock dir with specific compiler
 
 ### Low Priority
 
@@ -257,29 +356,44 @@ The `(executable ...)` field in `(tool)` stanza provides a default when the pack
 
 | File | Changes |
 |------|---------|
-| `bin/lock_tool.ml` | Simplified locking, system OCaml detection, avoid build triggers |
+| `bin/lock_tool.ml` | Versioned solve (temp→final), system OCaml detection, avoid build triggers |
 | `bin/lock_tool.mli` | Added `lock_tool_if_needed` |
-| `bin/tools/tools_common.ml` | CLI terms, use `lock_tool_if_needed` for run |
+| `bin/tools/tools_common.ml` | CLI with version handling, cookie-based build targets, binary discovery |
 | `bin/tools/group.ml` | Simplified CLI (removed `add`, kept `lock`) |
-| `src/dune_rules/pkg_rules.ml` | Always generate `.pkg/` rules, tools-only DB |
-| `src/dune_rules/fetch_rules.ml` | Include tool lock dirs in checksum collection |
-| `src/dune_rules/lock_dir.ml` | Use `Fs_memo` instead of `Path.Untracked` |
+| `src/dune_rules/pkg_rules.ml` | `Package_universe.Tool` with version, `Install_cookie.files` exposed |
+| `src/dune_rules/pkg_rules.mli` | Exposed `Install_cookie` module with `files` accessor |
+| `src/dune_rules/fetch_rules.ml` | Scan versioned tool lock dirs for checksums |
+| `src/dune_rules/lock_dir.ml` | Versioned paths, `tool_locked_versions` scanner |
+| `src/dune_rules/lock_dir.mli` | Updated signatures for versioned paths |
+| `src/dune_rules/lock_rules.ml` | Copy rules iterate over package/version pairs |
 
 ### New Modules
 
 | File | Purpose |
 |------|---------|
 | `src/source/tool_stanza.ml` | `(tool)` stanza parsing |
-| `src/dune_rules/tool_lock.ml` | Lock directory management |
+| `src/dune_rules/tool_lock.ml` | Lock directory management with version support |
 | `src/dune_rules/tool_compiler.ml` | Compiler detection |
-| `src/dune_rules/tool_build.ml` | Build paths and environment |
-| `src/dune_rules/tool_resolution.ml` | Unified resolution |
+| `src/dune_rules/tool_build.ml` | Versioned build paths, cookie reading, binary selection |
+| `src/dune_rules/tool_resolution.ml` | Unified resolution with version selection |
 
 ---
 
 ## Next Steps
 
-1. Debug the internal error when running `dune tools lock`
-2. Compare invocation pattern with `dune pkg lock`
-3. Once locking works, test full build cycle
-4. Add cram tests for tool stanza functionality
+1. **Add `--bin` flag to CLI**: Allow explicit binary selection for packages with multiple executables
+   - Add to `generic_exec_term` and `generic_which_term` in `tools_common.ml`
+   - Thread through to `Tool_build.select_executable`
+
+2. **Create cram tests**: Start with simple cases
+   - Lock a tool: `dune tools lock hello`
+   - Run a tool: `dune tools run hello`
+   - Which a tool: `dune tools which hello`
+
+3. **Debug internal error on lock**: Compare with `dune pkg lock` invocation
+   - The error "Unexpected build progress state" suggests scheduler issue
+   - May need to avoid mixing fiber/memo with direct scheduler calls
+
+4. **Integrate with format_rules**: Use `Tool_resolution` for ocamlformat
+   - Replace dual-path (locked/unlocked) logic with unified resolution
+   - Test that `dune fmt` works with tool-locked ocamlformat
