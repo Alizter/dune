@@ -8,7 +8,7 @@ the Dune codebase.
 **Most Common Commands:**
 ```bash
 dune build @check          # Quick build (recommended for development)
-dune runtest dir/           # Run tests in specific directory
+dune runtest dir/          # Run tests in specific directory
 dune fmt                   # Auto-format code (always run before committing)
 dune promote               # Accept test output changes (ask user first)
 make dev                   # Full build (bootstraps automatically if needed)
@@ -39,17 +39,50 @@ Dune is a self-hosting OCaml build system that uses itself to build itself.
 - `bin` - dune's command line interface
 - `boot` - bootstrap mechanism for building dune itself
 - `doc` - user documentation
-- `otherlibs` - public libraries (dune-configurator, dune-build-info, etc.)
-- `src` - the majority of the source code
-  - `src/dune_rules` - build rule generation (main logic)
-  - `src/dune_engine` - incremental build engine
-  - `src/dune_lang` - configuration file parser
-  - `src/dune_pkg` - package management
-  - `src/fiber` - async/concurrency library
-  - `src/stdune` - dune's standard library
-  - `src/dune_tui` - terminal UI components
-- `test` - dune's test suite (`.t` files are cram tests)
-- `vendor` - 3rd party code pulled into dune
+- `otherlibs` - public libraries
+- `src` - internal libraries (see below)
+- `test` - test suite
+  - `test/blackbox-tests/test-cases` - cram tests (`.t` files)
+  - `test/expect-tests` - expect tests (ppx_expect)
+  - `test/unit-tests` - unit tests
+- `vendor` - vendored third-party code
+
+**Key `src/` Libraries:**
+- `dune_rules` - build rule generation (main logic)
+- `dune_engine` - action execution and build system core
+- `dune_lang` - dune file parsing and project configuration
+- `dune_pkg` - package management and lock files
+- `dune_scheduler` - process scheduling and file watching
+- `dune_cache` - shared build cache
+- `dune_trace` - tracing and profiling (writes to `_build/trace.csexp`)
+- `fiber` - structured concurrency
+- `memo` - incremental memoized computations
+- `dune_console` - console output and user messages
+- `dune_sexp` - s-expression parsing
+- `dune_vcs` - git/hg integration
+- `dune_findlib` - findlib/META file support
+
+**Key `otherlibs/` Libraries (public):**
+- `dyn` - dynamic value representation for debug serialization
+- `dune-build-info` - embed version info in executables
+- `dune-configurator` - discover C compiler/library configuration
+- `dune-site` - access installation paths at runtime
+- `dune-rpc` - RPC protocol for tooling integration
+
+**`stdune` - Dune's Standard Library:**
+Use instead of OCaml's stdlib. Provides enhanced versions of common modules:
+- Collections: `List`, `Array`, `Map`, `Set`, `Hashtbl`, `Table`, `Queue`,
+  `Seq`, `Nonempty_list`, `Appendable_list`
+- Types: `String`, `Option`, `Result`, `Either`, `Or_exn`, `Int`, `Float`,
+  `Bool`, `Char`, `Bytes`, `Tuple`
+- Errors: `Code_error` (internal), `User_error`, `User_message`, `User_warning`,
+  `Exn`, `Exn_with_backtrace`
+- Filesystem: `Path`, `Fpath`, `Filename`, `Io`, `Temp`, `Readdir`, `Flock`
+- Environment: `Env`, `Proc`, `Pid`, `Platform`, `Signal`, `Sys`
+- Printing: `Pp`, `Loc`, `Ansi_color`, `Format`, `Json`, `Sexp`
+- Interfaces: `Monad`, `Applicative`, `Comparable`, `Monoid`, `Staged`
+- Utilities: `Fdecl` (forward decls), `Univ_map`, `Id`, `State`, `Predicate`,
+  `Top_closure`, `Time`, `Log`, `Debug`, `Metrics`
 
 ## Development Workflow
 
@@ -85,9 +118,9 @@ or `make dev`. Bootstrap is only needed for the specific circumstances above.
 
 ### Test Commands
 ```bash
-dune runtest dir/           # Run tests in specific directory
-dune runtest dir/test.t     # Run specific .t test (cram test)
-dune runtest                # Run all tests (567+ tests, very slow)
+dune runtest dir/              # Run tests in a directory
+dune runtest dir/test.t        # Run a cram test
+dune runtest dir/test.ml       # Run an inline or expect test
 ```
 
 **Output Handling:** Dune is generally silent when building and only outputs
