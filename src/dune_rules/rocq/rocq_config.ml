@@ -222,7 +222,7 @@ let impl_config bin =
             ~output_limit:Execution_parameters.Action_output_limit.default)
        Return
        bin
-       [ "--config" ]
+       [ "compile"; "--config" ]
 ;;
 
 let config_memo = Memo.create "rocq-config" ~input:(module Path) impl_config
