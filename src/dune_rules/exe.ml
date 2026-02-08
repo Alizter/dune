@@ -395,7 +395,12 @@ let build_and_link_many
   let* () = Module_compilation.build_all cctx in
   let* () =
     Memo.when_ (Compilation_context.bin_annot cctx) (fun () ->
-      Ocaml_index.cctx_rules cctx)
+      let entry_modules =
+        let modules = Compilation_context.modules cctx in
+        List.filter_map programs ~f:(fun { Program.main_module_name; _ } ->
+          Modules.With_vlib.find modules main_module_name)
+      in
+      Ocaml_index.cctx_rules ~entry_modules cctx)
   in
   link_many
     ?link_args

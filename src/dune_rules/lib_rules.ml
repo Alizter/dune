@@ -596,7 +596,7 @@ let library_rules
   let for_ = Compilation_context.for_ cctx in
   let+ () =
     Memo.when_ (Compilation_context.bin_annot cctx) (fun () ->
-      Ocaml_index.cctx_rules cctx)
+      Ocaml_index.cctx_rules ~entry_modules:[] cctx)
   and+ () =
     Memo.when_
       (not (Library.is_virtual lib))

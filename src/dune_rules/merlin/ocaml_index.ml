@@ -33,7 +33,7 @@ let index_path_in_obj_dir obj_dir =
   Path.Build.relative dir index_file_name
 ;;
 
-let cctx_rules cctx =
+let cctx_rules ~entry_modules cctx =
   let for_ = Compilation_context.for_ cctx in
   (* Indexing is performed by the external binary [ocaml-index] which performs
      full shape reduction to compute the actual definition of all the elements in
@@ -85,12 +85,29 @@ let cctx_rules cctx =
       |> Context_name.build_dir
       |> Path.build
     in
-    (* Indexation also depends on the current stanza's modules *)
+    (* Indexation depends on the current stanza's modules.
+       When entry_modules is non-empty (for executables), we only index modules
+       reachable from those entry points to avoid trying to compile modules that
+       may have incompatible library dependencies (see issue #13566).
+       When entry_modules is empty (for libraries), we index all user-written modules. *)
     let modules_deps =
       Action_builder.memoize "index-module-deps"
       @@
       let open Action_builder.O in
-      let+ () = Action_builder.return () in
+      let+ modules_to_index =
+        match entry_modules with
+        | _ :: _ ->
+          (* For executables: compute modules reachable from entry points *)
+          Dep_graph.top_closed_implementations
+            (Compilation_context.dep_graphs cctx).impl
+            entry_modules
+        | [] ->
+          (* For libraries: use all user-written modules *)
+          let+ () = Action_builder.return () in
+          Compilation_context.modules cctx
+          |> Modules.With_vlib.drop_vlib
+          |> Modules.fold_user_written ~init:[] ~f:(fun m acc -> m :: acc)
+      in
       let cm_kind =
         match for_ with
         | Ocaml -> Lib_mode.Cm_kind.(Ocaml Cmi)
@@ -98,16 +115,16 @@ let cctx_rules cctx =
       in
       (* We only index occurrences in user-written modules *)
       let paths =
-        Compilation_context.modules cctx
-        |> Modules.With_vlib.drop_vlib
-        |> Modules.fold_user_written ~init:[] ~f:(fun module_ acc ->
-          let cmts =
-            [ Ml_kind.Intf; Impl ]
-            |> List.filter_map ~f:(fun ml_kind ->
-              Obj_dir.Module.cmt_file obj_dir ~ml_kind ~cm_kind module_
-              |> Option.map ~f:Path.build)
-          in
-          List.rev_append cmts acc)
+        List.filter_map modules_to_index ~f:(fun module_ ->
+          if not (Modules.is_user_written module_)
+          then None
+          else
+            Some
+              ([ Ml_kind.Intf; Impl ]
+               |> List.filter_map ~f:(fun ml_kind ->
+                 Obj_dir.Module.cmt_file obj_dir ~ml_kind ~cm_kind module_
+                 |> Option.map ~f:Path.build)))
+        |> List.concat
       in
       Command.Args.Deps paths
     in

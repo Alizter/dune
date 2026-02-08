@@ -10,10 +10,18 @@ open Import
       modules in that cctx in the corresponding obj_dir.
     - then we aggregate all these separate indexes into a unique one. *)
 
-(** [cctx_rules cctx] sets the rules needed to generate the indexes for every
-    module in the compilation context [cctx] and aggregate them in a
-    [cctx.uideps] index covering the whole compilation context. *)
-val cctx_rules : Compilation_context.t -> unit Memo.t
+(** [cctx_rules ~entry_modules cctx] sets the rules needed to generate the
+    indexes for every module in the compilation context [cctx] and aggregate
+    them in a [cctx.uideps] index covering the whole compilation context.
+
+    For executables, [entry_modules] should be the main modules of each
+    executable in the stanza. Only modules reachable from these entry points
+    will be indexed, avoiding compilation errors when overlapping executables
+    have different library dependencies (see issue #13566).
+
+    For libraries and melange, [entry_modules] should be empty to index all
+    user-written modules. *)
+val cctx_rules : entry_modules:Module.t list -> Compilation_context.t -> unit Memo.t
 
 (** [context_indexes] lists all the available cctx.ocaml-index files in the
     given context *)
