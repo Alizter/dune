@@ -474,7 +474,7 @@ end = struct
   ;;
 
   let execute_rule_impl ~rule_kind rule =
-    let { Rule.id = _; targets; mode; action; info = _; loc; refinement = _ } = rule in
+    let { Rule.id = _; targets; mode; action; info = _; loc; refinement } = rule in
     (* We run [State.start_rule_exn ()] entirely for its side effect, so one
        might be tempted to use [Memo.of_non_reproducible_fiber] here but that is
        wrong, because that would force us to rerun [execute_rule_impl] on every
@@ -654,6 +654,43 @@ end = struct
               in
               Fiber.return (produced_targets, dynamic_deps_stages)
           in
+          (* Step VI. Execute refinement action if present and compute refined deps. *)
+          let* refined =
+            match refinement with
+            | Rule.Refinement.No_refinement -> Fiber.return None
+            | Rule.Refinement.Action { action = refine_action; output; dir; env } ->
+              let context = Build_context.of_build_path dir in
+              let root =
+                match context with
+                | None -> Path.Build.root
+                | Some context -> context.build_dir
+              in
+              let input =
+                { Action_exec.root = Path.build root
+                ; context
+                ; env
+                ; targets = None
+                ; rule_loc = loc
+                ; execution_parameters
+                ; action = refine_action
+                }
+              in
+              let* result =
+                Action_exec.exec input ~build_deps:(fun deps ->
+                  Memo.run (build_deps deps))
+              in
+              let* (_ : Action_exec.Exec_result.ok) =
+                Action_exec.Exec_result.ok_exn result
+              in
+              (* Read refined deps from output file (one path per line) *)
+              let paths =
+                Io.lines_of_file (Path.build output) |> List.map ~f:Path.of_string
+              in
+              let deps = Dep.Set.of_files paths in
+              let+ facts = Memo.run (build_deps deps) in
+              let digest = Dep.Facts.digest facts ~env:action.env in
+              Some { Rule_cache.Workspace_local.Refined.deps; digest }
+          in
           (* We do not include target names into [targets_digest] because they
              are already included into the rule digest. *)
           Rule_cache.Workspace_local.store
@@ -662,7 +699,7 @@ end = struct
             ~dynamic_deps_stages
             ~targets_digest:(Targets.Produced.digest produced_targets)
             ~action_digest
-            ~refined:None;
+            ~refined;
           Fiber.return produced_targets
       in
       let* () =
