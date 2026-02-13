@@ -158,3 +158,24 @@ C's .cmx and .cmo SHOULD be rebuilt since the source changed:
   _build/default/lib2/.lib2.objs/native/lib2__C.o
   _build/default/lib2/.lib2.objs/byte/lib2__C.cmo
   _build/default/lib2/.lib2.objs/byte/lib2__C.cmt
+
+Now test the critical case: changing A (which lib2 DOES use).
+C should be rebuilt because it actually reads lib1__A.cmi:
+
+  $ cat > lib1/a.mli << EOF
+  > val x : int
+  > val x2 : int
+  > EOF
+
+  $ cat > lib1/a.ml << EOF
+  > let x = 1
+  > let x2 = 2
+  > EOF
+
+  $ dune build
+
+BUG: C is NOT rebuilt even though A.cmi changed and C uses A.
+This is because cross-library .cmi files are not in the refined deps mapping:
+
+  $ show_built | grep lib2__C
+  [1]
