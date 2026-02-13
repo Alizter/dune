@@ -40,3 +40,6 @@ val can_go_in_shared_cache_default : bool ref
 
 (** Command to use to diff files *)
 val diff_command : string option ref
+
+(** Enable refined dependency tracking (experimental) *)
+val refined_deps : bool ref
