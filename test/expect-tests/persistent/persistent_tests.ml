@@ -51,8 +51,8 @@ let%expect_test "persistent digests" =
     699a5c5c686662da218d0be3cb2f161c
     ---
 
-    INCREMENTAL-DB version 6
-    5d401c8cac2683cee736494457885f1f
+    INCREMENTAL-DB version 7
+    0102020abcfd44a3dc18b87c072b6e36
     ---
     |}]
 ;;

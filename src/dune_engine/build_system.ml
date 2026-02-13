@@ -660,7 +660,9 @@ end = struct
             ~head_target
             ~rule_digest
             ~dynamic_deps_stages
-            ~targets_digest:(Targets.Produced.digest produced_targets);
+            ~targets_digest:(Targets.Produced.digest produced_targets)
+            ~action_digest
+            ~refined:None;
           Fiber.return produced_targets
       in
       let* () =

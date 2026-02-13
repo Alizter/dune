@@ -2,6 +2,17 @@ open Import
 open Dune_cache.Hit_or_miss
 
 module Workspace_local = struct
+  module Refined = struct
+    type t =
+      { deps : Dep.Set.t
+      ; digest : Digest.t
+      }
+
+    let to_dyn { deps; digest } =
+      Dyn.Record [ "deps", Dep.Set.to_dyn deps; "digest", Digest.to_dyn digest ]
+    ;;
+  end
+
   (* Stores information for deciding if a rule needs to be re-executed. *)
   module Database = struct
     module Entry = struct
@@ -9,14 +20,20 @@ module Workspace_local = struct
         { rule_digest : Digest.t
         ; dynamic_deps_stages : (Dep.Set.t * Digest.t) list
         ; targets_digest : Digest.t
+        ; action_digest : Digest.t
+        ; refined : Refined.t option
         }
 
-      let to_dyn { rule_digest; dynamic_deps_stages; targets_digest } =
+      let to_dyn
+            { rule_digest; dynamic_deps_stages; targets_digest; action_digest; refined }
+        =
         Dyn.Record
           [ "rule_digest", Digest.to_dyn rule_digest
           ; ( "dynamic_deps_stages"
             , Dyn.list (Dyn.pair Dep.Set.to_dyn Digest.to_dyn) dynamic_deps_stages )
           ; "targets_digest", Digest.to_dyn targets_digest
+          ; "action_digest", Digest.to_dyn action_digest
+          ; "refined", Dyn.option Refined.to_dyn refined
           ]
       ;;
     end
@@ -31,7 +48,7 @@ module Workspace_local = struct
         type nonrec t = t
 
         let name = "INCREMENTAL-DB"
-        let version = 6
+        let version = 7
         let to_dyn = to_dyn
 
         let test_example () =
@@ -42,6 +59,8 @@ module Workspace_local = struct
             { Entry.rule_digest = Digest.string "foo"
             ; dynamic_deps_stages = [ Dep.Set.empty, Digest.string "bar" ]
             ; targets_digest = Digest.string "zzz"
+            ; action_digest = Digest.string "action"
+            ; refined = None
             };
           table
         ;;
@@ -87,10 +106,17 @@ module Workspace_local = struct
     ;;
   end
 
-  let store ~head_target ~rule_digest ~dynamic_deps_stages ~targets_digest =
+  let store
+        ~head_target
+        ~rule_digest
+        ~dynamic_deps_stages
+        ~targets_digest
+        ~action_digest
+        ~refined
+    =
     Database.set
       (Path.build head_target)
-      { rule_digest; dynamic_deps_stages; targets_digest }
+      { rule_digest; dynamic_deps_stages; targets_digest; action_digest; refined }
   ;;
 
   module Miss_reason = struct

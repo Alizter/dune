@@ -21,11 +21,20 @@ module Workspace_local : sig
     -> build_deps:(Dep.Set.t -> Dep.Facts.t Memo.t)
     -> Digest.t Targets.Produced.t option Fiber.t
 
+  module Refined : sig
+    type t =
+      { deps : Dep.Set.t
+      ; digest : Digest.t
+      }
+  end
+
   (** Add a new record to the rule database. *)
   val store
     :  head_target:Path.Build.t
     -> rule_digest:Digest.t
     -> dynamic_deps_stages:(Dep.Set.t * Digest.t) list
     -> targets_digest:Digest.t
+    -> action_digest:Digest.t
+    -> refined:Refined.t option
     -> unit
 end
