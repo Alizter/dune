@@ -269,17 +269,14 @@ end = struct
 
   (* The current version of the rule digest scheme. We should increment it when
      making any changes to the scheme, to avoid collisions. *)
-  let rule_digest_version = 23
+  let rule_digest_version = 24
 
-  let compute_rule_digest
-        (rule : Rule.t)
-        ~facts
-        ~action
-        ~sandbox_mode
-        ~execution_parameters
-    =
+  (* Compute the action digest - everything about the rule EXCEPT the dependencies.
+     This is used for refined deps checking: if the action hasn't changed, we can
+     check only the refined deps instead of all declared deps. *)
+  let compute_action_digest (rule : Rule.t) ~action ~sandbox_mode ~execution_parameters =
     let { Action.Full.action
-        ; env
+        ; env = _
         ; locks
         ; can_go_in_shared_cache
         ; sandbox = _ (* already taken into account in [sandbox_mode] *)
@@ -294,7 +291,6 @@ end = struct
     let trace =
       ( rule_digest_version (* Update when changing the rule digest scheme. *)
       , sandbox_mode
-      , Dep.Facts.digest facts ~env
       , target_paths rule.targets.files @ target_paths rule.targets.dirs
       , Action.for_shell action
       , can_go_in_shared_cache
@@ -305,6 +301,12 @@ end = struct
       , Execution_parameters.expand_aliases_in_sandbox execution_parameters )
     in
     Digest.generic trace
+  ;;
+
+  (* Compute the full rule digest - combines action digest with dependency facts.
+     This is the "coarse" digest used when refined deps are not available. *)
+  let compute_rule_digest ~action_digest ~facts ~env =
+    Digest.generic (action_digest, Dep.Facts.digest facts ~env)
   ;;
 
   let report_evaluated_rule_exn () =
@@ -545,9 +547,10 @@ end = struct
         let force_rerun = !Clflags.force && is_test in
         force_rerun || Dep.Map.has_universe facts
       in
-      let rule_digest =
-        compute_rule_digest rule ~facts ~action ~sandbox_mode ~execution_parameters
+      let action_digest =
+        compute_action_digest rule ~action ~sandbox_mode ~execution_parameters
       in
+      let rule_digest = compute_rule_digest ~action_digest ~facts ~env:action.env in
       let can_go_in_shared_cache =
         action.can_go_in_shared_cache
         && (not
