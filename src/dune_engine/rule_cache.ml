@@ -123,6 +123,8 @@ module Workspace_local = struct
     type t =
       | No_previous_record
       | Rule_changed of Digest.t * Digest.t
+      | Action_changed of Digest.t * Digest.t
+      | Refined_deps_changed
       | Targets_changed
       | Targets_missing
       | Dynamic_deps_changed
@@ -137,6 +139,12 @@ module Workspace_local = struct
           "rule or dependencies changed: %s -> %s"
           (Digest.to_string before)
           (Digest.to_string after)
+      | Action_changed (before, after) ->
+        sprintf
+          "action changed: %s -> %s"
+          (Digest.to_string before)
+          (Digest.to_string after)
+      | Refined_deps_changed -> "refined dependencies changed"
       | Targets_missing -> "target missing from build dir"
       | Targets_changed -> "target changed in build dir"
       | Always_rerun -> "not trying to use the cache"
@@ -163,59 +171,88 @@ module Workspace_local = struct
        | Error _ -> Miss Targets_missing)
   ;;
 
-  let lookup_impl ~rule_digest ~targets ~env ~build_deps =
+  let lookup_impl ~rule_digest ~action_digest ~targets ~env ~build_deps =
     (* [prev_trace] will be [None] if [head_target] was never built before. *)
     let head_target = Targets.Validated.head targets in
     let prev_trace = Database.get (Path.build head_target) in
-    let prev_trace_with_produced_targets =
+    (* Check if the rule/action has changed. If refined deps are available,
+       we only need to check action_digest (deps will be checked separately).
+       Otherwise, fall back to checking the full rule_digest. *)
+    let digest_check_result =
       match prev_trace with
       | None -> Miss Miss_reason.No_previous_record
       | Some prev_trace ->
-        (match Digest.equal prev_trace.rule_digest rule_digest with
-         | false -> Miss (Rule_changed (prev_trace.rule_digest, rule_digest))
-         | true ->
-           (* [compute_target_digests] returns a [Miss] if not all targets are
-              available in the workspace-local cache. *)
-           (match compute_target_digests targets with
-            | Miss reason -> Miss reason
-            | Hit produced_targets ->
-              (match
-                 Digest.equal
-                   prev_trace.targets_digest
-                   (Targets.Produced.digest produced_targets)
-               with
-               | true -> Hit (prev_trace, produced_targets)
-               | false -> Miss Targets_changed)))
+        (match prev_trace.refined with
+         | Some _ ->
+           (* Refined deps available: only check action_digest *)
+           if Digest.equal prev_trace.action_digest action_digest
+           then Hit prev_trace
+           else Miss (Action_changed (prev_trace.action_digest, action_digest))
+         | None ->
+           (* No refined deps: fall back to coarse rule_digest *)
+           if Digest.equal prev_trace.rule_digest rule_digest
+           then Hit prev_trace
+           else Miss (Rule_changed (prev_trace.rule_digest, rule_digest)))
     in
-    match prev_trace_with_produced_targets with
+    match digest_check_result with
     | Miss reason -> Fiber.return (Miss reason)
-    | Hit (prev_trace, produced_targets) ->
-      (* CR-someday aalekseyev: If there's a change at one of the last stages,
-         we still re-run all the previous stages, which is a bit of a waste. We
-         could remember what stage needs re-running and only re-run that (and
-         later stages). *)
-      let rec loop stages =
-        match stages with
-        | [] -> Fiber.return (Hit produced_targets)
-        | (deps, old_digest) :: rest ->
-          let open Fiber.O in
-          let* deps = Memo.run (build_deps deps) in
-          let new_digest = Dep.Facts.digest deps ~env in
-          (match Digest.equal old_digest new_digest with
-           | true -> loop rest
-           | false -> Fiber.return (Miss Miss_reason.Dynamic_deps_changed))
+    | Hit prev_trace ->
+      (* Check refined deps if available *)
+      let open Fiber.O in
+      let* refined_deps_ok =
+        match prev_trace.refined with
+        | None -> Fiber.return (Hit ())
+        | Some { deps; digest } ->
+          let* facts = Memo.run (build_deps deps) in
+          let new_digest = Dep.Facts.digest facts ~env in
+          if Digest.equal digest new_digest
+          then Fiber.return (Hit ())
+          else Fiber.return (Miss Miss_reason.Refined_deps_changed)
       in
-      loop prev_trace.dynamic_deps_stages
+      (match refined_deps_ok with
+       | Miss reason -> Fiber.return (Miss reason)
+       | Hit () ->
+         (* [compute_target_digests] returns a [Miss] if not all targets are
+            available in the workspace-local cache. *)
+         let prev_trace_with_produced_targets =
+           match compute_target_digests targets with
+           | Miss reason -> Miss reason
+           | Hit produced_targets ->
+             if
+               Digest.equal
+                 prev_trace.targets_digest
+                 (Targets.Produced.digest produced_targets)
+             then Hit (prev_trace, produced_targets)
+             else Miss Targets_changed
+         in
+         (match prev_trace_with_produced_targets with
+          | Miss reason -> Fiber.return (Miss reason)
+          | Hit (prev_trace, produced_targets) ->
+            (* CR-someday aalekseyev: If there's a change at one of the last stages,
+               we still re-run all the previous stages, which is a bit of a waste. We
+               could remember what stage needs re-running and only re-run that (and
+               later stages). *)
+            let rec loop stages =
+              match stages with
+              | [] -> Fiber.return (Hit produced_targets)
+              | (deps, old_digest) :: rest ->
+                let* deps = Memo.run (build_deps deps) in
+                let new_digest = Dep.Facts.digest deps ~env in
+                if Digest.equal old_digest new_digest
+                then loop rest
+                else Fiber.return (Miss Miss_reason.Dynamic_deps_changed)
+            in
+            loop prev_trace.dynamic_deps_stages))
   ;;
 
-  let lookup ~always_rerun ~rule_digest ~targets ~env ~build_deps
+  let lookup ~always_rerun ~rule_digest ~action_digest ~targets ~env ~build_deps
     : Digest.t Targets.Produced.t option Fiber.t
     =
     let open Fiber.O in
     let+ result =
       match always_rerun with
       | true -> Fiber.return (Miss Miss_reason.Always_rerun)
-      | false -> lookup_impl ~rule_digest ~targets ~env ~build_deps
+      | false -> lookup_impl ~rule_digest ~action_digest ~targets ~env ~build_deps
     in
     match result with
     | Hit result -> Some result

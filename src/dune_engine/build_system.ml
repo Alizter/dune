@@ -569,6 +569,7 @@ end = struct
         Rule_cache.Workspace_local.lookup
           ~always_rerun
           ~rule_digest
+          ~action_digest
           ~targets
           ~env:action.env
           ~build_deps

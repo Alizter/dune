@@ -16,6 +16,7 @@ module Workspace_local : sig
   val lookup
     :  always_rerun:bool
     -> rule_digest:Digest.t
+    -> action_digest:Digest.t
     -> targets:Targets.Validated.t
     -> env:Env.t
     -> build_deps:(Dep.Set.t -> Dep.Facts.t Memo.t)
