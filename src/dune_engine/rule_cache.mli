@@ -19,6 +19,7 @@ module Workspace_local : sig
     -> action_digest:Digest.t
     -> targets:Targets.Validated.t
     -> env:Env.t
+    -> facts:Dep.Facts.t
     -> build_deps:(Dep.Set.t -> Dep.Facts.t Memo.t)
     -> Digest.t Targets.Produced.t option Fiber.t
 

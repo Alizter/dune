@@ -154,3 +154,7 @@ let threaded_console_frames_per_second =
       | None -> Error (sprintf "could not parse %S as an integer" x))
     ~default:`Default
 ;;
+
+let refined_deps =
+  make ~name:"refined_deps" ~of_string:Toggle.of_string ~default:`Disabled
+;;

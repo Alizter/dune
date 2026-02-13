@@ -365,6 +365,51 @@ let build_cm
      Obj_dir.all_obj_dirs obj_dir ~mode
      |> List.concat_map ~f:(fun p -> [ Command.Args.A "-I"; Path (Path.build p) ])
    in
+   let refinement =
+     match Config.get Config.refined_deps with
+     | `Disabled -> None
+     | `Enabled ->
+       (* Skip alias and root modules - they have special compilation handling *)
+       (match Module.kind m with
+        | Alias _ | Root -> None
+        | _ ->
+          (match cm_kind with
+           | Ocaml Cmi | Ocaml Cmo | Ocaml Cmx ->
+             (match ocaml.ocamlobjinfo with
+              | Ok ocamlobjinfo_path ->
+                let modules =
+                  Compilation_context.modules cctx |> Modules.With_vlib.drop_vlib
+                in
+                let mapping =
+                  Modules.fold modules ~init:[] ~f:(fun m acc ->
+                    (* Filter out Alias modules - they depend on all other modules
+                       and would cause cycles if included in refined deps *)
+                    match Module.kind m with
+                    | Alias _ -> acc
+                    | _ ->
+                      (match Obj_dir.Module.cm_file obj_dir m ~kind:(Ocaml Cmi) with
+                       | Some cmi_path -> (Module.obj_name m, Path.build cmi_path) :: acc
+                       | None -> acc))
+                in
+                let refined_output =
+                  Path.Build.set_extension
+                    dst
+                    ~ext:(Filename.Extension.of_string_exn ".refined-deps")
+                in
+                let action =
+                  Refined_deps_action.action
+                    ~ocamlobjinfo:ocamlobjinfo_path
+                    ~input:(Path.build dst)
+                    ~source:src
+                    ~output:refined_output
+                    ~mapping
+                in
+                Some
+                  (Rule.Refinement.Action
+                     { action; output = refined_output; dir; env = Env.initial })
+              | Error _ -> None)
+           | _ -> None))
+   in
    Super_context.add_rule
      sctx
      ~dir:
@@ -374,6 +419,7 @@ let build_cm
         (* TODO DUNE4 get rid of the old behavior *)
         if dune_version >= (3, 7) then dir else Context.build_dir ctx)
      ?loc:(Compilation_context.loc cctx)
+     ?refinement
      (let open Action_builder.With_targets.O in
       Action_builder.with_no_targets other_cm_files
       >>> Command.run

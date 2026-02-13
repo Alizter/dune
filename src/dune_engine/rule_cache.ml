@@ -171,7 +171,7 @@ module Workspace_local = struct
        | Error _ -> Miss Targets_missing)
   ;;
 
-  let lookup_impl ~rule_digest ~action_digest ~targets ~env ~build_deps =
+  let lookup_impl ~rule_digest ~action_digest ~targets ~env ~facts ~build_deps =
     (* [prev_trace] will be [None] if [head_target] was never built before. *)
     let head_target = Targets.Validated.head targets in
     let prev_trace = Database.get (Path.build head_target) in
@@ -184,7 +184,8 @@ module Workspace_local = struct
       | Some prev_trace ->
         (match prev_trace.refined with
          | Some _ ->
-           (* Refined deps available: only check action_digest *)
+           (* Refined deps available: only check action_digest
+              (deps including source file will be checked separately below) *)
            if Digest.equal prev_trace.action_digest action_digest
            then Hit prev_trace
            else Miss (Action_changed (prev_trace.action_digest, action_digest))
@@ -197,21 +198,28 @@ module Workspace_local = struct
     match digest_check_result with
     | Miss reason -> Fiber.return (Miss reason)
     | Hit prev_trace ->
-      (* Check refined deps if available *)
-      let open Fiber.O in
-      let* refined_deps_ok =
+      (* Check refined deps if available.
+         We extract digests from the already-computed facts to avoid cycles. *)
+      let refined_deps_ok =
         match prev_trace.refined with
-        | None -> Fiber.return (Hit ())
+        | None -> Hit ()
         | Some { deps; digest } ->
-          let* facts = Memo.run (build_deps deps) in
-          let new_digest = Dep.Facts.digest facts ~env in
+          (* Filter facts to only the refined deps and compute digest *)
+          let refined_facts =
+            Dep.Set.fold deps ~init:Dep.Facts.empty ~f:(fun dep acc ->
+              match Dep.Map.find facts dep with
+              | Some fact -> Dep.Map.set acc dep fact
+              | None -> acc)
+          in
+          let new_digest = Dep.Facts.digest refined_facts ~env in
           if Digest.equal digest new_digest
-          then Fiber.return (Hit ())
-          else Fiber.return (Miss Miss_reason.Refined_deps_changed)
+          then Hit ()
+          else Miss Miss_reason.Refined_deps_changed
       in
       (match refined_deps_ok with
        | Miss reason -> Fiber.return (Miss reason)
        | Hit () ->
+         let open Fiber.O in
          (* [compute_target_digests] returns a [Miss] if not all targets are
             available in the workspace-local cache. *)
          let prev_trace_with_produced_targets =
@@ -245,14 +253,14 @@ module Workspace_local = struct
             loop prev_trace.dynamic_deps_stages))
   ;;
 
-  let lookup ~always_rerun ~rule_digest ~action_digest ~targets ~env ~build_deps
+  let lookup ~always_rerun ~rule_digest ~action_digest ~targets ~env ~facts ~build_deps
     : Digest.t Targets.Produced.t option Fiber.t
     =
     let open Fiber.O in
     let+ result =
       match always_rerun with
       | true -> Fiber.return (Miss Miss_reason.Always_rerun)
-      | false -> lookup_impl ~rule_digest ~action_digest ~targets ~env ~build_deps
+      | false -> lookup_impl ~rule_digest ~action_digest ~targets ~env ~facts ~build_deps
     in
     match result with
     | Hit result -> Some result

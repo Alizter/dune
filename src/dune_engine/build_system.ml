@@ -572,6 +572,7 @@ end = struct
           ~action_digest
           ~targets
           ~env:action.env
+          ~facts
           ~build_deps
         >>= function
         | Some produced_targets -> Fiber.return produced_targets
@@ -688,9 +689,15 @@ end = struct
                 Io.lines_of_file (Path.build output) |> List.map ~f:Path.of_string
               in
               let deps = Dep.Set.of_files paths in
-              let+ facts = Memo.run (build_deps deps) in
-              let digest = Dep.Facts.digest facts ~env:action.env in
-              Some { Rule_cache.Workspace_local.Refined.deps; digest }
+              (* Extract facts for refined deps from the already-computed facts *)
+              let refined_facts =
+                Dep.Set.fold deps ~init:Dep.Facts.empty ~f:(fun dep acc ->
+                  match Dep.Map.find facts dep with
+                  | Some fact -> Dep.Map.set acc dep fact
+                  | None -> acc)
+              in
+              let digest = Dep.Facts.digest refined_facts ~env:action.env in
+              Fiber.return (Some { Rule_cache.Workspace_local.Refined.deps; digest })
           in
           (* We do not include target names into [targets_digest] because they
              are already included into the rule digest. *)
