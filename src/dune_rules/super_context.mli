@@ -32,6 +32,7 @@ val add_rule
   :  t
   -> ?mode:Rule.Mode.t
   -> ?loc:Loc.t
+  -> ?refinement:Rule.Refinement.t
   -> dir:Path.Build.t
   -> Action.Full.t Action_builder.With_targets.t
   -> unit Memo.t
@@ -40,6 +41,7 @@ val add_rule_get_targets
   :  t
   -> ?mode:Rule.Mode.t
   -> ?loc:Loc.t
+  -> ?refinement:Rule.Refinement.t
   -> dir:Path.Build.t
   -> Action.Full.t Action_builder.With_targets.t
   -> Targets.Validated.t Memo.t
