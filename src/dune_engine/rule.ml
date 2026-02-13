@@ -47,6 +47,31 @@ module Mode = struct
     | Ignore_source_files
 end
 
+module Refinement = struct
+  type t =
+    | No_refinement
+    | Action of
+        { action : Action.t
+        ; output : Path.Build.t
+        ; dir : Path.Build.t
+        ; env : Env.t
+        }
+
+  let to_dyn = function
+    | No_refinement -> Dyn.variant "No_refinement" []
+    | Action { action; output; dir; env } ->
+      Dyn.variant
+        "Action"
+        [ Dyn.record
+            [ "action", Dyn.opaque action
+            ; "output", Path.Build.to_dyn output
+            ; "dir", Path.Build.to_dyn dir
+            ; "env", Env.to_dyn env
+            ]
+        ]
+  ;;
+end
+
 module Id = Id.Make ()
 
 module T = struct
@@ -57,19 +82,33 @@ module T = struct
     ; mode : Mode.t
     ; info : Info.t
     ; loc : Loc.t
+    ; refinement : Refinement.t
     }
 
   let compare a b = Id.compare a.id b.id
   let equal a b = Id.equal a.id b.id
   let hash t = Id.hash t.id
   let loc t = t.loc
-  let to_dyn t : Dyn.t = Record [ "id", Id.to_dyn t.id; "info", Info.to_dyn t.info ]
+
+  let to_dyn t : Dyn.t =
+    Record
+      [ "id", Id.to_dyn t.id
+      ; "info", Info.to_dyn t.info
+      ; "refinement", Refinement.to_dyn t.refinement
+      ]
+  ;;
 end
 
 include T
 include Comparable.Make (T)
 
-let make ?(mode = Mode.Standard) ?(info = Info.Internal) ~targets action =
+let make
+      ?(mode = Mode.Standard)
+      ?(info = Info.Internal)
+      ?(refinement = Refinement.No_refinement)
+      ~targets
+      action
+  =
   let action = Action_builder.memoize "Rule.make" action in
   let report_error ?(extra_pp = []) message =
     match info with
@@ -106,7 +145,7 @@ let make ?(mode = Mode.Standard) ?(info = Info.Internal) ~targets action =
            (Path.build (Path.Build.relative targets.root "_unknown_")))
     | Source_file_copy p -> Loc.in_file (Path.source p)
   in
-  { id = Id.gen (); targets; action; mode; info; loc }
+  { id = Id.gen (); targets; action; mode; info; loc; refinement }
 ;;
 
 let set_action t action =

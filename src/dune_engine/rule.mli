@@ -44,6 +44,20 @@ module Mode : sig
         .install files. *)
 end
 
+(** Specifies how to compute refined dependencies after rule execution. *)
+module Refinement : sig
+  type t =
+    | No_refinement
+    | Action of
+        { action : Action.t
+          (** Action to run that produces a file listing actual deps used *)
+        ; output : Path.Build.t
+          (** File where refined deps are written, one path per line *)
+        ; dir : Path.Build.t (** Directory to run the action in *)
+        ; env : Env.t (** Environment for the action *)
+        }
+end
+
 module Id : sig
   type t
 
@@ -59,6 +73,7 @@ type t = private
   ; mode : Mode.t
   ; info : Info.t
   ; loc : Loc.t
+  ; refinement : Refinement.t
   }
 
 include Comparable_intf.S with type key := t
@@ -72,6 +87,7 @@ val to_dyn : t -> Dyn.t
 val make
   :  ?mode:Mode.t
   -> ?info:Info.t
+  -> ?refinement:Refinement.t
   -> targets:Targets.t
   -> Action.Full.t Action_builder.t
   -> t
