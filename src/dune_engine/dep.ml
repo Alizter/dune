@@ -306,6 +306,20 @@ module Facts = struct
       | Alias facts -> if expand_aliases then Path.Set.union acc facts.files else acc)
   ;;
 
+  let filter_by_paths t ~paths:traced_paths =
+    Map.foldi t ~init:Map.empty ~f:(fun dep fact acc ->
+      let dominated =
+        match (fact : Fact.t) with
+        | Nothing -> false
+        | File (path, _) -> Path.Set.mem traced_paths path
+        | File_selector { facts; _ } ->
+          Path.Set.exists facts.files ~f:(Path.Set.mem traced_paths)
+        | Alias facts ->
+          Path.Set.exists facts.files ~f:(Path.Set.mem traced_paths)
+      in
+      if dominated then Map.set acc dep fact else acc)
+  ;;
+
   let group_paths_as_fact_files ts =
     let fact_files, paths =
       List.fold_left ts ~init:([], Path.Map.empty) ~f:(fun acc t ->

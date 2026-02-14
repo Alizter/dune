@@ -56,6 +56,9 @@ module Refinement : sig
         ; dir : Path.Build.t (** Directory to run the action in *)
         ; env : Env.t (** Environment for the action *)
         }
+    | Trace_syscalls
+    (** Trace file opens during action execution using seccomp-bpf.
+          Only available on Linux x86_64/aarch64. *)
 end
 
 module Id : sig

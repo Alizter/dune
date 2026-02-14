@@ -752,6 +752,20 @@ let spawn_thread ~name =
   Event.instant ~args ~name:"spawn_thread" now Thread
 ;;
 
+module Refinement = struct
+  let refined ~head ~actual_deps ~refined_deps ~traced_build =
+    let now = Time.now () in
+    let args =
+      [ "head", Arg.build_path head
+      ; "actual_deps", Arg.list (List.map actual_deps ~f:Arg.path)
+      ; "refined_deps", Arg.list (List.map refined_deps ~f:Arg.path)
+      ; "traced_build", Arg.list (List.map traced_build ~f:Arg.path)
+      ]
+    in
+    Event.instant ~args ~name:"refined" now Rules
+  ;;
+end
+
 let sandbox name ~start ~stop ~queued loc ~dir =
   let args =
     [ "loc", Arg.string (Loc.to_file_colon_line loc); "dir", Arg.build_path dir ]

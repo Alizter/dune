@@ -207,6 +207,15 @@ module Event : sig
       -> t
   end
 
+  module Refinement : sig
+    val refined
+      :  head:Path.Build.t
+      -> actual_deps:Path.t list
+      -> refined_deps:Path.t list
+      -> traced_build:Path.t list
+      -> t
+  end
+
   module Digest : sig
     val redigest
       :  path:Path.t

@@ -94,6 +94,9 @@ module Facts : sig
   (** Return all file paths, expanding aliases if [expand_aliases = true]. *)
   val paths : t -> expand_aliases:bool -> Path.Set.t
 
+  (** Filter facts to only include deps whose paths overlap with the given set. *)
+  val filter_by_paths : t -> paths:Path.Set.t -> t
+
   (** Create a single [Fact.Files.t] from all the paths contained in a list of
       fact maps. Does so while preserving as much sharing as possible with the
       original [Files.t]. *)

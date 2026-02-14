@@ -56,6 +56,7 @@ module Refinement = struct
         ; dir : Path.Build.t
         ; env : Env.t
         }
+    | Trace_syscalls
 
   let to_dyn = function
     | No_refinement -> Dyn.variant "No_refinement" []
@@ -69,6 +70,7 @@ module Refinement = struct
             ; "env", Env.to_dyn env
             ]
         ]
+    | Trace_syscalls -> Dyn.variant "Trace_syscalls" []
   ;;
 end
 

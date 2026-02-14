@@ -608,7 +608,7 @@ end = struct
                 ~file:remove_target_file
                 ~dir:remove_target_dir)
           in
-          let* produced_targets, dynamic_deps_stages =
+          let* produced_targets, dynamic_deps_stages, traced_paths =
             (* Step III. Try to restore artifacts from the shared cache. *)
             Dune_cache.Shared.lookup ~can_go_in_shared_cache ~rule_digest ~targets
             >>= function
@@ -620,7 +620,7 @@ end = struct
                  is precisely the reason why we don't store dynamic actions in
                  the shared cache. *)
               let dynamic_deps_stages = [] in
-              Fiber.return (produced_targets, dynamic_deps_stages)
+              Fiber.return (produced_targets, dynamic_deps_stages, Path.Set.empty)
             | None ->
               (* Step IV. Execute the build action. *)
               let* exec_result =
@@ -654,7 +654,8 @@ end = struct
                   ~f:(fun (deps, fact_map) ->
                     deps, Dep.Facts.digest fact_map ~env:action.env)
               in
-              Fiber.return (produced_targets, dynamic_deps_stages)
+              let traced_paths = exec_result.action_exec_result.traced_paths in
+              Fiber.return (produced_targets, dynamic_deps_stages, traced_paths)
           in
           (* Step VI. Execute refinement action if present and compute refined deps. *)
           let* refined =
@@ -698,6 +699,40 @@ end = struct
               in
               let digest = Dep.Facts.digest refined_facts ~env:action.env in
               Fiber.return (Some { Rule_cache.Workspace_local.Refined.deps; digest })
+            | Rule.Refinement.Trace_syscalls ->
+              (* Use traced paths from syscall tracing during action execution *)
+              let traced_paths_list = Path.Set.to_list traced_paths in
+              let actual_deps =
+                Dep.Facts.paths facts ~expand_aliases:false
+                |> Path.Set.to_list
+              in
+              (* Filter facts to only include deps whose paths were traced *)
+              let refined_facts = Dep.Facts.filter_by_paths facts ~paths:traced_paths in
+              let refined_deps =
+                Dep.Facts.paths refined_facts ~expand_aliases:false
+                |> Path.Set.to_list
+              in
+              (* Filter traced paths to only show build directory paths *)
+              let traced_build =
+                List.filter traced_paths_list ~f:(fun p ->
+                  match Path.as_in_build_dir p with
+                  | Some _ -> true
+                  | None -> false)
+              in
+              Dune_trace.emit Rules (fun () ->
+                Dune_trace.Event.Refinement.refined
+                  ~head:head_target
+                  ~actual_deps
+                  ~refined_deps
+                  ~traced_build);
+              if Path.Set.is_empty traced_paths
+              then Fiber.return None
+              else (
+                let deps = Dep.Map.foldi refined_facts ~init:Dep.Set.empty
+                    ~f:(fun dep _ acc -> Dep.Set.add acc dep)
+                in
+                let digest = Dep.Facts.digest refined_facts ~env:action.env in
+                Fiber.return (Some { Rule_cache.Workspace_local.Refined.deps; digest }))
           in
           (* We do not include target names into [targets_digest] because they
              are already included into the rule digest. *)

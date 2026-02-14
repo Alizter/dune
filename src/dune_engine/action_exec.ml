@@ -29,19 +29,32 @@ end
 
 module Produce = struct
   module State = struct
-    type t = { duration : Duration.t }
+    type t =
+      { duration : Duration.t
+      ; traced_paths : Path.Set.t
+      }
 
-    let empty = { duration = Duration.empty }
-    let combine x { duration } = { duration = Duration.combine x.duration duration }
+    let empty = { duration = Duration.empty; traced_paths = Path.Set.empty }
+
+    let combine x y =
+      { duration = Duration.combine x.duration y.duration
+      ; traced_paths = Path.Set.union x.traced_paths y.traced_paths
+      }
+    ;;
   end
 
   type 'a t = State.t -> ('a * State.t) Fiber.t
 
   let return : 'a. 'a -> 'a t = fun a state -> Fiber.return (a, state)
 
-  let incr_duration : Time.Span.t -> 'a t =
+  let incr_duration : Time.Span.t -> unit t =
     fun how_much state ->
-    Fiber.return ((), State.combine state { duration = Some how_much })
+    Fiber.return ((), State.combine state { State.empty with duration = Some how_much })
+  ;;
+
+  let add_traced_paths : Path.Set.t -> unit t =
+    fun paths state ->
+    Fiber.return ((), State.combine state { State.empty with traced_paths = paths })
   ;;
 
   let of_fiber (type a) (x : a Fiber.t) state : (a * State.t) Fiber.t =
@@ -126,6 +139,7 @@ module Exec_result = struct
   type ok =
     { dynamic_deps_stages : (Dep.Set.t * Dep.Facts.t) list
     ; duration : Time.Span.t option
+    ; traced_paths : Path.Set.t
     }
 
   type t = (ok, Error.t list) Result.t
@@ -141,24 +155,52 @@ end
 
 open Produce.O
 
-let exec_run ~(ectx : context) ~(eenv : env) prog args : _ Produce.t =
-  let* (res : (Proc.Times.t, int) result) =
-    Produce.of_fiber
-    @@ Process.run_with_times
-         ~display:!Clflags.display
-         (Accept eenv.exit_codes)
-         ~dir:eenv.working_dir
-         ~env:eenv.env
-         ~stdout_to:eenv.stdout_to
-         ~stderr_to:eenv.stderr_to
-         ~stdin_from:eenv.stdin_from
-         ~metadata:ectx.metadata
-         prog
-         args
-  in
-  match res with
-  | Error _ -> Produce.return ()
-  | Ok times -> Produce.incr_duration times.elapsed_time
+let exec_run ~(ectx : context) ~(eenv : env) ?(trace = false) prog args : _ Produce.t =
+  if trace
+  then
+    let* (res : (Process.Traced_result.t, int) result) =
+      Produce.of_fiber
+      @@ Process.run_with_trace
+           ~display:!Clflags.display
+           (Accept eenv.exit_codes)
+           ~dir:eenv.working_dir
+           ~env:eenv.env
+           ~stdout_to:eenv.stdout_to
+           ~stderr_to:eenv.stderr_to
+           ~stdin_from:eenv.stdin_from
+           ~metadata:ectx.metadata
+           prog
+           args
+    in
+    match res with
+    | Error _ -> Produce.return ()
+    | Ok { times; traced_paths } ->
+      let* () = Produce.incr_duration times.elapsed_time in
+      (* All paths from tracer are absolute - convert to workspace-relative Path.t *)
+      let paths =
+        Path.Set.of_list_map traced_paths ~f:(fun p ->
+          Path.Expert.try_localize_external (Path.of_string p))
+      in
+      (* Include the executable itself - execve doesn't go through openat *)
+      Produce.add_traced_paths (Path.Set.add paths prog)
+  else
+    let* (res : (Proc.Times.t, int) result) =
+      Produce.of_fiber
+      @@ Process.run_with_times
+           ~display:!Clflags.display
+           (Accept eenv.exit_codes)
+           ~dir:eenv.working_dir
+           ~env:eenv.env
+           ~stdout_to:eenv.stdout_to
+           ~stderr_to:eenv.stderr_to
+           ~stdin_from:eenv.stdin_from
+           ~metadata:ectx.metadata
+           prog
+           args
+    in
+    match res with
+    | Error _ -> Produce.return ()
+    | Ok times -> Produce.incr_duration times.elapsed_time
 ;;
 
 let exec_echo stdout_to str =
@@ -372,7 +414,10 @@ let exec_until_all_deps_ready ~ectx ~eenv t =
   in
   let open Fiber.O in
   let+ stages, state = Produce.run Produce.State.empty (loop ~eenv []) in
-  { Exec_result.dynamic_deps_stages = List.rev stages; duration = state.duration }
+  { Exec_result.dynamic_deps_stages = List.rev stages
+  ; duration = state.duration
+  ; traced_paths = state.traced_paths
+  }
 ;;
 
 type input =
