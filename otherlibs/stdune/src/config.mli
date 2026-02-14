@@ -67,6 +67,10 @@ val threaded_console_frames_per_second : [ `Default | `Custom of int ] t
     workspace-local cache for more precise rebuilds. *)
 val refined_deps : Toggle.t t
 
+(** Enable syscall tracing to capture file opens during action execution
+    (experimental). Uses seccomp-bpf + ptrace on Linux x86_64/aarch64. *)
+val trace_file_opens : Toggle.t t
+
 (** Before any configuration value is accessed, this function must be called
     with all the configuration values from the relevant config file
     ([dune-workspace], or [dune-config]).

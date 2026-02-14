@@ -104,13 +104,14 @@ end
 include T
 include Comparable.Make (T)
 
-let make
-      ?(mode = Mode.Standard)
-      ?(info = Info.Internal)
-      ?(refinement = Refinement.No_refinement)
-      ~targets
-      action
-  =
+let default_refinement () =
+  match Config.get Config.trace_file_opens with
+  | `Enabled -> Refinement.Trace_syscalls
+  | `Disabled -> Refinement.No_refinement
+;;
+
+let make ?(mode = Mode.Standard) ?(info = Info.Internal) ?refinement ~targets action =
+  let refinement = Option.value refinement ~default:(default_refinement ()) in
   let action = Action_builder.memoize "Rule.make" action in
   let report_error ?(extra_pp = []) message =
     match info with

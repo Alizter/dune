@@ -158,3 +158,7 @@ let threaded_console_frames_per_second =
 let refined_deps =
   make ~name:"refined_deps" ~of_string:Toggle.of_string ~default:`Disabled
 ;;
+
+let trace_file_opens =
+  make ~name:"trace_file_opens" ~of_string:Toggle.of_string ~default:`Disabled
+;;

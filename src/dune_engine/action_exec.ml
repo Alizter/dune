@@ -155,7 +155,12 @@ end
 
 open Produce.O
 
-let exec_run ~(ectx : context) ~(eenv : env) ?(trace = false) prog args : _ Produce.t =
+let exec_run ~(ectx : context) ~(eenv : env) prog args : _ Produce.t =
+  let trace =
+    match Config.(get trace_file_opens) with
+    | `Enabled -> true
+    | `Disabled -> false
+  in
   if trace
   then
     let* (res : (Process.Traced_result.t, int) result) =
