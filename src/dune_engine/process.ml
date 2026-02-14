@@ -1295,3 +1295,76 @@ let run_inherit_std_in_out =
     >>| fst
     >>| Failure_mode.exit_code_of_result
 ;;
+
+module Traced_result = struct
+  type t =
+    { times : Proc.Times.t
+    ; traced_paths : string list
+    }
+end
+
+let run_with_trace
+      ?dir
+      ~display:_
+      ?stdout_to
+      ?stderr_to
+      ?stdin_from
+      ?env
+      ?(metadata = default_metadata)
+      fail_mode
+      prog
+      args
+  =
+  let started_at = Time.now () in
+  Scheduler.with_job_slot (fun _cancel (_config : Scheduler.Config.t) ->
+    let prog_str = Path.reach_for_running ?from:dir prog in
+    let argv = Array.of_list (prog_str :: args) in
+    let env =
+      let env = Option.value env ~default:Env.initial in
+      let env = Dtemp.add_to_env env in
+      Env.to_unix env |> Array.of_list
+    in
+    let cwd = Option.map dir ~f:Path.to_string in
+    let stdin =
+      match stdin_from with
+      | Some io -> Lazy.force io.Io.fd
+      | None -> Unix.stdin
+    in
+    let stdout_fd =
+      match stdout_to with
+      | Some io -> Lazy.force io.Io.fd
+      | None -> Unix.stdout
+    in
+    let stderr_fd =
+      match stderr_to with
+      | Some io -> Lazy.force io.Io.fd
+      | None -> Unix.stderr
+    in
+    let status, traced_paths =
+      Spawn_with_trace.run ~prog:prog_str ~argv ~env ?cwd ~stdin ~stdout:stdout_fd
+        ~stderr:stderr_fd ()
+    in
+    let elapsed_time = Time.diff (Time.now ()) started_at in
+    let times = { Proc.Times.elapsed_time; resource_usage = None } in
+    let traced_result = { Traced_result.times; traced_paths } in
+    let exit_code =
+      match status with
+      | Unix.WEXITED n -> n
+      | Unix.WSIGNALED n -> 128 + n
+      | Unix.WSTOPPED n -> 128 + n
+    in
+    let pid = Pid.of_int (Unix.getpid ()) in
+    let exit_status : Exit_status.t =
+      if Failure_mode.accepted_codes fail_mode exit_code
+      then Ok exit_code
+      else Error (Exit_status.Failed exit_code)
+    in
+    let empty_out =
+      Result.Out.make None ~on_success:Print ~limit:Action_output_limit.default
+    in
+    report_process_finished ~metadata ~dir ~prog:prog_str ~pid ~args ~started_at
+      ~exit_status ~stdout:empty_out ~stderr:empty_out times;
+    Fiber.return
+      (Failure_mode.map_result fail_mode (`Finished exit_code) ~f:(fun () ->
+         traced_result)))
+;;

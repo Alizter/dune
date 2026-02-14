@@ -23,6 +23,7 @@
   dune_rpc_private
   dune_rpc_client
   spawn
+  spawn_with_trace
   dune_digest
   dune_action_trace)
  (synopsis "Internal Dune library, do not use!"))

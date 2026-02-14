@@ -120,6 +120,29 @@ val run_with_times
   -> string list
   -> 'a Fiber.t
 
+(** Result type that includes traced paths from syscall tracing *)
+module Traced_result : sig
+  type t =
+    { times : Proc.Times.t
+    ; traced_paths : string list
+    }
+end
+
+(** Like [run_with_times] but also traces file opens using seccomp-bpf.
+    Only available on Linux x86_64/aarch64. Raises on other platforms. *)
+val run_with_trace
+  :  ?dir:Path.t
+  -> display:Display.t
+  -> ?stdout_to:Io.output Io.t
+  -> ?stderr_to:Io.output Io.t
+  -> ?stdin_from:Io.input Io.t
+  -> ?env:Env.t
+  -> ?metadata:metadata
+  -> (Traced_result.t, 'a) Failure_mode.t
+  -> Path.t
+  -> string list
+  -> 'a Fiber.t
+
 (** Run a command and capture its output *)
 val run_capture
   :  ?dir:Path.t
