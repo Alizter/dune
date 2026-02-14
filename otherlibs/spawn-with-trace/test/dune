@@ -1,0 +1,7 @@
+(library
+ (name spawn_with_trace_tests)
+ (libraries spawn_with_trace stdune unix)
+ (inline_tests
+  (deps %{bin:cat} %{bin:ls} %{bin:echo}))
+ (preprocess
+  (pps ppx_expect)))
