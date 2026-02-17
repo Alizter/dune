@@ -6,6 +6,7 @@ case "$1" in
   "thread_pool" ) test="thread_pool_bench"; main="thread_pool_bench_main";;
   "digest" ) test="digest_bench"; main="digest_bench_main";;
   "path" ) test="path_bench"; main="path_bench_main";;
+  "solver" ) test="solver_bench"; main="solver_bench_main";;
 esac
 shift;
 export BENCH_LIB="$test"
