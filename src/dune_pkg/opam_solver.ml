@@ -884,38 +884,65 @@ module Solver = struct
     end
 
     module Conflict_classes = struct
-      type t = { mutable groups : Sat.lit list ref OpamPackage.Name.Map.t }
+      (* Key is (conflict_class_name, platform_id) to ensure conflict classes
+         are enforced per-platform, not across platforms. In multi-platform solving,
+         it's valid to select the same package with a conflict class on multiple
+         platforms, but within each platform, at most one package with the conflict
+         class can be selected. *)
+      module Key = struct
+        type t = OpamPackage.Name.t * Platform_id.t
 
-      let create () = { groups = OpamPackage.Name.Map.empty }
+        let compare (name1, plat1) (name2, plat2) =
+          match Ordering.of_int (OpamPackage.Name.compare name1 name2) with
+          | Eq -> Platform_id.compare plat1 plat2
+          | x -> x
+        ;;
 
-      let var t name =
-        match OpamPackage.Name.Map.find_opt name t.groups with
+        let to_dyn (name, plat) =
+          Dyn.Tuple
+            [ Dyn.string (OpamPackage.Name.to_string name); Platform_id.to_dyn plat ]
+        ;;
+      end
+
+      module Key_map = Map.Make (Key)
+
+      type t = { mutable groups : Sat.lit list ref Key_map.t }
+
+      let create () = { groups = Key_map.empty }
+
+      let var t key =
+        match Key_map.find t.groups key with
         | Some v -> v
         | None ->
           let v = ref [] in
-          t.groups <- OpamPackage.Name.Map.add name v t.groups;
+          t.groups <- Key_map.set t.groups key v;
           v
       ;;
 
-      (* Add [impl] to its conflict groups, if any. *)
-      let process t impl_var impl =
+      (* Add [impl] to its conflict groups, if any.
+         [role] is used to extract the platform_id for the group key. *)
+      let process t role impl_var impl =
+        (* Get platform_id from the role, defaulting to 0 for virtual roles *)
+        let platform_id =
+          match role with
+          | Input.Real (_, platform_id) -> platform_id
+          | Input.Virtual _ -> Platform_id.of_int 0
+        in
         Input.Impl.conflict_class impl
         |> List.iter ~f:(fun name ->
-          let impls = var t name in
+          let impls = var t (name, platform_id) in
           impls := impl_var :: !impls)
       ;;
 
       (* Call this at the end to add the final clause with all discovered groups.
          [t] must not be used after this. *)
       let seal t =
-        OpamPackage.Name.Map.iter
-          (fun _ impls ->
-             match !impls with
-             | _ :: _ :: _ ->
-               let (_ : Sat.at_most_one_clause) = Sat.at_most_one !impls in
-               ()
-             | _ -> ())
-          t.groups
+        Key_map.iter t.groups ~f:(fun impls ->
+          match !impls with
+          | _ :: _ :: _ ->
+            let (_ : Sat.at_most_one_clause) = Sat.at_most_one !impls in
+            ()
+          | _ -> ())
       ;;
     end
 
@@ -939,7 +966,7 @@ module Solver = struct
           in
           let+ () =
             Fiber.parallel_iter !impls ~f:(fun { var = impl_var; impl } ->
-              Conflict_classes.process conflict_classes impl_var impl;
+              Conflict_classes.process conflict_classes role impl_var impl;
               if Input.Impl.avoid impl then avoids := impl_var :: !avoids;
               match expand_deps with
               | `No_expand -> Fiber.return ()
@@ -1446,6 +1473,17 @@ module Solver = struct
         |> Option.iter ~f:(Component.apply_user_restriction component))
     ;;
 
+    (* Check if two roles refer to the same package (ignoring platform_id).
+       Used for conflict class checking - same package on different platforms
+       should not be considered in conflict with itself. *)
+    let same_package_name (role1 : Input.Role.t) (role2 : Input.Role.t) =
+      match role1, role2 with
+      | Real (name1, _), Real (name2, _) ->
+        Ordering.is_eq (OpamPackage.Name.compare name1 name2 |> Ordering.of_int)
+      | Virtual (id1, _), Virtual (id2, _) -> Input.Virtual_id.equal id1 id2
+      | Real _, Virtual _ | Virtual _, Real _ -> false
+    ;;
+
     (** For each selected implementation with a conflict class, reject all candidates
         with the same class. *)
     let check_conflict_classes report =
@@ -1466,8 +1504,7 @@ module Solver = struct
           Input.Impl.conflict_class impl
           |> List.find_map ~f:(fun cl ->
             match OpamPackage.Name.Map.find_opt cl classes with
-            | Some other_role
-              when not (Ordering.is_eq (Input.Role.compare role other_role)) ->
+            | Some other_role when not (same_package_name role other_role) ->
               Some (`ClassConflict (other_role, cl))
             | _ -> None)))
     ;;
