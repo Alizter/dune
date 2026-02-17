@@ -104,9 +104,9 @@ module Context = struct
     ; local_packages : local_package Package_name.Map.t Lazy.t
     ; local_constraints : (Package_name.t, local_package list) Table.t Lazy.t
     ; solver_env : Solver_env.t
-          (* Default/primary solver env - used for availability checks *)
+      (* Default/primary solver env - used for availability checks *)
     ; platform_envs : Solver_env.t Platform_id.Map.t
-          (* Platform environments keyed by Platform_id for multi-platform solving *)
+      (* Platform environments keyed by Platform_id for multi-platform solving *)
     ; dune_version : OpamPackage.Version.t
     ; stats_updater : Solver_stats.Updater.t
     ; candidates_cache : (Package_name.t, candidates) Fiber_cache.t
@@ -172,7 +172,9 @@ module Context = struct
     ; pinned_packages
     ; solver_env = Solver_env.add_sentinel_values_for_unset_platform_vars solver_env
     ; platform_envs =
-        Platform_id.Map.map platform_envs ~f:Solver_env.add_sentinel_values_for_unset_platform_vars
+        Platform_id.Map.map
+          platform_envs
+          ~f:Solver_env.add_sentinel_values_for_unset_platform_vars
     ; dune_version = Dune_dep.version
     ; stats_updater
     ; candidates_cache
@@ -240,6 +242,28 @@ module Context = struct
        package available (technically true) and let it produce the error
        message. *)
     if is_opam_available t opam_file then Ok opam_file else Error Unavailable
+  ;;
+
+  (* Check availability for a specific platform. Used for multi-platform solving
+     where packages may be available on some platforms but not others. *)
+  let is_available_for_platform t ~platform_id opam =
+    match Platform_id.Map.find t.platform_envs platform_id with
+    | None ->
+      (* Fallback to primary solver_env if platform not found *)
+      is_opam_available t opam
+    | Some solver_env ->
+      let package = OpamFile.OPAM.package opam in
+      let available = OpamFile.OPAM.available opam in
+      (match
+         OpamFilter.partial_eval
+           (Solver_env.to_env solver_env
+            |> Solver_stats.Updater.wrap_env t.stats_updater
+            |> Lock_pkg.add_self_to_filter_env package)
+           available
+         |> eval_to_bool
+       with
+       | Ok available -> available
+       | Error (`Not_a_bool _) -> false)
   ;;
 
   let pinned_candidate t resolved_package =
@@ -393,6 +417,37 @@ module Context = struct
           | None -> repo_candidate t name)
       in
       res.available
+  ;;
+
+  (* Get all candidates with their opam files, without pre-filtering by availability.
+     Used for multi-platform solving where availability is checked per-platform. *)
+  let candidates_unfiltered t name =
+    let* () = Fiber.return () in
+    let key = Package_name.of_opam_package_name name in
+    match Package_name.Map.find (Lazy.force t.local_packages) key with
+    | Some local_package ->
+      let priority = Priority.allowed local_package.version in
+      Fiber.return [ priority, local_package.opam_file ]
+    | None ->
+      let+ res =
+        Fiber_cache.find_or_add t.candidates_cache key ~f:(fun () ->
+          match Package_name.Map.find t.pinned_packages key with
+          | Some resolved_package -> Fiber.return (pinned_candidate t resolved_package)
+          | None -> repo_candidate t name)
+      in
+      (* Return all versions from resolved, with priority info *)
+      OpamPackage.Version.Map.to_list res.resolved
+      |> List.map ~f:(fun (version, resolved_pkg) ->
+        let opam = Resolved_package.opam_file resolved_pkg in
+        let avoid =
+          List.mem
+            (OpamFile.OPAM.flags opam)
+            OpamTypes.Pkgflag_AvoidVersion
+            ~equal:Poly.equal
+        in
+        { Priority.version; avoid }, opam)
+      |> List.sort ~compare:(fun (x, _) (y, _) ->
+        Priority.compare t.version_preference x y)
   ;;
 
   let user_restrictions : t -> OpamPackage.Name.t -> OpamFormula.version_constraint option
@@ -557,9 +612,9 @@ module Solver = struct
       let equal x y = Ordering.is_eq (compare x y)
 
       let hash = function
-        | Real (name, platform) ->
-          Poly.hash (Poly.hash name, Platform_id.hash platform)
+        | Real (name, platform) -> Poly.hash (Poly.hash name, Platform_id.hash platform)
         | Virtual (id, _) -> Virtual_id.hash id
+      ;;
 
       let user_restrictions t context =
         match t with
@@ -694,15 +749,20 @@ module Solver = struct
       aux deps
     ;;
 
-    (* Get all the candidates for a role. *)
+    (* Get all the candidates for a role. For multi-platform solving,
+       we check availability per-platform so packages that are only
+       available on certain platforms (e.g., linux-only, macos-only) work. *)
     let implementations role context =
       match role with
       | Virtual (_, impls) -> Fiber.return impls
       | Real (name, platform) ->
-        Context.candidates context name
-        >>| List.filter_map ~f:(function
-          | _, Error _rejection -> None
-          | { Priority.version; avoid }, Ok opam ->
+        Context.candidates_unfiltered context name
+        >>| List.filter_map ~f:(fun (priority, opam) ->
+          (* Check availability for this specific platform *)
+          if not (Context.is_available_for_platform context ~platform_id:platform opam)
+          then None
+          else (
+            let { Priority.version; avoid } = priority in
             let pkg = OpamPackage.create name version in
             (* Note: we ignore depopts here: see opam/doc/design/depopts-and-features *)
             let requires =
@@ -717,7 +777,7 @@ module Solver = struct
                  @ (OpamFile.OPAM.conflicts opam |> make_deps Prevent prevent))
             in
             let conflict_class = OpamFile.OPAM.conflict_class opam in
-            Some (RealImpl { pkg; avoid; requires; conflict_class }))
+            Some (RealImpl { pkg; avoid; requires; conflict_class })))
     ;;
 
     let meets_restriction impl { Restriction.kind; expr } =
@@ -1440,7 +1500,10 @@ module Solver = struct
         let depends =
           List.concat_map platforms ~f:(fun platform ->
             List.map pkgs ~f:(fun name ->
-              { Input.drole = Real (name, platform); importance = Ensure; restrictions = [] }))
+              { Input.drole = Real (name, platform)
+              ; importance = Ensure
+              ; restrictions = []
+              }))
         in
         let impl : Input.Impl.t = VirtualImpl (Input.Rank.bottom, depends) in
         Input.virtual_role [ impl ]
@@ -1800,9 +1863,7 @@ let solve_lock_dir
     let pinned_package_names = Package_name.Set.of_keys pinned_packages in
     let stats_updater = Solver_stats.Updater.init () in
     (* For now, single platform with id 0. Multi-platform will add more. *)
-    let platform_envs =
-      Platform_id.Map.singleton (Platform_id.of_int 0) solver_env
-    in
+    let platform_envs = Platform_id.Map.singleton (Platform_id.of_int 0) solver_env in
     let platforms = [ Platform_id.of_int 0 ] in
     let context =
       let rec context =
