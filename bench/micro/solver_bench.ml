@@ -139,7 +139,7 @@ let gen_pigeonhole ~pigeons =
   sat
 ;;
 
-let%bench_fun ("pigeonhole_unsat" [@indexed pigeons = [ 5; 7; 9; 11 ]]) =
+let%bench_fun ("pigeonhole_unsat" [@indexed pigeons = [ 2; 4; 8 ]]) =
   let sat = gen_pigeonhole ~pigeons in
   fun () -> ignore (Sat.run_solver sat null_decider : bool)
 ;;
@@ -229,5 +229,98 @@ let gen_chain_with_conflict ~depth =
 
 let%bench_fun ("chain_late_conflict_unsat" [@indexed depth = [ 10; 50; 100; 200 ]]) =
   let sat = gen_chain_with_conflict ~depth in
+  fun () -> ignore (Sat.run_solver sat null_decider : bool)
+;;
+
+(* Scenario 8: Multi-platform problem duplication
+   Simulates solving for N platforms where each platform has independent
+   package selection (like role = (package, platform_id)).
+
+   Structure:
+   - Virtual root depends on pkg_i for each platform i
+   - Each pkg_i,p (package i on platform p) has M versions
+   - At most one version per (package, platform) pair
+   - Platforms are independent (no cross-platform constraints)
+
+   This tests the scaling when we duplicate the problem space N times. *)
+let gen_multiplatform ~platforms ~packages ~versions =
+  let sat = Sat.create () in
+  let root = Sat.add_variable sat "root" in
+  (* For each platform, for each package, create version choices *)
+  for p = 0 to platforms - 1 do
+    for i = 0 to packages - 1 do
+      let versions_vars =
+        Array.init versions ~f:(fun v ->
+          Sat.add_variable sat (Printf.sprintf "pkg_%d_p%d_v%d" i p v))
+      in
+      (* At most one version of each package on each platform *)
+      let _clause = Sat.at_most_one (Array.to_list versions_vars) in
+      (* Root implies at least one version of this package on this platform *)
+      Sat.implies sat root (Array.to_list versions_vars)
+    done
+  done;
+  Sat.at_least_one sat [ root ];
+  sat
+;;
+
+(* Test scaling with number of platforms (fixed packages/versions) *)
+let%bench_fun ("multiplatform_scaling" [@indexed platforms = [ 1; 2; 4; 8 ]]) =
+  let sat = gen_multiplatform ~platforms ~packages:20 ~versions:5 in
+  fun () -> ignore (Sat.run_solver sat null_decider : bool)
+;;
+
+(* Test with realistic package counts *)
+let%bench_fun ("multiplatform_realistic" [@indexed platforms = [ 1; 4 ]]) =
+  let sat = gen_multiplatform ~platforms ~packages:50 ~versions:10 in
+  fun () -> ignore (Sat.run_solver sat null_decider : bool)
+;;
+
+(* Scenario 9: Multi-platform with shared constraints
+   More realistic: some packages have cross-platform version requirements
+   (like requiring same compiler version across platforms) *)
+let gen_multiplatform_shared ~platforms ~packages ~versions ~shared_packages =
+  let sat = Sat.create () in
+  let root = Sat.add_variable sat "root" in
+  (* Track version vars for shared packages to add cross-platform constraints *)
+  let shared_vars = Array.init shared_packages ~f:(fun _ ->
+    Array.init platforms ~f:(fun _ ->
+      Array.init versions ~f:(fun _ -> None)))
+  in
+  for p = 0 to platforms - 1 do
+    for i = 0 to packages - 1 do
+      let versions_vars =
+        Array.init versions ~f:(fun v ->
+          let var = Sat.add_variable sat (Printf.sprintf "pkg_%d_p%d_v%d" i p v) in
+          (* Track shared package vars *)
+          if i < shared_packages then shared_vars.(i).(p).(v) <- Some var;
+          var)
+      in
+      let _clause = Sat.at_most_one (Array.to_list versions_vars) in
+      Sat.implies sat root (Array.to_list versions_vars)
+    done
+  done;
+  (* Add cross-platform constraints: if pkg_i has version v on platform 0,
+     it must have version v on all other platforms *)
+  for i = 0 to shared_packages - 1 do
+    for v = 0 to versions - 1 do
+      match shared_vars.(i).(0).(v) with
+      | None -> ()
+      | Some p0_var ->
+        for p = 1 to platforms - 1 do
+          match shared_vars.(i).(p).(v) with
+          | None -> ()
+          | Some pp_var ->
+            (* p0_var implies pp_var and vice versa *)
+            Sat.implies sat p0_var [ pp_var ];
+            Sat.implies sat pp_var [ p0_var ]
+        done
+    done
+  done;
+  Sat.at_least_one sat [ root ];
+  sat
+;;
+
+let%bench_fun ("multiplatform_shared" [@indexed platforms = [ 1; 2; 4 ]]) =
+  let sat = gen_multiplatform_shared ~platforms ~packages:20 ~versions:5 ~shared_packages:5 in
   fun () -> ignore (Sat.run_solver sat null_decider : bool)
 ;;

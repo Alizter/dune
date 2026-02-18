@@ -96,6 +96,17 @@ module Conditional_choice = struct
   let empty = []
   let singleton condition value = [ Conditional.make condition value ]
 
+  (* Create a conditional choice with a condition covering multiple platforms.
+     The condition is a disjunction of all provided solver_envs (filtered to
+     platform-specific vars only). This is used when a single solve produces
+     a result valid for all platforms. *)
+  let singleton_multi conditions value =
+    let condition =
+      List.map conditions ~f:Solver_env.remove_all_except_platform_specific
+    in
+    [ { Conditional.condition; value } ]
+  ;;
+
   (* A choice where a given value will be chosen unconditionally. This is only
      used to help support both portable and non-portable lockdirs with the same
      codebase and can be removed when portable lockdirs is the only option. *)
@@ -1151,7 +1162,7 @@ let create_latest_version
       ~ocaml
       ~repos
       ~expanded_solver_variable_bindings
-      ~solved_for_platform
+      ~solved_for_platforms
       ~portable_lock_dir
   =
   let packages =
@@ -1183,8 +1194,8 @@ let create_latest_version
       let complete = Int.equal (List.length repos) (List.length used) in
       complete, Some used
   in
-  let solved_for_platform_platform_specific_only =
-    Option.map solved_for_platform ~f:Solver_env.remove_all_except_platform_specific
+  let solved_for_platforms_platform_specific_only =
+    List.map solved_for_platforms ~f:Solver_env.remove_all_except_platform_specific
   in
   let expanded_solver_variable_bindings =
     match portable_lock_dir with
@@ -1201,8 +1212,7 @@ let create_latest_version
   ; ocaml
   ; repos = { complete; used }
   ; expanded_solver_variable_bindings
-  ; solved_for_platforms =
-      Loc.none, Option.to_list solved_for_platform_platform_specific_only
+  ; solved_for_platforms = Loc.none, solved_for_platforms_platform_specific_only
   }
 ;;
 
