@@ -1,2 +1,8 @@
 (cram
  (applies_to :whole_subtree))
+
+; Disabled: partial solving has been removed
+
+(cram
+ (applies_to portable-lockdirs-partial-solve)
+ (enabled_if false))
