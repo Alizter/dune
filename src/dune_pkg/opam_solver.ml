@@ -104,9 +104,12 @@ module Context = struct
     ; local_packages : local_package Package_name.Map.t Lazy.t
     ; local_constraints : (Package_name.t, local_package list) Table.t Lazy.t
     ; solver_env : Solver_env.t
-      (* Default/primary solver env - used for availability checks *)
-    ; platform_envs : Solver_env.t Platform_id.Map.t
-      (* Platform environments keyed by Platform_id for multi-platform solving *)
+      (* Base solver env. Full platform-specific envs are computed by extending
+         this with platform_overlays. *)
+    ; platform_overlays : Solver_env.t Platform_id.Map.t
+      (* Platform-specific variable overlays. Extended onto solver_env to get
+         full platform envs. For single-platform solving, this contains an
+         empty overlay. *)
     ; dune_version : OpamPackage.Version.t
     ; stats_updater : Solver_stats.Updater.t
     ; candidates_cache : (Package_name.t, candidates) Fiber_cache.t
@@ -124,7 +127,7 @@ module Context = struct
   let create
         ~pinned_packages
         ~solver_env
-        ~platform_envs
+        ~platform_overlays
         ~repos
         ~local_packages
         ~version_preference
@@ -171,10 +174,9 @@ module Context = struct
     ; local_packages
     ; pinned_packages
     ; solver_env = Solver_env.add_sentinel_values_for_unset_platform_vars solver_env
-    ; platform_envs =
-        Platform_id.Map.map
-          platform_envs
-          ~f:Solver_env.add_sentinel_values_for_unset_platform_vars
+    ; platform_overlays
+      (* Overlays don't need sentinel values - they only contain platform-specific
+         vars that will override the sentinels in solver_env when extended. *)
     ; dune_version = Dune_dep.version
     ; stats_updater
     ; candidates_cache
@@ -185,12 +187,13 @@ module Context = struct
     }
   ;;
 
+  (* Compute full platform-specific env by extending base with overlay *)
   let platform_env t platform_id =
-    match Platform_id.Map.find t.platform_envs platform_id with
-    | Some env -> env
+    match Platform_id.Map.find t.platform_overlays platform_id with
+    | Some overlay -> Solver_env.extend t.solver_env overlay
     | None ->
       Code_error.raise
-        "Platform_id not found in platform_envs"
+        "Platform_id not found in platform_overlays"
         [ "platform_id", Platform_id.to_dyn platform_id ]
   ;;
 
@@ -247,23 +250,19 @@ module Context = struct
   (* Check availability for a specific platform. Used for multi-platform solving
      where packages may be available on some platforms but not others. *)
   let is_available_for_platform t ~platform_id opam =
-    match Platform_id.Map.find t.platform_envs platform_id with
-    | None ->
-      (* Fallback to primary solver_env if platform not found *)
-      is_opam_available t opam
-    | Some solver_env ->
-      let package = OpamFile.OPAM.package opam in
-      let available = OpamFile.OPAM.available opam in
-      (match
-         OpamFilter.partial_eval
-           (Solver_env.to_env solver_env
-            |> Solver_stats.Updater.wrap_env t.stats_updater
-            |> Lock_pkg.add_self_to_filter_env package)
-           available
-         |> eval_to_bool
-       with
-       | Ok available -> available
-       | Error (`Not_a_bool _) -> false)
+    let solver_env = platform_env t platform_id in
+    let package = OpamFile.OPAM.package opam in
+    let available = OpamFile.OPAM.available opam in
+    match
+      OpamFilter.partial_eval
+        (Solver_env.to_env solver_env
+         |> Solver_stats.Updater.wrap_env t.stats_updater
+         |> Lock_pkg.add_self_to_filter_env package)
+        available
+      |> eval_to_bool
+    with
+    | Ok available -> available
+    | Error (`Not_a_bool _) -> false
   ;;
 
   let pinned_candidate t resolved_package =
@@ -2025,8 +2024,11 @@ let solve_lock_dir
   | Ok pinned_packages ->
     let pinned_package_names = Package_name.Set.of_keys pinned_packages in
     let stats_updater = Solver_stats.Updater.init () in
-    (* For now, single platform with id 0. Multi-platform will add more. *)
-    let platform_envs = Platform_id.Map.singleton (Platform_id.of_int 0) solver_env in
+    (* For single-platform solving, use an empty overlay. The full env is
+       computed by extending solver_env with the (empty) overlay. *)
+    let platform_overlays =
+      Platform_id.Map.singleton (Platform_id.of_int 0) Solver_env.empty
+    in
     let platforms = [ Platform_id.of_int 0 ] in
     let context =
       let rec context =
@@ -2034,7 +2036,7 @@ let solve_lock_dir
           (Context.create
              ~pinned_packages
              ~solver_env
-             ~platform_envs
+             ~platform_overlays
              ~repos
              ~version_preference
              ~local_packages:local_packages'
