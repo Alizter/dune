@@ -1,0 +1,173 @@
+name: Windows Test Discovery
+
+on:
+  push:
+    paths:
+      - '.github/workflows/windows-test-discovery.yml'
+      - 'ci/windows-test-list.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  generate-matrix:
+    name: Generate Test Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.generate.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Generate matrix from test list
+        id: generate
+        run: |
+          # Read tests from the checklist file, skip comments and empty lines
+          tests=$(grep -v '^#' ci/windows-test-list.txt | grep -v '^$' | head -200)
+
+          echo '{"include":[' > matrix.json
+          first=true
+
+          while IFS= read -r test; do
+            [ -z "$test" ] && continue
+
+            for toolchain in msvc mingw; do
+              if [ "$first" = true ]; then
+                first=false
+              else
+                echo ',' >> matrix.json
+              fi
+
+              # Extract just the test name for the job title
+              test_name=$(basename "$test")
+              echo "{\"test\":\"$test\",\"test_name\":\"$test_name\",\"toolchain\":\"$toolchain\"}" >> matrix.json
+            done
+          done <<< "$tests"
+
+          echo ']}' >> matrix.json
+
+          cat matrix.json
+          echo "matrix=$(cat matrix.json | tr -d '\n')" >> "$GITHUB_OUTPUT"
+
+  setup-msvc:
+    name: Setup MSVC
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use OCaml (MSVC)
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ocaml-compiler.5.4.0,system-msvc
+
+      - name: Restore cache
+        id: opam-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            C:\.opam
+            _opam
+            _boot
+          key: opam-win-discovery-msvc-${{ hashFiles('**.opam') }}
+
+      - name: Install dependencies
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          opam pin -n . --with-version=3.22.0
+          opam install dune --deps-only
+          opam pin add lwt 5.9.1 --no-action
+          opam install . --deps-only --with-test
+          opam exec -- make dev-deps
+
+      - name: Build dune
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: opam exec -- make release
+
+      - name: Save cache
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            C:\.opam
+            _opam
+            _boot
+          key: opam-win-discovery-msvc-${{ hashFiles('**.opam') }}
+
+  setup-mingw:
+    name: Setup MinGW
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use OCaml (MinGW)
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ocaml-base-compiler.5.4.0,system-mingw
+
+      - name: Restore cache
+        id: opam-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            C:\.opam
+            _opam
+            _boot
+          key: opam-win-discovery-mingw-${{ hashFiles('**.opam') }}
+
+      - name: Install dependencies
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: |
+          opam pin -n . --with-version=3.22.0
+          opam install dune --deps-only
+          opam pin add lwt 5.9.1 --no-action
+          opam install . --deps-only --with-test
+          opam exec -- make dev-deps
+
+      - name: Build dune
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        run: opam exec -- make release
+
+      - name: Save cache
+        if: steps.opam-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            C:\.opam
+            _opam
+            _boot
+          key: opam-win-discovery-mingw-${{ hashFiles('**.opam') }}
+
+  test-windows:
+    name: ${{ matrix.toolchain }} / ${{ matrix.test_name }}
+    needs: [generate-matrix, setup-msvc, setup-mingw]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use OCaml (MSVC)
+        if: matrix.toolchain == 'msvc'
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ocaml-compiler.5.4.0,system-msvc
+
+      - name: Use OCaml (MinGW)
+        if: matrix.toolchain == 'mingw'
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ocaml-base-compiler.5.4.0,system-mingw
+
+      - name: Restore cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            C:\.opam
+            _opam
+            _boot
+          key: opam-win-discovery-${{ matrix.toolchain }}-${{ hashFiles('**.opam') }}
+          fail-on-cache-miss: true
+
+      - name: Run test
+        run: opam exec -- _boot/dune.exe runtest ${{ matrix.test }}

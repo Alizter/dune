@@ -1,0 +1,44 @@
+# Windows Test Discovery List
+# Add test paths here (one per line) to test them on Windows CI.
+# Tests that pass can be added to runtest-windows alias.
+#
+# Use full paths relative to repo root, e.g.:
+#   test/blackbox-tests/test-cases/bigarray.t
+#   test/blackbox-tests/test-cases/alias
+#
+# Lines starting with # are comments.
+# Workflow triggers on push when this file or the workflow changes.
+
+# ============================================================
+# Initial batch - simple tests to validate the workflow
+# ============================================================
+
+test/blackbox-tests/test-cases/action-modifying-a-dependency.t
+test/blackbox-tests/test-cases/alias
+test/blackbox-tests/test-cases/alternative-dune-fname.t
+test/blackbox-tests/test-cases/bigarray.t
+test/blackbox-tests/test-cases/block-strings.t
+test/blackbox-tests/test-cases/buildable-empty-intf-if-absent.t
+test/blackbox-tests/test-cases/build-bin.t
+test/blackbox-tests/test-cases/build-percent-form-bin.t
+test/blackbox-tests/test-cases/builtin-support-override.t
+test/blackbox-tests/test-cases/byte-code-only.t
+test/blackbox-tests/test-cases/cmdliner-dep-conf.t
+test/blackbox-tests/test-cases/config-project-defaults.t
+test/blackbox-tests/test-cases/contents-depends-on-glob.t
+test/blackbox-tests/test-cases/copy-files-non-sub-dir-error.t
+test/blackbox-tests/test-cases/custom-build-dir.t
+test/blackbox-tests/test-cases/cycle-detection-symlinks-2863.t
+test/blackbox-tests/test-cases/cyclic-dep-executable.t
+test/blackbox-tests/test-cases/default-ocaml-flags-3-13.t
+test/blackbox-tests/test-cases/dep-on-dir-that-does-not-exist.t
+test/blackbox-tests/test-cases/dep-vars.t
+test/blackbox-tests/test-cases/dirs-with-subdir.t
+test/blackbox-tests/test-cases/disable-warning.t
+test/blackbox-tests/test-cases/display.t
+test/blackbox-tests/test-cases/double-echo.t
+test/blackbox-tests/test-cases/dump-gc-stat.t
+
+# ============================================================
+# Add more tests below as you discover passing ones
+# ============================================================
