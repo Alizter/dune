@@ -36,8 +36,9 @@ val eval_pred : File_selector.t -> Filename_set.t Memo.t
 val files_of : dir:Path.t -> Filename_set.t Memo.t
 
 (** Return all targets (files and directories) in a directory.
-    Handles directory targets by building them first. *)
-val targets_of : dir:Path.t -> Targets.t Memo.t
+    Handles directory targets by building them first.
+    If [only_generated] is true (the default), source file copies are excluded. *)
+val targets_of : dir:Path.t -> only_generated:bool -> Targets.t Memo.t
 
 (** Execute an action. The execution is cached. *)
 val execute_action : observing_facts:Dep.Facts.t -> Rule.Anonymous_action.t -> unit Memo.t

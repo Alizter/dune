@@ -5,13 +5,10 @@ We have two libraries with one in a subdirectory. We also have a directory
 target d to see how the command will behave.
 
 With no directory provided to the command, it should default to the current
-working directory.
+working directory. By default, source files are hidden.
 
   $ dune show targets
-  a.ml
   d/
-  dune
-  dune-project
   simple.a
   simple.cma
   simple.cmxa
@@ -23,10 +20,7 @@ used, and only the targets available in that directory will be displayed.
 
   $ dune show targets . b/
   .:
-  a.ml
   d/
-  dune
-  dune-project
   simple.a
   simple.cma
   simple.cmxa
@@ -34,8 +28,6 @@ used, and only the targets available in that directory will be displayed.
   simple.ml-gen
   
   b:
-  c.ml
-  dune
   simple2.a
   simple2.cma
   simple2.cmxa
@@ -45,6 +37,23 @@ used, and only the targets available in that directory will be displayed.
 The command also works with files in the _build directory.
 
   $ dune show targets _build/default/
+  d/
+  simple.a
+  simple.cma
+  simple.cmxa
+  simple.cmxs
+  simple.ml-gen
+
+  $ dune show targets _build/default/b
+  simple2.a
+  simple2.cma
+  simple2.cmxa
+  simple2.cmxs
+  simple2.ml-gen
+
+Using --all shows source file copies too:
+
+  $ dune show targets --all
   a.ml
   d/
   dune
@@ -54,15 +63,6 @@ The command also works with files in the _build directory.
   simple.cmxa
   simple.cmxs
   simple.ml-gen
-
-  $ dune show targets _build/default/b
-  c.ml
-  dune
-  simple2.a
-  simple2.cma
-  simple2.cmxa
-  simple2.cmxs
-  simple2.ml-gen
 
 We can see inside directory targets. The directory target `d` contains files
 and a subdirectory.

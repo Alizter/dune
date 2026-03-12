@@ -1,13 +1,13 @@
 open Import
 
-let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
+let ls_term_gen extra_args fetch_results =
   let+ builder = Common.Builder.term
   (* CR-someday Alizter: document this option *)
   and+ paths = Arg.(value & pos_all string [ "." ] & info [] ~docv:"DIR" ~doc:None)
   and+ context =
     Common.context_arg
       ~doc:(Some "The context to look in. Defaults to the default context.")
-  in
+  and+ extra = extra_args in
   let common, config = Common.init builder in
   let request (_ : Dune_rules.Main.build_system) =
     let header = List.length paths > 1 in
@@ -67,7 +67,7 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
               User_error.raise
                 [ Pp.textf "Directory %s does not exist." (Path.to_string dir) ]
         in
-        let+ targets = fetch_results build_dir in
+        let+ targets = fetch_results extra build_dir in
         (* If we are printing multiple directories, we print the directory
            name as a header. *)
         (if header then [ Pp.textf "%s:" (Path.to_string dir) ] else [])
@@ -82,6 +82,8 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
   let open Fiber.O in
   Build.run_build_system ~request >>| fun (_ : (unit, [ `Already_reported ]) result) -> ()
 ;;
+
+let ls_term fetch_results = ls_term_gen (Term.const ()) (fun () -> fetch_results)
 
 module Aliases_cmd = struct
   let fetch_results (dir : Path.Build.t) =
@@ -106,10 +108,11 @@ module Aliases_cmd = struct
 end
 
 module Targets_cmd = struct
-  let fetch_results (dir : Path.Build.t) =
+  let fetch_results only_generated (dir : Path.Build.t) =
     let open Action_builder.O in
     let+ targets =
-      Action_builder.of_memo (Build_system.targets_of ~dir:(Path.build dir))
+      Action_builder.of_memo
+        (Build_system.targets_of ~dir:(Path.build dir) ~only_generated)
     in
     let results = ref [] in
     Dune_targets.iter
@@ -119,7 +122,19 @@ module Targets_cmd = struct
     List.sort ~compare:String.compare !results
   ;;
 
-  let term = ls_term fetch_results
+  let all_arg =
+    Arg.(
+      value
+      & flag
+      & info
+          [ "all" ]
+          ~doc:
+            (Some
+               "Show all targets including source file copies. By default, only \
+                generated targets are shown."))
+  ;;
+
+  let term = ls_term_gen all_arg (fun all -> fetch_results (not all))
 
   let command =
     let doc = "Print targets in a given directory. Works similarly to ls." in
