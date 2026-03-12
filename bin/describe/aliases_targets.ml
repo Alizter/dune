@@ -48,7 +48,7 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
                   (Path.to_string_maybe_quoted dir)
               ]
         in
-        (* Check if the directory exists. *)
+        (* Check if the directory exists (in source tree or as a directory target). *)
         let* () =
           Action_builder.of_memo
           @@
@@ -57,20 +57,13 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
           >>= function
           | Some _ -> Memo.return ()
           | None ->
-            (* The directory didn't exist. We therefore check if it was a
-               directory target and error for the user accordingly. *)
+            (* The directory didn't exist in source tree. Check if it's a
+               directory target - if so, allow it through. *)
             let+ is_dir_target =
               Load_rules.is_under_directory_target (Path.build build_dir)
             in
-            if is_dir_target
+            if not is_dir_target
             then
-              User_error.raise
-                [ Pp.textf
-                    "Directory %s is a directory target. This command does not support \
-                     the inspection of directory targets."
-                    (Path.to_string dir)
-                ]
-            else
               User_error.raise
                 [ Pp.textf "Directory %s does not exist." (Path.to_string dir) ]
         in
@@ -116,21 +109,14 @@ module Targets_cmd = struct
   let fetch_results (dir : Path.Build.t) =
     let open Action_builder.O in
     let+ targets =
-      let open Memo.O in
-      Target.all_direct_targets (Some (Path.Build.drop_build_context_exn dir))
-      >>| Path.Build.Map.to_list
-      |> Action_builder.of_memo
+      Action_builder.of_memo (Build_system.targets_of ~dir:(Path.build dir))
     in
-    List.filter_map targets ~f:(fun (path, kind) ->
-      match Path.Build.equal (Path.Build.parent_exn path) dir with
-      | false -> None
-      | true ->
-        (* directory targets can be distinguied by the trailing path separator
-        *)
-        Some
-          (match kind with
-           | Target.File -> Path.Build.basename path
-           | Directory -> Path.Build.basename path ^ Filename.dir_sep))
+    let results = ref [] in
+    Dune_targets.iter
+      targets
+      ~file:(fun p -> results := Path.Build.basename p :: !results)
+      ~dir:(fun p -> results := (Path.Build.basename p ^ Filename.dir_sep) :: !results);
+    List.sort ~compare:String.compare !results
   ;;
 
   let term = ls_term fetch_results
