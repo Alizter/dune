@@ -1,13 +1,13 @@
 open Import
 
-let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
+let ls_term_gen extra_args fetch_results =
   let+ builder = Common.Builder.term
   (* CR-someday Alizter: document this option *)
   and+ paths = Arg.(value & pos_all string [ "." ] & info [] ~docv:"DIR" ~doc:None)
   and+ context =
     Common.context_arg
       ~doc:(Some "The context to look in. Defaults to the default context.")
-  in
+  and+ extra = extra_args in
   let common, config = Common.init builder in
   let request (_ : Dune_rules.Main.build_system) =
     let header = List.length paths > 1 in
@@ -59,8 +59,8 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
           | Load_rules.Loaded.Build_under_directory_target _ ->
             User_error.raise
               [ Pp.textf
-                  "Directory %s is a directory target. This command does not support \
-                   the inspection of directory targets."
+                  "Directory %s is a directory target. This command does not support the \
+                   inspection of directory targets."
                   (Path.to_string dir)
               ]
           | External _ | Build _ | Source _ ->
@@ -92,7 +92,7 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
                      User_error.raise
                        [ Pp.textf "Directory %s does not exist." (Path.to_string dir) ])))
         in
-        let+ targets = fetch_results build_dir in
+        let+ targets = fetch_results extra build_dir in
         (* If we are printing multiple directories, we print the directory
            name as a header. *)
         (if header then [ Pp.textf "%s:" (Path.to_string dir) ] else [])
@@ -109,7 +109,7 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
 ;;
 
 module Aliases_cmd = struct
-  let fetch_results (dir : Path.Build.t) =
+  let fetch_results () (dir : Path.Build.t) =
     let open Action_builder.O in
     let+ alias_targets =
       let+ load_dir =
@@ -122,7 +122,7 @@ module Aliases_cmd = struct
     List.map ~f:Dune_engine.Alias.Name.to_string alias_targets
   ;;
 
-  let term = ls_term fetch_results
+  let term = ls_term_gen (Term.const ()) fetch_results
 
   let command =
     let doc = "Print aliases in a given directory. Works similarly to ls." in
@@ -131,11 +131,9 @@ module Aliases_cmd = struct
 end
 
 module Targets_cmd = struct
-  let fetch_results (dir : Path.Build.t) =
+  let fetch_results () (dir : Path.Build.t) =
     let open Action_builder.O in
-    let+ load_dir =
-      Action_builder.of_memo (Load_rules.load_dir ~dir:(Path.build dir))
-    in
+    let+ load_dir = Action_builder.of_memo (Load_rules.load_dir ~dir:(Path.build dir)) in
     match load_dir with
     | Load_rules.Loaded.Build { rules_here; _ } ->
       let file_targets =
@@ -156,7 +154,7 @@ module Targets_cmd = struct
     | _ -> []
   ;;
 
-  let term = ls_term fetch_results
+  let term = ls_term_gen (Term.const ()) fetch_results
 
   let command =
     let doc = "Print targets in a given directory. Works similarly to ls." in
