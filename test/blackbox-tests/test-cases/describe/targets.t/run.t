@@ -8,7 +8,10 @@ With no directory provided to the command, it should default to the current
 working directory.
 
   $ dune show targets
+  _doc/
+  _doc_new/
   a.ml
+  b/
   d/
   dune
   dune-project
@@ -23,7 +26,10 @@ used, and only the targets available in that directory will be displayed.
 
   $ dune show targets . b/
   .:
+  _doc/
+  _doc_new/
   a.ml
+  b/
   d/
   dune
   dune-project
@@ -45,7 +51,10 @@ used, and only the targets available in that directory will be displayed.
 The command also works with files in the _build directory.
 
   $ dune show targets _build/default/
+  _doc/
+  _doc_new/
   a.ml
+  b/
   d/
   dune
   dune-project
@@ -74,12 +83,31 @@ Build-only directories that don't exist in the source tree, like .simple.objs,
 can now be queried:
 
   $ dune show targets .simple.objs
+  byte/
   cctx.ocaml-index
+  jsoo/
+  native/
   simple__A.impl.all-deps
   simple__A.impl.d
 
   $ dune show targets _build/default/.simple.objs
+  byte/
   cctx.ocaml-index
+  jsoo/
+  native/
+  simple__A.impl.all-deps
+  simple__A.impl.d
+
+With --all, hidden directories are also shown:
+
+  $ dune show targets --all .simple.objs
+  .bin/
+  .formatted/
+  .utop/
+  byte/
+  cctx.ocaml-index
+  jsoo/
+  native/
   simple__A.impl.all-deps
   simple__A.impl.d
 
