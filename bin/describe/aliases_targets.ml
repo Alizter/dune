@@ -129,8 +129,10 @@ end
 module Targets_cmd = struct
   let fetch_results all (dir : Path.Build.t) =
     let open Action_builder.O in
+    let only_generated = not all in
     let* targets =
-      Action_builder.of_memo (Build_system.targets_of ~dir:(Path.build dir))
+      Action_builder.of_memo
+        (Build_system.targets_of ~dir:(Path.build dir) ~only_generated)
     in
     let+ subdirs =
       Action_builder.of_memo
@@ -167,7 +169,9 @@ module Targets_cmd = struct
       & flag
       & info
           [ "a"; "all" ]
-          ~doc:(Some "Show hidden directories (those starting with '.')."))
+          ~doc:
+            (Some
+               "Show all targets including source file copies and hidden directories."))
   ;;
 
   let term = ls_term_gen extra_args fetch_results

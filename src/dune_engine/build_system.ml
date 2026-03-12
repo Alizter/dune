@@ -1118,7 +1118,7 @@ let files_of ~dir =
     Filename_set.create ~dir filenames
 ;;
 
-let targets_of ~dir =
+let targets_of ~dir ~only_generated =
   Load_rules.load_dir ~dir
   >>= function
   | Source _ | External _ ->
@@ -1126,7 +1126,11 @@ let targets_of ~dir =
     Memo.return Targets.empty
   | Build { rules_here; _ } ->
     let files =
-      Path.Build.Map.keys rules_here.by_file_targets |> Path.Build.Set.of_list
+      Path.Build.Map.foldi rules_here.by_file_targets ~init:[] ~f:(fun path rule acc ->
+        match rule.Rule.info with
+        | Rule.Info.Source_file_copy _ when only_generated -> acc
+        | _ -> path :: acc)
+      |> Path.Build.Set.of_list
     in
     let dirs =
       Path.Build.Map.keys rules_here.by_directory_targets |> Path.Build.Set.of_list
