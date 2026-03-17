@@ -6,35 +6,44 @@ flags for compressed archives: -z for gzip, -j for bzip2, etc.
   $ make_lockdir
 
 Set up a fake tar that behaves like OpenBSD tar:
-- Returns generic version (not "bsdtar" or "GNU tar")
+- Fails on --version (not supported)
 - Requires explicit decompression flags
 
   $ mkdir -p .binaries
   $ cat > .binaries/openbsd-tar << 'EOF'
   > #!/usr/bin/env sh
-  > case "$1" in
-  >   --version)
-  >     echo "tar (OpenBSD)"
+  > # Parse flags - OpenBSD tar doesn't support long options
+  > has_z=false
+  > has_j=false
+  > archive=""
+  > target=""
+  > for arg in "$@"; do
+  >   case "$arg" in
+  >     --*) echo "tar: unknown option -- -" >&2; exit 1 ;;
+  >     -*z*) has_z=true ;;
+  >     -*j*) has_j=true ;;
+  >   esac
+  > done
+  > # Find -f and -C arguments
+  > while [ $# -gt 0 ]; do
+  >   case "$1" in
+  >     -f) archive="$2"; shift ;;
+  >     -C) target="$2"; shift ;;
+  >   esac
+  >   shift
+  > done
+  > # Require correct flag for compressed archives
+  > case "$archive" in
+  >   *.tar.gz|*.tgz)
+  >     $has_z || { echo "tar: input compressed with gzip; use the -z option to decompress it" >&2; exit 1; }
   >     ;;
-  >   *)
-  >     # Dune passes: -x -z -f archive -C target (or -x -j -f ... for bzip2)
-  >     # $4 = archive, $6 = target
-  >     archive="$4"
-  >     target="$6"
-  >     # Require correct flag for compressed archives
-  >     case "$archive" in
-  >       *.tar.gz|*.tgz)
-  >         echo "$@" | grep -q '\-z' || { echo "tar: Cannot open: compressed archive requires -z flag" >&2; exit 1; }
-  >         ;;
-  >       *.tar.bz2|*.tbz)
-  >         echo "$@" | grep -q '\-j' || { echo "tar: Cannot open: compressed archive requires -j flag" >&2; exit 1; }
-  >         ;;
-  >     esac
-  >     # Success - create fake extracted content
-  >     mkdir -p "$target/pkg-content"
-  >     echo "extracted" > "$target/pkg-content/file.txt"
+  >   *.tar.bz2|*.tbz)
+  >     $has_j || { echo "tar: input compressed with bzip2; use the -j option to decompress it" >&2; exit 1; }
   >     ;;
   > esac
+  > # Success - create fake extracted content
+  > mkdir -p "$target/pkg-content"
+  > echo "extracted" > "$target/pkg-content/file.txt"
   > EOF
   $ chmod +x .binaries/openbsd-tar
 
@@ -70,6 +79,7 @@ Test with a .tar.gz file:
   > EOF
 
   $ PATH=.fakebin build_pkg foo
+  tar: unknown option -- -
 
 Verify that -z flag was passed:
 
@@ -88,6 +98,7 @@ Test with a .tbz file (bzip2 compressed):
   > EOF
 
   $ PATH=.fakebin build_pkg bar
+  tar: unknown option -- -
 
 Verify that -j flag was passed:
 
@@ -107,6 +118,7 @@ doesn't support XZ:
   > EOF
 
   $ PATH=.fakebin build_pkg xzpkg 2>&1 | dune_cmd delete '^File |^ *[0-9]+ \||^ +\^'
+  tar: unknown option -- -
   Error: Cannot extract 'test.tar.xz'
   The detected tar does not support XZ decompression. XZ archives require GNU
   tar or libarchive.
@@ -126,6 +138,7 @@ doesn't support LZMA:
   > EOF
 
   $ PATH=.fakebin build_pkg lzmapkg 2>&1 | dune_cmd delete '^File |^ *[0-9]+ \||^ +\^'
+  tar: unknown option -- -
   Error: Cannot extract 'test.tar.lzma'
   The detected tar does not support LZMA decompression. LZMA archives require
   GNU tar or libarchive.
