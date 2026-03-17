@@ -82,6 +82,7 @@ let load () =
               Package.enabled_if package |> Option.map ~f:(fun expr -> package, expr))
             |> Memo.List.map ~f:(fun (package, expr) ->
               Blang_expand.eval
+                ~short_circuit:false
                 expr
                 ~dir:Path.root (* This value is irrelevant *)
                 ~f:(fun ~source:_ pform ->

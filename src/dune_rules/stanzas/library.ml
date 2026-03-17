@@ -549,19 +549,23 @@ let to_lib_info
       if Dune_project.dune_version project >= (3, 15)
       then Expander0.eval_blang expander conf.enabled_if
       else
-        Blang_expand.eval conf.enabled_if ~dir:(Path.build dir) ~f:(fun ~source:_ pform ->
-          let+ value =
-            match pform with
-            | Var Context_name ->
-              let context, _ = Path.Build.extract_build_context_exn dir in
-              Memo.return context
-            | Var Profile ->
-              let context, _ = Path.Build.extract_build_context_exn dir in
-              let+ profile = Per_context.profile (Context_name.of_string context) in
-              Profile.to_string profile
-            | _ -> Memo.return @@ Lib_config.get_for_enabled_if lib_config pform
-          in
-          [ Value.String value ])
+        Blang_expand.eval
+          ~short_circuit:false
+          conf.enabled_if
+          ~dir:(Path.build dir)
+          ~f:(fun ~source:_ pform ->
+            let+ value =
+              match pform with
+              | Var Context_name ->
+                let context, _ = Path.Build.extract_build_context_exn dir in
+                Memo.return context
+              | Var Profile ->
+                let context, _ = Path.Build.extract_build_context_exn dir in
+                let+ profile = Per_context.profile (Context_name.of_string context) in
+                Profile.to_string profile
+              | _ -> Memo.return @@ Lib_config.get_for_enabled_if lib_config pform
+            in
+            [ Value.String value ])
     in
     if not enabled_if_result
     then Lib_info.Enabled_status.Disabled_because_of_enabled_if

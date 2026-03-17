@@ -965,7 +965,11 @@ let expand_and_eval_set t set ~standard =
 ;;
 
 let eval_blang t blang =
-  Blang_expand.eval ~f:(No_deps.expand_pform t) ~dir:(Path.build t.dir) blang
+  Blang_expand.eval
+    blang
+    ~short_circuit:(Dune_project.dune_version (project t) >= (3, 23))
+    ~f:(No_deps.expand_pform t)
+    ~dir:(Path.build t.dir)
 ;;
 
 let expand_locks t (locks : Locks.t) =

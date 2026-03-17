@@ -1,7 +1,7 @@
 open Import
 open Memo.O
 
-let rec eval (t : Blang.t) ~dir ~f =
+let rec eval (t : Blang.t) ~short_circuit ~dir ~f =
   match t with
   | Const x -> Memo.return x
   | Expr sw ->
@@ -12,9 +12,15 @@ let rec eval (t : Blang.t) ~dir ~f =
      | _ ->
        let loc = String_with_vars.loc sw in
        User_error.raise ~loc [ Pp.text "This value must be either true or false" ])
-  | And xs -> Memo.List.map xs ~f:(eval ~f ~dir) >>| List.for_all ~f:Fun.id
-  | Or xs -> Memo.List.map xs ~f:(eval ~f ~dir) >>| List.exists ~f:Fun.id
-  | Not t -> eval t ~f ~dir >>| not
+  | And xs ->
+    if short_circuit
+    then Memo.List.for_all xs ~f:(eval ~short_circuit ~f ~dir)
+    else Memo.List.map xs ~f:(eval ~short_circuit ~f ~dir) >>| List.for_all ~f:Fun.id
+  | Or xs ->
+    if short_circuit
+    then Memo.List.exists xs ~f:(eval ~short_circuit ~f ~dir)
+    else Memo.List.map xs ~f:(eval ~short_circuit ~f ~dir) >>| List.exists ~f:Fun.id
+  | Not t -> eval t ~short_circuit ~f ~dir >>| not
   | Compare (op, x, y) ->
     let+ x = String_expander.Memo.expand x ~mode:Many ~dir ~f
     and+ y = String_expander.Memo.expand y ~mode:Many ~dir ~f in

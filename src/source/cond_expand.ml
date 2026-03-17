@@ -5,7 +5,7 @@ let eval (cond : Dune_lang.Cond.t) ~dir ~f =
   let expand_sw = String_expander.Memo.expand ~mode:Single ~dir ~f in
   let* from_case =
     Memo.List.find_map cond.cases ~f:(fun (blang, sw) ->
-      let* condition = Blang_expand.eval blang ~dir ~f in
+      let* condition = Blang_expand.eval ~short_circuit:false blang ~dir ~f in
       if condition then expand_sw sw >>| Option.some else Memo.return None)
   in
   if Option.is_some from_case
