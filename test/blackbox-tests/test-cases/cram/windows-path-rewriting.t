@@ -23,10 +23,8 @@ verifies the path gets rewritten in output.
   >   path is /NATIVEPATH/something
   > EOF
 
-On Windows, the colon in the drive letter (e.g. C:) causes decode_map to crash
-because it uses colon as the entry separator. This should succeed without error,
-but currently it does not:
+On Windows, the colon in the drive letter (e.g. C:) previously caused
+decode_map to crash because it uses colon as the entry separator. This now
+succeeds without error.
 
-  $ dune runtest 2>&1 | grep -c "Cannot decode build prefix map"
-  1
-  [1]
+  $ dune runtest

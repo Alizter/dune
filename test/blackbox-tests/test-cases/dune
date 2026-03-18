@@ -39,7 +39,7 @@
  (timeout 60))
 
 (cram
- (applies_to windows-diff staged-pps-with-sandboxing-gh6644)
+ (applies_to windows-diff staged-pps-with-sandboxing-gh6644 path-rewriting)
  (alias runtest-windows))
 
 ;; DISABLED TESTS

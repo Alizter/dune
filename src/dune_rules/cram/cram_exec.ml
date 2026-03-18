@@ -280,17 +280,76 @@ let line_number =
   seq [ set "123456789"; rep digit ]
 ;;
 
+(* In BUILD_PATH_PREFIX_MAP, ':' is the entry separator and '=' separates
+   target from source. On Windows, shell-injected entries may contain bare
+   drive-letter colons like C:/ that collide with the entry separator.
+   We only encode a colon when it looks like a drive letter: a single
+   [A-Za-z] preceded by '=', ':', or start-of-string, followed by '/' or '\'. *)
+let drive_letter_re =
+  Re.(
+    compile
+      (seq
+         [ group (alt [ char '='; char ':'; bos ])
+         ; group (alt [ rg 'A' 'Z'; rg 'a' 'z' ])
+         ; char ':'
+         ; group (set "/\\")
+         ]))
+;;
+
+let fixup_drive_letters s =
+  if Sys.win32
+  then
+    Re.replace drive_letter_re s ~f:(fun g ->
+      Re.Group.get g 1 ^ Re.Group.get g 2 ^ "%." ^ Re.Group.get g 3)
+  else s
+;;
+
+let abs_path_re =
+  let not_dir = Printf.sprintf " \n\r\t%c" Bin.path_sep in
+  let path_chars = Re.(rep1 (diff any (set not_dir))) in
+  let unix_abs = Re.(seq [ char '/'; path_chars ]) in
+  let win_abs =
+    Re.(seq [ alt [ rg 'A' 'Z'; rg 'a' 'z' ]; char ':'; set "/\\"; path_chars ])
+  in
+  if Sys.win32 then Re.(compile (alt [ unix_abs; win_abs ])) else Re.(compile unix_abs)
+;;
+
+(* On Windows, [String.maybe_quoted] produces paths like "C:\\Users\\..."
+   with escaped backslashes inside quotes. Unwrap these before path
+   rewriting so the prefix map can match them. *)
+let quoted_win_path_re =
+  Re.(
+    compile
+      (seq
+         [ char '"'
+         ; group
+             (seq
+                [ alt [ rg 'A' 'Z'; rg 'a' 'z' ]
+                ; str ":\\\\"
+                ; rep1 (diff any (set "\n\r\""))
+                ])
+         ; char '"'
+         ]))
+;;
+
+let escaped_backslash_re = Re.(compile (str "\\\\"))
+
+let unwrap_quoted_win_paths s =
+  if not Sys.win32
+  then s
+  else
+    Re.replace quoted_win_path_re s ~f:(fun g ->
+      Re.replace_string escaped_backslash_re (Re.Group.get g 1) ~by:"\\")
+;;
+
 let rewrite_paths ~build_path_prefix_map ~parent_script ~command_script s =
+  let build_path_prefix_map = fixup_drive_letters build_path_prefix_map in
   match Build_path_prefix_map.decode_map build_path_prefix_map with
   | Error msg ->
     Code_error.raise
       "Cannot decode build prefix map"
       [ "build_path_prefix_map", String build_path_prefix_map; "msg", String msg ]
   | Ok map ->
-    let abs_path_re =
-      let not_dir = Printf.sprintf " \n\r\t%c" Bin.path_sep in
-      Re.(compile (seq [ char '/'; rep1 (diff any (set not_dir)) ]))
-    in
     let error_msg =
       let open Re in
       let command_script = str (Path.to_absolute_filename command_script) in
@@ -302,7 +361,8 @@ let rewrite_paths ~build_path_prefix_map ~parent_script ~command_script s =
       let b = seq [ command_script; str ": line "; line_number; str ": " ] in
       [ a; b ] |> List.map ~f:(fun re -> seq [ bol; re ]) |> alt |> compile
     in
-    Re.replace abs_path_re s ~f:(fun g ->
+    unwrap_quoted_win_paths s
+    |> Re.replace abs_path_re ~f:(fun g ->
       Build_path_prefix_map.rewrite map (Re.Group.get g 0))
     |> Re.replace_string error_msg ~by:""
 ;;
@@ -506,15 +566,32 @@ let _display_with_bars s = List.iter (String.split_lines s) ~f:(Printf.eprintf "
 let make_run_env env ~temp_dir ~cwd =
   let env = Env.add env ~var:"LC_ALL" ~value:"C" in
   let temp_dir = Path.relative temp_dir "tmp" in
+  (* [Path.to_absolute_filename] on Windows produces a mixed-separator
+     string: the absolute root part comes from [Sys.getcwd] which uses
+     backslashes, while the appended local part uses forward slashes
+     (via [External.relative]'s [/]-join). Dune's own [Path.to_string]
+     produces pure forward-slash paths (e.g. [C:/Users/...] in error
+     messages from opam-file handling), so the mixed form here would
+     not prefix-match dune's output. Normalise to all forward slashes;
+     [win32_extra_entries] then derives the backslash and cygdrive
+     variants from this canonical form. *)
+  let to_forward_slashes s =
+    if Sys.win32 then String.replace_char s ~from:'\\' ~to_:'/' else s
+  in
+  let cwd = to_forward_slashes (Path.to_absolute_filename cwd) in
+  let temp_dir = to_forward_slashes (Path.to_absolute_filename temp_dir) in
+  let extras = Dune_util.Build_path_prefix_map.win32_extra_entries in
   let env =
     Dune_util.Build_path_prefix_map.extend_build_path_prefix_map
       env
       `New_rules_have_precedence
-      [ Some { source = Path.to_absolute_filename cwd; target = "$TESTCASE_ROOT" }
-      ; Some { source = Path.to_absolute_filename temp_dir; target = "$TMPDIR" }
-      ]
+      ([ Some { Build_path_prefix_map.source = cwd; target = "$TESTCASE_ROOT" }
+       ; Some { source = temp_dir; target = "$TMPDIR" }
+       ]
+       @ extras ~source:cwd ~target:"$TESTCASE_ROOT"
+       @ extras ~source:temp_dir ~target:"$TMPDIR")
   in
-  Env.add env ~var:Env.Var.temp_dir ~value:(Path.to_absolute_filename temp_dir)
+  Env.add env ~var:Env.Var.temp_dir ~value:temp_dir
 ;;
 
 let make_temp_dir ~script =
@@ -726,7 +803,9 @@ module Run = struct
       }
 
     let name = "cram-run"
-    let version = 6
+    (* Bump on any change that affects [make_run_env] or [rewrite_paths],
+       so cached cram results are not reused with stale prefix-map setup. *)
+    let version = 7
 
     let bimap
           ({ src = _; dir; script; output; timeout; setup_scripts; shell = _ } as t)

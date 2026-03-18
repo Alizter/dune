@@ -428,11 +428,12 @@ let exec
       with
       | Unset -> env
       | Set target ->
+        let source = Path.to_absolute_filename root in
         Dune_util.Build_path_prefix_map.extend_build_path_prefix_map
           env
           `New_rules_have_precedence
-          (* TODO generify *)
-          [ Some { source = Path.to_absolute_filename root; target } ]
+          (Some { Build_path_prefix_map.source; target }
+           :: Dune_util.Build_path_prefix_map.win32_extra_entries ~source ~target)
     in
     let env =
       let var = "DUNE_PROJECT_ROOT" in
