@@ -2250,6 +2250,33 @@ let main () =
   let ocaml_system = Config.system ocaml_config in
   let build_flags = get_flags ocaml_system build_flags in
   let link_flags = get_flags ocaml_system link_flags in
+  let* link_flags =
+    let os_type = Config.os_type ocaml_config in
+    match os_type with
+    | `Win32 ->
+      let ccomp_type = Config.ccomp_type ocaml_config in
+      Io.copy "bin/dune.manifest" (build_dir ^/ "dune.manifest");
+      Io.copy "bin/dune-manifest.rc" (build_dir ^/ "dune-manifest.rc");
+      let res_file, prog, args =
+        match ccomp_type with
+        | `Msvc ->
+          ( "dune-manifest.res"
+          , "rc.exe"
+          , [ "/nologo"; "/fo"; "dune-manifest.res"; "dune-manifest.rc" ] )
+        | `Other ->
+          "dune-manifest.o", "windres", [ "dune-manifest.rc"; "dune-manifest.o" ]
+      in
+      let* result = Process.try_run_and_capture ~cwd:build_dir prog args in
+      (match result with
+       | Some _ -> Fiber.return (link_flags @ [ "-cclib"; res_file ])
+       | None ->
+         Format.eprintf
+           "Warning: could not compile Windows manifest resource (%s). Long path support \
+            will not be available.@."
+           prog;
+         Fiber.return link_flags)
+    | `Unix | `Cygwin -> Fiber.return link_flags
+  in
   let c_compiler = Config.c_compiler ocaml_config in
   build
     ~ext_obj

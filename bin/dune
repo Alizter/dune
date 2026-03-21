@@ -1,5 +1,63 @@
 (include_subdirs qualified)
 
+; Compile Windows manifest resource (mingw)
+
+(rule
+ (enabled_if
+  (and
+   (= %{os_type} Win32)
+   (<> %{ccomp_type} msvc)))
+ (deps dune.manifest dune-manifest.rc)
+ (targets dune-manifest.o)
+ (action
+  (run windres dune-manifest.rc dune-manifest.o)))
+
+; Compile Windows manifest resource (MSVC)
+
+(rule
+ (enabled_if
+  (and
+   (= %{os_type} Win32)
+   (= %{ccomp_type} msvc)))
+ (deps dune.manifest dune-manifest.rc)
+ (targets dune-manifest.res)
+ (action
+  (run rc.exe /nologo /fo dune-manifest.res dune-manifest.rc)))
+
+; Manifest link flags: mingw
+
+(rule
+ (enabled_if
+  (and
+   (= %{os_type} Win32)
+   (<> %{ccomp_type} msvc)))
+ (action
+  (with-stdout-to
+   manifest-link-flags.sexp
+   (echo "(-cclib dune-manifest.o)"))))
+
+; Manifest link flags: MSVC
+
+(rule
+ (enabled_if
+  (and
+   (= %{os_type} Win32)
+   (= %{ccomp_type} msvc)))
+ (action
+  (with-stdout-to
+   manifest-link-flags.sexp
+   (echo "(-cclib dune-manifest.res)"))))
+
+; Manifest link flags: non-Windows (empty)
+
+(rule
+ (enabled_if
+  (<> %{os_type} Win32))
+ (action
+  (with-stdout-to
+   manifest-link-flags.sexp
+   (echo "()"))))
+
 (executable
  (name main)
  (public_name dune)
@@ -45,7 +103,9 @@
   source
   xdg
   re)
- (bootstrap_info bootstrap-info))
+ (bootstrap_info bootstrap-info)
+ (link_flags
+  (:include manifest-link-flags.sexp)))
 
 ; Installing the dune binary depends on the kind of build:
 ; - for bootstrap builds, dune.exe is copied from ../dune.exe
