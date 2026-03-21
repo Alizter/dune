@@ -52,6 +52,7 @@ type t =
   ; bootstrap_info : string option
   ; enabled_if : Blang.t
   ; dune_version : Dune_lang.Syntax.Version.t
+  ; windows_manifest : string option
   }
 
 include Stanza.S with type t := t

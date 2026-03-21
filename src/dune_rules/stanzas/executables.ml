@@ -424,6 +424,7 @@ type t =
   ; bootstrap_info : string option
   ; enabled_if : Blang.t
   ; dune_version : Dune_lang.Syntax.Version.t
+  ; windows_manifest : string option
   }
 
 include Stanza.Make (struct
@@ -492,6 +493,8 @@ let common =
        if not (Dune_project.is_extension_set project bootstrap_info_extension)
        then User_error.raise ~loc [ Pp.text "This field is reserved for Dune itself" ];
        fname)
+  and+ windows_manifest =
+    field_o "windows_manifest" (Dune_lang.Unreleased.since () >>> filename)
   and+ project_root = Dune_project.get_exn () >>| Dune_project.root
   and+ enabled_if =
     let allowed_vars = Enabled_if.common_vars ~since:(2, 3) in
@@ -555,6 +558,7 @@ let common =
     ; bootstrap_info
     ; enabled_if
     ; dune_version
+    ; windows_manifest
     }
 ;;
 

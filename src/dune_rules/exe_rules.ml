@@ -135,6 +135,54 @@ let o_files
     Mode.Map.Multi.add_all o_files All extra_o_files)
 ;;
 
+let windows_manifest_args sctx ~dir ~(exes : Executables.t) (ocaml : Ocaml_toolchain.t) =
+  match exes.windows_manifest with
+  | None -> Memo.return Command.Args.empty
+  | Some manifest_file ->
+    let os_type = ocaml.lib_config.os_type in
+    (match (os_type : Ocaml_config.Os_type.t) with
+     | Unix | Other _ -> Memo.return Command.Args.empty
+     | Win32 ->
+       let first_exe = first_exe exes in
+       let manifest_src = Path.Build.relative dir manifest_file in
+       let rc_file = Path.Build.relative dir (first_exe ^ "-manifest.rc") in
+       let ccomp_type = ocaml.lib_config.ccomp_type in
+       let obj_file, prog_name, compile_args =
+         match (ccomp_type : Ocaml_config.Ccomp_type.t) with
+         | Msvc ->
+           let res = Path.Build.relative dir (first_exe ^ "-manifest.res") in
+           ( res
+           , "rc.exe"
+           , [ Command.Args.A "/nologo"
+             ; Concat ("", [ A "/Fo"; Target res ])
+             ; Dep (Path.build rc_file)
+             ] )
+         | Cc | Other _ ->
+           let o = Path.Build.relative dir (first_exe ^ "-manifest.o") in
+           o, "windres", [ Dep (Path.build rc_file); Target o ]
+       in
+       let* () =
+         Super_context.add_rule
+           sctx
+           ~dir
+           (Action_builder.write_file rc_file (sprintf "1 24 \"%s\"" manifest_file))
+       in
+       let prog = Super_context.resolve_program sctx ~dir ~loc:None prog_name in
+       let* () =
+         Super_context.add_rule
+           sctx
+           ~dir
+           (Command.run_dyn_prog
+              ~dir:(Path.build dir)
+              prog
+              ([ Command.Args.Hidden_deps
+                   (Dep.Set.singleton (Dep.file (Path.build manifest_src)))
+               ]
+               @ compile_args))
+       in
+       Memo.return (Command.Args.S [ A "-cclib"; Dep (Path.build obj_file) ]))
+;;
+
 let for_ = Compilation_mode.Ocaml
 
 let executables_rules
@@ -157,6 +205,7 @@ let executables_rules
   let* () = Check_rules.add_obj_dir sctx ~obj_dir Ocaml in
   let ctx = Super_context.context sctx in
   let* ocaml = Context.ocaml ctx in
+  let* manifest_link_args = windows_manifest_args sctx ~dir ~exes ocaml in
   let project = Scope.project scope in
   let explicit_js_mode = Dune_project.explicit_js_mode project in
   let js_of_ocaml = Js_of_ocaml.In_context.make ~dir exes.buildable.js_of_ocaml in
@@ -281,6 +330,7 @@ let executables_rules
                  >>| List.concat_map ~f:(fun f -> [ "-cclib"; f ])
                in
                Command.Args.As args)
+          ; manifest_link_args
           ]
         |> Action_builder.return
       in

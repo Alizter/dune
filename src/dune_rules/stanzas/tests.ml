@@ -67,6 +67,7 @@ let gen_parse names =
             ; bootstrap_info = None
             ; enabled_if = build_if
             ; dune_version
+            ; windows_manifest = None
             }
         ; locks
         ; package

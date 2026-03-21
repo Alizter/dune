@@ -2256,7 +2256,9 @@ let main () =
     | `Win32 ->
       let ccomp_type = Config.ccomp_type ocaml_config in
       Io.copy "bin/dune.manifest" (build_dir ^/ "dune.manifest");
-      Io.copy "bin/dune-manifest.rc" (build_dir ^/ "dune-manifest.rc");
+      let oc = open_out (build_dir ^/ "dune-manifest.rc") in
+      output_string oc "1 24 \"dune.manifest\"\n";
+      close_out oc;
       let res_file, prog, args =
         match ccomp_type with
         | `Msvc ->
