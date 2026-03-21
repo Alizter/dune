@@ -24,6 +24,7 @@ module Build_system_error = Build_system_error
 module Load_rules = Load_rules
 module Clflags = Clflags
 module Response_file = Response_file
+module Long_path_check = Long_path_check
 module File_selector = File_selector
 module Print_diff = Print_diff
 module Diff_promotion = Diff_promotion

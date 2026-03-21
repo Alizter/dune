@@ -922,6 +922,7 @@ let spawn
   let prog_str =
     if Sys.win32 then String.replace_char prog_str ~from:'/' ~to_:'\\' else prog_str
   in
+  if Sys.win32 then Long_path_check.check_and_warn ~prog ~dir ~args;
   let args, response_file =
     if Sys.win32 && cmdline_approximate_length prog_str args >= 1024
     then (
