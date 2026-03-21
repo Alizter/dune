@@ -23,4 +23,5 @@
    platform_stubs
    copyfile_stubs
    signal_stubs
-   time_stubs)))
+   time_stubs
+   win_registry_stubs)))

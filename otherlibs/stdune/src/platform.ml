@@ -65,3 +65,5 @@ let assert_os what =
   if not (OS.equal OS.value what)
   then Code_error.raise "unexpected os" [ ("os", OS.(to_dyn value)) ]
 ;;
+
+external long_paths_enabled_registry : unit -> bool = "stdune_long_paths_enabled"

@@ -42,6 +42,12 @@
  (applies_to windows-diff github6644)
  (alias runtest-windows))
 
+(cram
+ (applies_to windows-manifest)
+ (enabled_if
+  (= %{os_type} Win32))
+ (alias runtest-windows))
+
 ;; DISABLED TESTS
 
 (subdir

@@ -942,6 +942,7 @@ let spawn
     | _ -> (None, stdout), (None, stderr)
   in
   let prog_str = Path.reach_for_running ?from:dir prog in
+  if Sys.win32 then Long_path_check.check_and_warn ~prog ~dir ~args;
   let args, response_file =
     if Sys.win32 && cmdline_approximate_length prog_str args >= 1024
     then (

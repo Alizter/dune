@@ -19,3 +19,7 @@ end
 
 (** [assert_os os] assert that we're running on [os]. *)
 val assert_os : OS.t -> unit
+
+(** Check if the Windows LongPathsEnabled registry key is set.
+    Always returns [false] on non-Windows platforms. *)
+val long_paths_enabled_registry : unit -> bool
