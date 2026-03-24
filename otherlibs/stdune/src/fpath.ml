@@ -132,18 +132,18 @@ let rec follow_symlinks path =
 ;;
 
 let win32_unlink fn =
-  try Unix.unlink fn with
+  try Readdir.win32_unlink fn with
   | Unix.Unix_error (Unix.EACCES, _, _) as e ->
     (try
        (* Try removing the read-only attribute *)
        Unix.chmod fn 0o666;
-       Unix.unlink fn
+       Readdir.win32_unlink fn
      with
      | Unix.Unix_error (Unix.EACCES, _, _) ->
        (* On Windows a virus scanner frequently has a lock on new executables for a short while - just retry *)
        let rec retry_loop cnt =
          Unix.sleep 1;
-         try Unix.unlink fn with
+         try Readdir.win32_unlink fn with
          | Unix.Unix_error (Unix.EACCES, _, _) ->
            if cnt > 0 then retry_loop (cnt - 1) else raise e
        in
@@ -187,11 +187,11 @@ let unlink_exn_ignore_missing fn =
 ;;
 
 let rmdir_ignore_missing fn =
-  match Unix.rmdir fn with
+  match if Stdlib.Sys.win32 then Readdir.win32_rmdir fn else Unix.rmdir fn with
   | () -> ()
   | exception Unix.Unix_error (ENOENT, _, _) ->
     (* How can we end up here? [clear_dir] cleared the directory successfully,
-       but by the time the above [Unix.rmdir] was called, another process
+       but by the time the above rmdir was called, another process
        deleted the directory. *)
     ()
 ;;
@@ -244,6 +244,17 @@ and clear_files ?(chmod = false) dir listing =
        will tolerate such phantom paths and succeed. *)
     match kind with
     | Unix.S_DIR -> rm_rf_dir ~chmod fn
+    | Unix.S_LNK ->
+      if Stdlib.Sys.win32
+      then (
+        (* Windows reparse points (junctions/symlinks): use wide APIs for
+           unicode support. Try unlink first, fall back to rmdir for
+           directory junctions. *)
+        try Readdir.win32_unlink fn with
+        | Unix.Unix_error _ ->
+          (try Readdir.win32_rmdir fn with
+           | Unix.Unix_error _ -> ()))
+      else unlink_exn ~chmod dir fn
     | _ -> unlink_exn ~chmod dir fn)
 
 and rm_rf_dir ?(chmod = false) path =

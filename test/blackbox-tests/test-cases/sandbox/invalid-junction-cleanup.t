@@ -1,12 +1,12 @@
 When a junction targets a regular file, OCaml's Unix.lstat returns ENOENT.
 Junctions are directory reparse points, so Windows cannot resolve one whose
-target is a plain file. The readdir fallback in readdir.ml treats any lstat
-failure as "file disappeared between readdir and lstat" and silently skips the
-entry. The junction remains on disk but is invisible to dune. When rmdir is
-called on the parent directory, it fails because the directory is not empty.
+target is a plain file. Without reparse point awareness in readdir, the lstat
+fallback would silently skip the entry, leaving the junction invisible to dune
+and causing rmdir to fail with "Directory not empty".
 
-On Unix, lstat on a symlink always returns S_LNK regardless of target kind, so
-this situation cannot arise.
+Dune's readdir detects reparse points via file attributes and reports them as
+S_LNK regardless of target kind, so cleanup can remove the junction even when
+lstat would fail.
 
   $ trap 'cmd /c "rmdir /s /q _build" 2>/dev/null' EXIT
 
@@ -21,11 +21,4 @@ this situation cannot arise.
   > EOF
 
   $ dune runtest 2>&1 | censor
-  Error: failed to delete sandbox in
-  _build/.sandbox/$DIGEST
-  Reason:
-  rmdir(_build/.sandbox/$DIGEST\default): Directory not empty
-  -> required by _build/default/.cram.junction.t/cram.out
-  -> required by alias junction
-  -> required by alias runtest
-  [1]
+  

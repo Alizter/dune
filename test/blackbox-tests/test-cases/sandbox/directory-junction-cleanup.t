@@ -1,8 +1,9 @@
-When a junction targets a directory, OCaml's Unix.lstat can resolve it and
-returns S_DIR — the target kind, not S_LNK. On Unix, lstat on a symlink always
-returns S_LNK regardless of target kind.
+OCaml's Unix.lstat resolves directory junctions and returns S_DIR rather than
+S_LNK. Without reparse point awareness in readdir, rm_rf would treat the
+junction as a real directory, recurse into the target, and delete its contents.
 
-We can observe this directly. On Unix this would print "symbolic_link":
+We can observe the lstat behavior directly. On Unix this would print
+"symbolic_link":
 
   $ trap 'cmd /c "rmdir /s /q _build" 2>/dev/null' EXIT
 
@@ -13,15 +14,13 @@ We can observe this directly. On Unix this would print "symbolic_link":
   $ cmd /c "rmdir junc_to_dir"
   $ rmdir real_dir
 
-Because lstat returns S_DIR, dune's rm_rf treats the junction as a real
-directory: it recurses into the target and deletes its contents. On Unix,
-lstat returns S_LNK for symlinks, so rm_rf calls unlink instead — removing
-the link without following it.
+Dune's readdir detects reparse points via file attributes and reports them as
+S_LNK, so rm_rf calls unlink rather than recursing. This test verifies that
+sandbox cleanup removes the junction without following it into the target.
 
-To demonstrate this deterministically, we use a dune rule with sandboxing.
-The rule creates a junction inside the sandbox pointing to a precious
-directory outside the sandbox. When the sandbox is cleaned up, rm_rf follows
-the junction and destroys the external directory's contents.
+A dune rule with sandboxing creates a junction inside the sandbox pointing to
+a precious directory outside the sandbox. After the build, the precious
+directory's contents must survive cleanup.
 
   $ mkdir precious
   $ echo "must survive" > precious/important.txt
@@ -51,4 +50,4 @@ the junction and destroys the external directory's contents.
   $ dune build output 2>&1
 
   $ test -f precious/important.txt && echo "survived" || echo "DESTROYED by sandbox cleanup"
-  DESTROYED by sandbox cleanup
+  survived

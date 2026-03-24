@@ -1,11 +1,13 @@
 WSL symlinks (IO_REPARSE_TAG_LX_SYMLINK, 0xa000001d) are created by Cygwin's
 default ln -s and by MSYS2's ln -s when MSYS=winsymlinks:native is set.
-Unlike NTFS junctions, they are completely invisible to OCaml's Unix.lstat for
-all target kinds — both files and directories return ENOENT. This makes them
-impossible for dune's sandbox cleanup to remove, causing "Directory not empty".
+OCaml's Unix.lstat returns ENOENT for WSL symlinks regardless of target kind,
+because Windows does not recognize the reparse tag. Without reparse point
+awareness in readdir, these entries would be silently skipped and cleanup would
+fail with "Directory not empty".
 
-On Unix, lstat on a symlink returns S_LNK regardless of target kind, and
-unlink removes the link. The WSL symlink problem cannot arise on Unix.
+Dune's readdir detects reparse points via file attributes and reports them as
+S_LNK, bypassing lstat entirely. This allows cleanup to remove WSL symlinks
+even though lstat cannot resolve them.
 
 This is the most practically relevant case because users writing ln -s in
 build scripts or cram tests may not realize MSYS2/Cygwin is creating WSL
@@ -32,7 +34,7 @@ to OCaml's lstat, for both file and directory targets:
   $ rm wsl_link_to_file wsl_link_to_dir target_file
   $ rmdir target_dir
 
-Now demonstrate the sandbox cleanup failure:
+Verify that sandbox cleanup succeeds despite lstat's inability to resolve them:
 
   $ cat > dune-project << EOF
   > (lang dune 3.0)
@@ -45,11 +47,4 @@ Now demonstrate the sandbox cleanup failure:
   > EOF
 
   $ dune runtest 2>&1 | censor
-  Error: failed to delete sandbox in
-  _build/.sandbox/$DIGEST
-  Reason:
-  rmdir(_build/.sandbox/$DIGEST\default): Directory not empty
-  -> required by _build/default/.cram.wsl-link.t/cram.out
-  -> required by alias wsl-link
-  -> required by alias runtest
-  [1]
+  
