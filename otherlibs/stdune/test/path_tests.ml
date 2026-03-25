@@ -663,7 +663,7 @@ let%expect_test "external relative plain" =
 
 let%expect_test "external relative dot-slash multi" =
   external_relative "/root" "./foo/bar";
-  [%expect {| /root/./foo/bar |}]
+  [%expect {| /root/foo/bar |}]
 ;;
 
 let%expect_test "external relative dot" =
@@ -683,7 +683,7 @@ let%expect_test "external relative deep" =
 
 let%expect_test "external relative dot-slash single" =
   external_relative "/root" "./foo";
-  [%expect {| /root/./foo |}]
+  [%expect {| /root/foo |}]
 ;;
 
 let%expect_test "external append_local multi" =
@@ -698,7 +698,7 @@ let%expect_test "external append_local root" =
 
 let%expect_test "path relative external dot-slash" =
   relative (Path.of_string "/ext") "./foo/bar";
-  [%expect {| External "/ext/./foo/bar" |}]
+  [%expect {| External "/ext/foo/bar" |}]
 ;;
 
 let%expect_test "path relative external plain" =

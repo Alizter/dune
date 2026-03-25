@@ -26,7 +26,15 @@ let to_dyn t = Dyn.variant "External" [ Dyn.string t ]
 let relative x y =
   match y with
   | "." -> x
-  | _ -> Filename.concat x y
+  | _ ->
+    let y =
+      if String.length y >= 2 && y.[0] = '.' && is_dir_sep y.[1]
+      then String.drop y 2
+      else y
+    in
+    (match y with
+     | "" | "." -> x
+     | _ -> x ^ "/" ^ y)
 ;;
 
 let append_local t local = relative t (Local.to_string local)
