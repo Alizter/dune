@@ -95,6 +95,15 @@ module Index = struct
   ;;
 end
 
+module Dependents = struct
+  type t = Collect.t =
+    { libs : Lib.Set.t
+    ; dirs : Path.Build.Set.t
+    }
+
+  let find = Index.dependents
+end
+
 let libs_in_dir ~scope ~dir =
   Dune_load.stanzas_in_dir dir
   >>= function

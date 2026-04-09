@@ -264,3 +264,13 @@ understood by dune language."))
   (ocaml (>= 4.14)))
  (maintenance_intent none)
  (description "Produce trace events from dune actions"))
+
+(package
+ (name dune-index-dump)
+ (dir otherbins/dune-index-dump)
+ (synopsis "Dump .ocaml-index files as structured s-expressions")
+ (depends
+  (ocaml (>= 5.4))
+  (merlin-lib (>= 5.7)))
+ (description
+  "Reads .ocaml-index binary files and outputs structured data about exports, their locations, and cross-module references."))

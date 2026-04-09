@@ -18,6 +18,8 @@ val install : Name.t
 val pkg_install : Name.t
 val runtest : Name.t
 val unused_libs : Name.t
+val unused : Name.t
+val unused_all : Name.t
 val revdep : Name.t
 val revdep_check : Name.t
 val revdep_runtest : Name.t

@@ -13,6 +13,11 @@ open Import
 (** [cctx_rules cctx] sets the rules needed to generate the indexes for every
     module in the compilation context [cctx] and aggregate them in a
     [cctx.uideps] index covering the whole compilation context. *)
+val index_path_in_obj_dir : Path.Build.t Obj_dir.t -> Path.Build.t
+
+(** [cctx_rules cctx] sets the rules needed to generate the indexes for every
+    module in the compilation context [cctx] and aggregate them in a
+    [cctx.uideps] index covering the whole compilation context. *)
 val cctx_rules : Compilation_context.t -> unit Memo.t
 
 (** [context_indexes] lists all the available cctx.ocaml-index files in the

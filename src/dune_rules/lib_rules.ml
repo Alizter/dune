@@ -622,6 +622,9 @@ let library_rules
       ~dir
       ~user_written_requires
       ~allow_unused_libraries
+  and+ () =
+    Memo.when_ (Compilation_context.bin_annot cctx) (fun () ->
+      Dead_code_rules.gen_rules_for_lib sctx cctx lib ~dir)
   and+ merlin =
     let+ requires_hidden = Compilation_context.requires_hidden cctx
     and+ parameters = Compilation_context.parameters cctx in

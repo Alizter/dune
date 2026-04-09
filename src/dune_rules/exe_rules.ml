@@ -239,6 +239,10 @@ let executables_rules
       ~allow_unused_libraries
   in
   let* () =
+    Memo.when_ (Compilation_context.bin_annot cctx) (fun () ->
+      Dead_code_rules.gen_rules_for_exe sctx cctx exes ~dir)
+  in
+  let* () =
     let* dep_graphs =
       (* Building an archive for foreign stubs, we link the corresponding object
        files directly to improve perf. *)

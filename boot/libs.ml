@@ -290,6 +290,12 @@ let local_libraries =
     ; special_builtin_support = None
     ; root_module = None
     }
+  ; { path = "otherbins/dune-index-dump/lib"
+    ; main_module_name = Some "Dune_index_format"
+    ; include_subdirs = No
+    ; special_builtin_support = None
+    ; root_module = None
+    }
   ; { path = "src/action_plugin"
     ; main_module_name = Some "Action_plugin"
     ; include_subdirs = No
