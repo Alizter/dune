@@ -1,0 +1,18 @@
+(env
+ (_
+  (env-vars
+   (DUNE_CONFIG__BACKGROUND_SANDBOXES disabled)
+   (DUNE_CONFIG__BACKGROUND_DIGESTS disabled)
+   (DUNE_JOBS 1)
+   (OCAML_COLOR always))))
+
+(cram
+ (applies_to :whole_subtree)
+ (shell bash)
+ (deps
+  (env_var OCAML_COLOR)
+  (env_var DUNE_JOBS)
+  %{bin:dune-index-dump}
+  (package dune))
+ (conflict_markers error)
+ (timeout 60))

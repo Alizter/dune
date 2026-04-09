@@ -29,12 +29,8 @@ let ocaml_index sctx ~dir =
 
 let index_file_name = "cctx.ocaml-index"
 
-let index_path_in_obj_dir obj_dir ~for_ =
-  let dir =
-    match for_ with
-    | Compilation_mode.Ocaml -> Obj_dir.obj_dir obj_dir
-    | Melange -> Obj_dir.melange_dir obj_dir
-  in
+let index_path_in_obj_dir obj_dir =
+  let dir = Obj_dir.obj_dir obj_dir in
   Path.Build.relative dir index_file_name
 ;;
 
@@ -48,7 +44,7 @@ let cctx_rules cctx =
   let dir = Compilation_context.dir cctx in
   let aggregate =
     let obj_dir = Compilation_context.obj_dir cctx in
-    let target = index_path_in_obj_dir obj_dir ~for_ in
+    let target = index_path_in_obj_dir obj_dir in
     let additional_libs =
       let* () = Memo.return () in
       let scope = Compilation_context.scope cctx in
@@ -84,7 +80,7 @@ let cctx_rules cctx =
         >>| List.filter_map ~f:(fun lib ->
           Lib.Local.of_lib lib
           |> Option.map ~f:(fun lib ->
-            Lib.Local.obj_dir lib |> index_path_in_obj_dir ~for_ |> Path.build))
+            Lib.Local.obj_dir lib |> index_path_in_obj_dir |> Path.build))
         >>| Dep.Set.of_files
       in
       Command.Args.Hidden_deps deps
@@ -149,7 +145,7 @@ let context_indexes =
       Action_builder.create_memo
         "indixes"
         ~input:(module Input)
-        (fun (ctx, for_) ->
+        (fun (ctx, _) ->
            Context.name ctx
            |> Dune_load.dune_files
            >>| Dune_file.fold_static_stanzas ~init:[] ~f:(fun dune_file stanza acc ->
@@ -168,7 +164,7 @@ let context_indexes =
              in
              match obj with
              | None -> acc
-             | Some obj_dir -> Path.build (index_path_in_obj_dir obj_dir ~for_) :: acc)
+             | Some obj_dir -> Path.build (index_path_in_obj_dir obj_dir) :: acc)
            |> Action_builder.of_memo)
     in
     Action_builder.exec_memo memo

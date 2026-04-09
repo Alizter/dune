@@ -1,0 +1,11 @@
+(executable
+ (name main)
+ (public_name dune-index-dump)
+ (package dune-index-dump)
+ (libraries
+  csexp
+  stdune
+  dune_index_format
+  merlin-lib.index_format
+  merlin-lib.ocaml_typing
+  merlin-lib.ocaml_parsing))
