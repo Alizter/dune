@@ -54,10 +54,142 @@ shared.ml uses Lib_a, which foo has but bar doesn't:
 
 Normal build succeeds because each executable only links what it needs:
   $ dune build ./foo.exe ./bar.exe
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Shared" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Foo" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Bar" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Shared" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Foo" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Bar" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
 
 But ocaml-index fails because bar's compilation context includes shared.ml
 which depends on Lib_a, but bar doesn't have lib_a as a dependency:
   $ dune build @ocaml-index
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Shared" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Foo" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Bar" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Shared" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Foo" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
+  File "dune", lines 1-3, characters 0-43:
+  1 | (executable
+  2 |  (name foo)
+  3 |  (libraries lib_a))
+  Warning: Module "Bar" is used in several stanzas:
+  - dune:1
+  - dune:4
+  To fix this error, you must specify an explicit "modules" field in every
+  library, executable, and executables stanzas in this dune file. Note that
+  each module cannot appear in more than one "modules" field - it must belong
+  to a single library or executable.
   File "bar.ml", line 1, characters 23-28:
   1 | let () = print_endline Lib_b.value_b
                              ^^^^^

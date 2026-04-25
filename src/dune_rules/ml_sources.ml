@@ -334,7 +334,42 @@ let find_origin (t : t) ~libs path =
     >>| (function
      | [] -> None
      | [ origin ] -> Some origin
-     | origins -> raise_module_conflict_error origins ~module_path:path)
+     | origins ->
+       let has_library =
+         List.exists origins ~f:(function
+           | Origin.Library _ -> true
+           | _ -> false)
+       in
+       if has_library
+       then raise_module_conflict_error origins ~module_path:path
+       else (
+         let dune_version =
+           List.filter_map origins ~f:(fun origin ->
+             match origin with
+             | Origin.Executables e -> Some e.dune_version
+             | Origin.Tests t -> Some t.exes.dune_version
+             | Origin.Library _ -> None
+             | Origin.Melange _ -> None)
+           |> List.fold_left ~init:(0, 0) ~f:(fun acc v -> max acc v)
+         in
+         if dune_version >= (3, 24)
+         then raise_module_conflict_error origins ~module_path:path
+         else (
+           let locs = List.map origins ~f:Origin.loc |> List.sort ~compare:Loc.compare in
+           let loc = List.hd locs in
+           User_warning.emit
+             ~loc
+             [ Pp.textf
+                 "Module %S is used in several stanzas:"
+                 (Module_name.Path.to_string path)
+             ; Pp.enumerate locs ~f:(fun loc -> Pp.verbatim (Loc.to_file_colon_line loc))
+             ; Pp.text
+                 "To fix this error, you must specify an explicit \"modules\" field in \
+                  every library, executable, and executables stanzas in this dune file. \
+                  Note that each module cannot appear in more than one \"modules\" field \
+                  - it must belong to a single library or executable."
+             ];
+           Some (List.hd origins))))
 ;;
 
 let modules_and_obj_dir t ~libs ~for_ =
@@ -374,7 +409,14 @@ let modules_and_obj_dir t ~libs ~for_ =
                 "Library %S appears for the second time in this directory"
                 (Lib_name.to_string (Lib_id.Local.name lib_id))
             ]))
-  | Some (_, modules, obj_dir) -> Memo.return (modules, obj_dir)
+  | Some (_, modules, obj_dir) ->
+    let+ () =
+      Modules.fold_user_written modules ~init:[] ~f:(fun m acc -> Module.path m :: acc)
+      |> Memo.List.iter ~f:(fun module_path ->
+        let+ (_origin : Origin.t option) = find_origin t ~libs module_path in
+        ())
+    in
+    modules, obj_dir
   | None ->
     let map =
       match for_ with
