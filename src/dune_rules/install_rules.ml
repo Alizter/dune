@@ -1140,6 +1140,8 @@ let install_entries sctx package =
   Package.Name.Map.Multi.find packages package
 ;;
 
+let () = Install_layout.set_entry_resolver install_entries
+
 let packages =
   let f sctx =
     let* packages = Dune_load.packages () in

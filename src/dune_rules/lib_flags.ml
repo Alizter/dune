@@ -254,7 +254,7 @@ module L = struct
           let dir = Path.as_in_build_dir_exn @@ Lib_info.src_dir info in
           let headers =
             let+ expander = Super_context.expander sctx ~dir in
-            let deps, sandbox =
+            let deps, sandbox, _package_env =
               Dep_conf_eval.unnamed
                 Sandbox_config.no_special_requirements
                 ~expander

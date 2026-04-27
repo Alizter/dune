@@ -380,7 +380,7 @@ include Sub_system.Register_end_point (struct
       in
       let lib_name = snd lib.name in
       let partitions_flags = partition_flags ~expander ~lib_name ~backends in
-      let deps, sandbox =
+      let deps, sandbox, _package_env =
         let sandbox =
           if dune_version < (3, 5)
           then Sandbox_config.no_special_requirements

@@ -387,7 +387,7 @@ let make
     Module_name.Per_item.map preprocess ~f:(fun pp ->
       Preprocess.remove_future_syntax ~for_:Compiler pp ocaml.version)
   in
-  let preprocessor_deps, sandbox =
+  let preprocessor_deps, sandbox, _package_env =
     Dep_conf_eval.unnamed
       Sandbox_config.no_special_requirements
       preprocessor_deps

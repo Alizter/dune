@@ -334,7 +334,7 @@ let gen_rules ~cctx ~(buildable : Buildable.t) ~loc ~scope ~dir ~sctx =
   let headers =
     gen_headers ~expander ctypes.headers |> Action_builder.memoize "ctypes-gen-headers"
   in
-  let deps, sandbox =
+  let deps, sandbox, _package_env =
     Dep_conf_eval.unnamed Sandbox_config.no_special_requirements ~expander ctypes.deps
   in
   let exe_link_only = exe_link_only ~deps ~dir ~shared_cctx:cctx ~sandbox in

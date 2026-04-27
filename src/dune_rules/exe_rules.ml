@@ -242,7 +242,7 @@ let executables_rules
     let* dep_graphs =
       (* Building an archive for foreign stubs, we link the corresponding object
        files directly to improve perf. *)
-      let link_deps, sandbox =
+      let link_deps, sandbox, _package_env =
         Dep_conf_eval.unnamed
           Sandbox_config.no_special_requirements
           ~expander

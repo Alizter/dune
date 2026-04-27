@@ -130,15 +130,25 @@ let rec dir_contents ~loc d =
     >>| List.concat
 ;;
 
-let package loc pkg (context : Build_context.t) ~dune_version =
-  let pkg = Package.Name.of_string pkg in
+let package loc pkg_name (context : Build_context.t) ~dune_version =
   Action_builder.of_memo
     (let open Memo.O in
      let* package_db = Package_db.create context.name in
-     Package_db.find_package package_db pkg)
+     Package_db.find_package package_db pkg_name)
   >>= function
   | Some (Build build) -> build
-  | Some (Local pkg) -> Alias_builder.alias (package_install ~context ~pkg)
+  | Some (Local pkg) ->
+    let open Action_builder.O in
+    let* files =
+      Action_builder.of_memo
+        (let open Memo.O in
+         let* sctx = Super_context.find_exn context.name in
+         Install_layout.layout_files sctx [ pkg_name ])
+    in
+    let* () = Action_builder.paths files in
+    (* Alias kept to populate _build/install/ for PATH and other env vars
+       that still depend on the install staging directory. *)
+    Alias_builder.alias (package_install ~context ~pkg)
   | Some (Installed pkg) ->
     if dune_version < (2, 9)
     then
@@ -173,7 +183,7 @@ let package loc pkg (context : Build_context.t) ~dune_version =
           (fun () ->
             User_error.raise
               ~loc
-              [ Pp.textf "Package %s does not exist" (Package.Name.to_string pkg) ])
+              [ Pp.textf "Package %s does not exist" (Package.Name.to_string pkg_name) ])
       }
 ;;
 
@@ -187,7 +197,7 @@ let rec dep expander : Dep_conf.t -> _ = function
          let* project = Action_builder.of_memo @@ Dune_load.find_project ~dir in
          expand_include ~dir ~project s
        in
-       let builder, _bindings = named_paths_builder ~expander deps in
+       let builder, _bindings, _package_env = named_paths_builder ~expander deps in
        builder)
   | File s ->
     (match Expander.With_deps_if_necessary.expand_path expander s with
@@ -239,7 +249,7 @@ let rec dep expander : Dep_conf.t -> _ = function
   | Package p ->
     Other
       (let+ () =
-         let* pkg = Expander.expand_str expander p in
+         let* pkg_name = Expander.expand_str expander p >>| Package.Name.of_string in
          let context = Build_context.create ~name:(Expander.context expander) in
          let loc = String_with_vars.loc p in
          let* dune_version =
@@ -249,7 +259,7 @@ let rec dep expander : Dep_conf.t -> _ = function
            Dune_load.find_project ~dir:(Expander.dir expander)
            >>| Dune_project.dune_version
          in
-         package loc pkg context ~dune_version
+         package loc pkg_name context ~dune_version
        in
        [])
   | Universe ->
@@ -263,57 +273,162 @@ let rec dep expander : Dep_conf.t -> _ = function
        [])
   | Sandbox_config _ -> Other (Action_builder.return [])
 
+and combined_package_deps_builder expander pkgs =
+  let open Action_builder.O in
+  let context = Build_context.create ~name:(Expander.context expander) in
+  let* classified =
+    Action_builder.List.map pkgs ~f:(fun (swv, loc) ->
+      let* name = Expander.expand_str expander swv in
+      let pkg = Package.Name.of_string name in
+      let+ found =
+        Action_builder.of_memo
+        @@
+        let open Memo.O in
+        let* package_db = Package_db.create context.name in
+        Package_db.find_package package_db pkg
+      in
+      loc, pkg, found)
+  in
+  let local_packages =
+    List.filter_map classified ~f:(fun (_, _, found) ->
+      match found with
+      | Some (Package_db.Local pkg) -> Some pkg
+      | _ -> None)
+  in
+  let* env =
+    match local_packages with
+    | [] -> Action_builder.return Env.empty
+    | _ ->
+      let* layout =
+        Action_builder.of_memo
+        @@
+        let open Memo.O in
+        let* project = Dune_load.find_project ~dir:(Expander.dir expander) in
+        let* all_packages = Dune_load.packages () in
+        let package_names =
+          if Dune_project.strict_package_deps project
+          then
+            let module Closure = Top_closure.Make (Package.Name.Set) (Monad.Id) in
+            match
+              Closure.top_closure local_packages ~key:Package.name ~deps:(fun pkg ->
+                List.filter_map (Package.depends pkg) ~f:(fun dep ->
+                  Package.Name.Map.find all_packages dep.name))
+            with
+            | Ok pkgs -> List.map pkgs ~f:Package.name
+            | Error cycle ->
+              User_error.raise
+                [ Pp.text "Cycle in package dependencies:"
+                ; Pp.chain cycle ~f:(fun pkg ->
+                    Pp.text (Package.Name.to_string (Package.name pkg)))
+                ]
+          else Package.Name.Map.keys all_packages
+        in
+        let* sctx = Super_context.find_exn context.name in
+        let lib_root = Install_layout.layout_lib_root sctx package_names in
+        let+ files = Install_layout.layout_files sctx package_names in
+        files, lib_root
+      in
+      let files, lib_root = layout in
+      let+ () = Action_builder.paths files in
+      Env.update Env.empty ~var:Dune_findlib.Config.ocamlpath_var ~f:(fun _PATH ->
+        Some
+          (Bin.cons_path
+             ~path_sep:Dune_findlib.Config.ocamlpath_sep
+             (Path.build lib_root)
+             ~_PATH))
+  in
+  let* dune_version =
+    Action_builder.of_memo
+    @@
+    let open Memo.O in
+    Dune_load.find_project ~dir:(Expander.dir expander) >>| Dune_project.dune_version
+  in
+  let+ () =
+    Action_builder.List.iter classified ~f:(fun (loc, pkg_name, found) ->
+      match found with
+      | Some (Local _) -> Action_builder.return ()
+      | Some (Build build) -> build
+      | Some (Installed _) | None -> package loc pkg_name context ~dune_version)
+  in
+  env
+
 and named_paths_builder ~expander l =
-  let builders, bindings =
+  let builders, bindings, combined_packages_builder =
     let expander = prepare_expander expander in
-    List.fold_left l ~init:([], Pform.Map.empty) ~f:(fun (builders, bindings) x ->
-      match x with
-      | Bindings.Unnamed x -> to_action_builder (dep expander x) :: builders, bindings
-      | Named (name, x) ->
-        let x = List.map x ~f:(dep expander) in
-        (match
-           Option.List.all
-             (List.map x ~f:(function
-                | Simple x -> Some x
-                | Other _ -> None))
-         with
-         | Some x ->
-           let open Memo.O in
-           let x = Memo.lazy_ (fun () -> Memo.all_concurrently x >>| List.concat) in
-           let bindings =
-             Pform.Map.set
-               bindings
-               (Var (User_var name))
-               (Expander.Deps.Without (Memo.Lazy.force x >>| Value.L.paths))
-           in
-           let x =
-             let open Action_builder.O in
-             let* x = Action_builder.of_memo (Memo.Lazy.force x) in
-             let+ () = Action_builder.paths x in
-             x
-           in
-           x :: builders, bindings
-         | None ->
-           let x =
-             Action_builder.memoize
-               ~cutoff:(List.equal Path.equal)
-               ("dep " ^ name)
-               (Action_builder.List.concat_map x ~f:to_action_builder)
-           in
-           let bindings =
-             Pform.Map.set
-               bindings
-               (Var (User_var name))
-               (Expander.Deps.With (x >>| Value.L.paths))
-           in
-           x :: builders, bindings))
+    let package_swvs =
+      List.filter_map l ~f:(function
+        | Bindings.Unnamed (Dep_conf.Package p) -> Some (p, String_with_vars.loc p)
+        | _ -> None)
+    in
+    let combined_packages_builder =
+      match package_swvs with
+      | [] -> None
+      | pkgs -> Some (combined_package_deps_builder expander pkgs)
+    in
+    let builders, bindings =
+      List.fold_left l ~init:([], Pform.Map.empty) ~f:(fun (builders, bindings) x ->
+        match x with
+        | Bindings.Unnamed (Dep_conf.Package _)
+          when Option.is_some combined_packages_builder -> builders, bindings
+        | Bindings.Unnamed x -> to_action_builder (dep expander x) :: builders, bindings
+        | Named (name, x) ->
+          let x = List.map x ~f:(dep expander) in
+          (match
+             Option.List.all
+               (List.map x ~f:(function
+                  | Simple x -> Some x
+                  | Other _ -> None))
+           with
+           | Some x ->
+             let open Memo.O in
+             let x = Memo.lazy_ (fun () -> Memo.all_concurrently x >>| List.concat) in
+             let bindings =
+               Pform.Map.set
+                 bindings
+                 (Var (User_var name))
+                 (Expander.Deps.Without (Memo.Lazy.force x >>| Value.L.paths))
+             in
+             let x =
+               let open Action_builder.O in
+               let* x = Action_builder.of_memo (Memo.Lazy.force x) in
+               let+ () = Action_builder.paths x in
+               x
+             in
+             x :: builders, bindings
+           | None ->
+             let x =
+               Action_builder.memoize
+                 ~cutoff:(List.equal Path.equal)
+                 ("dep " ^ name)
+                 (Action_builder.List.concat_map x ~f:to_action_builder)
+             in
+             let bindings =
+               Pform.Map.set
+                 bindings
+                 (Var (User_var name))
+                 (Expander.Deps.With (x >>| Value.L.paths))
+             in
+             x :: builders, bindings))
+    in
+    builders, bindings, combined_packages_builder
+  in
+  let builders, package_env =
+    match combined_packages_builder with
+    | None -> builders, Action_builder.return Env.empty
+    | Some b ->
+      let open Action_builder.O in
+      let b = Action_builder.memoize "combined-package-deps" b in
+      (* Include b in the builders list to ensure its deps are registered.
+         The result (Env.t) is discarded here — it is returned separately
+         as package_env. Memoization ensures b is evaluated only once. *)
+      (b >>| fun _ -> []) :: builders, b
   in
   let builder = List.rev builders |> Action_builder.all >>| List.concat in
-  builder, bindings
+  builder, bindings, package_env
 ;;
 
 let named sandbox ~expander l =
-  let builder, bindings = named_paths_builder ~expander l in
+  let builder, bindings, package_env = named_paths_builder ~expander l in
   let builder =
     Action_builder.memoize
       ~cutoff:(List.equal Value.equal)
@@ -343,16 +458,29 @@ let named sandbox ~expander l =
     sandbox_bindings sandbox l
     |> Action_builder.memoize ~cutoff:Sandbox_config.equal "deps sandbox"
   in
-  Action_builder.ignore builder, expander, sandbox
+  Action_builder.ignore builder, expander, sandbox, package_env
 ;;
 
 let unnamed sandbox ~expander l =
   let expander = prepare_expander expander in
+  let package_swvs =
+    List.filter_map l ~f:(function
+      | Dep_conf.Package p -> Some (p, String_with_vars.loc p)
+      | _ -> None)
+  in
+  let package_env =
+    match package_swvs with
+    | [] -> Action_builder.return Env.empty
+    | pkgs ->
+      let open Action_builder.O in
+      combined_package_deps_builder expander pkgs >>| Fun.id
+  in
   ( List.fold_left l ~init:(Action_builder.return ()) ~f:(fun acc x ->
       let+ () = acc
       and+ _x = to_action_builder (dep expander x) in
       ())
-  , List.fold_left l ~init:sandbox ~f:add_sandbox_config )
+  , List.fold_left l ~init:sandbox ~f:add_sandbox_config
+  , package_env )
 ;;
 
 let unnamed_get_paths ~expander l =

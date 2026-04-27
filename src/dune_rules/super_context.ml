@@ -150,7 +150,12 @@ let extend_action t ~dir action =
       (let open Memo.O in
        t.get_node dir >>= Env_node.external_env)
   in
+  (* Merge directory env with any env already on the action (e.g. package
+     OCAMLPATH from dep evaluation). The action's pre-existing env takes
+     priority so that per-rule env overrides like OCAMLPATH from materialized
+     install layouts are not clobbered by the directory-level env. *)
   Action.Full.add_env env action
+  |> Action.Full.add_env action.env
   |> Action.Full.map ~f:(function
     | Chdir _ as a -> a
     | a -> Chdir (Path.build (Context.build_dir t.context), a))

@@ -577,6 +577,7 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
                   ; "_doc"
                   ; "_doc_new"
                   ; ".ppx"
+                  ; ".install-layout"
                   ; ".dune"
                   ; ".topmod"
                   ; Dune_lang.Oxcaml.parameterised_dir
@@ -678,6 +679,18 @@ let gen_rules ctx sctx ~dir components : Gen_rules.result Memo.t =
       (fun () ->
          let* sctx = sctx in
          Pp_spec_rules.gen_rules sctx rest)
+  | ".install-layout" :: rest ->
+    has_rules
+      ~dir
+      (match rest with
+       | [] -> Subdir_set.all
+       | _ -> Subdir_set.empty)
+      (fun () ->
+         match rest with
+         | key :: _ ->
+           let* sctx = sctx in
+           Install_layout.gen_rules sctx ~dir key
+         | [] -> Memo.return ())
   | [ ".dune" ] ->
     has_rules
       ~dir

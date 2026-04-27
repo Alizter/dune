@@ -247,7 +247,7 @@ let gen_rules sctx t ~dir ~scope =
         let cinaps_exe = Path.Build.relative cinaps_dir (name ^ ".exe") in
         Path.build cinaps_exe
       in
-      let runtime_deps, sandbox =
+      let runtime_deps, sandbox, package_env =
         let sandbox =
           if t.cinaps_version >= (1, 1)
           then Sandbox_config.needs_sandboxing
@@ -260,8 +260,8 @@ let gen_rules sctx t ~dir ~scope =
         cinaps_exe :: List.rev_map cinapsed_files ~f:Path.build
         |> Dep.Set.of_files
         |> Action_builder.deps
-      in
-      Action.Full.make ~sandbox
+      and+ package_env = package_env in
+      Action.Full.make ~sandbox ~env:package_env
       @@ Action.chdir
            (Path.build dir)
            (Action.progn

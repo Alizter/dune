@@ -629,7 +629,7 @@ let rec expand (t : Dune_lang.Action.t) : Action.t Action_expander.t =
 
 let expand_no_targets t sandbox ~loc ~chdir ~deps:deps_written_by_user ~expander ~what =
   let open Action_builder.O in
-  let deps_builder, expander, sandbox =
+  let deps_builder, expander, sandbox, package_env =
     Dep_conf_eval.named ~expander sandbox deps_written_by_user
   in
   let expander =
@@ -652,9 +652,10 @@ let expand_no_targets t sandbox ~loc ~chdir ~deps:deps_written_by_user ~expander
       ];
   let+ () = deps_builder
   and+ sandbox = sandbox
+  and+ package_env = package_env
   and+ action = build in
   let action = Action.Chdir (Path.build chdir, action) in
-  Action.Full.make action ~sandbox
+  Action.Full.make action ~sandbox |> Action.Full.add_env package_env
 ;;
 
 let expand
@@ -668,7 +669,7 @@ let expand
       ~expander
   =
   let open Action_builder.O in
-  let deps_builder, expander, sandbox =
+  let deps_builder, expander, sandbox, package_env =
     Dep_conf_eval.named sandbox ~expander deps_written_by_user
   in
   let expander =
@@ -713,8 +714,10 @@ let expand
   let build =
     let+ () = deps_builder
     and+ sandbox = sandbox
+    and+ package_env = package_env
     and+ action = build in
     Action.Full.make (Action.Chdir (Path.build chdir, action)) ~sandbox
+    |> Action.Full.add_env package_env
   in
   Action_builder.with_targets ~targets build
 ;;

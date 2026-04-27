@@ -378,14 +378,15 @@ let build_include_flags ~sctx ~dir ~expander ~dir_contents ~requires ~src =
       ]
   in
   let extra_deps =
-    let extra_deps, sandbox =
+    let extra_deps, sandbox, _package_env =
       match Foreign.Source.kind src with
       | Stubs stubs ->
         Dep_conf_eval.unnamed
           Sandbox_config.no_special_requirements
           stubs.extra_deps
           ~expander
-      | Ctypes _ -> Action_builder.return (), Sandbox_config.default
+      | Ctypes _ ->
+        Action_builder.return (), Sandbox_config.default, Action_builder.return Env.empty
     in
     (* We don't sandbox the C compiler, see comment in [build_c] about
        this. *)

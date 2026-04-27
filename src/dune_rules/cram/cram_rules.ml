@@ -8,6 +8,7 @@ module Spec = struct
     ; extra_aliases : Alias.Name.Set.t
     ; deps : unit Action_builder.t list
     ; sandbox : Sandbox_config.t Action_builder.t
+    ; package_env : Env.t Action_builder.t
     ; enabled_if : (Expander.t * Blang.t) list
     ; locks : Path.Set.t Action_builder.t
     ; packages : Package.Name.Set.t
@@ -25,6 +26,7 @@ module Spec = struct
     ; locks = Action_builder.return Path.Set.empty
     ; deps = []
     ; sandbox = Action_builder.return Sandbox_config.needs_sandboxing
+    ; package_env = Action_builder.return Env.empty
     ; packages = Package.Name.Set.empty
     ; timeout = None
     ; conflict_markers = Ignore
@@ -62,6 +64,7 @@ let test_rule
        ; deps
        ; locks
        ; sandbox
+       ; package_env
        ; packages = _
        ; timeout
        ; conflict_markers
@@ -138,6 +141,7 @@ let test_rule
            ()
        and+ () = Action_builder.paths setup_scripts
        and+ sandbox = sandbox
+       and+ package_env = package_env
        and+ locks = locks >>| Path.Set.to_list in
        Cram_exec.run
          ~src:(Path.build script)
@@ -151,7 +155,8 @@ let test_rule
          ~timeout
          ~setup_scripts
          shell
-       |> Action.Full.make ~locks ~sandbox)
+       |> Action.Full.make ~locks ~sandbox
+       |> Action.Full.add_env package_env)
       |> Action_builder.with_file_targets ~file_targets:[ output ]
       |> Super_context.add_rule sctx ~dir ~loc
     in
@@ -256,11 +261,11 @@ let rules ~sctx ~dir tests project =
             | false -> Memo.return (runtest_alias, acc)
             | true ->
               let+ expander = Super_context.expander sctx ~dir in
-              let deps, sandbox =
+              let deps, sandbox, package_env =
                 match stanza.deps with
-                | None -> acc.deps, acc.sandbox
+                | None -> acc.deps, acc.sandbox, acc.package_env
                 | Some deps ->
-                  let (deps : unit Action_builder.t), _, sandbox =
+                  let (deps : unit Action_builder.t), _, sandbox, package_env =
                     Dep_conf_eval.named
                       ~expander
                       Sandbox_config.no_special_requirements
@@ -272,7 +277,13 @@ let rules ~sctx ~dir tests project =
                     and+ sandbox = sandbox in
                     Sandbox_config.inter acc sandbox
                   in
-                  deps :: acc.deps, sandbox
+                  let package_env =
+                    let open Action_builder.O in
+                    let+ acc = acc.package_env
+                    and+ env = package_env in
+                    Env.extend_env acc env
+                  in
+                  deps :: acc.deps, sandbox, package_env
               in
               let locks =
                 let open Action_builder.O in
@@ -355,6 +366,7 @@ let rules ~sctx ~dir tests project =
                 ; extra_aliases
                 ; packages
                 ; sandbox
+                ; package_env
                 ; timeout
                 ; conflict_markers
                 ; setup_scripts
