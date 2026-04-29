@@ -21,7 +21,6 @@ where vlib is a virtual library, and impl implements this library.
   > EOF
   $ dune build @all
   Error: Library "vlib" was pulled in.
-  -> required by library "lib" in _build/default/lib
   -> required by library "impl" in _build/default/impl
   -> required by _build/default/impl/.impl.objs/byte/vlib.cmo
   -> required by _build/default/impl/impl.cma
@@ -34,7 +33,6 @@ The implementation impl was built, but it's not usable:
   $ echo "(executable (name foo) (libraries impl))" > dune
   $ dune exec ./foo.exe
   Error: Library "vlib" was pulled in.
-  -> required by library "lib" in _build/default/lib
   -> required by library "impl" in _build/default/impl
   -> required by executable foo in dune:1
   -> required by _build/default/.foo.eobjs/native/dune__exe__Foo.cmx

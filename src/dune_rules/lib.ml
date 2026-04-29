@@ -874,8 +874,6 @@ module Dep_stack : sig
   module Implements_via : sig
     type t = Default_for of Id.t
   end
-
-  val push : t -> implements_via:Implements_via.t option -> lib -> t Resolve.Memo.t
 end = struct
   module Implements_via = struct
     type t = Default_for of Id.t
@@ -889,10 +887,9 @@ end = struct
   type t =
     { stack : Id.t list
     ; implements_via : Implements_via.t Id.Map.t
-    ; seen : Set.t
     }
 
-  let empty = { stack = []; seen = Set.empty; implements_via = Id.Map.empty }
+  let empty = { stack = []; implements_via = Id.Map.empty }
 
   let to_required_by t =
     List.map t.stack ~f:(fun ({ Id.path; name; _ } as id) ->
@@ -902,33 +899,6 @@ end = struct
         Implements_via.to_dep_path_implements_via via
       in
       { Dep_path.Entry.lib = { path; name }; implements_via })
-  ;;
-
-  let dependency_cycle t (last : lib) =
-    assert (Set.mem t.seen last);
-    let last = last.unique_id in
-    let rec build_loop acc stack =
-      match stack with
-      | [] -> assert false
-      | (x : Id.t) :: stack ->
-        let acc = (x.path, x.name) :: acc in
-        if Id.equal x last then acc else build_loop acc stack
-    in
-    let loop = build_loop [ last.path, last.name ] t.stack in
-    Error.dependency_cycle loop
-  ;;
-
-  let push (t : t) ~implements_via (x : lib) =
-    if Set.mem t.seen x
-    then dependency_cycle t x
-    else (
-      let implements_via =
-        match implements_via with
-        | None -> t.implements_via
-        | Some via -> Id.Map.add_exn t.implements_via x.unique_id via
-      in
-      Resolve.Memo.return
-        { stack = x.unique_id :: t.stack; seen = Set.add t.seen x; implements_via })
   ;;
 end
 
@@ -1191,6 +1161,28 @@ module Resolve_names : sig
     -> (Lib_name.t -> Path.t Lib_info.t -> hidden:string option -> Status.t Memo.t)
          Staged.t
 end = struct
+  module Lib_top_closure = Top_closure.Make (Set) (Resolve.Memo)
+
+  module Lib_for_key = struct
+    type t = lib * Compilation_mode.t
+
+    let equal (a, m) (b, m') =
+      T.compare a b |> Ordering.is_eq && Compilation_mode.equal m m'
+    ;;
+
+    let hash (lib, mode) =
+      let h = hash lib in
+      let m =
+        match mode with
+        | Compilation_mode.Ocaml -> 0
+        | Melange -> 1
+      in
+      (h * 31) + m
+    ;;
+
+    let to_dyn (lib, mode) = Dyn.pair to_dyn Compilation_mode.to_dyn (lib, mode)
+  end
+
   let projects_by_package =
     Memo.lazy_ (fun () ->
       let open Memo.O in
@@ -1312,97 +1304,7 @@ end = struct
     ; runtime_deps : t list Resolve.Memo.t
     }
 
-  module Closure = struct
-    type nonrec t =
-      { db : db option
-      ; forbidden_libraries : Loc.t Map.t
-      }
-
-    let make ~db ~forbidden_libraries = { db; forbidden_libraries }
-
-    module R = struct
-      type state =
-        { result : (lib * Dep_stack.t) list
-        ; visited : Set.t
-        ; unimplemented : Vlib.Unimplemented.t
-        }
-
-      let empty_state =
-        { result = []; visited = Set.empty; unimplemented = Vlib.Unimplemented.empty }
-      ;;
-
-      module M =
-        State.Make
-          (struct
-            type t = state
-          end)
-          (Resolve.Memo)
-
-      module List = Monad.List (M)
-      include M
-    end
-
-    let result computation kind ~for_ =
-      let* state, () = R.run computation R.empty_state in
-      Vlib.associate (List.rev state.result) kind ~for_
-    ;;
-  end
-
-  let rec closure_visit (t : Closure.t) ~stack ~for_ (implements_via, (lib : lib)) =
-    let open Closure in
-    let open R.O in
-    let* state = R.get in
-    if Set.mem state.visited lib
-    then R.return ()
-    else (
-      match Map.find t.forbidden_libraries lib with
-      | Some loc ->
-        let req_by = Dep_stack.to_required_by stack in
-        R.lift
-          (Error.make
-             ~loc
-             [ Pp.textf "Library %S was pulled in." (Lib_name.to_string lib.name)
-             ; Dep_path.pp req_by
-             ])
-      | None ->
-        let* () = R.set { state with visited = Set.add state.visited lib } in
-        let* () =
-          match t.db with
-          | None -> R.return ()
-          | Some db ->
-            (match Lib_info.status lib.info with
-             | Private (_, Some _) -> R.return ()
-             | _ ->
-               R.lift
-                 (let open Memo.O in
-                  find_internal db lib.name
-                  >>= function
-                  | Status.Found lib' ->
-                    if Id.equal lib.unique_id lib'.unique_id
-                    then Resolve.Memo.return ()
-                    else (
-                      let req_by = Dep_stack.to_required_by stack in
-                      Error.overlap ~in_workspace:lib'.info ~installed:(lib.info, req_by))
-                  | found ->
-                    Code_error.raise
-                      "Unexpected find result"
-                      [ "found", Status.to_dyn found
-                      ; "lib.name", Lib_name.to_dyn lib.name
-                      ]))
-        in
-        let* new_stack = R.lift (Dep_stack.push stack ~implements_via lib) in
-        let* deps = R.lift (Resolve.Memo.lift (Parameterised.requires lib ~for_)) in
-        let* unimplemented' = R.lift (Vlib.Unimplemented.add state.unimplemented lib) in
-        let* () = R.modify (fun state -> { state with unimplemented = unimplemented' }) in
-        let* () =
-          R.List.iter deps ~f:(fun l -> closure_visit t (None, l) ~stack:new_stack ~for_)
-        in
-        (match Parameterised.status lib with
-         | Partial -> R.return ()
-         | Not_parameterised | Complete ->
-           R.modify (fun state -> { state with result = (lib, stack) :: state.result })))
-
-  and resolve_parameters db ~private_deps info =
+  let rec resolve_parameters db ~private_deps info =
     let open Resolve.Memo.O in
     let* parameters =
       Resolve.Memo.List.filter_map (Lib_info.parameters info) ~f:(fun (loc, name) ->
@@ -2156,44 +2058,103 @@ end = struct
       libraries
       ~f:(library_is_default status.vlib_default_parent)
 
-  and step1_closure db ts ~forbidden_libraries ~for_ =
-    let closure = Closure.make ~db ~forbidden_libraries in
-    ( closure
-    , Closure.R.List.iter ts ~f:(fun lib ->
-        closure_visit closure ~stack:Dep_stack.empty (None, lib) ~for_) )
+  and lib_deps =
+    let memo =
+      Memo.create
+        "lib-closure-deps"
+        ~input:(module Lib_for_key)
+        (fun (lib, for_) -> Resolve.Memo.lift (Parameterised.requires lib ~for_))
+    in
+    fun lib ~for_ -> Memo.exec memo (lib, for_)
+
+  and pure_closure ts ~for_ =
+    Lib_top_closure.top_closure ts ~key:Fun.id ~deps:(fun lib -> lib_deps lib ~for_)
+
+  and filter_partial libs =
+    Resolve.Memo.return
+      (List.filter libs ~f:(fun lib ->
+         match Parameterised.status lib with
+         | Partial -> false
+         | Not_parameterised | Complete -> true))
+
+  and check_forbidden_post libs ~forbidden_libraries =
+    if Map.is_empty forbidden_libraries
+    then Resolve.Memo.return ()
+    else
+      Resolve.Memo.List.iter libs ~f:(fun lib ->
+        match Map.find forbidden_libraries lib with
+        | None -> Resolve.Memo.return ()
+        | Some loc ->
+          Error.make
+            ~loc
+            [ Pp.textf "Library %S was pulled in." (Lib_name.to_string lib.name) ])
+
+  and check_overlaps_post libs ~db =
+    match db with
+    | None -> Resolve.Memo.return ()
+    | Some db ->
+      Resolve.Memo.List.iter libs ~f:(fun lib ->
+        match Lib_info.status lib.info with
+        | Private (_, Some _) -> Resolve.Memo.return ()
+        | _ ->
+          let open Memo.O in
+          find_internal db lib.name
+          >>= (function
+           | Status.Found lib' ->
+             if Id.equal lib.unique_id lib'.unique_id
+             then Resolve.Memo.return ()
+             else Error.overlap ~in_workspace:lib'.info ~installed:(lib.info, [])
+           | found ->
+             Code_error.raise
+               "Unexpected find result"
+               [ "found", Status.to_dyn found; "lib.name", Lib_name.to_dyn lib.name ]))
+
+  and compute_unimplemented libs =
+    Resolve.Memo.List.fold_left libs ~init:Vlib.Unimplemented.empty ~f:(fun acc lib ->
+      Vlib.Unimplemented.add acc lib)
+
+  and handle_closure_result result =
+    match result with
+    | Ok libs -> Resolve.Memo.return libs
+    | Error cycle ->
+      Error.dependency_cycle
+        (List.map cycle ~f:(fun (lib : lib) -> Lib_info.src_dir lib.info, lib.name))
 
   and compile_closure_with_overlap_checks db ts ~forbidden_libraries ~for_ =
-    let (_ : Closure.t), state = step1_closure db ts ~forbidden_libraries ~for_ in
-    Closure.result state `Compile ~for_
+    let* libs = pure_closure ts ~for_ >>= handle_closure_result in
+    let* libs = filter_partial libs in
+    let* () = check_forbidden_post libs ~forbidden_libraries in
+    let* () = check_overlaps_post libs ~db in
+    let closure_with_stacks = List.map libs ~f:(fun lib -> lib, Dep_stack.empty) in
+    Vlib.associate closure_with_stacks `Compile ~for_
 
   and linking_closure_with_overlap_checks db ts ~forbidden_libraries ~for_ =
-    let closure, state = step1_closure db ts ~forbidden_libraries ~for_ in
-    let res =
-      let open Closure.R.O in
-      let rec impls_via_defaults () =
-        let* defaults =
-          let* state = Closure.R.get in
-          Vlib.Unimplemented.with_default_implementations state.unimplemented
-          |> resolve_default_libraries ~for_
-          |> Closure.R.lift
-        in
-        match defaults with
-        | _ :: _ -> fill_impls defaults
-        | [] -> Closure.R.return ()
-      and fill_impls libs =
-        let* () =
-          Closure.R.List.iter libs ~f:(fun (via, lib) ->
-            closure_visit closure (Some via, lib) ~stack:Dep_stack.empty ~for_)
-        in
-        impls_via_defaults ()
-      in
-      state >>> impls_via_defaults ()
+    let* libs = pure_closure ts ~for_ >>= handle_closure_result in
+    let* libs = filter_partial libs in
+    let* () = check_forbidden_post libs ~forbidden_libraries in
+    let* () = check_overlaps_post libs ~db in
+    let rec fixpoint libs =
+      let* unimplemented = compute_unimplemented libs in
+      let defaults = Vlib.Unimplemented.with_default_implementations unimplemented in
+      match defaults with
+      | [] ->
+        let closure_with_stacks = List.map libs ~f:(fun lib -> lib, Dep_stack.empty) in
+        Vlib.associate closure_with_stacks `Link ~for_
+      | _ :: _ ->
+        let* default_libs = resolve_default_libraries defaults ~for_ in
+        let new_roots = List.map default_libs ~f:snd in
+        let* extended = pure_closure (libs @ new_roots) ~for_ >>= handle_closure_result in
+        let* extended = filter_partial extended in
+        fixpoint extended
     in
-    Closure.result res `Link ~for_
+    fixpoint libs
 
   and check_forbidden ts ~forbidden_libraries ~for_ =
-    let (_ : Closure.t), state = step1_closure None ts ~forbidden_libraries ~for_ in
-    let+ (_ : lib list) = Closure.result state `Partial_link ~for_ in
+    let* libs = pure_closure ts ~for_ >>= handle_closure_result in
+    let* libs = filter_partial libs in
+    let* () = check_forbidden_post libs ~forbidden_libraries in
+    let closure_with_stacks = List.map libs ~f:(fun lib -> lib, Dep_stack.empty) in
+    let+ (_ : lib list) = Vlib.associate closure_with_stacks `Partial_link ~for_ in
     ()
   ;;
 end

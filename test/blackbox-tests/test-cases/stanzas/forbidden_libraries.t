@@ -21,8 +21,6 @@ Test the `forbidden_libraries` feature
   7 |  (forbidden_libraries a))
                             ^
   Error: Library "a" was pulled in.
-  -> required by library "b" in _build/default
-  -> required by library "c" in _build/default
   -> required by executable main in dune:5
   -> required by _build/default/.main.eobjs/native/dune__exe__Main.cmx
   -> required by _build/default/main.exe

@@ -4,7 +4,6 @@
   Error: Conflicting implementations for virtual library "vlib" in
   _build/default/vlib:
   - "impl1" in _build/default/impl1
-    -> required by library "bar" in _build/default
   - "impl2" in _build/default/impl2
   This cannot work.
   -> required by melange target output
@@ -12,7 +11,6 @@
   Error: Conflicting implementations for virtual library "vlib" in
   _build/default/vlib:
   - "impl1" in _build/default/impl1
-    -> required by library "bar" in _build/default
   - "impl2" in _build/default/impl2
   This cannot work.
   -> required by melange target output
