@@ -63,6 +63,9 @@ val threaded_console : Toggle.t t
 (** The number of frames per second for the threaded console. *)
 val threaded_console_frames_per_second : [ `Default | `Custom of int ] t
 
+(** Whether to use codept instead of ocamldep for module dependency discovery. *)
+val codept : Toggle.t t
+
 (** Before any configuration value is accessed, this function must be called
     with all the configuration values from the relevant config file
     ([dune-workspace], or [dune-config]).
