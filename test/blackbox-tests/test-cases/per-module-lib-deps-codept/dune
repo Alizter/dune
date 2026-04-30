@@ -1,0 +1,4 @@
+(env
+ (_
+  (env-vars
+   (DUNE_CONFIG__CODEPT enabled))))

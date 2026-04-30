@@ -670,6 +670,7 @@
               ])
               ++ (with pkgs.ocamlPackages; [
                 core_bench
+                codept
                 js_of_ocaml
                 js_of_ocaml-compiler
                 ocaml-lsp
