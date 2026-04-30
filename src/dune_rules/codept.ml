@@ -60,30 +60,37 @@ let cm_deps (cctx : Compilation_context.t) ~ml_kind ~cm_kind m =
          | Error _ -> []))
   in
   (* Resolve each compilation unit to .cmi/.cmx paths *)
+  let local_obj_map = Modules.With_vlib.obj_map modules in
+  let cm_files_of dep_module =
+    let cmi_kind = Lib_mode.Cm_kind.cmi cm_kind in
+    let cmi =
+      Path.build (Obj_dir.Module.cm_file_exn obj_dir dep_module ~kind:cmi_kind)
+    in
+    if Module.has dep_module ~ml_kind:Impl && cm_kind = Ocaml Cmx && not opaque
+    then (
+      let cmx =
+        Path.build (Obj_dir.Module.cm_file_exn obj_dir dep_module ~kind:(Ocaml Cmx))
+      in
+      [ cmi; cmx ])
+    else [ cmi ]
+  in
   let paths =
     List.concat_map unit_names ~f:(fun name ->
       let module_name = Module_name.of_checked_string name in
       match Modules.With_vlib.find_dep modules ~of_:m module_name with
       | Error `Parent_cycle -> []
-      | Ok (_ :: _ as local_modules) ->
-        (* Local module — get .cmi (and .cmx if needed) from local obj_dir *)
-        List.concat_map local_modules ~f:(fun dep_module ->
-          let cmi_kind = Lib_mode.Cm_kind.cmi cm_kind in
-          let cmi =
-            Path.build (Obj_dir.Module.cm_file_exn obj_dir dep_module ~kind:cmi_kind)
-          in
-          if Module.has dep_module ~ml_kind:Impl && cm_kind = Ocaml Cmx && not opaque
-          then (
-            let cmx =
-              Path.build (Obj_dir.Module.cm_file_exn obj_dir dep_module ~kind:(Ocaml Cmx))
-            in
-            [ cmi; cmx ])
-          else [ cmi ])
+      | Ok (_ :: _ as local_modules) -> List.concat_map local_modules ~f:cm_files_of
       | Ok [] ->
-        (* Not local — try dependency libraries *)
-        (match resolve_in_libs ~libs ~for_ module_name with
-         | Some cmi -> [ cmi ]
-         | None -> []))
+        (* Not found by module name — try by obj_name (handles mangled names
+           like Lib__Module in wrapped libraries) *)
+        let obj_name = Module_name.Unique.of_string name in
+        (match Module_name.Unique.Map.find local_obj_map obj_name with
+         | Some sourced -> cm_files_of (Modules.Sourced_module.to_module sourced)
+         | None ->
+           (* Not local — try dependency libraries *)
+           (match resolve_in_libs ~libs ~for_ module_name with
+            | Some cmi -> [ cmi ]
+            | None -> [])))
   in
   (* Also add implicit deps (e.g. modules_before_stdlib) *)
   let implicit_paths =
