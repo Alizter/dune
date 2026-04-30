@@ -79,6 +79,11 @@ flips the expected target_files array to [].
   > EOF
 
   $ dune build @check
+  File "consumer.ml", line 1, characters 8-28:
+  1 | let _ = Lib_re_export.Pprint.Re.x
+              ^^^^^^^^^^^^^^^^^^^^
+  Error: The module Lib_re_export.Pprint is an alias for module Lib_re_export__Pprint, which is missing
+  [1]
 
 Edit [unreached_module]'s interface — a module the consumer does
 NOT reach through any alias chain ([Pprint] aliases

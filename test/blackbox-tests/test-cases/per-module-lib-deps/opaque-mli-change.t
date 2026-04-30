@@ -35,6 +35,9 @@ Companion to [opaque.t], which covers the [.ml]-only change axis.
   > EOF
 
   $ dune build ./main.exe
+  File "_none_", line 1:
+  Warning 58 [no-cmx-file]: no cmx file was found in path for module Dep_lib,
+    and its interface was not compiled with -opaque
 
 Add a new declaration to both [.ml] and [.mli] (paired so no value is
 left unexported, which would trip warning 32 under dev):
@@ -49,14 +52,11 @@ left unexported, which would trip warning 32 under dev):
   > EOF
 
   $ dune build ./main.exe
+  File "_none_", line 1:
+  Warning 58 [no-cmx-file]: no cmx file was found in path for module Dep_lib,
+    and its interface was not compiled with -opaque
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("dune__exe__Main"))]'
   [
-    {
-      "target_files": [
-        "_build/default/.main.eobjs/byte/dune__exe__Main.cmi",
-        "_build/default/.main.eobjs/byte/dune__exe__Main.cmti"
-      ]
-    },
     {
       "target_files": [
         "_build/default/.main.eobjs/native/dune__exe__Main.cmx",
@@ -90,12 +90,6 @@ Add another paired declaration:
   $ dune build ./main.exe
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("dune__exe__Main"))]'
   [
-    {
-      "target_files": [
-        "_build/default/.main.eobjs/byte/dune__exe__Main.cmi",
-        "_build/default/.main.eobjs/byte/dune__exe__Main.cmti"
-      ]
-    },
     {
       "target_files": [
         "_build/default/.main.eobjs/native/dune__exe__Main.cmx",

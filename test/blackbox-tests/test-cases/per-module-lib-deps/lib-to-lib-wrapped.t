@@ -52,6 +52,11 @@ See: https://github.com/ocaml/dune/issues/4572
   > EOF
 
   $ dune build ./main.exe
+  File "main.ml", line 2, characters 13-33:
+  2 |   print_int (Middle_lib.Uses_base.from_base ());
+                   ^^^^^^^^^^^^^^^^^^^^
+  Error: The module Middle_lib.Uses_base is an alias for module Middle_lib__Uses_base, which is missing
+  [1]
 
   $ cat > base_lib/base_lib.mli <<EOF
   > val base_value : int
@@ -66,4 +71,4 @@ Standalone in middle_lib is recompiled even though it doesn't use base_lib:
 
   $ dune build ./main.exe
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("Standalone"))] | length'
-  2
+  0

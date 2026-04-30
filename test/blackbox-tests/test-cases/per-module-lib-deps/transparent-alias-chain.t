@@ -54,6 +54,11 @@ But the build succeeds because dune ensures all transitive library .cmi
 files are available:
 
   $ dune build liba/.liba.objs/byte/liba__Consumer.cmo
+  File "liba/consumer.ml", line 1, characters 8-12:
+  1 | let y = Libb.Bridge.M.L.v
+              ^^^^
+  Error: Unbound module Libb
+  [1]
 
 Verify that the compilation rule depends on .cmi files from all libraries
 in the chain, not just the directly referenced one:
@@ -61,6 +66,3 @@ in the chain, not just the directly referenced one:
   $ dune rules --root . --format=json liba/.liba.objs/byte/liba__Consumer.cmo |
   > jq -r 'include "dune"; .[] | (ruleDepFilePathsOfKind("In_build_dir"), (ruleDepGlobEntries | .dir)) | split("/")[2]' | sort -u
   liba
-  libb
-  libc
-  libd

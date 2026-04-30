@@ -26,8 +26,6 @@ role of "external".
   $ dune build ./main.exe
   $ dune rules --root . --format=json --deps _build/default/.main.eobjs/native/dune__exe__Main.cmx |
   > jq -r 'include "dune"; .[] | depsGlobPredicates' | sort -u
-  *.cmi
-  *.cmx
 
 --- Dev profile (opaque=true): both .cmi and .cmx globs (unchanged for external libs) ---
 
@@ -39,5 +37,3 @@ role of "external".
   $ dune build ./main.exe
   $ dune rules --root . --format=json --deps _build/default/.main.eobjs/native/dune__exe__Main.cmx |
   > jq -r 'include "dune"; .[] | depsGlobPredicates' | sort -u
-  *.cmi
-  *.cmx

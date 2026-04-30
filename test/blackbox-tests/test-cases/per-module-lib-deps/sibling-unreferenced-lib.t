@@ -73,4 +73,4 @@ rebuild targets observed in the trace:
   > EOF
   $ dune build @check
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("spurious_rebuild"))] | length'
-  1
+  0

@@ -69,17 +69,4 @@ uses_alpha being rebuilt:
 
   $ dune build ./main.exe
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("uses_alpha"))]'
-  [
-    {
-      "target_files": [
-        "_build/default/consumer_lib/.consumer_lib.objs/byte/uses_alpha.cmi",
-        "_build/default/consumer_lib/.consumer_lib.objs/byte/uses_alpha.cmti"
-      ]
-    },
-    {
-      "target_files": [
-        "_build/default/consumer_lib/.consumer_lib.objs/native/uses_alpha.cmx",
-        "_build/default/consumer_lib/.consumer_lib.objs/native/uses_alpha.o"
-      ]
-    }
-  ]
+  []

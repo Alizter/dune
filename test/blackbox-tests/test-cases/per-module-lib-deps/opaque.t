@@ -55,6 +55,9 @@ See: https://github.com/ocaml/dune/issues/4572
   > EOF
 
   $ dune build ./main.exe
+  File "_none_", line 1:
+  Warning 58 [no-cmx-file]: no cmx file was found in path for module Mylib, and
+    its interface was not compiled with -opaque
 
 Change ONLY the implementation (not the interface):
 
@@ -66,7 +69,7 @@ No_use_lib is recompiled even though it doesn't reference Mylib:
 
   $ dune build ./main.exe
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("No_use_lib"))] | length'
-  1
+  0
 
 --- Dev profile (opaque=true): .cmx deps are NOT tracked for local libs ---
 

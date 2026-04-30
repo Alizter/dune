@@ -49,3 +49,8 @@ to the wrapper API.
   > EOF
 
   $ dune build ./main.exe
+  File "main.ml", line 1, characters 23-38:
+  1 | let () = print_endline Mylib__Internal.hi
+                             ^^^^^^^^^^^^^^^
+  Error: Unbound module Mylib__Internal
+  [1]

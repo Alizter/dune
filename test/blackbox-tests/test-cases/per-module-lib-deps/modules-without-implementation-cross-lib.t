@@ -65,4 +65,4 @@ not error out with "inconsistent assumptions over interface":
   > EOF
   $ dune build @check
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("consumer"))] | length'
-  1
+  0

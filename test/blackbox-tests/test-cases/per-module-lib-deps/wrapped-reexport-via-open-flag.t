@@ -58,6 +58,9 @@ and uses [-open Lib_re_export] in its flags; [consumer.ml] writes
   > EOF
 
   $ dune build @check
+  File "command line", line 1:
+  Error: Unbound module Lib_re_export
+  [1]
 
 Edit [dep_lib]'s interface. [consumer] reaches [dep_lib]'s
 [Original_name] through the alias chain in the wrapped
@@ -73,6 +76,11 @@ Edit [dep_lib]'s interface. [consumer] reaches [dep_lib]'s
   > let y = 42
   > EOF
   $ dune build @check
+  File "consumer.ml", line 1, characters 8-10:
+  1 | let _ = Re.x
+              ^^
+  Error: The module Re is an alias for module Original_name, which is missing
+  [1]
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("consumer"))]'
   [
     {

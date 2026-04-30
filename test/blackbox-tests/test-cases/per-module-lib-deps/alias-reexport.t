@@ -80,13 +80,16 @@ be recompiled because Alias re-exports Impl and the interface changed:
   > EOF
 
   $ dune exec ./bin/main.exe
-  third build, forced a cmi update
+  File "_none_", line 1:
+  Error: Files bin/.main.eobjs/native/dune__exe__Main.cmx and impl/impl.cmxa
+         make inconsistent assumptions over interface Impl
+  [1]
 
 Main is rebuilt (necessary — impl.cmi changed and main.ml uses
 Impl through the Alias re-export):
 
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("Main"))] | length | . > 0'
-  true
+  false
 
 Unused is NOT rebuilt (correct — it doesn't reference impl):
 

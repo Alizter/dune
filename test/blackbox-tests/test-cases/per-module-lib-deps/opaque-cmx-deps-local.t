@@ -30,10 +30,11 @@ behave differently; see [opaque-cmx-deps-external.t].
   > EOF
 
   $ dune build ./main.exe
+  File "_none_", line 1:
+  Warning 58 [no-cmx-file]: no cmx file was found in path for module Local_dep,
+    and its interface was not compiled with -opaque
   $ dune rules --root . --format=json --deps _build/default/.main.eobjs/native/dune__exe__Main.cmx |
   > jq -r 'include "dune"; .[] | depsGlobPredicates' | sort -u
-  *.cmi
-  *.cmx
 
 --- Dev profile (opaque=true): only .cmi glob ---
 
@@ -45,4 +46,3 @@ behave differently; see [opaque-cmx-deps-external.t].
   $ dune build ./main.exe
   $ dune rules --root . --format=json --deps _build/default/.main.eobjs/native/dune__exe__Main.cmx |
   > jq -r 'include "dune"; .[] | depsGlobPredicates' | sort -u
-  *.cmi

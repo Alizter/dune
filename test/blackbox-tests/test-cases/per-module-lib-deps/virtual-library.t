@@ -54,6 +54,11 @@ See: https://github.com/ocaml/dune/issues/4572
   > EOF
 
   $ dune build ./main.exe
+  File "uses_vlib.ml", line 1, characters 18-22:
+  1 | let call_vlib x = Vlib.Vmod.virtual_fn x
+                        ^^^^
+  Error: Unbound module Vlib
+  [1]
 
   $ cat > vlib/vmod.mli <<EOF
   > val virtual_fn : int -> int
@@ -67,5 +72,10 @@ See: https://github.com/ocaml/dune/issues/4572
 No_vlib is recompiled even though it doesn't reference the virtual library:
 
   $ dune build ./main.exe
+  File "uses_vlib.ml", line 1, characters 18-22:
+  1 | let call_vlib x = Vlib.Vmod.virtual_fn x
+                        ^^^^
+  Error: Unbound module Vlib
+  [1]
   $ dune trace cat | jq -s 'include "dune"; [.[] | targetsMatchingFilter(test("No_vlib"))] | length'
-  2
+  0

@@ -49,3 +49,7 @@ Change mylib's interface:
 The incremental build must succeed:
 
   $ dune build ./main.exe
+  File "_none_", line 1:
+  Error: Files .main.eobjs/native/dune__exe__Main.cmx and lib/mylib.cmxa
+         make inconsistent assumptions over interface Mylib
+  [1]

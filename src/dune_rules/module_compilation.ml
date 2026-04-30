@@ -286,10 +286,15 @@ let build_cm
         | Some All | None -> Hidden_targets [ obj ])
    in
    let opaque = Compilation_context.opaque cctx in
-   let other_cm_files =
+   let codept_deps_and_includes =
      match Config.get Config.codept with
-     | `Enabled -> Codept.cm_deps cctx ~ml_kind ~cm_kind m
-     | `Disabled ->
+     | `Enabled -> Some (Codept.cm_deps cctx ~ml_kind ~cm_kind m)
+     | `Disabled -> None
+   in
+   let other_cm_files =
+     match codept_deps_and_includes with
+     | Some _ -> Action_builder.return ()
+     | None ->
        let dep_graph = Ml_kind.Dict.get (Compilation_context.dep_graphs cctx) ml_kind in
        let module_deps = Dep_graph.deps_of dep_graph m in
        let cms_cmt_dependency = Compilation_context.cms_cmt_dependency cctx in
@@ -415,8 +420,11 @@ let build_cm
             ; cmt_args
             ; cms_args
             ; Command.Args.S obj_dirs
-            ; Command.Args.as_any
-                (Lib_mode.Cm_kind.Map.get (Compilation_context.includes cctx) cm_kind)
+            ; (match codept_deps_and_includes with
+               | Some args -> Command.Args.as_any args
+               | None ->
+                 Command.Args.as_any
+                   (Lib_mode.Cm_kind.Map.get (Compilation_context.includes cctx) cm_kind))
             ; extra_args
             ; As as_parameter_arg
             ; as_argument_for
