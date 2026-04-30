@@ -77,13 +77,7 @@ let deps_of_module ~modules ~sandbox ~sctx ~dir ~obj_dir ~ml_kind ~for_ m =
   | Wrapped_compat ->
     wrapped_compat_deps modules m |> Action_builder.return |> Memo.return
   | _ ->
-    let+ deps =
-      match Config.get Config.codept with
-      | `Enabled ->
-        Memo.return (Codept.deps_of ~sandbox ~modules ~sctx ~dir ~ml_kind ~for_ m)
-      | `Disabled ->
-        Ocamldep.deps_of ~sandbox ~modules ~sctx ~dir ~obj_dir ~ml_kind ~for_ m
-    in
+    let+ deps = Ocamldep.deps_of ~sandbox ~modules ~sctx ~dir ~obj_dir ~ml_kind ~for_ m in
     (match Modules.With_vlib.alias_for modules m with
      | [] -> deps
      | aliases ->
@@ -187,7 +181,7 @@ let rec deps_of
        | Impl -> Normal m))
 ;;
 
-let read_deps_of_module ~sctx ~sandbox ~modules ~obj_dir dep ~for_ =
+let read_deps_of_module ~modules ~obj_dir dep ~for_ =
   let (Obj_dir.Module.Dep.Immediate (unit, _) | Transitive (unit, _)) = dep in
   match Module.kind unit with
   | Root | Alias _ -> Action_builder.return []
@@ -196,34 +190,24 @@ let read_deps_of_module ~sctx ~sandbox ~modules ~obj_dir dep ~for_ =
     if has_single_file modules
     then Action_builder.return []
     else (
-      match Config.get Config.codept with
-      | `Enabled ->
-        let dir = Obj_dir.dir obj_dir in
-        let ml_kind =
-          match dep with
-          | Immediate (_, ml_kind) | Transitive (_, ml_kind) -> ml_kind
-        in
-        Codept.deps_of ~sandbox ~modules ~sctx ~dir ~ml_kind ~for_ unit
-      | `Disabled ->
-        (match dep with
-         | Immediate (unit, ml_kind) ->
-           Ocamldep.read_immediate_deps_of ~obj_dir ~modules ~ml_kind ~for_ unit
-         | Transitive (unit, ml_kind) ->
-           let open Action_builder.O in
-           let+ deps = Ocamldep.read_deps_of ~obj_dir ~modules ~ml_kind ~for_ unit in
-           (match Modules.With_vlib.alias_for modules unit with
-            | [] -> deps
-            | aliases -> aliases @ deps)))
+      match dep with
+      | Immediate (unit, ml_kind) ->
+        Ocamldep.read_immediate_deps_of ~obj_dir ~modules ~ml_kind ~for_ unit
+      | Transitive (unit, ml_kind) ->
+        let open Action_builder.O in
+        let+ deps = Ocamldep.read_deps_of ~obj_dir ~modules ~ml_kind ~for_ unit in
+        (match Modules.With_vlib.alias_for modules unit with
+         | [] -> deps
+         | aliases -> aliases @ deps))
 ;;
 
-let read_immediate_deps_of ~sctx ~sandbox ~obj_dir ~modules ~ml_kind ~for_ m =
-  read_deps_of_module ~sctx ~sandbox ~modules ~obj_dir (Immediate (m, ml_kind)) ~for_
+let read_immediate_deps_of ~obj_dir ~modules ~ml_kind ~for_ m =
+  read_deps_of_module ~modules ~obj_dir (Immediate (m, ml_kind)) ~for_
 ;;
 
-let read_deps_of ~sctx ~sandbox ~obj_dir ~modules ~ml_kind ~for_ m =
+let read_deps_of ~obj_dir ~modules ~ml_kind ~for_ m =
   if Module.has m ~ml_kind
-  then
-    read_deps_of_module ~sctx ~sandbox ~modules ~obj_dir (Transitive (m, ml_kind)) ~for_
+  then read_deps_of_module ~modules ~obj_dir (Transitive (m, ml_kind)) ~for_
   else Action_builder.return []
 ;;
 
