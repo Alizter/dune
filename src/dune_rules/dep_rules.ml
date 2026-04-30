@@ -222,7 +222,8 @@ let read_immediate_deps_of ~sctx ~sandbox ~obj_dir ~modules ~ml_kind ~for_ m =
 
 let read_deps_of ~sctx ~sandbox ~obj_dir ~modules ~ml_kind ~for_ m =
   if Module.has m ~ml_kind
-  then read_deps_of_module ~sctx ~sandbox ~modules ~obj_dir (Transitive (m, ml_kind)) ~for_
+  then
+    read_deps_of_module ~sctx ~sandbox ~modules ~obj_dir (Transitive (m, ml_kind)) ~for_
   else Action_builder.return []
 ;;
 

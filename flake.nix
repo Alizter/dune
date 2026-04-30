@@ -670,7 +670,7 @@
               ])
               ++ (with pkgs.ocamlPackages; [
                 core_bench
-                codept
+                (import ./nix/codept.nix { inherit pkgs; })
                 js_of_ocaml
                 js_of_ocaml-compiler
                 ocaml-lsp

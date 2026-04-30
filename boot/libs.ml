@@ -296,6 +296,12 @@ let local_libraries =
     ; special_builtin_support = None
     ; root_module = None
     }
+  ; { path = "src/codept_m2l"
+    ; main_module_name = Some "Codept_m2l"
+    ; include_subdirs = No
+    ; special_builtin_support = None
+    ; root_module = None
+    }
   ; { path = "src/rpc"
     ; main_module_name = Some "Rpc"
     ; include_subdirs = No

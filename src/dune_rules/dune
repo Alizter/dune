@@ -5,6 +5,7 @@
  (libraries
   action_ext
   build_path_prefix_map
+  codept_m2l
   csexp
   action_plugin
   dune_action_plugin
