@@ -68,6 +68,7 @@
               (self: super: {
                 ocamlPackages = super.ocaml-ng.ocamlPackages_5_4.overrideScope (
                   oself: osuper: {
+                    dune_target = oself.callPackage ./nix/dune-target.nix { };
                     ocaml = osuper.ocaml.override {
                       flambdaSupport = false;
                       framePointerSupport = true;
@@ -114,6 +115,9 @@
                     };
                   }
                 );
+                ocaml-ng = super.ocaml-ng // {
+                  ocamlPackages_5_4 = self.ocamlPackages;
+                };
               })
               melange.overlays.default
             ];
@@ -180,23 +184,8 @@
                 (fs.fileFilter (file: file.hasExt "opam" || file.hasExt "template") ./.)
               ]
             );
-          dune-static-overlay = self: super: {
-            ocamlPackages = super.ocaml-ng.ocamlPackages_5_4.overrideScope (
-              oself: osuper: {
-                dune_3 = osuper.dune_3.overrideAttrs (a: {
-                  src = dune-source;
-                  preBuild = "ocaml boot/bootstrap.ml --static";
-                });
-              }
-            );
-          };
-          pkgs-static = nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.appendOverlays [
-            ocaml-overlays.overlays.default
-            dune-static-overlay
-          ];
-
         in
-        {
+        rec {
           default =
             with pkgs;
             stdenv.mkDerivation {
@@ -220,8 +209,39 @@
                 "LIBDIR=$(OCAMLFIND_DESTDIR)"
               ];
             };
-          dune = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-          dune-static = pkgs-static.pkgsCross.musl64.ocamlPackages.dune;
+          dune = default;
+
+          # Alias preserved for `ocaml-dune/binary-distribution`'s workflows.
+          dune-static = targets.musl-static;
+
+          targets =
+            let
+              duneFor = crossPkgs: crossPkgs.ocamlPackages.dune_target.overrideAttrs { src = dune-source; };
+              withOcaml =
+                ocamlOverride: crossPkgs:
+                crossPkgs.appendOverlays [
+                  (self: super: {
+                    ocamlPackages = super.ocamlPackages.overrideScope (
+                      oself: osuper: {
+                        ocaml = osuper.ocaml.override ocamlOverride;
+                      }
+                    );
+                  })
+                ];
+            in
+            {
+              musl-static = duneFor pkgs.pkgsStatic;
+
+              # Building windows requires opting in to unsupported systems
+              # (a transitive build input has `meta.platforms` that excludes
+              # the MinGW target):
+              #
+              #   NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1 nix build --impure .#targets.windows-static
+              windows-static = duneFor (
+                withOcaml { framePointerSupport = false; } pkgs.pkgsCross.mingwW64Static
+              );
+            };
+
           oxcaml-trunk-build =
             let
               dune-version =

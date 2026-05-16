@@ -157,11 +157,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1780321124,
-        "narHash": "sha256-OKqSwDolIAz3iXe5lIRbX0+1vD4EebSrLOt60EaURnY=",
+        "lastModified": 1780859605,
+        "narHash": "sha256-/mNBkWvFQcFmHmrvMmcfOF951BMjT3pOQ2EAiAVMuWo=",
         "owner": "nix-ocaml",
         "repo": "nix-overlays",
-        "rev": "6fb3fed14fe3eff85e4a82804801fb0f7ccbe2be",
+        "rev": "f8302c93d3c9e8605b8111951f7eca5d8c8da45d",
         "type": "github"
       },
       "original": {
