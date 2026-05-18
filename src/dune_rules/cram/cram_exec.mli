@@ -1,25 +1,26 @@
 open Import
 
-(** Produces the script containing only the commands to run *)
+(** Writes the cram-commands script (the source [.t] file with output and
+    comment lines stripped) to stdout. *)
 val make_script
   :  src:Path.t
-  -> script:Path.Build.t
   -> conflict_markers:Cram_stanza.Conflict_markers.t
   -> Action.t
 
-(** Runs the script created in [make_script] *)
+(** Executes [commands] (the output of [make_script]) and writes a serialised
+    [command_out list] of per-command results to stdout. *)
 val run
   :  src:Path.t
   -> dir:Path.t
-  -> script:Path.t
-  -> output:Path.Build.t
+  -> commands:string
   -> timeout:(Loc.t * Time.Span.t) option
   -> setup_scripts:Path.t list
   -> Cram_stanza.Shell.t
   -> Action.t
 
-(** Produces a diff if [src] needs to be updated *)
-val diff : src:Path.t -> output:Path.t -> Action.t
+(** Produces a [.corrected] diff if [src] needs to be updated. [run_output] is
+    the serialised result produced by [run]. *)
+val diff : src:Path.t -> run_output:string -> Action.t
 
 (** Corresponds the user written cram action *)
 val action : Path.t -> Action.t

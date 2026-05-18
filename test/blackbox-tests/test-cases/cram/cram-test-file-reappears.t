@@ -34,6 +34,8 @@ file or directory even though the .t source was unchanged.
 Out-of-band removal of cram.sh leaves the digest table intact.
 
   $ rm _build/default/.cram.foo.t/cram.sh
+  rm: cannot remove '_build/default/.cram.foo.t/cram.sh': No such file or directory
+  [1]
 
 Touching setup_script invalidates the run action but not make_script.
 Dune treats cram.sh as a cache hit and the run action fires with
@@ -42,10 +44,4 @@ cram.sh missing.
   $ echo "# touch" >> setup_script
 
   $ dune build @runtest 2>&1 | censor
-  Error:
-  _build/.sandbox/$DIGEST/default/.cram.foo.t/cram.sh:
-  No such file or directory
-  -> required by _build/default/.cram.foo.t/cram.out
-  -> required by alias foo
-  -> required by alias runtest
-  [1]
+  

@@ -154,30 +154,9 @@ type metadata_entry =
   ; build_path_prefix_map : string
   }
 
-let metadata_entry_repr =
-  Repr.record
-    "cram-metadata-entry"
-    [ Repr.field "exit_code" Repr.int ~get:(fun t -> t.exit_code)
-    ; Repr.field "build_path_prefix_map" Repr.string ~get:(fun t ->
-        t.build_path_prefix_map)
-    ]
-;;
-
 type metadata_result =
   | Present of metadata_entry
   | Missing_unreachable
-
-let metadata_result_repr =
-  Repr.variant
-    "cram-metadata-result"
-    [ Repr.case "Present" metadata_entry_repr ~proj:(function
-        | Present p -> Some p
-        | _ -> None)
-    ; Repr.case0 "Missing_unreachable" ~test:(function
-        | Missing_unreachable -> true
-        | _ -> false)
-    ]
-;;
 
 type full_block_result =
   { block : block_result
@@ -312,15 +291,6 @@ type command_out =
   ; metadata : metadata_result
   ; output : string option
   }
-
-let command_out_repr =
-  Repr.record
-    "cram-command-output"
-    [ Repr.field "command" (Repr.list Repr.string) ~get:(fun t -> t.command)
-    ; Repr.field "metadata" metadata_result_repr ~get:(fun t -> t.metadata)
-    ; Repr.field "output" (Repr.option Repr.string) ~get:(fun t -> t.output)
-    ]
-;;
 
 let sanitize ~parent_script cram_to_output : command_out Cram_lexer.block list =
   List.map cram_to_output ~f:(fun (t : full_block_result Cram_lexer.block) ->
@@ -665,39 +635,45 @@ let run_produce_correction
   >>| compose_cram_output
 ;;
 
-module Script = Persistent.Make (struct
-    type nonrec t = command_out list
+(* The cram pipeline communicates between three anonymous actions via stdout:
+   make_script writes the commands-only script text, run consumes it inline
+   and emits a serialised [command_out list], diff consumes the latter
+   inline and writes [.corrected] if needed. We serialise via [Marshal]
+   locally — the round-trip is always within one dune binary, so version
+   stability is not a concern. *)
 
-    let name = "CRAM-RESULT"
-    let sharing = false
-    let version = 2
-    let repr = Repr.list command_out_repr
-  end)
+let serialise_command_outs (xs : command_out list) : string =
+  Marshal.to_string xs ~sharing:false
+;;
 
-let run_and_produce_output
+let deserialise_command_outs (s : string) : command_out list = Marshal.from_string s
+
+let run_and_emit_to_stdout
       ~conflict_markers
       ~src
       ~env
+      ~stdout_to
       ~dir:cwd
-      ~script
-      ~dst
+      ~commands
       ~timeout
       ~setup_scripts
       shell
   =
-  let script_contents = Io.read_file ~binary:false script in
-  let lexbuf = Lexbuf.from_string script_contents ~fname:(Path.to_string script) in
-  let temp_dir = make_temp_dir ~script in
+  let lexbuf = Lexbuf.from_string commands ~fname:(Path.to_string src) in
+  let temp_dir = make_temp_dir ~script:src in
   let cram_stanzas = cram_stanzas lexbuf ~conflict_markers |> List.map ~f:snd in
-  (* We don't want the ".cram.run.t" dir around when executing the script. *)
-  Path.rm_rf (Path.parent_exn script);
+  (* The previous file-target version of this action had cram.sh as a sandbox
+     dep, which forced the sandbox to create [cwd]'s parent path. With the
+     anonymous-action chain there is no dep under [cwd], so the sandbox does
+     not create it. Make the directory ourselves before [sh] tries to chdir. *)
+  Path.mkdir_p cwd;
   let env = make_run_env env ~temp_dir ~cwd in
   let open Fiber.O in
-  let+ commands =
+  let+ command_outs =
     run_cram_test
       env
       ~src
-      ~script
+      ~script:src
       ~cram_stanzas
       ~temp_dir
       ~cwd
@@ -708,99 +684,25 @@ let run_and_produce_output
       | Cram_lexer.Command c -> Some c
       | Comment _ -> None)
   in
-  let dst = Path.build dst in
-  Path.mkdir_p (Path.parent_exn dst);
-  Script.dump dst commands
-;;
-
-module Run = struct
-  module Spec = struct
-    type ('path, 'target) t =
-      { src : Path.t
-      ; dir : 'path
-      ; script : 'path
-      ; output : 'target
-      ; timeout : (Loc.t * Time.Span.t) option
-      ; setup_scripts : 'path list
-      ; shell : Cram_stanza.Shell.t
-      }
-
-    let name = "cram-run"
-    let version = 6
-
-    let bimap
-          ({ src = _; dir; script; output; timeout; setup_scripts; shell = _ } as t)
-          f
-          g
-      =
-      { t with
-        dir = f dir
-      ; script = f script
-      ; output = g output
-      ; timeout
-      ; setup_scripts = List.map ~f setup_scripts
-      }
-    ;;
-
-    let is_useful_to ~memoize:_ = true
-
-    let encode { src = _; dir; script; output; timeout; shell; setup_scripts } path target
-      : Sexp.t
-      =
-      List
-        [ path dir
-        ; path script
-        ; target output
-        ; Dune_sexp.Encoder.(
-            option float (Option.map ~f:(fun (_, time) -> Time.Span.to_secs time) timeout))
-          |> Dune_sexp.to_sexp
-        ; List (List.map ~f:path setup_scripts)
-        ; Atom (Cram_stanza.Shell.to_string shell)
-        ]
-    ;;
-
-    let action
-          { src; dir; script; output; timeout; setup_scripts; shell }
-          ~ectx:_
-          ~(eenv : Action.env)
-      =
-      run_and_produce_output
-        ~conflict_markers:Ignore
-        ~src
-        ~env:eenv.env
-        ~dir
-        ~script
-        ~dst:output
-        ~timeout
-        ~setup_scripts
-        shell
-    ;;
-  end
-
-  include Action_ext.Make (Spec)
-end
-
-let run ~src ~dir ~script ~output ~timeout ~setup_scripts shell =
-  Run.action { src; dir; script; output; timeout; setup_scripts; shell }
+  let oc = Process.Io.out_channel stdout_to in
+  output_string oc (serialise_command_outs command_outs)
 ;;
 
 module Make_script = struct
   module Spec = struct
-    type ('path, 'target) t =
-      { script : 'path
-      ; target : 'target
+    type ('path, _) t =
+      { src : 'path
       ; conflict_markers : Cram_stanza.Conflict_markers.t
       }
 
-    let name = "cram-generate"
-    let version = 2
-    let bimap t f g = { t with script = f t.script; target = g t.target }
+    let name = "cram-make-script"
+    let version = 1
+    let bimap t f _ = { t with src = f t.src }
     let is_useful_to ~memoize:_ = true
 
-    let encode { script = src; target = dst; conflict_markers } path target : Sexp.t =
+    let encode { src; conflict_markers } path _ : Sexp.t =
       List
         [ path src
-        ; target dst
         ; Atom
             (match conflict_markers with
              | Error -> "error"
@@ -808,7 +710,7 @@ module Make_script = struct
         ]
     ;;
 
-    let action { script = src; target = dst; conflict_markers } ~ectx:_ ~eenv:_ =
+    let action { src; conflict_markers } ~ectx:_ ~(eenv : Action.env) =
       let commands =
         Io.read_file ~binary:false src
         |> Lexbuf.from_string ~fname:(Path.to_string src)
@@ -819,7 +721,8 @@ module Make_script = struct
           | Command s -> Some s)
         |> cram_commmands
       in
-      Io.write_file ~binary:false (Path.build dst) commands;
+      let oc = Process.Io.out_channel eenv.stdout_to in
+      output_string oc commands;
       Fiber.return ()
     ;;
   end
@@ -827,33 +730,89 @@ module Make_script = struct
   include Action_ext.Make (Spec)
 end
 
-let make_script ~src ~script ~conflict_markers =
-  Make_script.action { script = src; target = script; conflict_markers }
+let make_script ~src ~conflict_markers = Make_script.action { src; conflict_markers }
+
+module Run = struct
+  module Spec = struct
+    type ('path, _) t =
+      { src : Path.t
+      ; commands : string
+      ; dir : 'path
+      ; timeout : (Loc.t * Time.Span.t) option
+      ; setup_scripts : 'path list
+      ; shell : Cram_stanza.Shell.t
+      }
+
+    let name = "cram-run"
+    let version = 7
+
+    let bimap
+          ({ src = _; commands = _; dir; timeout = _; setup_scripts; shell = _ } as t)
+          f
+          _
+      =
+      { t with dir = f dir; setup_scripts = List.map ~f setup_scripts }
+    ;;
+
+    let is_useful_to ~memoize:_ = true
+
+    let encode { src = _; commands; dir; timeout; shell; setup_scripts } path _ : Sexp.t =
+      List
+        [ path dir
+        ; Atom commands
+        ; Dune_sexp.Encoder.(
+            option float (Option.map ~f:(fun (_, time) -> Time.Span.to_secs time) timeout))
+          |> Dune_sexp.to_sexp
+        ; List (List.map ~f:path setup_scripts)
+        ; Atom (Cram_stanza.Shell.to_string shell)
+        ]
+    ;;
+
+    let action
+          { src; commands; dir; timeout; setup_scripts; shell }
+          ~ectx:_
+          ~(eenv : Action.env)
+      =
+      run_and_emit_to_stdout
+        ~conflict_markers:Ignore
+        ~src
+        ~env:eenv.env
+        ~stdout_to:eenv.stdout_to
+        ~dir
+        ~commands
+        ~timeout
+        ~setup_scripts
+        shell
+    ;;
+  end
+
+  include Action_ext.Make (Spec)
+end
+
+let run ~src ~dir ~commands ~timeout ~setup_scripts shell =
+  Run.action { src; commands; dir; timeout; setup_scripts; shell }
 ;;
 
 module Diff = struct
   module Spec = struct
     type ('path, _) t =
       { script : 'path
-      ; out : 'path
+      ; run_output : string
       }
 
-    let name = "cram-generate"
-    let version = 1
-    let bimap { script; out } f _ = { script = f script; out = f out }
+    let name = "cram-diff"
+    let version = 2
+    let bimap { script; run_output } f _ = { script = f script; run_output }
     let is_useful_to ~memoize:_ = true
-    let encode { script; out } path _ : Sexp.t = List [ path script; path out ]
 
-    let action { script; out } ~ectx:_ ~eenv:_ =
+    let encode { script; run_output } path _ : Sexp.t =
+      List [ path script; Atom run_output ]
+    ;;
+
+    let action { script; run_output } ~ectx:_ ~eenv:_ =
       let current = Io.read_file ~binary:false script in
+      let out = deserialise_command_outs run_output in
       let combined =
-        let out =
-          match Script.load out with
-          | Some s -> s
-          | None ->
-            User_error.raise
-              [ Pp.textf "%s does not exist or is corrupted" (Path.to_string out) ]
-        in
         let current_stanzas =
           Lexbuf.from_string ~fname:(Path.to_string script) current
           |> cram_stanzas ~conflict_markers:Ignore
@@ -883,7 +842,7 @@ module Diff = struct
   include Action_ext.Make (Spec)
 end
 
-let diff ~src ~output = Diff.action { script = src; out = output }
+let diff ~src ~run_output = Diff.action { script = src; run_output }
 
 module Action = struct
   module Spec = struct

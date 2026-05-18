@@ -1,5 +1,6 @@
-This test demonstrates that we pointlessly re-run cram tests
-after they're promted
+This test demonstrates that cram tests are not re-run after promotion
+(because the script-generation step's output is content-stable), and
+that passing --force does re-run them.
 
   $ cat >dune-project<<EOF
   > (lang dune 3.12)
@@ -30,11 +31,12 @@ side-effect should only contain a single "run":
   $ cat side-effect
   run
 
-However, if passing --force, we should still be able to re-run cram tests:
+Passing --force re-runs the cram test:
 
   $ dune runtest foo.t --force
 
-There should be two "run"s here, however there is only one:
+There should be two "run"s here:
   $ cat side-effect
+  run
   run
 
