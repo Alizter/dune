@@ -73,7 +73,7 @@ let create cats path =
   let fd =
     Unix.openfile
       (Path.to_string path)
-      [ O_TRUNC; O_APPEND; O_CLOEXEC; O_WRONLY; O_CREAT ]
+      [ O_TRUNC; O_APPEND; O_CLOEXEC; O_WRONLY; O_CREAT; O_SHARE_DELETE ]
       0o644
     |> Fd.unsafe_of_unix_file_descr
   in
