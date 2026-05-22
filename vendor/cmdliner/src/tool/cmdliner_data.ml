@@ -9,8 +9,9 @@ let bash_generic_completion fun_name = strf
   local prefix="${words[cword]}"
   local w=("${words[@]}") # Keep words intact for restart completion
   w[cword]="--__complete=${words[cword]}"
-  local line="${w[@]:0:1} --__complete ${w[@]:1}"
   local version type group item text_line item_doc msg
+  local item_count=0
+  local directory_item_count=0
   {
     read version
     if [[ $version != "1" ]]; then
@@ -51,9 +52,9 @@ let bash_generic_completion fun_name = strf
           done
           printf "$msg" >&2
       elif [[ $type == "item" ]]; then
-        read item;
+        IFS= read -r item;
         item_doc="";
-        while read text_line; do
+        while IFS= read -r text_line; do
             if [[ "$text_line" == "item-end" ]]; then
                 item_doc=${item_doc#?} # remove first newline
                 break
@@ -66,11 +67,10 @@ let bash_generic_completion fun_name = strf
           # properly complete short options
           item="${prefix:0:2}$item"
         fi
-        COMPREPLY+=($item)
-        # Items ending in '/' are directory-like; suppress the trailing
-        # space so the user can chain another tab into the subdirectory.
-        if [[ "$item" == */ ]] && (type compopt &> /dev/null); then
-          compopt -o nospace
+        COMPREPLY+=("$item")
+        item_count=$((item_count + 1))
+        if [[ "$item" == */ ]]; then
+          directory_item_count=$((directory_item_count + 1))
         fi
       elif [[ $type == "restart" ]]; then
           # N.B. only emitted if there is a -- token
@@ -81,7 +81,14 @@ let bash_generic_completion fun_name = strf
               fi
           done
       fi
-    done } < <(eval $line)
+    done
+    # compopt applies to every reply. Only suppress a trailing space when all
+    # semantic replies are directory-like.
+    if (( item_count > 0 && item_count == directory_item_count )) &&
+       (type compopt &> /dev/null); then
+      compopt -o nospace
+    fi
+  } < <("${w[0]}" --__complete "${w[@]:1}")
   return 0
 }
 |} fun_name

@@ -633,6 +633,28 @@ module Builder = struct
   let default_root_is_cwd t = t.default_root_is_cwd
   let set_default_root_is_cwd t x = { t with default_root_is_cwd = x }
   let disable_log_file t = { t with trace_file = None }
+
+  let disable_default_trace_file t =
+    { t with
+      trace_file =
+        (match t.trace_file with
+         | Some (`User_specified _) as trace_file -> trace_file
+         | None | Some `Default -> None)
+    }
+  ;;
+
+  let for_completion ({ workspace_config; _ } as t) =
+    let { Workspace.Clflags.config_from_command_line; _ } = workspace_config in
+    let config_from_command_line =
+      { config_from_command_line with
+        Dune_config.Partial.display = Some Dune_config.Display.quiet
+      }
+    in
+    let workspace_config = { workspace_config with config_from_command_line } in
+    disable_default_trace_file
+      { t with allow_builds = false; no_print_directory = true; workspace_config }
+  ;;
+
   let set_promote t v = { t with promote = Some v }
   let default_target t = t.default_target
 

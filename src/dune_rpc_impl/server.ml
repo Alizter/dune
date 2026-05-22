@@ -143,6 +143,15 @@ let cancel_all_build_requests t =
   | Enabled { build_loop; _ } -> Build_loop.cancel_all_rpc_requests build_loop
 ;;
 
+let flush_file_watcher_if_running t =
+  match t.server.watch_mode with
+  | No -> Fiber.return ()
+  | Yes _ ->
+    (match t.build with
+     | Disabled -> Scheduler.flush_file_watcher ()
+     | Enabled { build_loop; _ } -> Build_loop.flush_file_watcher build_loop)
+;;
+
 let handler (t : t Fdecl.t) : unit Handler.t =
   let on_init session (_ : Initialize.Request.t) =
     let t = Fdecl.get t in
@@ -305,11 +314,7 @@ let handler (t : t Fdecl.t) : unit Handler.t =
       match t.server.watch_mode with
       | No -> Fiber.return `Not_in_watch_mode
       | Yes _ ->
-        let+ () =
-          match t.build with
-          | Disabled -> Scheduler.flush_file_watcher ()
-          | Enabled { build_loop; _ } -> Build_loop.flush_file_watcher build_loop
-        in
+        let+ () = flush_file_watcher_if_running t in
         `Ok
     in
     Handler.implement_request rpc Procedures.Public.flush_file_watcher f
@@ -328,6 +333,24 @@ let handler (t : t Fdecl.t) : unit Handler.t =
          | Failure -> Build_failed)
     in
     Handler.implement_request_with_id rpc Decl.simulate_file_watcher_queue_overflow f
+  in
+  let () =
+    let f session request_id (cwd, token) =
+      let t = Fdecl.get t in
+      match t.build with
+      | Disabled -> Fiber.return []
+      | Enabled { build_loop; _ } ->
+        let cwd = For_handlers.source_path_of_string cwd in
+        Build_loop.submit_rpc_query
+          build_loop
+          ~session_id:(Session.id session)
+          ~request_id
+          ~query:(Dune_rules.Runtest_completion.candidates ~cwd ~token)
+        >>| (function
+         | Busy | Query_failed -> []
+         | Query_succeeded candidates -> candidates)
+    in
+    Handler.implement_request_with_id rpc Decl.runtest_completion f
   in
   let () =
     let shutdown _ () =

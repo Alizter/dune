@@ -92,7 +92,23 @@ module Queue_overflow = struct
   ;;
 end
 
+module Runtest_completion = struct
+  let v1 =
+    Decl.Request.make_current_gen
+      ~req:Conv.(pair string string)
+      ~resp:Conv.(list string)
+      ~version:1
+  ;;
+
+  let decl =
+    Decl.Request.make
+      ~method_:(Method.Name.of_string "runtest-completion")
+      ~generations:[ v1 ]
+  ;;
+end
+
 let build = Build.decl
 let status = Status.decl
 let pkg_enabled = Pkg_enabled.decl
+let runtest_completion = Runtest_completion.decl
 let simulate_file_watcher_queue_overflow = Queue_overflow.decl

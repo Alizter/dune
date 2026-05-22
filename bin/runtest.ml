@@ -33,11 +33,58 @@ let runtest_info =
   Cmd.info "runtest" ~doc ~man ~envs:Common.envs
 ;;
 
+let test_path_completion_func builder ~token =
+  let candidates =
+    match builder with
+    | None -> []
+    | Some builder ->
+      (try
+         let builder = Common.Builder.for_completion builder in
+         let common, config = Common.init builder in
+         let cwd =
+           Path.of_filename_relative_to_initial_cwd Filename.current_dir_name
+           |> Path.Expert.try_localize_external
+           |> Path.as_in_source_tree
+         in
+         match cwd with
+         | None -> []
+         | Some cwd ->
+           (match Global_lock.lock () with
+            | Ok () ->
+              Scheduler_setup.go_for_completion ~common ~config (fun () ->
+                Build_system.run_exn (fun () ->
+                  Dune_rules.Runtest_completion.candidates ~cwd ~token))
+            | Error lock_held_by ->
+              Scheduler_setup.go_for_completion ~common ~config (fun () ->
+                Rpc.Rpc_common.fire_request
+                  ~name:"runtest-completion"
+                  ~wait:false
+                  ~warn_forwarding:false
+                  ~lock_held_by
+                  builder
+                  Dune_rpc_impl.Decl.runtest_completion
+                  (Path.Source.to_string cwd, token)))
+       with
+       | User_error.E _ | Dune_rpc.Version_error.E _ | Dune_scheduler.Shutdown.E Timeout
+         -> [])
+  in
+  Ok (List.map candidates ~f:Cmdliner.Arg.Completion.string)
+;;
+
+let test_path_conv : string Cmdliner.Arg.conv =
+  let parser s = Ok s in
+  let pp = Format.pp_print_string in
+  let completion =
+    Cmdliner.Arg.Completion.make ~context:Common.Builder.term test_path_completion_func
+  in
+  Cmdliner.Arg.Conv.make ~docv:"TEST" ~parser ~pp ~completion ()
+;;
+
 let runtest_term =
   (* CR-someday Alizter: document this option *)
   let name = Arg.info [] ~docv:"TEST" ~doc:None in
   let+ builder = Common.Builder.term
-  and+ test_paths = Arg.(value & pos_all string [ "." ] name) in
+  and+ test_paths = Arg.(value & pos_all test_path_conv [ "." ] name) in
   let common, config = Common.init_build builder in
   match Global_lock.lock () with
   | Ok () ->

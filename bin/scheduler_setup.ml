@@ -20,6 +20,25 @@ let go_without_rpc_server ~(common : Common.t) ~config:dune_config f =
   Run.go config f
 ;;
 
+let completion_timeout = Time.Span.of_secs 1.0
+
+let go_for_completion ~(common : Common.t) ~config:(dune_config : Dune_config.t) f =
+  (* [Common.init] selects and starts the console backend. Replacing a threaded
+     console after that point can restore the signal mask from before the
+     scheduler was initialized and make scheduler shutdown hang. *)
+  if not (Dune_config.Display.equal dune_config.display Dune_config.Display.quiet)
+  then
+    Code_error.raise
+      "go_for_completion requires the quiet display to be selected before Common.init"
+      [ "display", Dune_config.Display.to_dyn dune_config.display ];
+  let config =
+    let watch_exclusions = Common.watch_exclusions common in
+    Dune_config.for_scheduler dune_config ~print_ctrl_c_warning:false ~watch_exclusions
+  in
+  Clflags.concurrency := config.concurrency;
+  Run.go config ~timeout:completion_timeout f
+;;
+
 let await_action_runner common =
   match Common.action_runner common with
   | None -> Fiber.return ()

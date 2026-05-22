@@ -18,6 +18,22 @@ val submit_rpc_request
   -> build:unit Action_builder.t
   -> Build_outcome.t Fiber.t
 
+type 'a rpc_query_result =
+  | Busy
+  | Query_failed
+  | Query_succeeded of 'a
+
+(** [submit_rpc_query t ~session_id ~request_id ~query] flushes pending watcher
+    events and runs [query] in the build loop when it is idle. Unlike
+    [submit_rpc_request], it never cancels an active build; it returns [Busy]
+    instead. *)
+val submit_rpc_query
+  :  t
+  -> session_id:Rpc.Server.Session.Id.t
+  -> request_id:Dune_rpc.Id.t
+  -> query:'a Memo.t
+  -> 'a rpc_query_result Fiber.t
+
 val cancel_rpc_requests_by_session
   :  t
   -> session_id:Rpc.Server.Session.Id.t

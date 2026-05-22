@@ -436,6 +436,34 @@ let submit_rpc_request t ~session_id ~request_id ~build =
   outcome
 ;;
 
+type 'a rpc_query_result =
+  | Busy
+  | Query_failed
+  | Query_succeeded of 'a
+
+let submit_rpc_query t ~session_id ~request_id ~query =
+  match t.status with
+  | Building _ | Restarting_build _ -> Fiber.return Busy
+  | Standing_by ->
+    let* () = flush_file_watcher t in
+    (match t.status with
+     | Building _ | Restarting_build _ -> Fiber.return Busy
+     | Standing_by ->
+       let result = ref None in
+       let build =
+         Action_builder.of_memo
+           (let open Memo.O in
+            let+ result_value = query in
+            result := Some result_value)
+       in
+       let+ outcome = submit_rpc_request t ~session_id ~request_id ~build in
+       (match outcome, !result with
+        | Success, Some result -> Query_succeeded result
+        | Failure, _ -> Query_failed
+        | Success, None ->
+          Code_error.raise "RPC query succeeded without producing a result" []))
+;;
+
 type rpc_poll_iter_result =
   { wakeup_generation : int
   ; sticky_built_at : int option

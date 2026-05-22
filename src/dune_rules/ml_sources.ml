@@ -48,6 +48,7 @@ module Per_stanza = struct
     ; (* Map from modules to the origin they are part of *)
       rev_map : (Origin.t * Path.Build.t) list Module_name.Path.Map.t
     ; libraries_by_obj_dir : Lib_id.Local.t list Path.Build.Map.t
+    ; runtest_files_by_dir : Filename.Set.t Path.Source.Map.t
     }
 
   let empty =
@@ -59,6 +60,7 @@ module Per_stanza = struct
     ; menhirs = Loc.Map.empty
     ; rev_map = Module_name.Path.Map.empty
     ; libraries_by_obj_dir = Path.Build.Map.empty
+    ; runtest_files_by_dir = Path.Source.Map.empty
     }
   ;;
 
@@ -186,6 +188,50 @@ module Per_stanza = struct
                | None -> Some [ origin ]
                | Some origins -> Some (origin :: origins)))
     in
+    let runtest_files_by_dir =
+      let add_file files_by_dir file =
+        let path =
+          Module.File.original_path file |> Path.drop_optional_build_context_src_exn
+        in
+        match Path.Source.parent path with
+        | None -> files_by_dir
+        | Some dir ->
+          Path.Source.Map.update files_by_dir dir ~f:(fun files ->
+            let files = Option.value files ~default:Filename.Set.empty in
+            Some (Filename.Set.add files (Path.Source.basename path)))
+      in
+      let add_sources files_by_dir sources ~f =
+        Module_trie.fold sources ~init:files_by_dir ~f:(fun (_loc, source) acc ->
+          Module.Source.files source
+          |> List.fold_left ~init:acc ~f:(fun acc file ->
+            if f file then add_file acc file else acc))
+      in
+      let files_by_dir =
+        List.fold_left
+          libs
+          ~init:Path.Source.Map.empty
+          ~f:(fun acc (part : Library.t group_part) ->
+            if
+              Sub_system_name.Map.mem part.stanza.sub_systems Inline_tests_info.Tests.name
+            then add_sources acc part.sources ~f:(Fun.const true)
+            else acc)
+      in
+      List.fold_left tests ~init:files_by_dir ~f:(fun acc (part : Tests.t group_part) ->
+        let names = Nonempty_list.to_list part.stanza.exes.names |> List.map ~f:snd in
+        let is_entry_point file =
+          match names with
+          | [ _ ] -> true
+          | [] | _ :: _ :: _ ->
+            let basename =
+              Module.File.original_path file
+              |> Path.basename
+              |> Filename.remove_extension
+              |> Filename.to_string
+            in
+            List.mem names basename ~equal:String.equal
+        in
+        add_sources acc part.sources ~f:is_entry_point)
+    in
     { libraries
     ; executables
     ; melange_emits
@@ -194,6 +240,7 @@ module Per_stanza = struct
     ; menhirs
     ; rev_map
     ; libraries_by_obj_dir
+    ; runtest_files_by_dir
     }
   ;;
 end
@@ -214,6 +261,11 @@ let empty =
 ;;
 
 let artifacts t = Memo.Lazy.force t.artifacts
+
+let runtest_files t ~dir =
+  Path.Source.Map.find t.modules.runtest_files_by_dir dir
+  |> Option.value ~default:Filename.Set.empty
+;;
 
 let source_in_dir ~dir fn ~for_ =
   let dst = Path.Build.append_local dir fn in

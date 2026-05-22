@@ -115,7 +115,20 @@ make_dune_project() {
 dune_complete() {
   local token="${!#}"
   local args=("${@:1:$#-1}")
-  dune --__complete "${args[@]}" "--__complete=$token" | awk '
+  local output
+  local status
+
+  output=$("$timeout" 2 "${DUNE_COMPLETE_BIN:-dune}" \
+    --__complete "${args[@]}" "--__complete=$token")
+  status=$?
+  if [ "$status" -eq 124 ]; then
+    echo "Timed out"
+    return "$status"
+  elif [ "$status" -ne 0 ]; then
+    return "$status"
+  fi
+
+  printf '%s\n' "$output" | awk '
     /^group$/ { getline g; current = g; next }
     current == "Values" && /^item$/ { getline name; print name }
   '

@@ -64,6 +64,7 @@ module Pkg_build_progress = Pkg_build_progress
 module Compile_time = Compile_time
 module Cram_rules = Cram_rules
 module Cram_stanza = Cram_stanza
+module Runtest_completion = Runtest_completion
 module Instrumentation = Instrumentation
 module Sub_system_name = Sub_system_name
 module Inline_tests_info = Inline_tests_info

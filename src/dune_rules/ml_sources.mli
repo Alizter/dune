@@ -20,6 +20,9 @@ type t
 
 val artifacts : t -> Artifacts_obj.t Memo.t
 
+(** Source files in [dir] that identify tests accepted by [dune runtest]. *)
+val runtest_files : t -> dir:Path.Source.t -> Filename.Set.t
+
 type for_ =
   | Library of Lib_id.Local.t
   | Exe_target of Exe_target.t

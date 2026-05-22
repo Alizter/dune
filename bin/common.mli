@@ -53,6 +53,15 @@ module Builder : sig
   val default_root_is_cwd : t -> bool
   val set_default_root_is_cwd : t -> bool -> t
   val disable_log_file : t -> t
+
+  (** Disable the default trace file while preserving an explicit
+      [--trace-file]. *)
+  val disable_default_trace_file : t -> t
+
+  (** Configure Dune for a completion request before initialization, including
+      selecting the quiet display required by [Scheduler_setup.go_for_completion]. *)
+  val for_completion : t -> t
+
   val set_promote : t -> Stdune.Clflags.Promote.t -> t
   val default_target : t -> Arg.Dep.t
   val term : t Cmdliner.Term.t
