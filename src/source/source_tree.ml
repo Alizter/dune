@@ -357,6 +357,16 @@ let files_of path =
     |> Path.Source.Set.of_list_map ~f:(Path.Source.relative_fname path)
 ;;
 
+let file_exists path =
+  match Path.Source.parent path with
+  | None -> Memo.return false
+  | Some parent ->
+    find_dir parent
+    >>| (function
+     | None -> false
+     | Some dir -> Filename.Array.Set.mem (Dir0.filenames dir) (Path.Source.basename path))
+;;
+
 module Dir = struct
   include Dir0
 

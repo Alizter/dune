@@ -59,6 +59,10 @@ val nearest_dir : Path.Source.t -> Dir.t Memo.t
 
 val files_of : Path.Source.t -> Path.Source.Set.t Memo.t
 
+(** [file_exists path] is [true] iff [path] is a file in the source tree, taking
+    into account [(files ...)] and other filtering applied by [dune] files. *)
+val file_exists : Path.Source.t -> bool Memo.t
+
 (** [true] iff the path is a vendored directory *)
 val is_vendored : Path.Source.t -> bool Memo.t
 
