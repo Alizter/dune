@@ -39,7 +39,7 @@ module Package_paths = struct
     | Generated | Generated_with_diff ->
       let+ use_source_opam =
         if Profile.is_release (Context.profile context)
-        then Build_system.file_exists (Path.source opam_file)
+        then Source_tree.file_exists opam_file
         else Memo.return false
       in
       Some (if use_source_opam then build_opam_file else generated_opam_file ctx pkg)
