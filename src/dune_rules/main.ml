@@ -88,15 +88,20 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
       ~conf
       ()
   in
+  let workspace_build_contexts =
+    Memo.lazy_ (fun () ->
+      let open Memo.O in
+      Workspace.workspace () >>| Workspace.build_contexts)
+  in
   let contexts =
     Memo.lazy_ (fun () ->
       let open Memo.O in
-      let+ contexts = Workspace.workspace () >>| Workspace.build_contexts in
+      let+ contexts = Memo.Lazy.force workspace_build_contexts in
       let open Dune_engine.Build_config.Context_type in
       (Private_context.t, Empty)
       :: (Install.Context.install_context, Empty)
       :: (Fetch_rules.context, Empty)
-      :: List.map contexts ~f:(fun ctx -> ctx, With_sources))
+      :: List.map contexts ~f:(fun (ctx, _source) -> ctx, With_sources))
   in
   let module_of_source_tree (t : Source_tree.t)
     : (module Dune_engine.Build_config.Source_tree)
@@ -110,10 +115,35 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
   let source_tree_of_context =
     Memo.lazy_ (fun () ->
       let open Memo.O in
-      let+ contexts = Memo.Lazy.force contexts in
+      let+ contexts = Memo.Lazy.force workspace_build_contexts in
+      (* Mounts of the same external path share a single [Source_tree.t]
+         across toolchain variants, so [Source_resolver] identity (and
+         memo caches) stay consistent. *)
+      let mount_trees =
+        List.fold_left
+          contexts
+          ~init:Path.External.Map.empty
+          ~f:(fun acc ((_ctx : Build_context.t), source) ->
+            match (source : Workspace.Build_context_source.t) with
+            | Workspace -> acc
+            | Mount path ->
+              if Path.External.Map.mem acc path
+              then acc
+              else
+                Path.External.Map.set
+                  acc
+                  path
+                  (Source_tree.of_external_root ~read_only:false path))
+      in
       Context_name.Map.of_list_map_exn
         contexts
-        ~f:(fun ((ctx : Build_context.t), _ctx_type) -> ctx.name, Source_tree.default))
+        ~f:(fun ((ctx : Build_context.t), source) ->
+          let tree =
+            match (source : Workspace.Build_context_source.t) with
+            | Workspace -> Source_tree.default
+            | Mount path -> Path.External.Map.find_exn mount_trees path
+          in
+          ctx.name, tree))
   in
   Source_tree.set_for_context_callback (fun ctx ->
     let open Memo.O in

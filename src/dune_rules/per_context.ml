@@ -9,19 +9,27 @@ let all =
   let+ workspace = Workspace.workspace () in
   let contexts =
     List.concat_map workspace.contexts ~f:(fun (context : Workspace.Context.t) ->
-      let native, targets =
-        match context with
-        | Default default -> default.base.name, default.base.targets
-        | Opam opam -> opam.base.name, opam.base.targets
-      in
-      let targets =
+      let base = Workspace.Context.base context in
+      let native, targets, mounts = base.name, base.targets, base.mounts in
+      let cross_target_entries native_name =
         List.filter_map targets ~f:(function
           | Native -> None
           | Named { name = toolchain; _ } ->
-            let name = Context_name.target native ~toolchain in
+            let name = Context_name.target native_name ~toolchain in
             Some (name, `Target (context, toolchain)))
       in
-      (native, `Native context) :: targets)
+      let workspace_entries = (native, `Native context) :: cross_target_entries native in
+      let mount_entries =
+        List.concat_map mounts ~f:(fun mount ->
+          let mount_native_name =
+            Context_name.target
+              native
+              ~toolchain:(Workspace.Context.Mount.internal_name mount)
+          in
+          (mount_native_name, `Native context)
+          :: List.map (cross_target_entries mount_native_name) ~f:(fun (n, v) -> n, v))
+      in
+      workspace_entries @ mount_entries)
   in
   Context_name.Map.of_list_exn contexts
 ;;

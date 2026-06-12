@@ -794,7 +794,7 @@ let gen_rules ctx ~dir components =
         let+ context_dirs =
           let+ workspace = Workspace.workspace () in
           Workspace.build_contexts workspace
-          |> List.map ~f:(fun (ctx : Build_context.t) ->
+          |> List.map ~f:(fun ((ctx : Build_context.t), _source) ->
             Filename.of_string_exn (Context_name.to_string ctx.name))
           |> Subdir_set.of_list
         in

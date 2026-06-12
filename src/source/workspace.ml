@@ -307,6 +307,24 @@ module Lock_dir_selection = struct
   ;;
 end
 
+module Build_context_source = struct
+  type t =
+    | Workspace
+    | Mount of Path.External.t
+
+  let equal a b =
+    match a, b with
+    | Workspace, Workspace -> true
+    | Mount p, Mount q -> Path.External.equal p q
+    | (Workspace | Mount _), _ -> false
+  ;;
+
+  let to_dyn = function
+    | Workspace -> Dyn.variant "Workspace" []
+    | Mount p -> Dyn.variant "Mount" [ Path.External.to_dyn p ]
+  ;;
+end
+
 module Context = struct
   module Target = struct
     type named =
@@ -464,6 +482,18 @@ module Context = struct
       let open Dune_lang.Decoder in
       let+ loc, path = located string in
       { loc; path = Path.External.parse_string_exn ~loc path }
+    ;;
+
+    let internal_name t =
+      let basename = Filename.basename (Path.External.to_string t.path) in
+      match Context_name.of_string_opt basename with
+      | Some n -> n
+      | None ->
+        User_error.raise
+          ~loc:t.loc
+          [ Pp.textf "cannot derive a context name from mount path basename %S" basename ]
+          ~hints:
+            [ Pp.text "An explicit (name ...) field for mounts is not yet supported." ]
     ;;
   end
 
@@ -805,10 +835,19 @@ module Context = struct
 
   let all_names t =
     let n = name t in
-    n
-    :: List.filter_map (targets t) ~f:(function
-      | Native -> None
-      | Named { name; _ } -> Some (Context_name.target n ~toolchain:name))
+    let base_targets = targets t in
+    let cross_for ~native_name =
+      List.filter_map base_targets ~f:(function
+        | Native -> None
+        | Named { name; _ } -> Some (Context_name.target native_name ~toolchain:name))
+    in
+    let workspace_names = n :: cross_for ~native_name:n in
+    let mount_names =
+      List.concat_map (base t).mounts ~f:(fun mount ->
+        let mount_name = Context_name.target n ~toolchain:(Mount.internal_name mount) in
+        mount_name :: cross_for ~native_name:mount_name)
+    in
+    workspace_names @ mount_names
   ;;
 
   let default ~x ~profile ~instrument_with =
@@ -834,14 +873,26 @@ module Context = struct
   ;;
 
   let build_contexts t =
-    let name = name t in
-    let native = Build_context.create ~name in
-    native
-    :: List.filter_map (targets t) ~f:(function
-      | Native -> None
-      | Named { name = toolchain; _ } ->
-        let name = Context_name.target name ~toolchain in
-        Some (Build_context.create ~name))
+    let parent = name t in
+    let common = base t in
+    let targets = common.targets in
+    let for_base ~name source =
+      let native = Build_context.create ~name, source in
+      native
+      :: List.filter_map targets ~f:(function
+        | Native -> None
+        | Named { name = toolchain; _ } ->
+          let name = Context_name.target name ~toolchain in
+          Some (Build_context.create ~name, source))
+    in
+    let workspace = for_base ~name:parent Build_context_source.Workspace in
+    let mounts =
+      List.concat_map common.mounts ~f:(fun (mount : Mount.t) ->
+        let mount_name = Mount.internal_name mount in
+        let name = Context_name.target parent ~toolchain:mount_name in
+        for_base ~name (Build_context_source.Mount mount.path))
+    in
+    workspace @ mounts
   ;;
 end
 
@@ -1370,4 +1421,6 @@ let update_execution_parameters t ep =
   |> Execution_parameters.set_action_stderr_on_success t.config.action_stderr_on_success
 ;;
 
-let build_contexts t = List.concat_map t.contexts ~f:Context.build_contexts
+let build_contexts t : (Build_context.t * Build_context_source.t) list =
+  List.concat_map t.contexts ~f:Context.build_contexts
+;;

@@ -36,6 +36,18 @@ module Lock_dir_selection : sig
     -> Path.Source.t Memo.t
 end
 
+(** Per-internal-build-context source-tree backing. Each entry returned
+    by [build_contexts] is paired with one of these, telling callers
+    which source tree the internal context reads from. *)
+module Build_context_source : sig
+  type t =
+    | Workspace
+    | Mount of Path.External.t
+
+  val equal : t -> t -> bool
+  val to_dyn : t -> Dyn.t
+end
+
 module Context : sig
   module Target : sig
     type named =
@@ -81,6 +93,11 @@ module Context : sig
 
     val equal : t -> t -> bool
     val to_dyn : t -> Dyn.t
+
+    (** Internal-context-name suffix derived from the mount's path. Currently
+        the path's basename; raises a [User_error] if the basename is not a
+        valid [Context_name.t]. *)
+    val internal_name : t -> Context_name.t
   end
 
   module Common : sig
@@ -193,5 +210,7 @@ val workspace_config : unit -> Dune_config.t Memo.t
     [dune-workspace] file. *)
 val update_execution_parameters : t -> Execution_parameters.t -> Execution_parameters.t
 
-(** All the build contexts defined in the workspace. *)
-val build_contexts : t -> Build_context.t list
+(** All the internal build contexts defined in the workspace.
+    Each entry is paired with the source-tree backing it should read
+    from. *)
+val build_contexts : t -> (Build_context.t * Build_context_source.t) list

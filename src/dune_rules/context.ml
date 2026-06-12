@@ -559,10 +559,11 @@ module Group = struct
   type nonrec t =
     { native : t Memo.Lazy.t
     ; targets : t Memo.Lazy.t list
+    ; mounts : t Memo.Lazy.t list
     }
 
-  let create builder ~(kind : Kind.t) ~targets =
-    let name, native =
+  let create builder ~(kind : Kind.t) ~targets ~mounts =
+    let native_builder =
       let implicit =
         not
           (List.mem
@@ -570,17 +571,19 @@ module Group = struct
              ~equal:Workspace.Context.Target.equal
              Workspace.Context.Target.Native)
       in
-      let builder = { builder with implicit } in
-      ( builder.name
-      , Memo.Lazy.create ~name:"native-context" (fun () ->
-          Memo.return (create builder ~kind)) )
+      { builder with implicit }
     in
-    let targets =
+    let native =
+      Memo.Lazy.create ~name:"native-context" (fun () ->
+        Memo.return (create native_builder ~kind))
+    in
+    let make_cross_targets ~native_name ~host_native =
       let builder =
-        { builder with
-          implicit = false
+        { native_builder with
+          name = native_name
+        ; implicit = false
         ; merlin = false
-        ; for_host = Some (name, Memo.Lazy.force native)
+        ; for_host = Some (native_name, Memo.Lazy.force host_native)
         }
       in
       List.filter_map targets ~f:(function
@@ -598,10 +601,28 @@ module Group = struct
                  ~kind
                |> Memo.return)))
     in
-    { native; targets }
+    let workspace_cross_targets =
+      make_cross_targets ~native_name:native_builder.name ~host_native:native
+    in
+    let mount_contexts =
+      List.concat_map mounts ~f:(fun (mount : Workspace.Context.Mount.t) ->
+        let mount_suffix = Workspace.Context.Mount.internal_name mount in
+        let mount_native_name =
+          Context_name.target native_builder.name ~toolchain:mount_suffix
+        in
+        let mount_native =
+          Memo.Lazy.create ~name:"mount-native-context" (fun () ->
+            Memo.return (create { native_builder with name = mount_native_name } ~kind))
+        in
+        let mount_cross_targets =
+          make_cross_targets ~native_name:mount_native_name ~host_native:mount_native
+        in
+        mount_native :: mount_cross_targets)
+    in
+    { native; targets = workspace_cross_targets; mounts = mount_contexts }
   ;;
 
-  let default (builder : Builder.t) ~lock ~targets =
+  let default (builder : Builder.t) ~lock ~targets ~mounts =
     let* path =
       let+ env = builder.env in
       Env_path.path env
@@ -615,10 +636,10 @@ module Group = struct
         | true -> Kind.Lock { default = true }
         | false -> Default
     in
-    create { builder with path } ~kind ~targets
+    create { builder with path } ~kind ~targets ~mounts
   ;;
 
-  let create_for_opam (builder : Builder.t) ~switch ~loc ~targets =
+  let create_for_opam (builder : Builder.t) ~switch ~loc ~targets ~mounts =
     let* env = builder.env in
     let+ vars = Opam.env ~env switch in
     if not (Env.Map.mem vars Opam_switch.opam_switch_prefix_var_name)
@@ -638,7 +659,7 @@ module Group = struct
       | Some s -> Bin.parse_path s
     in
     let builder = { builder with path; env = Memo.return (Env.extend env ~vars) } in
-    create builder ~kind:(Opam switch) ~targets
+    create builder ~kind:(Opam switch) ~targets ~mounts
   ;;
 
   module rec Instantiate : sig
@@ -654,7 +675,9 @@ module Group = struct
         match Workspace.Context.host_context context with
         | None -> Memo.return None
         | Some context_name ->
-          let+ { native; targets = _ } = Instantiate.instantiate context_name in
+          let+ { native; targets = _; mounts = _ } =
+            Instantiate.instantiate context_name
+          in
           Some (context_name, Memo.Lazy.force native)
       in
       let builder : Builder.t =
@@ -680,7 +703,12 @@ module Group = struct
       in
       match context with
       | Opam { base; switch } ->
-        create_for_opam builder ~switch ~loc:base.loc ~targets:base.targets
+        create_for_opam
+          builder
+          ~switch
+          ~loc:base.loc
+          ~targets:base.targets
+          ~mounts:base.mounts
       | Default { lock_dir; base } ->
         let* builder =
           match builder.findlib_toolchain with
@@ -695,7 +723,7 @@ module Group = struct
                })
         in
         let lock = Option.is_some lock_dir in
-        default builder ~targets:base.targets ~lock
+        default builder ~targets:base.targets ~mounts:base.mounts ~lock
     ;;
 
     let memo =
@@ -714,8 +742,10 @@ module DB = struct
       let* workspace = Workspace.workspace () in
       let* contexts =
         Memo.parallel_map workspace.contexts ~f:(fun c ->
-          let+ { Group.native; targets } = Group.instantiate (Workspace.Context.name c) in
-          native :: targets)
+          let+ { Group.native; targets; mounts } =
+            Group.instantiate (Workspace.Context.name c)
+          in
+          (native :: targets) @ mounts)
       in
       let+ all = List.concat contexts |> Memo.parallel_map ~f:Memo.Lazy.force in
       List.iter all ~f:(fun t -> Log.info "Dune context" [ "context", to_dyn t ]);
