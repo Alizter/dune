@@ -234,14 +234,12 @@ let push_stack_frame ~human_readable_description f =
 ;;
 
 module Expert = struct
-  let record_dep_on_source_file_exn res ~loc (src_path : Path.Source.t) =
-    let path : Path.t = Path.source src_path in
+  let record_dep_on_source_file_exn res ~loc (src : Path.Outside_build_dir.t) =
+    let path : Path.t = Path.outside_build_dir src in
     let dep = Dep.file path in
     let f _ =
       let open Memo.O in
-      let+ digest =
-        Fs_memo.file_digest_exn ~loc (Path.Outside_build_dir.In_source_dir src_path)
-      in
+      let+ digest = Fs_memo.file_digest_exn ~loc src in
       Dep.Fact.file path digest
     in
     record res (Dep.Set.singleton dep) ~f

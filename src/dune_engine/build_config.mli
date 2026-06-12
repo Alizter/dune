@@ -90,6 +90,12 @@ module type Source_tree = sig
 
     val sub_dir_names : t -> Filename.Array.Set.t
     val filenames : t -> Filename.Array.Set.t
+
+    (** Physical location of a file in this directory. Routes through
+        the per-context source-tree backing, so for a mount-backed
+        context this returns the resolved external path rather than a
+        workspace-relative one. *)
+    val file_path : t -> Filename.t -> Path.Outside_build_dir.t
   end
 
   val find_dir : Path.Source.t -> Dir.t option Memo.t

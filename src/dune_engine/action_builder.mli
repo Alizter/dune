@@ -75,7 +75,7 @@ module Expert : sig
   val record_dep_on_source_file_exn
     :  'a
     -> loc:(unit -> Loc.t option Memo.t)
-    -> Path.Source.t
+    -> Path.Outside_build_dir.t
     -> 'a t
 end
 

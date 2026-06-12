@@ -56,6 +56,7 @@ module Dir0 = struct
     ; dune_file : Dune_file.t option
     ; project : Dune_project.t
     ; vcs : Vcs.t
+    ; resolver : Source_resolver.t
     }
 
   and sub_dir =
@@ -63,7 +64,17 @@ module Dir0 = struct
     ; sub_dir_as_t : t Memo.t
     }
 
-  let rec to_dyn { path; status; files; dune_file; sub_dirs; vcs = _; project = _ } =
+  let rec to_dyn
+            { path
+            ; status
+            ; files
+            ; dune_file
+            ; sub_dirs
+            ; vcs = _
+            ; project = _
+            ; resolver = _
+            }
+    =
     Dyn.record
       [ "path", Path.Source.to_dyn path
       ; "status", Source_dir_status.to_dyn status
@@ -87,6 +98,11 @@ module Dir0 = struct
   let project t = t.project
   let sub_dir_names t = Filename.Array.Map.keys t.sub_dirs
   let sub_dir_as_t (s : sub_dir) = s.sub_dir_as_t
+
+  let file_path t filename =
+    let logical = Path.Source.relative_fname t.path filename in
+    Source_resolver.resolve t.resolver logical
+  ;;
 end
 
 let eval_status ~status_map ~(parent_status : Source_dir_status.t) dir
@@ -234,7 +250,7 @@ and contents
       ~path
       ~init:dirs
   in
-  { Dir0.project; vcs; status = dir_status; path; files; sub_dirs; dune_file }
+  { Dir0.project; vcs; status = dir_status; path; files; sub_dirs; dune_file; resolver }
 
 and find_dir_raw
       ~resolver

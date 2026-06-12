@@ -1,17 +1,7 @@
 A library in the workspace depends on a public library that lives in
-a mounted source tree. Today this fails for two reasons.
-
-First, the mount context's rule generation discovers the (library ...)
-stanza but cannot read the source file bar.ml through the mount tree
-(rules-layer file-resolution still goes through paths that aren't
-routed via Source_tree.for_context — task #30).
-
-Second, the workspace context's scope DB does not include the mount's
-project, so (libraries bar) in the workspace can't resolve (task #25 —
-per-context scope DB).
-
-This test pins both behaviours so the follow-up work has a target to
-flip from failure to success.
+a mounted source tree. The mount context can build its own library;
+the workspace cannot resolve the mount's library because the scope DB
+does not span the mount yet (task #25 — per-context scope DB).
 
 Mounted source tree: a public library [bar].
 
@@ -53,13 +43,21 @@ Workspace: a public library [foo] that depends on [bar].
   >   (mount $PWD/../mount-src)))
   > EOF
 
-Mount-context library build fails because source files cannot be
-resolved through the mount tree.
+The copy rule for [bar.ml] under the mount context's build dir uses
+the resolved external path, not a workspace-relative one.
 
-  $ dune build _build/default.mount-src/bar.cma 2>&1 | head -3
-  File "bar.ml", line 1, characters 0-0:
-  Error: File unavailable: bar.ml
-  [1]
+  $ dune rules --format=json _build/default.mount-src/bar.ml | jq '.[0].action'
+  [
+    "copy",
+    "$TESTCASE_ROOT/wksp/../mount-src/bar.ml",
+    "_build/default.mount-src/bar.ml"
+  ]
+
+Building the mount-context library succeeds.
+
+  $ dune build _build/default.mount-src/bar.cma
+  $ test -f _build/default.mount-src/bar.cma && echo built
+  built
 
 Workspace context cannot resolve [bar] because the scope DB does not
 span the mount.

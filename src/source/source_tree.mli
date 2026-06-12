@@ -8,6 +8,14 @@ module Dir : sig
   val path : t -> Path.Source.t
   val filenames : t -> Filename.Array.Set.t
 
+  (** Physical location of a file in this directory. For a
+      workspace-backed tree this is the [In_source_dir] interpretation;
+      for an externally-rooted tree the [External] interpretation
+      rooted at the mount path. Callers use this to read the bytes
+      (e.g. copy-from-source rules) without needing to know about
+      path-resolution mechanics. *)
+  val file_path : t -> Filename.t -> Path.Outside_build_dir.t
+
   type sub_dir
 
   val sub_dirs : t -> sub_dir Filename.Array.Map.t

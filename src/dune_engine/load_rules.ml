@@ -285,28 +285,29 @@ module rec Load_rules : sig
 end = struct
   open Load_rules
 
-  let copy_source_action ~src_path ~build_path : Action.Full.t Action_builder.t =
+  let copy_source_action ~src_physical ~build_path : Action.Full.t Action_builder.t =
     let action =
       Action.Full.make
-        (Action.copy (Path.source src_path) build_path)
-        (* Sandboxing this action doesn't make much sense: if we can copy [src_path] to
-           the sandbox, we might as well copy it to the build directory directly. *)
+        (Action.copy (Path.outside_build_dir src_physical) build_path)
+        (* Sandboxing this action doesn't make much sense: if we can copy
+           [src_physical] to the sandbox, we might as well copy it to the
+           build directory directly. *)
         ~sandbox:Sandbox_config.no_sandboxing
     in
     Action_builder.Expert.record_dep_on_source_file_exn
       action
       ~loc:Current_rule_loc.get
-      src_path
+      src_physical
   ;;
 
-  let create_copy_rules ~dir ~ctx_dir ~non_target_source_filenames =
-    Filename.Array.Set.to_list_map non_target_source_filenames ~f:(fun filename ->
+  let create_copy_rules ~dir ~ctx_dir ~non_target_source_files =
+    Filename.Map.to_list_map non_target_source_files ~f:(fun filename src_physical ->
       let src_path = Path.Source.relative_fname dir filename in
       let build_path = Path.Build.append_source ctx_dir src_path in
       Rule.make
         ~info:(Source_file_copy src_path)
         ~targets:(Targets.File.create build_path)
-        (copy_source_action ~src_path ~build_path))
+        (copy_source_action ~src_physical ~build_path))
   ;;
 
   let compile_rules ~dir ~source_dirs rules =
@@ -695,35 +696,50 @@ end = struct
 
   module Source_files_and_dirs = struct
     type t =
-      { source_filenames : Filename.Array.Set.t
+      { source_files : Path.Outside_build_dir.t Filename.Map.t
+        (** Each source filename mapped to the physical location from
+            which its bytes should be read. Resolved at the
+            [Build_config.Source_tree] boundary so the engine never has
+            to interpret [Path.Source.t] itself — a mount-backed context
+            yields an external path here, a workspace-backed context an
+            in-source-tree one. *)
       ; source_dirs : Filename.Array.Set.t
       }
 
     let empty =
-      { source_filenames = Filename.Array.Set.empty
+      { source_files = Filename.Map.empty
       ; source_dirs = Filename.Array.Set.empty
       }
+    ;;
+
+    let source_filenames t =
+      Filename.Map.keys t.source_files |> Filename.Array.Set.of_list
     ;;
   end
 
   let source_files_and_dirs ~context_name source_paths_to_ignore dir =
-    (* Take into account the source files *)
-    let+ source_filenames, source_dirs =
-      let+ filenames, dirnames =
-        let* source_trees = Memo.Lazy.force (Build_config.get ()).source_trees in
-        match Context_name.Map.find source_trees context_name with
-        | None -> Memo.return (Filename.Array.Set.empty, Filename.Array.Set.empty)
-        | Some (module Source_tree) ->
-          Source_tree.find_dir dir
-          >>| (function
-           | None -> Filename.Array.Set.empty, Filename.Array.Set.empty
-           | Some dir -> Source_tree.Dir.filenames dir, Source_tree.Dir.sub_dir_names dir)
-      in
-      ( Filename.Array.Set.diff filenames source_paths_to_ignore.filenames
-      , Filename.Array.Set.diff dirnames source_paths_to_ignore.dirnames )
-    in
-    (* Compile the rules and cleanup stale artifacts *)
-    { Source_files_and_dirs.source_filenames; source_dirs }
+    let* source_trees = Memo.Lazy.force (Build_config.get ()).source_trees in
+    match Context_name.Map.find source_trees context_name with
+    | None -> Memo.return Source_files_and_dirs.empty
+    | Some (module Source_tree) ->
+      Source_tree.find_dir dir
+      >>| (function
+       | None -> Source_files_and_dirs.empty
+       | Some st_dir ->
+         let source_files =
+           Source_tree.Dir.filenames st_dir
+           |> Filename.Array.Set.to_list_map ~f:(fun fn ->
+             fn, Source_tree.Dir.file_path st_dir fn)
+           |> Filename.Map.of_list_exn
+           |> Filename.Map.filteri ~f:(fun fn _ ->
+             not (Filename.Array.Set.mem source_paths_to_ignore.filenames fn))
+         in
+         let source_dirs =
+           Filename.Array.Set.diff
+             (Source_tree.Dir.sub_dir_names st_dir)
+             source_paths_to_ignore.dirnames
+         in
+         { Source_files_and_dirs.source_files; source_dirs })
   ;;
 
   let descendants_to_keep
@@ -846,7 +862,7 @@ end = struct
       (* Compute the set of sources and targets promoted to the source tree that
          must not be copied to the build directory. *)
       (* Take into account the source files *)
-      let* { source_filenames; source_dirs } =
+      let* source_files_and_dirs =
         match context_type with
         | Empty -> Memo.return Source_files_and_dirs.empty
         | With_sources ->
@@ -855,17 +871,16 @@ end = struct
           in
           source_files_and_dirs ~context_name source_paths_to_ignore sub_dir
       in
+      let { Source_files_and_dirs.source_files; source_dirs } = source_files_and_dirs in
+      let source_filenames = Source_files_and_dirs.source_filenames source_files_and_dirs in
       let copy_rules =
         let ctx_dir = Context_name.build_dir context_name in
-        create_copy_rules
-          ~dir:sub_dir
-          ~ctx_dir
-          ~non_target_source_filenames:source_filenames
+        create_copy_rules ~dir:sub_dir ~ctx_dir ~non_target_source_files:source_files
       in
       (* Compile the rules and cleanup stale artifacts *)
       let rules =
         (* Filter out fallback rules *)
-        if Filename.Array.Set.is_empty source_filenames
+        if Filename.Map.is_empty source_files
         then
           (* If there are no source files to copy, fallback rules are
              automatically kept *)

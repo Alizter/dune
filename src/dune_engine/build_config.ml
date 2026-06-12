@@ -82,6 +82,7 @@ module type Source_tree = sig
 
     val sub_dir_names : t -> Filename.Array.Set.t
     val filenames : t -> Filename.Array.Set.t
+    val file_path : t -> Filename.t -> Path.Outside_build_dir.t
   end
 
   val find_dir : Path.Source.t -> Dir.t option Memo.t
