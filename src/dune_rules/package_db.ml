@@ -13,21 +13,33 @@ let find_package ctx pkg =
   match Package.Name.Map.find packages pkg with
   | Some p -> Memo.return (Some (Local p))
   | None ->
-    Pkg_rules.lock_dir_active ctx
-    >>= (function
-     | true ->
-       Pkg_rules.find_package ctx pkg
-       >>| (function
-        | None -> None
-        | Some b -> Some (Build b))
-     | false ->
-       let* findlib = Findlib.create ctx in
-       Findlib.find_root_package findlib pkg
+    (* Cross-mount fallback: a package not in this context might be
+       declared in a mount sibling sharing the same user-facing
+       context. *)
+    let* siblings = Per_context.siblings ctx in
+    let* sibling_local =
+      Memo.List.find_map siblings ~f:(fun sib ->
+        let+ sib_packages = Dune_load.packages sib in
+        Package.Name.Map.find sib_packages pkg |> Option.map ~f:(fun p -> Local p))
+    in
+    (match sibling_local with
+     | Some p -> Memo.return (Some p)
+     | None ->
+       Pkg_rules.lock_dir_active ctx
        >>= (function
-        | Ok p -> Memo.return @@ Some (Installed p)
-        | Error (Invalid_dune_package user_message) ->
-          User_error.raise [ User_message.pp user_message ]
-        | Error Not_found -> Memo.return None))
+        | true ->
+          Pkg_rules.find_package ctx pkg
+          >>| (function
+           | None -> None
+           | Some b -> Some (Build b))
+        | false ->
+          let* findlib = Findlib.create ctx in
+          Findlib.find_root_package findlib pkg
+          >>= (function
+           | Ok p -> Memo.return @@ Some (Installed p)
+           | Error (Invalid_dune_package user_message) ->
+             User_error.raise [ User_message.pp user_message ]
+           | Error Not_found -> Memo.return None)))
 ;;
 
 let create ctx = Memo.return ctx
