@@ -599,7 +599,14 @@ let default_resolve : Path.Source.t -> Path.Outside_build_dir.t =
   fun p -> Path.Outside_build_dir.In_source_dir p
 ;;
 
-let load ?(resolve = default_resolve) ~dir (status : Source_dir_status.t) project ~files ~parent =
+let load
+      ?(resolve = default_resolve)
+      ~dir
+      (status : Source_dir_status.t)
+      project
+      ~files
+      ~parent
+  =
   let file =
     if status = Data_only
     then None

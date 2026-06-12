@@ -42,160 +42,129 @@ module Projects_and_dune_files =
 module Source_tree_map_reduce =
   Source_tree.Make_map_reduce_with_progress (Memo) (Projects_and_dune_files)
 
-(* Workspace-level walk + eval. Today every context's [Source_tree.t] is
-   [Source_tree.default], so the walk and dune-file evaluation (which has
-   side-effecting parse with warning emission) are shared across all
-   contexts. When per-context source-tree backings actually diverge this
-   must be refactored to share work only across contexts with the same
-   [Source_tree.t]. *)
-module Workspace = struct
-  type t =
-    { projects : Dune_project.t list
-    ; projects_by_root : Dune_project.t Path.Source.Map.t
-    ; packages : Package.t Package.Name.Map.t
-    ; mask : Only_packages.t
-    ; dune_files_by_ctx : Context_name.t -> Dune_file.t list Memo.t
-    }
-end
-
-let workspace =
-  Memo.lazy_ ~name:"dune-load-workspace" (fun () ->
-    let status dir =
-      match Source_tree.Dir.status dir with
-      | Vendored -> `Vendored
-      | Normal | Data_only -> `Regular
-    in
-    let* projects, dune_files =
-      let f dir : Projects_and_dune_files.t Memo.t =
-        let path = Source_tree.Dir.path dir in
-        let project = Source_tree.Dir.project dir in
-        let projects =
-          if Path.Source.equal path (Dune_project.root project)
-          then Appendable_list.singleton (status dir, project)
-          else Appendable_list.empty
-        in
-        let dune_files =
-          match Source_tree.Dir.dune_file dir with
-          | None -> Appendable_list.empty
-          | Some d -> Appendable_list.singleton (path, project, d)
-        in
-        Memo.return (projects, dune_files)
+let load_for_context_impl ctx =
+  let status dir =
+    match Source_tree.Dir.status dir with
+    | Vendored -> `Vendored
+    | Normal | Data_only -> `Regular
+  in
+  let* source_tree = Source_tree.for_context ctx in
+  let* projects, dune_files =
+    let f dir : Projects_and_dune_files.t Memo.t =
+      let path = Source_tree.Dir.path dir in
+      let project = Source_tree.Dir.project dir in
+      let projects =
+        if Path.Source.equal path (Dune_project.root project)
+        then Appendable_list.singleton (status dir, project)
+        else Appendable_list.empty
       in
-      Source_tree_map_reduce.map_reduce
-        Source_tree.default
-        ~traverse:Source_dir_status.Set.all
-        ~trace_event_name:"Dune load"
-        ~f
+      let dune_files =
+        match Source_tree.Dir.dune_file dir with
+        | None -> Appendable_list.empty
+        | Some d -> Appendable_list.singleton (path, project, d)
+      in
+      Memo.return (projects, dune_files)
     in
-    let projects = Appendable_list.to_list_rev projects in
-    let* all_packages, vendored_packages =
-      Memo.List.fold_left
-        projects
-        ~init:(Package.Name.Map.empty, Package.Name.Set.empty)
-        ~f:(fun (acc_packages, vendored) (status, (project : Dune_project.t)) ->
-          let+ packages =
-            let packages = Dune_project.including_hidden_packages project in
-            let+ disabled =
-              Package.Name.Map.values packages
-              |> List.filter_map ~f:(fun package ->
-                Package.enabled_if package |> Option.map ~f:(fun expr -> package, expr))
-              |> Memo.List.map ~f:(fun (package, expr) ->
-                Blang_expand.eval
-                  expr
-                  ~dir:Path.root (* This value is irrelevant *)
-                  ~f:(fun ~source:_ pform ->
-                    match pform with
-                    | Var (Os v) -> Lock_dir.Sys_vars.(os_values poll v)
-                    | Var Architecture ->
-                      let+ arch = Memo.Lazy.force Lock_dir.Sys_vars.poll.arch in
-                      [ Value.String (Option.value ~default:"" arch) ]
-                    | _ -> assert false)
-                >>| function
-                | true -> None
-                | false -> Some package)
-              >>| List.filter_opt
-              >>| Package.Name.Map.of_list_map_exn ~f:(fun pkg -> Package.name pkg, ())
-            in
-            Package.Name.Map.merge packages disabled ~f:(fun _key package disabled ->
-              match package, disabled with
-              | Some p, Some () -> Some (p, `Disabled)
-              | Some p, None -> Some (p, `Enabled)
-              | None, None | None, Some _ -> assert false)
+    Source_tree_map_reduce.map_reduce
+      source_tree
+      ~traverse:Source_dir_status.Set.all
+      ~trace_event_name:"Dune load"
+      ~f
+  in
+  let projects = Appendable_list.to_list_rev projects in
+  let* all_packages, vendored_packages =
+    Memo.List.fold_left
+      projects
+      ~init:(Package.Name.Map.empty, Package.Name.Set.empty)
+      ~f:(fun (acc_packages, vendored) (status, (project : Dune_project.t)) ->
+        let+ packages =
+          let packages = Dune_project.including_hidden_packages project in
+          let+ disabled =
+            Package.Name.Map.values packages
+            |> List.filter_map ~f:(fun package ->
+              Package.enabled_if package |> Option.map ~f:(fun expr -> package, expr))
+            |> Memo.List.map ~f:(fun (package, expr) ->
+              Blang_expand.eval
+                expr
+                ~dir:Path.root (* This value is irrelevant *)
+                ~f:(fun ~source:_ pform ->
+                  match pform with
+                  | Var (Os v) -> Lock_dir.Sys_vars.(os_values poll v)
+                  | Var Architecture ->
+                    let+ arch = Memo.Lazy.force Lock_dir.Sys_vars.poll.arch in
+                    [ Value.String (Option.value ~default:"" arch) ]
+                  | _ -> assert false)
+              >>| function
+              | true -> None
+              | false -> Some package)
+            >>| List.filter_opt
+            >>| Package.Name.Map.of_list_map_exn ~f:(fun pkg -> Package.name pkg, ())
           in
-          let vendored =
-            match status with
-            | `Regular -> vendored
-            | `Vendored ->
-              Package.Name.Set.of_keys packages |> Package.Name.Set.union vendored
-          in
-          let acc_packages =
-            Package.Name.Map.union acc_packages packages ~f:(fun name (a, _) (b, _) ->
-              User_error.raise
-                [ Pp.textf
-                    "The package %S is defined more than once:"
-                    (Package.Name.to_string name)
-                ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc a))
-                ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc b))
-                ])
-          in
-          acc_packages, vendored)
-    in
-    let mask = Only_packages.mask all_packages ~vendored:vendored_packages in
-    let packages =
-      Package.Name.Map.map ~f:fst all_packages |> Only_packages.filter_packages mask
-    in
-    let projects = List.rev_map projects ~f:snd in
-    let (_ : Package.Name.t Path.Source.Map.t) =
-      match
-        Package.Name.Map.values all_packages
-        |> List.filter_map ~f:(fun (pkg, _) ->
-          match Package.exclusive_dir pkg with
-          | None -> None
-          | Some d -> Some (d, pkg))
-        |> Path.Source.Map.of_list_map ~f:(fun ((_loc, d), pkg) -> d, Package.name pkg)
-      with
-      | Ok s -> s
-      | Error (dir, ((loc, _), p1), (_, p2)) ->
-        let name p = Package.Name.to_string (Package.name p) in
-        User_error.raise
-          ~loc
-          [ Pp.textf
-              "Directory %s cannot belong to package %s"
-              (Path.Source.to_string_maybe_quoted dir)
-              (name p1)
-          ; Pp.textf "It already belongs to package %s" (name p2)
-          ]
-    in
-    let+ dune_files_by_ctx = Dune_file.eval dune_files mask in
-    let projects_by_root =
-      Path.Source.Map.of_list_map_exn projects ~f:(fun project ->
-        Dune_project.root project, project)
-    in
-    { Workspace.projects; projects_by_root; packages; mask; dune_files_by_ctx })
-;;
-
-(* Per-context [Ctx_data] derived from the shared workspace walk. Once
-   contexts have divergent source-tree backings, this needs to consult the
-   per-context [Source_tree.for_context ctx] rather than the workspace
-   default. *)
-let load_for_context ctx =
-  let* ws = Memo.Lazy.force workspace in
-  let+ dune_files = ws.dune_files_by_ctx ctx in
+          Package.Name.Map.merge packages disabled ~f:(fun _key package disabled ->
+            match package, disabled with
+            | Some p, Some () -> Some (p, `Disabled)
+            | Some p, None -> Some (p, `Enabled)
+            | None, None | None, Some _ -> assert false)
+        in
+        let vendored =
+          match status with
+          | `Regular -> vendored
+          | `Vendored ->
+            Package.Name.Set.of_keys packages |> Package.Name.Set.union vendored
+        in
+        let acc_packages =
+          Package.Name.Map.union acc_packages packages ~f:(fun name (a, _) (b, _) ->
+            User_error.raise
+              [ Pp.textf
+                  "The package %S is defined more than once:"
+                  (Package.Name.to_string name)
+              ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc a))
+              ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc b))
+              ])
+        in
+        acc_packages, vendored)
+  in
+  let mask = Only_packages.mask all_packages ~vendored:vendored_packages in
+  let packages =
+    Package.Name.Map.map ~f:fst all_packages |> Only_packages.filter_packages mask
+  in
+  let projects = List.rev_map projects ~f:snd in
+  let (_ : Package.Name.t Path.Source.Map.t) =
+    match
+      Package.Name.Map.values all_packages
+      |> List.filter_map ~f:(fun (pkg, _) ->
+        match Package.exclusive_dir pkg with
+        | None -> None
+        | Some d -> Some (d, pkg))
+      |> Path.Source.Map.of_list_map ~f:(fun ((_loc, d), pkg) -> d, Package.name pkg)
+    with
+    | Ok s -> s
+    | Error (dir, ((loc, _), p1), (_, p2)) ->
+      let name p = Package.Name.to_string (Package.name p) in
+      User_error.raise
+        ~loc
+        [ Pp.textf
+            "Directory %s cannot belong to package %s"
+            (Path.Source.to_string_maybe_quoted dir)
+            (name p1)
+        ; Pp.textf "It already belongs to package %s" (name p2)
+        ]
+  in
+  let* dune_files_by_ctx = Dune_file.eval dune_files mask in
+  let+ dune_files = dune_files_by_ctx ctx in
+  let projects_by_root =
+    Path.Source.Map.of_list_map_exn projects ~f:(fun project ->
+      Dune_project.root project, project)
+  in
   let dune_file_by_dir = Dune_file_db.make dune_files in
-  { Ctx_data.dune_files
-  ; mask = ws.mask
-  ; dune_file_by_dir
-  ; packages = ws.packages
-  ; projects = ws.projects
-  ; projects_by_root = ws.projects_by_root
-  }
+  { Ctx_data.dune_files; mask; dune_file_by_dir; packages; projects; projects_by_root }
 ;;
 
 let load () =
   let ctx_data =
     Staged.unstage
       (Per_context.create_by_name ~name:"dune-load-ctx-data" (fun ctx ->
-         load_for_context ctx))
+         Memo.lazy_ (fun () -> load_for_context_impl ctx) |> Memo.Lazy.force))
   in
   Memo.return { ctx_data }
 ;;

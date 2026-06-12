@@ -14,11 +14,9 @@ val packages : Context_name.t -> Package.t Package.Name.Map.t Memo.t
 val projects : Context_name.t -> Dune_project.t list Memo.t
 
 (** Workspace-aggregate helpers: union the per-context view across all
-    registered contexts. While contexts share [Source_tree.default] (the
-    current state) these return the same data as any single context's
-    view. Callers should migrate to the per-context APIs as part of the
-    per-context project/package work — these helpers are a transient
-    bridge. *)
+    registered contexts. Useful when a caller genuinely needs the
+    workspace-wide set; prefer the per-context APIs above when a single
+    context's view suffices. *)
 val workspace_packages : unit -> Package.t Package.Name.Map.t Memo.t
 
 val workspace_projects : unit -> Dune_project.t list Memo.t
