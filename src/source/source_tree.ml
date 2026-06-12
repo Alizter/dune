@@ -110,6 +110,7 @@ let error_unable_to_load ~path unix_error =
 ;;
 
 let rec physical
+          ~resolver
           ~project
           ~default_vcs
           ~dir
@@ -133,6 +134,7 @@ let rec physical
         ; sub_dir_as_t =
             Memo.lazy_node (fun () ->
               find_dir_raw
+                ~resolver
                 ~default_vcs
                 ~path
                 ~basename:fn
@@ -144,7 +146,7 @@ let rec physical
             |> Memo.Node.read
         })
 
-and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
+and virtual_ ~resolver ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
   match dune_file with
   | None -> init
   | Some df ->
@@ -166,6 +168,7 @@ and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
                 ; sub_dir_as_t =
                     Memo.lazy_node (fun () ->
                       find_dir_raw
+                        ~resolver
                         ~default_vcs:Dir0.Vcs.Ancestor_vcs
                         ~path:(Path.Source.relative_fname path fn)
                         ~basename:fn
@@ -182,6 +185,7 @@ and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
     Filename.Array.Map.union_left_biased init virtual_dirs
 
 and contents
+      ~resolver
       readdir
       ~default_vcs
       ~path
@@ -191,7 +195,9 @@ and contents
       ~(dir_status : Source_dir_status.t)
   =
   let files = Dir_contents.files readdir in
-  let+ dune_file = Dune_file.load ~dir:path dir_status project ~files ~parent:dune_file in
+  let+ dune_file =
+    Dune_file.load ~resolver ~dir:path dir_status project ~files ~parent:dune_file
+  in
   let files =
     let predicate =
       match dune_file with
@@ -209,6 +215,7 @@ and contents
     in
     let dirs =
       physical
+        ~resolver
         ~default_vcs:vcs
         ~project
         ~dir:path
@@ -218,11 +225,19 @@ and contents
         ~dune_file
         ~parent_status:dir_status
     in
-    virtual_ ~project ~sub_dirs ~parent_status:dir_status ~dune_file ~path ~init:dirs
+    virtual_
+      ~resolver
+      ~project
+      ~sub_dirs
+      ~parent_status:dir_status
+      ~dune_file
+      ~path
+      ~init:dirs
   in
   { Dir0.project; vcs; status = dir_status; path; files; sub_dirs; dune_file }
 
 and find_dir_raw
+      ~resolver
       ~virtual_
       ~default_vcs
       ~dune_file
@@ -233,6 +248,7 @@ and find_dir_raw
       ~basename
   : Dir0.t Memo.t
   =
+  let resolve = Source_resolver.resolve resolver in
   let status =
     if Dune_project.cram project && Cram_test.is_cram_suffix basename
     then Source_dir_status.Data_only
@@ -242,7 +258,7 @@ and find_dir_raw
     if virtual_
     then Memo.return Dir_contents.empty
     else
-      Dir_contents.of_source_path path
+      Dir_contents.of_outside_build_dir ~path_for_hint:path ~physical:(resolve path)
       >>| function
       | Ok dir -> dir
       | Error _ -> Dir_contents.empty
@@ -250,22 +266,33 @@ and find_dir_raw
   let* project =
     if status = Data_only
     then Memo.return project
-    else
-      Dune_project.load
+    else (
+      let read source = Dune_engine.Fs_memo.file_contents (resolve source) in
+      Dune_project.gen_load
+        ~read
         ~dir:path
         ~files:(Dir_contents.files readdir)
         ~infer_from_opam_files:false
         ~load_opam_file_with_contents:Dune_pkg.Opam_file.load_opam_file_with_contents
       >>| Option.map
             ~f:(Only_packages.filter_packages_in_project ~vendored:(status = Vendored))
-      >>| Option.value ~default:project
+      >>| Option.value ~default:project)
   in
-  contents readdir ~default_vcs ~path ~dune_file ~dirs_visited ~project ~dir_status:status
+  contents
+    ~resolver
+    readdir
+    ~default_vcs
+    ~path
+    ~dune_file
+    ~dirs_visited
+    ~project
+    ~dir_status:status
 ;;
 
-let make_root_node ~read_only =
+let make_root_node ~resolver ~read_only =
   Memo.lazy_node
   @@ fun () ->
+  let resolve = Source_resolver.resolve resolver in
   let path = Path.Source.root in
   (* A read-only source tree (e.g. backed by a git sha or a fetched
      archive) is fully vendored: the user can't be expected to edit its
@@ -274,14 +301,16 @@ let make_root_node ~read_only =
      too. *)
   let dir_status : Source_dir_status.t = if read_only then Vendored else Normal in
   let* readdir =
-    Dir_contents.of_source_path path
+    Dir_contents.of_outside_build_dir ~path_for_hint:path ~physical:(resolve path)
     >>| function
     | Ok dir -> dir
     | Error unix_error -> error_unable_to_load ~path unix_error
   in
   let vcs = Dir0.Vcs.get_vcs ~default:Ancestor_vcs ~readdir ~path in
   let* project =
-    Dune_project.load
+    let read source = Dune_engine.Fs_memo.file_contents (resolve source) in
+    Dune_project.gen_load
+      ~read
       ~dir:path
       ~files:(Dir_contents.files readdir)
       ~infer_from_opam_files:true
@@ -292,12 +321,13 @@ let make_root_node ~read_only =
     >>| Only_packages.filter_packages_in_project ~vendored:(dir_status = Vendored)
   in
   let* dirs_visited =
-    Dir_contents.File.of_source_path path
+    Dir_contents.File.of_path (resolve path)
     >>| function
     | Ok file -> Dirs_visited.singleton path file
     | Error unix_error -> error_unable_to_load ~path unix_error
   in
   contents
+    ~resolver
     readdir
     ~default_vcs:vcs
     ~path
@@ -312,7 +342,24 @@ type t =
   ; read_only : bool
   }
 
-let default = { root_node = make_root_node ~read_only:false; read_only = false }
+let default =
+  { root_node = make_root_node ~resolver:Source_resolver.workspace ~read_only:false
+  ; read_only = false
+  }
+;;
+
+let of_external_root ?(read_only = true) root =
+  let resolver =
+    Source_resolver.create (fun p ->
+      if Path.Source.is_root p
+      then Path.Outside_build_dir.External root
+      else
+        Path.Outside_build_dir.External
+          (Path.External.relative root (Path.Source.to_string p)))
+  in
+  { root_node = make_root_node ~resolver ~read_only; read_only }
+;;
+
 let read_only t = t.read_only
 let root t = Memo.Node.read t.root_node
 let for_context_callback : (Context_name.t -> t Memo.t) Fdecl.t = Fdecl.create Dyn.opaque

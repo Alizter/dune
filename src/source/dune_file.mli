@@ -40,13 +40,14 @@ val files : t -> Files.t
 (** Directories introduced via [(subdir ..)] *)
 val sub_dirnames : t -> Filename.Array.Set.t
 
-(** [load] reads the dune file at [dir] (workspace-relative). [resolve]
-    translates the logical [Path.Source.t] into the physical
-    [Path.Outside_build_dir.t] from which bytes are read; the default
-    treats source paths as workspace-rooted. Source trees with a
-    different backing pass a custom resolver. *)
+(** [load] reads the dune file at [dir] (workspace-relative). [resolver]
+    translates logical [Path.Source.t] identities to the physical
+    [Path.Outside_build_dir.t] from which bytes are read; the workspace
+    resolver maps to [In_source_dir]. The workspace-centric "missing
+    dune-project" warning fires only when [resolver] is the workspace
+    one. *)
 val load
-  :  ?resolve:(Path.Source.t -> Path.Outside_build_dir.t)
+  :  ?resolver:Source_resolver.t
   -> dir:Path.Source.t
   -> Source_dir_status.t
   -> Dune_project.t

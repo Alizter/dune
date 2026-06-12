@@ -595,12 +595,8 @@ let ensure_dune_project_file_exists =
     | Error -> impl ~is_error:true project
 ;;
 
-let default_resolve : Path.Source.t -> Path.Outside_build_dir.t =
-  fun p -> Path.Outside_build_dir.In_source_dir p
-;;
-
 let load
-      ?(resolve = default_resolve)
+      ?(resolver = Source_resolver.workspace)
       ~dir
       (status : Source_dir_status.t)
       project
@@ -629,15 +625,16 @@ let load
       match file with
       | None -> Memo.return ()
       | Some _ ->
-        (* The missing-dune-project warning is workspace-centric: it checks
-           the workspace filesystem and gives a user-actionable hint. For
-           externally-rooted source trees we skip it — the read_only flag
-           on those trees will eventually suppress parse warnings entirely
-           (#31). *)
-        if resolve == default_resolve
+        (* The missing-dune-project warning is workspace-centric: it
+           checks the workspace filesystem and gives a user-actionable
+           hint. Suppressed for non-workspace source trees — the
+           read_only flag will eventually suppress parse warnings
+           entirely (#31). *)
+        if Source_resolver.is_workspace resolver
         then ensure_dune_project_file_exists project
         else Memo.return ()
     in
     let file = Option.map file ~f:(fun file -> Path.Source.relative_fname dir file) in
+    let resolve = Source_resolver.resolve resolver in
     load ~resolve file ~from_parent:parent ~project >>| Option.some
 ;;

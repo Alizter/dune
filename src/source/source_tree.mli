@@ -45,6 +45,19 @@ type t
 (** The default source tree, backed by the workspace filesystem. *)
 val default : t
 
+(** [of_external_root root] is a source tree whose contents live at the
+    external filesystem path [root]. The same [Path.Source.t] identities
+    are used for directories inside the tree — they're interpreted
+    relative to [root] for filesystem reads.
+
+    Defaults to [read_only = true]: the tree is assumed to belong to
+    something the user isn't editing in place (e.g. a fetched dependency
+    or a checkout managed by some other tool). Pass [~read_only:false]
+    when the external location is genuinely writable, such as another
+    project on the local filesystem that should still accept
+    promotions. *)
+val of_external_root : ?read_only:bool -> Path.External.t -> t
+
 (** [read_only t] is [true] when this source tree is not user-editable —
     e.g., backed by a git sha or a fetched archive. Such trees are
     treated as fully vendored: warnings/alerts are suppressed in
