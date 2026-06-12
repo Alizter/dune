@@ -76,8 +76,8 @@ let analyze_binary_local t lookup_name =
        User_error.raise
          ~loc:(loc x)
          [ Pp.textf
-             "binary %S is available from more than one definition. It is also \
-              available in:"
+             "binary %S is available from more than one definition. It is also available \
+              in:"
              (Filename.to_string lookup_name)
          ; Pp.enumerate rest ~f:(fun x -> Pp.verbatim (Loc.to_file_colon_line (loc x)))
          ])
@@ -112,8 +112,7 @@ let analyze_binary t ~dir name =
       match kind, lookup_name with
       | In_path, Some lookup_name ->
         let* siblings = Memo.Lazy.force t.siblings in
-        Memo.parallel_map siblings ~f:(fun sib ->
-          analyze_binary_local sib lookup_name)
+        Memo.parallel_map siblings ~f:(fun sib -> analyze_binary_local sib lookup_name)
         >>| List.find_map ~f:(function
           | `None -> None
           | (`Resolved _ | `Origin _) as r -> Some r)

@@ -109,11 +109,7 @@ let get_installed_binaries ~(context : Context.t) stanzas =
 
 (* Forward reference so [all] can call [get] on siblings. Resolution
    happens at sibling-lookup time, after [all] has been constructed. *)
-let get_fdecl
-  : (Context.t -> Artifacts.t Memo.t) Fdecl.t
-  =
-  Fdecl.create Dyn.opaque
-;;
+let get_fdecl : (Context.t -> Artifacts.t Memo.t) Fdecl.t = Fdecl.create Dyn.opaque
 
 let all =
   Memo.lazy_ ~name:"Artifacts_db.all"

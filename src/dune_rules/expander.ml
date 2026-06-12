@@ -189,23 +189,58 @@ let expand_artifact ~source t artifact arg =
     let lookup = Fdecl.get lookup_artifacts in
     Action_builder.of_memo (lookup ~dir)
   in
+  let emit_module_artifact kind (obj_dir, m) =
+    match
+      match kind with
+      | Pform.Artifact.Cm_kind kind -> Obj_dir.Module.cm_file obj_dir m ~kind:(Ocaml kind)
+      | Cmt -> Obj_dir.Module.cmt_file obj_dir m ~cm_kind:(Ocaml Cmi) ~ml_kind:Impl
+      | Cmti -> Some (Obj_dir.Module.cmti_file obj_dir m ~cm_kind:(Ocaml Cmi))
+    with
+    | None -> Action_builder.return [ Value.String "" ]
+    | Some path -> dep (Path.build path)
+  in
   match artifact with
   | Pform.Artifact.Mod kind ->
     (match Artifacts_obj.lookup_module artifacts path with
+     | Some r -> emit_module_artifact kind r
      | None ->
-       Module_name.of_string_allow_invalid (loc, Filename.to_string name)
-       |> Module_name.Unchecked.allow_invalid
-       |> Module_name.to_string
-       |> does_not_exist ~what:"Module"
-     | Some (t, m) ->
-       (match
-          match kind with
-          | Cm_kind kind -> Obj_dir.Module.cm_file t m ~kind:(Ocaml kind)
-          | Cmt -> Obj_dir.Module.cmt_file t m ~cm_kind:(Ocaml Cmi) ~ml_kind:Impl
-          | Cmti -> Some (Obj_dir.Module.cmti_file t m ~cm_kind:(Ocaml Cmi))
-        with
-        | None -> Action_builder.return [ Value.String "" ]
-        | Some path -> dep (Path.build path)))
+       (* Cross-mount fallback: translate the lookup path to each sibling
+          context's build-dir prefix and query its [Artifacts_obj.t]. The
+          module name (and any sub-dir) is taken verbatim, so this finds
+          modules that exist at the same workspace-relative position in a
+          mount. *)
+       let ctx_name, src_suffix = Path.Build.extract_build_context_exn path in
+       let* sibling_match =
+         Action_builder.of_memo
+           (let open Memo.O in
+            let* siblings =
+              Per_context.siblings
+                (Context_name.parse_string_exn (Loc.none, Filename.to_string ctx_name))
+            in
+            Memo.parallel_map siblings ~f:(fun sib ->
+              let sib_path =
+                Path.Build.append_source (Context_name.build_dir sib) src_suffix
+              in
+              let sib_dir = Path.Build.parent_exn sib_path in
+              let* sib_artifacts = (Fdecl.get lookup_artifacts) ~dir:sib_dir in
+              Memo.return (Artifacts_obj.lookup_module sib_artifacts sib_path))
+            >>| List.filter_opt)
+       in
+       (match sibling_match with
+        | [ r ] -> emit_module_artifact kind r
+        | _ :: _ :: _ ->
+          User_error.raise
+            ~loc
+            [ Pp.textf
+                "Module %s is defined in multiple mount siblings; this is not yet \
+                 supported."
+                (Filename.to_string name)
+            ]
+        | [] ->
+          Module_name.of_string_allow_invalid (loc, Filename.to_string name)
+          |> Module_name.Unchecked.allow_invalid
+          |> Module_name.to_string
+          |> does_not_exist ~what:"Module"))
   | Lib mode ->
     let lib_name =
       Lib_name.parse_string_exn
