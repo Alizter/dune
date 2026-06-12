@@ -451,6 +451,22 @@ module Context = struct
     ;;
   end
 
+  module Mount = struct
+    type t =
+      { loc : Loc.t
+      ; path : Path.External.t
+      }
+
+    let equal { loc = _; path } t = Path.External.equal path t.path
+    let to_dyn { loc = _; path } = Dyn.record [ "path", Path.External.to_dyn path ]
+
+    let decode =
+      let open Dune_lang.Decoder in
+      let+ loc, path = located string in
+      { loc; path = Path.External.parse_string_exn ~loc path }
+    ;;
+  end
+
   module Common = struct
     type t =
       { loc : Loc.t
@@ -466,6 +482,7 @@ module Context = struct
       ; instrument_with : Lib_name.t list
       ; merlin : Merlin.t
       ; cms_cmt_dependency : Cms_cmt_dependency.t
+      ; mounts : Mount.t list
       }
 
     let repr =
@@ -494,6 +511,7 @@ module Context = struct
           ; instrument_with
           ; merlin
           ; cms_cmt_dependency
+          ; mounts
           }
           t
       =
@@ -511,6 +529,7 @@ module Context = struct
       && List.equal Lib_name.equal instrument_with t.instrument_with
       && Merlin.equal merlin t.merlin
       && Cms_cmt_dependency.equal cms_cmt_dependency t.cms_cmt_dependency
+      && List.equal Mount.equal mounts t.mounts
     ;;
 
     let fdo_suffix t =
@@ -589,6 +608,8 @@ module Context = struct
           ~default:Cms_cmt_dependency.No_dependency
           (Dune_lang.Syntax.since Dune_lang.Oxcaml.syntax (0, 1)
            >>> Cms_cmt_dependency.decode)
+      and+ mounts =
+        multi_field "mount" (Dune_lang.Syntax.since syntax (3, 25) >>> Mount.decode)
       in
       fun ~profile_default ~instrument_with_default ->
         let profile = Option.value profile ~default:profile_default in
@@ -622,6 +643,7 @@ module Context = struct
                 | true -> Rules_only
                 | false -> Not_selected))
         ; cms_cmt_dependency
+        ; mounts
         }
     ;;
   end
@@ -806,6 +828,7 @@ module Context = struct
           ; instrument_with = Option.value instrument_with ~default:[]
           ; merlin = Not_selected
           ; cms_cmt_dependency = Cms_cmt_dependency.No_dependency
+          ; mounts = []
           }
       }
   ;;

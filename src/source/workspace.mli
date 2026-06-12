@@ -70,6 +70,19 @@ module Context : sig
     val to_dyn : t -> Dyn.t
   end
 
+  module Mount : sig
+    (** A user-declared source-tree mount attached to a context. At build time,
+        the mount is wired to an internal build context whose [Source_tree.t]
+        is rooted at [path]. *)
+    type t =
+      { loc : Loc.t
+      ; path : Path.External.t
+      }
+
+    val equal : t -> t -> bool
+    val to_dyn : t -> Dyn.t
+  end
+
   module Common : sig
     type t =
       { loc : Loc.t
@@ -91,6 +104,7 @@ module Context : sig
       ; instrument_with : Lib_name.t list
       ; merlin : Merlin.t
       ; cms_cmt_dependency : Cms_cmt_dependency.t
+      ; mounts : Mount.t list
       }
   end
 

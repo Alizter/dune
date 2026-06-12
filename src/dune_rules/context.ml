@@ -157,6 +157,7 @@ module Builder = struct
         ; instrument_with
         ; merlin
         ; cms_cmt_dependency
+        ; mounts = _
         }
     =
     let env =
