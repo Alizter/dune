@@ -85,22 +85,34 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
       ~conf
       ()
   in
+  let contexts =
+    Memo.lazy_ (fun () ->
+      let open Memo.O in
+      let+ contexts = Workspace.workspace () >>| Workspace.build_contexts in
+      let open Dune_engine.Build_config.Context_type in
+      (Private_context.t, Empty)
+      :: (Install.Context.install_context, Empty)
+      :: (Fetch_rules.context, Empty)
+      :: List.map contexts ~f:(fun ctx -> ctx, With_sources))
+  in
+  let source_trees =
+    Memo.lazy_ (fun () ->
+      let open Memo.O in
+      let+ contexts = Memo.Lazy.force contexts in
+      Context_name.Map.of_list_map_exn
+        contexts
+        ~f:(fun ((ctx : Build_context.t), _ctx_type) ->
+          ctx.name, (module Source_tree : Dune_engine.Build_config.Source_tree)))
+  in
   Build_config.set
     ~sandboxing_preference
     ~promote_source
-    ~contexts:
-      (Memo.lazy_ (fun () ->
-         let open Memo.O in
-         let+ contexts = Workspace.workspace () >>| Workspace.build_contexts in
-         let open Dune_engine.Build_config.Context_type in
-         (Private_context.t, Empty)
-         :: (Install.Context.install_context, Empty)
-         :: (Fetch_rules.context, Empty)
-         :: List.map contexts ~f:(fun ctx -> ctx, With_sources)))
+    ~contexts
     ~rule_generator:(module Gen_rules)
     ~implicit_default_alias
     ~execution_parameters:(execution_parameters ~sandbox_actions)
-    ~source_tree:(module Source_tree)
+    ~source_trees
+    ~workspace_source_tree:(module Source_tree)
 ;;
 
 let get () =

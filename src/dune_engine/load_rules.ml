@@ -79,7 +79,7 @@ end
 let get_dir_triage ~dir =
   match Dpath.analyse_dir dir with
   | Source dir ->
-    let module Source_tree = (val (Build_config.get ()).source_tree) in
+    let module Source_tree = (val (Build_config.get ()).workspace_source_tree) in
     Source_tree.find_dir dir
     >>| (function
      | None -> Dir_triage.empty_source
@@ -452,16 +452,17 @@ end = struct
       | Restricted of Path.Unspecified.w Dir_set.t Memo.Lazy.t
 
     let source_subdirs_of_build_dir ~dir =
-      let module Source_tree = (val (Build_config.get ()).source_tree) in
-      let corresponding_source_dir =
-        match Dpath.analyse_target dir with
-        | Alias _ | Anonymous_action _ | Other _ -> Memo.return None
-        | Regular (_ctx, sub_dir) -> Source_tree.find_dir sub_dir
-      in
-      corresponding_source_dir
-      >>| function
-      | None -> Filename.Array.Set.empty
-      | Some dir -> Source_tree.Dir.sub_dir_names dir
+      match Dpath.analyse_target dir with
+      | Alias _ | Anonymous_action _ | Other _ -> Memo.return Filename.Array.Set.empty
+      | Regular (ctx, sub_dir) ->
+        let* source_trees = Memo.Lazy.force (Build_config.get ()).source_trees in
+        (match Context_name.Map.find source_trees ctx with
+         | None -> Memo.return Filename.Array.Set.empty
+         | Some (module Source_tree) ->
+           Source_tree.find_dir sub_dir
+           >>| (function
+            | None -> Filename.Array.Set.empty
+            | Some dir -> Source_tree.Dir.sub_dir_names dir))
     ;;
 
     let allowed_dirs ~dir ~subdir : restriction Memo.t =
@@ -707,15 +708,18 @@ end = struct
     ;;
   end
 
-  let source_files_and_dirs source_paths_to_ignore dir =
+  let source_files_and_dirs ~context_name source_paths_to_ignore dir =
     (* Take into account the source files *)
     let+ source_filenames, source_dirs =
       let+ filenames, dirnames =
-        let module Source_tree = (val (Build_config.get ()).source_tree) in
-        Source_tree.find_dir dir
-        >>| function
-        | None -> Filename.Array.Set.empty, Filename.Array.Set.empty
-        | Some dir -> Source_tree.Dir.filenames dir, Source_tree.Dir.sub_dir_names dir
+        let* source_trees = Memo.Lazy.force (Build_config.get ()).source_trees in
+        match Context_name.Map.find source_trees context_name with
+        | None -> Memo.return (Filename.Array.Set.empty, Filename.Array.Set.empty)
+        | Some (module Source_tree) ->
+          Source_tree.find_dir dir
+          >>| (function
+           | None -> Filename.Array.Set.empty, Filename.Array.Set.empty
+           | Some dir -> Source_tree.Dir.filenames dir, Source_tree.Dir.sub_dir_names dir)
       in
       ( Filename.Array.Set.diff filenames source_paths_to_ignore.filenames
       , Filename.Array.Set.diff dirnames source_paths_to_ignore.dirnames )
@@ -851,7 +855,7 @@ end = struct
           let source_paths_to_ignore =
             source_paths_to_ignore ~dir build_dir_only_sub_dirs rules
           in
-          source_files_and_dirs source_paths_to_ignore sub_dir
+          source_files_and_dirs ~context_name source_paths_to_ignore sub_dir
       in
       let copy_rules =
         let ctx_dir = Context_name.build_dir context_name in
