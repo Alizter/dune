@@ -281,8 +281,10 @@ let files_to_mdx t ~sctx ~dir =
   let build_path src_path =
     Path.Build.append_source (Context.build_dir (Super_context.context sctx)) src_path
   in
+  let context_name = Context.name (Super_context.context sctx) in
+  let* source_tree = Source_tree.for_context context_name in
   Path.Build.drop_build_context_exn dir
-  |> Source_tree.files_of Source_tree.default
+  |> Source_tree.files_of source_tree
   >>| Path.Source.Set.to_list
   >>| List.filter_map ~f:(fun src_path ->
     if must_mdx src_path then Some (build_path src_path) else None)

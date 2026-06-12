@@ -401,7 +401,8 @@ module Valid = struct
         Scope.DB.with_all ctx ~f:(fun find ->
           Memo.List.fold_left projects ~init:([], []) ~f:(fun (libs_acc, pkg_acc) proj ->
             let* vendored =
-              Source_tree.is_vendored Source_tree.default (Dune_project.root proj)
+              let* source_tree = Source_tree.for_context (Context.name ctx) in
+              Source_tree.is_vendored source_tree (Dune_project.root proj)
             in
             if vendored
             then Memo.return (libs_acc, pkg_acc)

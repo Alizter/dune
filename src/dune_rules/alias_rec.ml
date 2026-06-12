@@ -32,10 +32,9 @@ include Alias_builder.Alias_rec (struct
     let traverse dir ~f =
       let open Action_builder.O in
       let ctx_name, src_dir = Path.Build.extract_build_context_exn dir in
+      let context_name = Context_name.of_string (Filename.to_string ctx_name) in
       let f =
-        let build_dir =
-          Context_name.build_dir (Context_name.of_string (Filename.to_string ctx_name))
-        in
+        let build_dir = Context_name.build_dir context_name in
         fun dir ->
           let build_path =
             Path.Build.append_source build_dir (Source_tree.Dir.path dir)
@@ -67,8 +66,9 @@ include Alias_builder.Alias_rec (struct
               ~init:found_in_source
               ~f:Alias_status.combine
       in
-      Source_tree.find_dir Source_tree.default src_dir
-      |> Action_builder.of_memo
+      Action_builder.of_memo
+        (Memo.bind (Source_tree.for_context context_name) ~f:(fun source_tree ->
+           Source_tree.find_dir source_tree src_dir))
       >>= function
       | None -> Action_builder.return Alias_builder.Alias_status.Not_defined
       | Some src_dir ->

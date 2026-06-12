@@ -438,7 +438,9 @@ let add_alias_rule (ctx : Build_context.t) ~profile ~project ~pkg =
   let opam_alias = Alias.make Alias0.opam ~dir in
   let* use_source_opam =
     if Profile.is_release profile
-    then Source_tree.file_exists Source_tree.default (Package.opam_file pkg)
+    then
+      let* source_tree = Source_tree.for_context ctx.name in
+      Source_tree.file_exists source_tree (Package.opam_file pkg)
     else Memo.return false
   in
   let aliases = [ Alias.make Alias0.install ~dir; Alias.make Alias0.runtest ~dir ] in
@@ -454,7 +456,8 @@ let add_alias_rule (ctx : Build_context.t) ~profile ~project ~pkg =
     match Package.has_opam_file pkg with
     | Generated_with_diff when not use_source_opam ->
       let* source_opam_exists =
-        Source_tree.file_exists Source_tree.default (Package.opam_file pkg)
+        let* source_tree = Source_tree.for_context ctx.name in
+        Source_tree.file_exists source_tree (Package.opam_file pkg)
       in
       Rules.Produce.Alias.add_action
         opam_alias

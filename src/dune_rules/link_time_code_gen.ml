@@ -92,8 +92,10 @@ let build_info_code cctx ~libs ~api_version =
   let open Memo.O in
   (match api_version with
    | Lib_info.Special_builtin_support.Build_info.V1 -> ());
+  let context_name = Context.name (Compilation_context.context cctx) in
   let placeholder placeholders p =
-    Source_tree.nearest_vcs Source_tree.default p
+    let* source_tree = Source_tree.for_context context_name in
+    Source_tree.nearest_vcs source_tree p
     >>| function
     | None -> "None", placeholders
     | Some vcs ->

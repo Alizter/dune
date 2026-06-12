@@ -307,7 +307,9 @@ end = struct
     (match Path.Build.extract_build_context dir with
      | None -> Memo.return None
      | Some (ctx, dir) ->
-       Source_tree.find_dir Source_tree.default dir
+       let context_name = Context_name.of_string (Filename.to_string ctx) in
+       let* source_tree = Source_tree.for_context context_name in
+       Source_tree.find_dir source_tree dir
        >>| (function
         | None -> None
         | Some src_dir -> Some (ctx, src_dir)))

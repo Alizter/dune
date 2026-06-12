@@ -12,11 +12,13 @@ let get_descendants_of_relative_dir_relative_to_base_dir_local
       ~relative_dir
       ~prefix
   =
-  let base_dir = Path.Build.drop_build_context_exn base_dir in
+  let ctx, base_dir = Path.Build.extract_build_context_exn base_dir in
+  let context_name = Context_name.of_string (Filename.to_string ctx) in
   let rec get_descendants_rec relative_dir prefix =
     let absolute_dir = Path.Source.relative base_dir relative_dir in
     let* children =
-      Source_tree.find_dir Source_tree.default absolute_dir
+      let* source_tree = Source_tree.for_context context_name in
+      Source_tree.find_dir source_tree absolute_dir
       >>| function
       | None -> []
       | Some dir ->

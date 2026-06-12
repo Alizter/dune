@@ -404,7 +404,9 @@ let gen_project_rules =
       | Some _ when Dune_project.dune_version project < version -> Memo.return ()
       | Some loc ->
         let+ vendored =
-          Source_tree.is_vendored Source_tree.default (Dune_project.root project)
+          let context_name = Context.name (Super_context.context sctx) in
+          let* source_tree = Source_tree.for_context context_name in
+          Source_tree.is_vendored source_tree (Dune_project.root project)
         in
         if not vendored
         then
@@ -567,12 +569,14 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
   | Lock_dir _ -> Memo.return Gen_rules.no_rules
   | dir_status ->
     let+ rules =
-      let* st_dir = Source_tree.find_dir Source_tree.default src_dir in
+      let* sctx_v = sctx in
+      let context_name = Context.name (Super_context.context sctx_v) in
+      let* source_tree = Source_tree.for_context context_name in
+      let* st_dir = Source_tree.find_dir source_tree src_dir in
       let* nearest_src_dir =
         match st_dir with
         | Some dir -> Memo.return (Some dir)
-        | None ->
-          Source_tree.find_dir Source_tree.default (Path.Source.parent_exn src_dir)
+        | None -> Source_tree.find_dir source_tree (Path.Source.parent_exn src_dir)
       in
       let+ rules =
         let+ make_rules =

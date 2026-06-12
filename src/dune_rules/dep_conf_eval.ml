@@ -45,8 +45,11 @@ let include_action_env = function
 ;;
 
 let dep_on_alias_rec alias ~loc =
-  let src_dir = Path.Build.drop_build_context_exn (Alias.dir alias) in
-  Action_builder.of_memo (Source_tree.find_dir Source_tree.default src_dir)
+  let ctx_name, src_dir = Path.Build.extract_build_context_exn (Alias.dir alias) in
+  let context_name = Context_name.of_string (Filename.to_string ctx_name) in
+  Action_builder.of_memo
+    (Memo.bind (Source_tree.for_context context_name) ~f:(fun source_tree ->
+       Source_tree.find_dir source_tree src_dir))
   >>= function
   | None ->
     Action_builder.fail

@@ -8,11 +8,13 @@ type build_system =
   }
 
 let implicit_default_alias dir =
-  match Path.Build.drop_build_context dir with
+  match Path.Build.extract_build_context dir with
   | None -> Memo.return None
-  | Some src_dir ->
+  | Some (ctx, src_dir) ->
     let open Memo.O in
-    Source_tree.find_dir Source_tree.default src_dir
+    let context_name = Context_name.of_string (Filename.to_string ctx) in
+    let* source_tree = Source_tree.for_context context_name in
+    Source_tree.find_dir source_tree src_dir
     >>| (function
      | None -> None
      | Some src_dir ->
@@ -49,7 +51,8 @@ let execution_parameters ~sandbox_actions =
       match source_backed_dir path with
       | None -> Memo.return ep
       | Some path ->
-        let+ dir = Source_tree.nearest_dir Source_tree.default path in
+        let* source_tree = Source_tree.for_context context in
+        let+ dir = Source_tree.nearest_dir source_tree path in
         Dune_project.update_execution_parameters (Source_tree.Dir.project dir) ep)
   in
   let memo =

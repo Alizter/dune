@@ -10,7 +10,9 @@ let ocaml_flags t ~dir (spec : Dune_lang.Ocaml_flags.Spec.t) =
       ~default:ocaml_flags
       ~eval:(Expander.expand_and_eval_set expander)
   in
-  Source_tree.is_vendored Source_tree.default (Path.Build.drop_build_context_exn dir)
+  let context_name = Context.name (Super_context.context t) in
+  let* source_tree = Source_tree.for_context context_name in
+  Source_tree.is_vendored source_tree (Path.Build.drop_build_context_exn dir)
   >>= function
   | false -> Memo.return flags
   | true ->

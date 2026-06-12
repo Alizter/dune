@@ -464,8 +464,11 @@ let eval
     eval0 ~expander ~loc:stanza_loc ~all_modules ~standard:all_modules settings.modules
   in
   let* is_vendored =
-    match Path.Build.drop_build_context src_dir with
-    | Some src_dir -> Source_tree.is_vendored Source_tree.default src_dir
+    match Path.Build.extract_build_context src_dir with
+    | Some (ctx, src_dir) ->
+      let context_name = Context_name.of_string (Filename.to_string ctx) in
+      let* source_tree = Source_tree.for_context context_name in
+      Source_tree.is_vendored source_tree src_dir
     | None -> Memo.return false
   in
   eval

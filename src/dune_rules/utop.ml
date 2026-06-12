@@ -115,7 +115,10 @@ let add_stanza db ~dir (acc, pps) stanza =
 let libs_and_ppx_under_dir sctx ~db ~dir =
   (match Path.drop_build_context dir with
    | None -> Memo.return None
-   | Some dir -> Source_tree.find_dir Source_tree.default dir)
+   | Some dir ->
+     let context_name = Context.name (Super_context.context sctx) in
+     let* source_tree = Source_tree.for_context context_name in
+     Source_tree.find_dir source_tree dir)
   >>= function
   | None -> Memo.return ([], [])
   | Some dir ->

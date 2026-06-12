@@ -39,7 +39,9 @@ module Package_paths = struct
     | Generated | Generated_with_diff ->
       let+ use_source_opam =
         if Profile.is_release (Context.profile context)
-        then Source_tree.file_exists Source_tree.default opam_file
+        then
+          let* source_tree = Source_tree.for_context (Context.name context) in
+          Source_tree.file_exists source_tree opam_file
         else Memo.return false
       in
       Some (if use_source_opam then build_opam_file else generated_opam_file ctx pkg)
@@ -544,7 +546,12 @@ end = struct
       String.starts_with ~prefix fn)
   ;;
 
-  let entries_of_install_stanza ~dir ~expander ~package_db (install_conf : Install_conf.t)
+  let entries_of_install_stanza
+        ~context_name
+        ~dir
+        ~expander
+        ~package_db
+        (install_conf : Install_conf.t)
     =
     let expand = Expander.No_deps.expand expander ~mode:Single in
     let make_entry =
@@ -589,9 +596,8 @@ end = struct
         let loc = File_binding.Expanded.src_loc fb in
         let* entry = make_entry ~kind:Source_tree fb in
         let+ () =
-          Source_tree.find_dir
-            Source_tree.default
-            (Path.Build.drop_build_context_exn entry.src)
+          let* source_tree = Source_tree.for_context context_name in
+          Source_tree.find_dir source_tree (Path.Build.drop_build_context_exn entry.src)
           >>| function
           | Some _ -> ()
           | None ->
@@ -614,7 +620,8 @@ end = struct
       let+ entries =
         match Stanza.repr stanza with
         | Install_conf.T i | Executables.T { install_conf = Some i; _ } ->
-          entries_of_install_stanza ~dir ~expander ~package_db i
+          let context_name = Super_context.context sctx |> Context.name in
+          entries_of_install_stanza ~context_name ~dir ~expander ~package_db i
         | Library.T lib ->
           let sub_dir = Library.sub_dir lib in
           let* dir_contents = Dir_contents.get sctx ~dir in
@@ -681,7 +688,8 @@ end = struct
           | Some opam_file -> file Lib opam_file "opam" :: deprecated_meta_and_dune_files
         in
         let pkg_dir = Package.dir pkg in
-        Source_tree.find_dir Source_tree.default pkg_dir
+        let* source_tree = Source_tree.for_context ctx.name in
+        Source_tree.find_dir source_tree pkg_dir
         >>| function
         | None -> init
         | Some dir ->

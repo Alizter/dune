@@ -116,7 +116,10 @@ module Conf = struct
   ;;
 
   let of_context (context : Context.t) =
-    let get_vcs = Source_tree.nearest_vcs Source_tree.default in
+    let get_vcs p =
+      let* source_tree = Source_tree.for_context (Context.name context) in
+      Source_tree.nearest_vcs source_tree p
+    in
     let name = Context.name context in
     let get_location = Install.Paths.get_local_location name in
     let get_config_path = function
@@ -138,7 +141,10 @@ module Conf = struct
   ;;
 
   let of_install ~relocatable ~roots ~(context : Context.t) =
-    let get_vcs = Source_tree.nearest_vcs Source_tree.default in
+    let get_vcs p =
+      let* source_tree = Source_tree.for_context (Context.name context) in
+      Source_tree.nearest_vcs source_tree p
+    in
     let hardcoded_ocaml_path =
       match relocatable with
       | Some prefix -> Memo.return @@ Relocatable prefix

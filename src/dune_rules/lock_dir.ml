@@ -307,7 +307,9 @@ let lock_dir_active ctx =
     get_source_path_for_context ctx
     >>= (function
      | None -> Memo.return false
-     | Some source -> Source_tree.find_dir Source_tree.default source >>| Option.is_some)
+     | Some source ->
+       let* source_tree = Source_tree.for_context ctx in
+       Source_tree.find_dir source_tree source >>| Option.is_some)
 ;;
 
 let source_kind (source : Dune_pkg.Source.t) =

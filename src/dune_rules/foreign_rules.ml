@@ -106,6 +106,10 @@ let foreign_flags t ~dir ~expander ~flags ~language =
    and track all files in specified directories as [Hidden_deps]
    dependencies. *)
 let include_dir_flags ~expander ~dir ~include_dirs =
+  let context_name =
+    let ctx, _ = Path.Build.extract_build_context_exn dir in
+    Context_name.of_string (Filename.to_string ctx)
+  in
   let lib_dir =
     let scope = Scope.DB.find_by_dir dir in
     fun loc lib_name ->
@@ -167,7 +171,8 @@ let include_dir_flags ~expander ~dir ~include_dirs =
                 ((* This branch corresponds to a source directory. We
                     track its contents recursively. *)
                  Action_builder.of_memo
-                   (Source_tree.find_dir Source_tree.default source_dir)
+                   (Memo.bind (Source_tree.for_context context_name) ~f:(fun st ->
+                      Source_tree.find_dir st source_dir))
                  >>= function
                  | None ->
                    User_error.raise
@@ -304,7 +309,9 @@ let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), 
       let use_standard_flags = Dune_project.use_standard_c_and_cxx_flags project in
       let+ is_vendored =
         match Path.Build.drop_build_context dir with
-        | Some src_dir -> Source_tree.is_vendored Source_tree.default src_dir
+        | Some src_dir ->
+          let* source_tree = Source_tree.for_context (Context.name ctx) in
+          Source_tree.is_vendored source_tree src_dir
         | None -> Memo.return false
       in
       if
