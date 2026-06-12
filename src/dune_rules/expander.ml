@@ -207,18 +207,35 @@ let expand_artifact ~source t artifact arg =
         | None -> Action_builder.return [ Value.String "" ]
         | Some path -> dep (Path.build path)))
   | Lib mode ->
-    let name =
+    let lib_name =
       Lib_name.parse_string_exn
         (Dune_lang.Template.Pform.loc source, Filename.to_string name)
     in
-    (match Artifacts_obj.lookup_library artifacts name with
-     | None -> does_not_exist ~what:"Library" (Lib_name.to_string name)
+    (match Artifacts_obj.lookup_library artifacts lib_name with
      | Some lib ->
        Mode.Dict.get (Lib_info.archives lib) mode
        |> Action_builder.List.map ~f:(fun fn ->
          let fn = Path.build fn in
          let+ () = Action_builder.path fn in
-         Value.Path fn))
+         Value.Path fn)
+     | None ->
+       (* Cross-mount fallback: the per-dir [Artifacts_obj.t] only sees
+          libraries declared in the local context. Fall through to the
+          scope's [public_libs] Lib.DB, which carries the cross-mount
+          sibling fallback. *)
+       let* lib_result =
+         Action_builder.of_memo
+           (let open Memo.O in
+            let* public_libs = t.public_libs in
+            Lib.DB.find public_libs lib_name)
+       in
+       (match lib_result with
+        | None -> does_not_exist ~what:"Library" (Lib_name.to_string lib_name)
+        | Some lib ->
+          Mode.Dict.get (Lib_info.archives (Lib.info lib)) mode
+          |> Action_builder.List.map ~f:(fun fn ->
+            let+ () = Action_builder.path fn in
+            Value.Path fn)))
 ;;
 
 let foreign_flags = Fdecl.create Dyn.opaque
