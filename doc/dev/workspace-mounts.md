@@ -327,6 +327,34 @@ Open Limitations
   share a basename across user-facing contexts, naming may collide;
   no explicit user-side rename mechanism exists yet.
 
+- **Workspace-wide aggregation rules are not mount-aware.** The
+  cross-mount lookup mechanisms above are all *resolution-side*: when
+  a stanza names X, look across siblings until X is found. Two
+  existing rules are instead *aggregating*: they walk the dune files
+  of one context and emit a single artifact summarising them.
+
+  - `compile_commands.json` (`src/dune_rules/compile_commands.ml`):
+    `collect_entries sctx` calls `Dune_load.dune_files (Context.name
+    ctx)` for a single internal context and writes
+    `_build/<ctx>/compile_commands.json`. With mounts, each internal
+    context produces its own file and none of them is the union. A
+    C/C++ tool pointed at the workspace sees only one context's
+    entries.
+
+  - `ocaml-index` (`src/dune_rules/merlin/ocaml_index.ml`):
+    `context_indexes` and `project_rule` iterate one context's
+    dune_files; the `(ocaml-index)` alias is attached per-context
+    per-project root. Cross-mount cmts are not fed into the aggregate,
+    so jump-to-def across a mount boundary misses.
+
+  The fix shape is different from the resolution fallbacks: instead
+  of "iterate one context's dune files", iterate `Context.name ctx ::
+  Per_context.siblings ctx` and concat. Decisions still owed: which
+  internal context "owns" the aggregate output (probably the native
+  one, to avoid N near-duplicate files per user-facing context); and
+  how the `(ocaml-index)` alias is attached when project roots cross
+  sibling boundaries.
+
 
 Future Work
 -----------
