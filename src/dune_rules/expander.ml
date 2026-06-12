@@ -322,8 +322,18 @@ let file_of_lib db context ~loc ~lib ~file =
       in
       let+ pkg_root =
         let package = Lib_name.package_name name in
-        (* Why do we return the install path? *)
-        let+ context = Resolve.Memo.lift_memo @@ context >>| Context.name in
+        (* For a local lib, derive the install context from the lib's own
+           build dir, not the expander's context. This is required for
+           cross-mount lookups: a workspace rule that references
+           [%{lib:bar:archives}] where [bar] lives in a mount sibling
+           needs the mount's install dir, not the workspace context's. *)
+        let+ context =
+          match Path.extract_build_context (Lib_info.src_dir info) with
+          | Some (ctx, _) ->
+            Resolve.Memo.return
+              (Context_name.parse_string_exn (Loc.none, Filename.to_string ctx))
+          | None -> Resolve.Memo.lift_memo @@ context >>| Context.name
+        in
         Install.Context.lib_dir ~context ~package
       in
       Path.build (Path.Build.append_local pkg_root subdir)
