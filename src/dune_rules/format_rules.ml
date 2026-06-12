@@ -230,7 +230,8 @@ let setup_source_files
 
 let gen_format_alias (config : Format_config.t) ~version ~dialects ~expander ~dir =
   let open Action_builder.O in
-  Action_builder.of_memo (Source_tree.find_dir (Path.Build.drop_build_context_exn dir))
+  Action_builder.of_memo
+    (Source_tree.find_dir Source_tree.default (Path.Build.drop_build_context_exn dir))
   >>= function
   | None -> Action_builder.return ()
   | Some source_dir ->
@@ -258,7 +259,7 @@ let format_config ~dir =
   and+ default =
     (* we always force the default for error checking *)
     Path.Build.drop_build_context_exn dir
-    |> Source_tree.nearest_dir
+    |> Source_tree.nearest_dir Source_tree.default
     >>| Source_tree.Dir.project
     >>| Dune_project.format_config
   in

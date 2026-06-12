@@ -166,7 +166,8 @@ let include_dir_flags ~expander ~dir ~include_dirs =
            @@ Command.Args.Dyn
                 ((* This branch corresponds to a source directory. We
                     track its contents recursively. *)
-                 Action_builder.of_memo (Source_tree.find_dir source_dir)
+                 Action_builder.of_memo
+                   (Source_tree.find_dir Source_tree.default source_dir)
                  >>= function
                  | None ->
                    User_error.raise
@@ -303,7 +304,7 @@ let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), 
       let use_standard_flags = Dune_project.use_standard_c_and_cxx_flags project in
       let+ is_vendored =
         match Path.Build.drop_build_context dir with
-        | Some src_dir -> Source_tree.is_vendored src_dir
+        | Some src_dir -> Source_tree.is_vendored Source_tree.default src_dir
         | None -> Memo.return false
       in
       if

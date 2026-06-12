@@ -64,6 +64,7 @@ let load () =
       Memo.return (projects, dune_files)
     in
     Source_tree_map_reduce.map_reduce
+      Source_tree.default
       ~traverse:Source_dir_status.Set.all
       ~trace_event_name:"Dune load"
       ~f

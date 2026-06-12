@@ -67,7 +67,7 @@ include Alias_builder.Alias_rec (struct
               ~init:found_in_source
               ~f:Alias_status.combine
       in
-      Source_tree.find_dir src_dir
+      Source_tree.find_dir Source_tree.default src_dir
       |> Action_builder.of_memo
       >>= function
       | None -> Action_builder.return Alias_builder.Alias_status.Not_defined

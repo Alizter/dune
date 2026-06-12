@@ -260,7 +260,7 @@ let copy_files sctx ~dir ~expander ~src_dir (def : Copy_files.t) =
     | In_build_dir _ -> assert false
     | External ext -> Fs_memo.dir_exists (External ext)
     | In_source_tree src_in_src ->
-      Source_tree.find_dir src_in_src
+      Source_tree.find_dir Source_tree.default src_in_src
       >>= (function
        | Some _ -> Memo.return true
        | None -> Load_rules.is_under_directory_target src_in_build)
@@ -288,7 +288,7 @@ let copy_files sctx ~dir ~expander ~src_dir (def : Copy_files.t) =
     in
     match only_sources, src_in_src with
     | true, In_source_tree p ->
-      Source_tree.find_dir p
+      Source_tree.find_dir Source_tree.default p
       >>| (function
        | None -> Filename_set.empty ~dir
        | Some d ->

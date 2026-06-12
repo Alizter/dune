@@ -44,7 +44,7 @@ let emit t context f =
        | Project project -> Some (Dune_project.root project)
      with
      | None -> Memo.return None
-     | Some dir -> Source_tree.nearest_dir dir >>| Option.some
+     | Some dir -> Source_tree.nearest_dir Source_tree.default dir >>| Option.some
    in
    match dir with
    | None -> `Enabled
@@ -91,7 +91,7 @@ module Bag = struct
     (match project_root with
      | None -> Memo.return active
      | Some project_root ->
-       Source_tree.nearest_dir project_root
+       Source_tree.nearest_dir Source_tree.default project_root
        >>| Source_tree.Dir.status
        >>| (function
         | Vendored -> `Disabled

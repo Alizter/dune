@@ -79,8 +79,8 @@ let get_dir_triage ~dir =
   match Dpath.analyse_dir dir with
   | Source dir ->
     Code_error.raise
-      "load_dir called on a source path; source-tree queries must go through \
-       Source_tree directly (per-context)"
+      "load_dir called on a source path; source-tree queries must go through Source_tree \
+       directly (per-context)"
       [ "dir", Path.Source.to_dyn dir ]
   | External dir_ext ->
     let+ filenames =

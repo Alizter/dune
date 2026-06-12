@@ -372,6 +372,7 @@ let upgrade () =
                 end))
          in
          M.map_reduce
+           Source_tree.default
            ~traverse:Source_dir_status.Set.normal_only
            ~trace_event_name:"Upgrader"
            ~f:(fun dir ->

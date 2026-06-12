@@ -263,7 +263,7 @@ and find_dir_raw
   contents readdir ~default_vcs ~path ~dune_file ~dirs_visited ~project ~dir_status:status
 ;;
 
-let root =
+let make_root_node () =
   Memo.lazy_node
   @@ fun () ->
   let path = Path.Source.root in
@@ -302,6 +302,11 @@ let root =
     ~dir_status
 ;;
 
+type t = { root_node : (unit, Dir0.t) Memo.Node.t }
+
+let default = { root_node = make_root_node () }
+let root t = Memo.Node.read t.root_node
+
 let gen_find_dir =
   let rec loop on_success on_last_found components (dir : Dir0.t) =
     match components with
@@ -311,8 +316,8 @@ let gen_find_dir =
        | None -> on_last_found dir
        | Some dir -> dir.sub_dir_as_t >>= loop on_success on_last_found xs)
   in
-  fun ~on_success ~on_last_found p ->
-    Memo.Node.read root >>= loop on_success on_last_found (Path.Source.explode p)
+  fun ~on_success ~on_last_found t p ->
+    Memo.Node.read t.root_node >>= loop on_success on_last_found (Path.Source.explode p)
 ;;
 
 let find_dir =
@@ -323,7 +328,7 @@ let find_dir =
 
 let nearest_dir = gen_find_dir ~on_success:Memo.return ~on_last_found:Memo.return
 
-let find_excluded_ancestor path =
+let find_excluded_ancestor t path =
   let rec loop (dir : Dir0.t) = function
     | [] -> Memo.return None
     | sub_dir :: path ->
@@ -341,14 +346,12 @@ let find_excluded_ancestor path =
             |> Option.map ~f:(fun loc -> Path.Source.relative_fname dir.path sub_dir, loc)
           | _ -> None))
   in
-  let* root = Memo.Node.read root in
+  let* root = Memo.Node.read t.root_node in
   loop root (Path.Source.explode path)
 ;;
 
-let root () = Memo.Node.read root
-
-let files_of path =
-  find_dir path
+let files_of t path =
+  find_dir t path
   >>| function
   | None -> Path.Source.Set.empty
   | Some dir ->
@@ -357,11 +360,11 @@ let files_of path =
     |> Path.Source.Set.of_list_map ~f:(Path.Source.relative_fname path)
 ;;
 
-let file_exists path =
+let file_exists t path =
   match Path.Source.parent path with
   | None -> Memo.return false
   | Some parent ->
-    find_dir parent
+    find_dir t parent
     >>| (function
      | None -> false
      | Some dir -> Filename.Array.Set.mem (Dir0.filenames dir) (Path.Source.basename path))
@@ -418,8 +421,8 @@ module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) = struct
   open M.O
   include Dir.Make_map_reduce (M) (Outcome)
 
-  let map_reduce ~traverse ~trace_event_name ~f =
-    let* root = M.of_memo (root ()) in
+  let map_reduce t ~traverse ~trace_event_name ~f =
+    let* root = M.of_memo (root t) in
     let nb_path_visited = ref 0 in
     let overlay =
       Console.Status_line.add_overlay
@@ -436,8 +439,8 @@ module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) = struct
   ;;
 end
 
-let is_vendored dir =
-  find_dir dir
+let is_vendored t dir =
+  find_dir t dir
   >>| function
   | None -> false
   | Some d -> Dir.status d = Vendored
@@ -477,8 +480,8 @@ let ancestor_vcs =
       Memo.return (loop (Path.to_absolute_filename Path.root))))
 ;;
 
-let nearest_vcs dir =
-  let* dir = nearest_dir dir in
+let nearest_vcs t dir =
+  let* dir = nearest_dir t dir in
   match dir.vcs with
   | This vcs -> Memo.return (Some vcs)
   | Ancestor_vcs -> Memo.Lazy.force ancestor_vcs

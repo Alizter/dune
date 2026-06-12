@@ -403,7 +403,9 @@ let gen_project_rules =
       | None -> Memo.return ()
       | Some _ when Dune_project.dune_version project < version -> Memo.return ()
       | Some loc ->
-        let+ vendored = Source_tree.is_vendored (Dune_project.root project) in
+        let+ vendored =
+          Source_tree.is_vendored Source_tree.default (Dune_project.root project)
+        in
         if not vendored
         then
           Dune_lang.Syntax.Warning.deprecated_in
@@ -565,11 +567,12 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
   | Lock_dir _ -> Memo.return Gen_rules.no_rules
   | dir_status ->
     let+ rules =
-      let* st_dir = Source_tree.find_dir src_dir in
+      let* st_dir = Source_tree.find_dir Source_tree.default src_dir in
       let* nearest_src_dir =
         match st_dir with
         | Some dir -> Memo.return (Some dir)
-        | None -> Source_tree.find_dir (Path.Source.parent_exn src_dir)
+        | None ->
+          Source_tree.find_dir Source_tree.default (Path.Source.parent_exn src_dir)
       in
       let+ rules =
         let+ make_rules =

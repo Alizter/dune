@@ -62,7 +62,7 @@ let of_string (root : Workspace_root.t) ~recursive s ~contexts =
 
 let find_dir_specified_on_command_line ~dir =
   let open Memo.O in
-  Source_tree.find_dir dir
+  Source_tree.find_dir Source_tree.default dir
   >>| function
   | Some dir -> dir
   | None ->

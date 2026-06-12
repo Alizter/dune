@@ -347,7 +347,7 @@ let subst vcs =
      and+ files = Vcs.files ~needed_for vcs in
      Some (version, commit_id, files)
    | None ->
-     let* root = Source_tree.root () in
+     let* root = Source_tree.root Source_tree.default in
      let project = Source_tree.Dir.project root in
      if Dune_project.dune_version project < (3, 17)
      then Memo.return None
@@ -356,7 +356,7 @@ let subst vcs =
          let module Map_reduce =
            Source_tree.Dir.Make_map_reduce (Memo) (Monoid.Union (Path.Source.Set))
          in
-         Source_tree.root ()
+         Source_tree.root Source_tree.default
          >>= Map_reduce.map_reduce
                ~traverse:Source_dir_status.Set.all
                ~trace_event_name:"Subst"
@@ -468,7 +468,11 @@ let subst vcs =
       then subst_file path ~map:watermarks opam_package_files))
 ;;
 
-let subst () = Source_tree.nearest_vcs Path.Source.root |> Memo.bind ~f:subst |> Memo.run
+let subst () =
+  Source_tree.nearest_vcs Source_tree.default Path.Source.root
+  |> Memo.bind ~f:subst
+  |> Memo.run
+;;
 
 (** A string that is "%%VERSION%%" but not expanded by [dune subst] *)
 let literal_version = "%%" ^ "VERSION%%"

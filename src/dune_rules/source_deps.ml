@@ -13,7 +13,7 @@ let files_with_filter dir ~filter =
     | In_source_tree dir -> Path.root, dir
     | otherwise -> Path.extract_build_context_dir_exn otherwise
   in
-  Source_tree.find_dir dir
+  Source_tree.find_dir Source_tree.default dir
   >>= function
   | None -> Memo.return (Dep.Set.empty, Path.Set.empty)
   | Some dir ->

@@ -206,7 +206,7 @@ module File_ops_real (W : sig
   open W
 
   let print_line = print_line ~verbosity
-  let get_vcs p = Source_tree.nearest_vcs p
+  let get_vcs p = Source_tree.nearest_vcs Source_tree.default p
 
   type copy_special_file_status =
     | Done
@@ -425,7 +425,7 @@ let file_operations ~verbosity ~dry_run ~workspace : (module File_operations) =
 
 let package_is_vendored (pkg : Package.t) =
   let dir = Package.dir pkg in
-  Memo.run (Source_tree.is_vendored dir)
+  Memo.run (Source_tree.is_vendored Source_tree.default dir)
 ;;
 
 type what =

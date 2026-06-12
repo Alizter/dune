@@ -66,7 +66,7 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
               ]
           | External _ | Build _ | Source _ ->
             (* Check if directory exists in source tree or is a valid build-only directory *)
-            Source_tree.find_dir src_dir
+            Source_tree.find_dir Source_tree.default src_dir
             >>= (function
              | Some _ -> Memo.return () (* Exists in source tree *)
              | None ->

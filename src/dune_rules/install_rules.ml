@@ -39,7 +39,7 @@ module Package_paths = struct
     | Generated | Generated_with_diff ->
       let+ use_source_opam =
         if Profile.is_release (Context.profile context)
-        then Source_tree.file_exists opam_file
+        then Source_tree.file_exists Source_tree.default opam_file
         else Memo.return false
       in
       Some (if use_source_opam then build_opam_file else generated_opam_file ctx pkg)
@@ -589,7 +589,9 @@ end = struct
         let loc = File_binding.Expanded.src_loc fb in
         let* entry = make_entry ~kind:Source_tree fb in
         let+ () =
-          Source_tree.find_dir (Path.Build.drop_build_context_exn entry.src)
+          Source_tree.find_dir
+            Source_tree.default
+            (Path.Build.drop_build_context_exn entry.src)
           >>| function
           | Some _ -> ()
           | None ->
@@ -679,7 +681,7 @@ end = struct
           | Some opam_file -> file Lib opam_file "opam" :: deprecated_meta_and_dune_files
         in
         let pkg_dir = Package.dir pkg in
-        Source_tree.find_dir pkg_dir
+        Source_tree.find_dir Source_tree.default pkg_dir
         >>| function
         | None -> init
         | Some dir ->

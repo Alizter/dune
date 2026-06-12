@@ -5,7 +5,7 @@ let dialect_and_ml_kind file =
   let file = Path.of_string file in
   let open Memo.O in
   let _base, ext = Path.split_extension file in
-  let+ project = Source_tree.root () >>| Source_tree.Dir.project in
+  let+ project = Source_tree.root Source_tree.default >>| Source_tree.Dir.project in
   let dialects = Dune_project.dialects project in
   if Filename.Extension.Or_empty.is_empty ext
   then User_error.raise [ Pp.textf "file %s has no extension" (Path.to_string file) ]

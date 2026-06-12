@@ -400,7 +400,9 @@ module Valid = struct
         let* mask = Dune_load.mask () in
         Scope.DB.with_all ctx ~f:(fun find ->
           Memo.List.fold_left projects ~init:([], []) ~f:(fun (libs_acc, pkg_acc) proj ->
-            let* vendored = Source_tree.is_vendored (Dune_project.root proj) in
+            let* vendored =
+              Source_tree.is_vendored Source_tree.default (Dune_project.root proj)
+            in
             if vendored
             then Memo.return (libs_acc, pkg_acc)
             else (

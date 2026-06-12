@@ -104,7 +104,7 @@ let gen_rules sctx t ~dir ~scope =
   let loc = t.loc in
   (* Files checked by cinaps *)
   let* cinapsed_files =
-    Source_tree.files_of (Path.Build.drop_build_context_exn dir)
+    Source_tree.files_of Source_tree.default (Path.Build.drop_build_context_exn dir)
     >>| Path.Source.Set.to_list
     >>| List.filter_map ~f:(fun p ->
       if

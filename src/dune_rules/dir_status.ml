@@ -307,7 +307,7 @@ end = struct
     (match Path.Build.extract_build_context dir with
      | None -> Memo.return None
      | Some (ctx, dir) ->
-       Source_tree.find_dir dir
+       Source_tree.find_dir Source_tree.default dir
        >>| (function
         | None -> None
         | Some src_dir -> Some (ctx, src_dir)))

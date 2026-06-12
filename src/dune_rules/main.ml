@@ -12,7 +12,7 @@ let implicit_default_alias dir =
   | None -> Memo.return None
   | Some src_dir ->
     let open Memo.O in
-    Source_tree.find_dir src_dir
+    Source_tree.find_dir Source_tree.default src_dir
     >>| (function
      | None -> None
      | Some src_dir ->
@@ -49,7 +49,7 @@ let execution_parameters ~sandbox_actions =
       match source_backed_dir path with
       | None -> Memo.return ep
       | Some path ->
-        let+ dir = Source_tree.nearest_dir path in
+        let+ dir = Source_tree.nearest_dir Source_tree.default path in
         Dune_project.update_execution_parameters (Source_tree.Dir.project dir) ep)
   in
   let memo =
@@ -95,6 +95,15 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
       :: (Fetch_rules.context, Empty)
       :: List.map contexts ~f:(fun ctx -> ctx, With_sources))
   in
+  let module_of_source_tree (t : Source_tree.t)
+    : (module Dune_engine.Build_config.Source_tree)
+    =
+    (module struct
+      module Dir = Source_tree.Dir
+
+      let find_dir p = Source_tree.find_dir t p
+    end)
+  in
   let source_trees =
     Memo.lazy_ (fun () ->
       let open Memo.O in
@@ -102,7 +111,7 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
       Context_name.Map.of_list_map_exn
         contexts
         ~f:(fun ((ctx : Build_context.t), _ctx_type) ->
-          ctx.name, (module Source_tree : Dune_engine.Build_config.Source_tree)))
+          ctx.name, module_of_source_tree Source_tree.default))
   in
   Build_config.set
     ~sandboxing_preference

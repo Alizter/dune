@@ -36,36 +36,46 @@ module Dir : sig
   val to_dyn : t -> Dyn.t
 end
 
-val root : unit -> Dir.t Memo.t
+(** A source tree value. Currently every [t] reads from the workspace
+    filesystem; the value-level abstraction is the substrate for letting a
+    context have a different backing (git-tree-rooted, fetched archive, etc.)
+    in the future. *)
+type t
+
+(** The default source tree, backed by the workspace filesystem. *)
+val default : t
+
+val root : t -> Dir.t Memo.t
 
 module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) : sig
   (** Traverse starting from the root and report progress in the status line *)
   val map_reduce
-    :  traverse:Source_dir_status.Set.t
+    :  t
+    -> traverse:Source_dir_status.Set.t
     -> trace_event_name:string
     -> f:(Dir.t -> Outcome.t M.t)
     -> Outcome.t M.t
 end
 
-val find_dir : Path.Source.t -> Dir.t option Memo.t
+val find_dir : t -> Path.Source.t -> Dir.t option Memo.t
 
 (** [find_excluded_ancestor path] is the ancestor of [path] that was excluded by
     a dirs stanza, if any. *)
-val find_excluded_ancestor : Path.Source.t -> (Path.Source.t * Loc.t) option Memo.t
+val find_excluded_ancestor : t -> Path.Source.t -> (Path.Source.t * Loc.t) option Memo.t
 
 (** [nearest_dir t fn] returns the directory with the longest path that is an
     ancestor of [fn]. *)
-val nearest_dir : Path.Source.t -> Dir.t Memo.t
+val nearest_dir : t -> Path.Source.t -> Dir.t Memo.t
 
-val files_of : Path.Source.t -> Path.Source.Set.t Memo.t
+val files_of : t -> Path.Source.t -> Path.Source.Set.t Memo.t
 
 (** [file_exists path] is [true] iff [path] is a file in the source tree, taking
     into account [(files ...)] and other filtering applied by [dune] files. *)
-val file_exists : Path.Source.t -> bool Memo.t
+val file_exists : t -> Path.Source.t -> bool Memo.t
 
 (** [true] iff the path is a vendored directory *)
-val is_vendored : Path.Source.t -> bool Memo.t
+val is_vendored : t -> Path.Source.t -> bool Memo.t
 
 (** [nearest_vcs t fn] returns the version control system with the longest root
     path that is an ancestor of [fn]. *)
-val nearest_vcs : Path.Source.t -> Vcs.t option Memo.t
+val nearest_vcs : t -> Path.Source.t -> Vcs.t option Memo.t

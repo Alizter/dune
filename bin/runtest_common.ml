@@ -32,7 +32,7 @@ end
 
 let cram_tests_of_dir parent_dir =
   let open Memo.O in
-  Source_tree.find_dir parent_dir
+  Source_tree.find_dir Source_tree.default parent_dir
   >>= function
   | None -> Memo.return []
   | Some dir -> Dune_rules.Cram_rules.cram_tests dir
@@ -100,7 +100,7 @@ let all_tests_of_dir ~sctx parent_dir =
       Result.to_option res
       |> Option.map ~f:(fun test -> Source.Cram_test.path test |> Path.Source.to_string))
   and+ ml_test_candidates =
-    Source_tree.find_dir parent_dir
+    Source_tree.find_dir Source_tree.default parent_dir
     >>= function
     | None -> Memo.return []
     | Some source_dir ->
@@ -110,7 +110,7 @@ let all_tests_of_dir ~sctx parent_dir =
         classify_ml_test ~sctx ~dir:parent_dir ~ml_file >>| Result.is_ok)
       >>| Filename.L.to_string
   and+ dir_candidates =
-    let* parent_source_dir = Source_tree.find_dir parent_dir in
+    let* parent_source_dir = Source_tree.find_dir Source_tree.default parent_dir in
     match parent_source_dir with
     | None -> Memo.return []
     | Some parent_source_dir ->
@@ -163,7 +163,7 @@ let disambiguate_test_name ~sctx path =
             ]
         | Error `Not_a_test ->
           (* Assume the user intended a directory for @runtest to be used. *)
-          Source_tree.find_dir path
+          Source_tree.find_dir Source_tree.default path
           >>= (function
            (* We need to make sure that this directory or file exists. *)
            | Some _ -> Memo.return (Test_kind.Runtest (Path.source path))

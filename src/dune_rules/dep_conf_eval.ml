@@ -46,7 +46,7 @@ let include_action_env = function
 
 let dep_on_alias_rec alias ~loc =
   let src_dir = Path.Build.drop_build_context_exn (Alias.dir alias) in
-  Action_builder.of_memo (Source_tree.find_dir src_dir)
+  Action_builder.of_memo (Source_tree.find_dir Source_tree.default src_dir)
   >>= function
   | None ->
     Action_builder.fail

@@ -16,7 +16,7 @@ let term =
   Build.build_memo_exn
   @@ fun () ->
   let open Memo.O in
-  let+ project = Source_tree.root () >>| Source_tree.Dir.project in
+  let+ project = Source_tree.root Source_tree.default >>| Source_tree.Dir.project in
   let packages = Dune_project.packages project |> Package.Name.Map.values in
   let opam_file_to_dyn pkg =
     let opam_file = Path.source (Package.opam_file pkg) in

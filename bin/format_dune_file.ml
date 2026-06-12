@@ -73,8 +73,8 @@ let term =
          let open Memo.O in
          let+ dir =
            match Path.as_in_source_tree (Path.of_string root.reach_from_root_prefix) with
-           | None -> Source_tree.root ()
-           | Some path -> Source_tree.nearest_dir path
+           | None -> Source_tree.root Source_tree.default
+           | Some path -> Source_tree.nearest_dir Source_tree.default path
          in
          Dune_project.dune_version (Source_tree.Dir.project dir))
   in

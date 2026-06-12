@@ -16,7 +16,7 @@ let get_descendants_of_relative_dir_relative_to_base_dir_local
   let rec get_descendants_rec relative_dir prefix =
     let absolute_dir = Path.Source.relative base_dir relative_dir in
     let* children =
-      Source_tree.find_dir absolute_dir
+      Source_tree.find_dir Source_tree.default absolute_dir
       >>| function
       | None -> []
       | Some dir ->

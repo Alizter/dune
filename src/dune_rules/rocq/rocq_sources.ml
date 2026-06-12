@@ -190,7 +190,7 @@ let mlg_files ~sctx ~dir ~modules =
              file)
       else None
     in
-    Source_tree.files_of (Path.Build.drop_build_context_exn dir)
+    Source_tree.files_of Source_tree.default (Path.Build.drop_build_context_exn dir)
     >>| Path.Source.Set.to_list
     >>| List.filter_map ~f:filter_mlg
   in

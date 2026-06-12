@@ -602,7 +602,7 @@ let expand_pform_var (context : Context.t) ~dir ~source (var : Pform.Var.t) =
   | Git_sha ->
     (let open Memo.O in
      let+ sha =
-       Source_tree.nearest_vcs Path.Source.root
+       Source_tree.nearest_vcs Source_tree.default Path.Source.root
        >>= function
        | None -> Memo.return None
        | Some vcs -> Vcs.git_sha_short vcs

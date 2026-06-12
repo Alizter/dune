@@ -93,7 +93,7 @@ let build_info_code cctx ~libs ~api_version =
   (match api_version with
    | Lib_info.Special_builtin_support.Build_info.V1 -> ());
   let placeholder placeholders p =
-    Source_tree.nearest_vcs p
+    Source_tree.nearest_vcs Source_tree.default p
     >>| function
     | None -> "None", placeholders
     | Some vcs ->

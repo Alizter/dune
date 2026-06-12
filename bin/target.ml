@@ -40,8 +40,8 @@ let all_direct_targets dir =
   let open Memo.O in
   let* root =
     match dir with
-    | None -> Source_tree.root ()
-    | Some dir -> Source_tree.nearest_dir dir
+    | None -> Source_tree.root Source_tree.default
+    | Some dir -> Source_tree.nearest_dir Source_tree.default dir
   and* contexts = Memo.Lazy.force (Build_config.get ()).contexts in
   Context_name.Map.values contexts
   |> List.filter_map ~f:(fun (ctx, (ctx_type : Build_config.Context_type.t)) ->
@@ -117,7 +117,7 @@ let resolve_path path ~(setup : Dune_rules.Main.build_system)
       match src with
       | None -> Memo.return []
       | Some src ->
-        Source_tree.find_excluded_ancestor src
+        Source_tree.find_excluded_ancestor Source_tree.default src
         >>| (function
          | None -> []
          | Some (excluded, loc) ->
@@ -130,7 +130,7 @@ let resolve_path path ~(setup : Dune_rules.Main.build_system)
     Error (excluded_hint @ target_hint)
   in
   let as_source_dir src =
-    Source_tree.find_dir src
+    Source_tree.find_dir Source_tree.default src
     >>| Option.map ~f:(fun _ ->
       [ Request.Alias
           (Alias.in_dir
