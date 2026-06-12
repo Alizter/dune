@@ -112,7 +112,6 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
     ~implicit_default_alias
     ~execution_parameters:(execution_parameters ~sandbox_actions)
     ~source_trees
-    ~workspace_source_tree:(module Source_tree)
 ;;
 
 let get () =

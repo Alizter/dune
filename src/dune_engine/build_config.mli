@@ -111,7 +111,6 @@ val set
   -> execution_parameters:
        (Context_name.t -> dir:Path.Build.t -> Execution_parameters.t Memo.t)
   -> source_trees:(module Source_tree) Context_name.Map.t Memo.Lazy.t
-  -> workspace_source_tree:(module Source_tree)
   -> unit
 
 type t = private
@@ -128,7 +127,6 @@ type t = private
   ; execution_parameters :
       Context_name.t -> dir:Path.Build.t -> Execution_parameters.t Memo.t
   ; source_trees : (module Source_tree) Context_name.Map.t Memo.Lazy.t
-  ; workspace_source_tree : (module Source_tree)
   }
 
 val get : unit -> t

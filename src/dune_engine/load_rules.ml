@@ -72,18 +72,16 @@ module Dir_triage = struct
     | Known of Loaded.t
     | Build_directory of Build_directory.t
 
-  let empty_source = Known (Source { filenames = Filename.Array.Set.empty })
   let no_rules = Known (Loaded.no_rules ~allowed_subdirs:Dir_set.empty)
 end
 
 let get_dir_triage ~dir =
   match Dpath.analyse_dir dir with
   | Source dir ->
-    let module Source_tree = (val (Build_config.get ()).workspace_source_tree) in
-    Source_tree.find_dir dir
-    >>| (function
-     | None -> Dir_triage.empty_source
-     | Some dir -> Dir_triage.Known (Source { filenames = Source_tree.Dir.filenames dir }))
+    Code_error.raise
+      "load_dir called on a source path; source-tree queries must go through \
+       Source_tree directly (per-context)"
+      [ "dir", Path.Source.to_dyn dir ]
   | External dir_ext ->
     let+ filenames =
       Fs_memo.dir_contents (External dir_ext)

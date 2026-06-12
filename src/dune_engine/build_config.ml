@@ -103,10 +103,6 @@ type t =
   ; source_trees : (module Source_tree) Context_name.Map.t Memo.Lazy.t
     (** Per-context [Source_tree]. The engine looks these up when serving
       queries about a particular build directory's source view. *)
-  ; workspace_source_tree : (module Source_tree)
-    (** Source tree used by the engine for workspace-level queries that
-      arrive without a build context — e.g. the [Source] arm of
-      [Dpath.analyse_dir]. *)
   }
 
 let t : t Fdecl.t = Fdecl.create Dyn.opaque
@@ -120,7 +116,6 @@ let set
       ~implicit_default_alias
       ~execution_parameters
       ~source_trees
-      ~workspace_source_tree
   =
   let contexts =
     Memo.lazy_ ~name:"Build_config.set" (fun () ->
@@ -140,6 +135,5 @@ let set
     ; implicit_default_alias
     ; execution_parameters
     ; source_trees
-    ; workspace_source_tree
     }
 ;;
