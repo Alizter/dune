@@ -36,6 +36,26 @@ let all =
 
 let list () = Memo.Lazy.force all >>| Context_name.Map.keys
 
+let siblings ctx =
+  let+ map = Memo.Lazy.force all in
+  match Context_name.Map.find map ctx with
+  | None -> []
+  | Some entry ->
+    let parent_name =
+      match entry with
+      | `Native uc | `Target (uc, _) -> Workspace.Context.name uc
+    in
+    Context_name.Map.foldi map ~init:[] ~f:(fun name entry acc ->
+      if Context_name.equal name ctx
+      then acc
+      else (
+        let entry_parent_name =
+          match entry with
+          | `Native uc | `Target (uc, _) -> Workspace.Context.name uc
+        in
+        if Context_name.equal parent_name entry_parent_name then name :: acc else acc))
+;;
+
 let create_db ?cutoff ~name f =
   let cutoff = Option.map cutoff ~f:(fun equal -> Context_name.Map.equal ~equal) in
   let map =

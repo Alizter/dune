@@ -343,8 +343,35 @@ module DB = struct
       { project; db; rocq_db; root })
   ;;
 
+  (* Forward reference to [public_libs : Context_name.t -> Lib.DB.t Memo.t]
+     (defined later in this module). [create] uses it to look up sibling
+     contexts' public_libs DBs without triggering re-entry, since the
+     lookup is deferred behind a [Memo.Lazy]. *)
+  let public_libs_for_context : (Context_name.t -> Lib.DB.t Memo.t) Fdecl.t =
+    Fdecl.create Dyn.opaque
+  ;;
+
+  (* Public library names defined in [dune_files], used to know whether to
+     emit a [Redirect_by_name] into a sibling context's public_libs DB at
+     cross-mount lookup time. Walking the precomputed name set avoids
+     forcing the sibling's [Lib.DB.find] (which would traverse parents and
+     can recurse back through this context's sibling layer). *)
+  let collect_public_lib_names dune_files =
+    Dune_file.fold_static_stanzas
+      dune_files
+      ~init:Lib_name.Set.empty
+      ~f:(fun _ stanza acc ->
+        match Stanza.repr stanza with
+        | Library.T { visibility = Public p; _ } ->
+          Lib_name.Set.add acc (Public_lib.name p)
+        | Deprecated_library_name.T s ->
+          Lib_name.Set.add acc (Deprecated_library_name.old_public_name s)
+        | _ -> acc)
+  ;;
+
   let create ~context ~projects_by_root stanzas rocq_stanzas =
     let t = Fdecl.create Dyn.opaque in
+    let context_name = context in
     let* context = Context.DB.get context in
     let build_dir = Context.build_dir context in
     let* lib_config =
@@ -352,9 +379,38 @@ module DB = struct
       ocaml.lib_config
     in
     let instrument_with = Context.instrument_with context in
+    let* installed_libs = Lib.DB.installed context in
+    (* Sibling-context public library fallback: for cross-mount [(libraries
+       bar)] resolution, fall through to siblings' public_libs DBs. The
+       sibling lookup is deferred via [Memo.Lazy] so that siblings'
+       [Scope.DB] construction doesn't form a cycle with ours. *)
+    let siblings_data =
+      Memo.Lazy.create (fun () ->
+        let* siblings = Per_context.siblings context_name in
+        Memo.parallel_map siblings ~f:(fun sib ->
+          let* dune_files = Dune_load.dune_files sib in
+          let names = collect_public_lib_names dune_files in
+          let+ sib_public_libs = Fdecl.get public_libs_for_context sib in
+          names, sib_public_libs))
+    in
+    let siblings_db =
+      Lib.DB.create
+        ~parent:(Some installed_libs)
+        ~resolve:(fun name ->
+          let+ data = Memo.Lazy.force siblings_data in
+          List.filter_map data ~f:(fun (names, sib_db) ->
+            if Lib_name.Set.mem names name
+            then Some (Lib.DB.Resolve_result.redirect_by_name sib_db (Loc.none, name))
+            else None))
+        ~resolve_lib_id:(fun _ -> Memo.return Lib.DB.Resolve_result.not_found)
+        ~all:(fun () ->
+          let+ data = Memo.Lazy.force siblings_data in
+          List.concat_map data ~f:(fun (names, _) -> Lib_name.Set.to_list names))
+        ~instrument_with:[]
+        ()
+    in
     let+ public_libs =
-      let+ installed_libs = Lib.DB.installed context in
-      public_libs t ~instrument_with ~installed_libs stanzas
+      Memo.return (public_libs t ~instrument_with ~installed_libs:siblings_db stanzas)
     in
     let by_dir =
       scopes_by_dir
@@ -419,6 +475,8 @@ module DB = struct
     let+ _, public_libs = create_from_stanzas context in
     public_libs
   ;;
+
+  let () = Fdecl.set public_libs_for_context public_libs
 
   let find_by_dir dir =
     let* context = Context.DB.by_dir dir in

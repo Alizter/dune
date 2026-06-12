@@ -1,7 +1,6 @@
 A library in the workspace depends on a public library that lives in
-a mounted source tree. The mount context can build its own library;
-the workspace cannot resolve the mount's library because the scope DB
-does not span the mount yet (task #25 — per-context scope DB).
+a mounted source tree. The Lib.DB sibling fallback in the rules layer
+makes [(libraries bar)] resolve [bar] from the mount.
 
 Mounted source tree: a public library [bar].
 
@@ -44,7 +43,7 @@ Workspace: a public library [foo] that depends on [bar].
   > EOF
 
 The copy rule for [bar.ml] under the mount context's build dir uses
-the resolved external path, not a workspace-relative one.
+the resolved external path.
 
   $ dune rules --format=json _build/default.mount-src/bar.ml | jq '.[0].action'
   [
@@ -53,19 +52,16 @@ the resolved external path, not a workspace-relative one.
     "_build/default.mount-src/bar.ml"
   ]
 
-Building the mount-context library succeeds.
+The mount context builds its own library.
 
   $ dune build _build/default.mount-src/bar.cma
   $ test -f _build/default.mount-src/bar.cma && echo built
   built
 
-Workspace context cannot resolve [bar] because the scope DB does not
-span the mount.
+The workspace context resolves [bar] via the sibling fallback and
+builds [foo.cma]. [bar]'s artifacts live in the mount context's build
+dir; [foo.cma] links against them across contexts.
 
-  $ dune build _build/default/foo.cma 2>&1 | head -5
-  File "dune", line 4, characters 12-15:
-  4 |  (libraries bar))
-                  ^^^
-  Error: Library "bar" not found.
-  -> required by library "foo" in _build/default
-  [1]
+  $ dune build _build/default/foo.cma
+  $ test -f _build/default/foo.cma && echo foo-built
+  foo-built

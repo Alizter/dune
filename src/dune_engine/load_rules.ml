@@ -707,9 +707,7 @@ end = struct
       }
 
     let empty =
-      { source_files = Filename.Map.empty
-      ; source_dirs = Filename.Array.Set.empty
-      }
+      { source_files = Filename.Map.empty; source_dirs = Filename.Array.Set.empty }
     ;;
 
     let source_filenames t =
@@ -872,7 +870,9 @@ end = struct
           source_files_and_dirs ~context_name source_paths_to_ignore sub_dir
       in
       let { Source_files_and_dirs.source_files; source_dirs } = source_files_and_dirs in
-      let source_filenames = Source_files_and_dirs.source_filenames source_files_and_dirs in
+      let source_filenames =
+        Source_files_and_dirs.source_filenames source_files_and_dirs
+      in
       let copy_rules =
         let ctx_dir = Context_name.build_dir context_name in
         create_copy_rules ~dir:sub_dir ~ctx_dir ~non_target_source_files:source_files

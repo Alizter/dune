@@ -12,3 +12,8 @@ val create_by_name
 val profile : Context_name.t -> Profile.t Memo.t
 val valid : Context_name.t -> bool Memo.t
 val list : unit -> Context_name.t list Memo.t
+
+(** Internal contexts that share the same user-facing [Workspace.Context.t]
+    as the given context, excluding itself. Used by the rules layer to
+    coordinate cross-mount lookups (libraries, binaries, etc.). *)
+val siblings : Context_name.t -> Context_name.t list Memo.t
