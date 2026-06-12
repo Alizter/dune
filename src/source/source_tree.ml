@@ -306,6 +306,9 @@ type t = { root_node : (unit, Dir0.t) Memo.Node.t }
 
 let default = { root_node = make_root_node () }
 let root t = Memo.Node.read t.root_node
+let for_context_callback : (Context_name.t -> t Memo.t) Fdecl.t = Fdecl.create Dyn.opaque
+let set_for_context_callback f = Fdecl.set for_context_callback f
+let for_context ctx = (Fdecl.get for_context_callback) ctx
 
 let gen_find_dir =
   let rec loop on_success on_last_found components (dir : Dir0.t) =

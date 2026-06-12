@@ -104,14 +104,25 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
       let find_dir p = Source_tree.find_dir t p
     end)
   in
-  let source_trees =
+  let source_tree_of_context =
     Memo.lazy_ (fun () ->
       let open Memo.O in
       let+ contexts = Memo.Lazy.force contexts in
       Context_name.Map.of_list_map_exn
         contexts
-        ~f:(fun ((ctx : Build_context.t), _ctx_type) ->
-          ctx.name, module_of_source_tree Source_tree.default))
+        ~f:(fun ((ctx : Build_context.t), _ctx_type) -> ctx.name, Source_tree.default))
+  in
+  Source_tree.set_for_context_callback (fun ctx ->
+    let open Memo.O in
+    let+ map = Memo.Lazy.force source_tree_of_context in
+    match Context_name.Map.find map ctx with
+    | Some t -> t
+    | None -> Source_tree.default);
+  let source_trees =
+    Memo.lazy_ (fun () ->
+      let open Memo.O in
+      let+ map = Memo.Lazy.force source_tree_of_context in
+      Context_name.Map.map map ~f:module_of_source_tree)
   in
   Build_config.set
     ~sandboxing_preference

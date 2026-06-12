@@ -45,6 +45,17 @@ type t
 (** The default source tree, backed by the workspace filesystem. *)
 val default : t
 
+(** [for_context ctx] returns the [Source_tree.t] associated with the
+    build context [ctx]. Rules-layer code that generates rules for a
+    specific context should query the source tree this way rather than
+    falling back to [default], so that the per-context source-tree
+    backing is observed once contexts can diverge. *)
+val for_context : Context_name.t -> t Memo.t
+
+(** Set the callback used to resolve [for_context]. Called once at build
+    system initialisation. *)
+val set_for_context_callback : (Context_name.t -> t Memo.t) -> unit
+
 val root : t -> Dir.t Memo.t
 
 module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) : sig
