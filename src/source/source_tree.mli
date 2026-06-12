@@ -45,6 +45,13 @@ type t
 (** The default source tree, backed by the workspace filesystem. *)
 val default : t
 
+(** [read_only t] is [true] when this source tree is not user-editable —
+    e.g., backed by a git sha or a fetched archive. Such trees are
+    treated as fully vendored: warnings/alerts are suppressed in
+    compilation flags, packages are filtered out of the workspace list,
+    and rules-layer code should not emit promotion rules into them. *)
+val read_only : t -> bool
+
 (** [for_context ctx] returns the [Source_tree.t] associated with the
     build context [ctx]. Rules-layer code that generates rules for a
     specific context should query the source tree this way rather than

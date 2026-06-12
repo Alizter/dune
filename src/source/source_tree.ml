@@ -263,11 +263,16 @@ and find_dir_raw
   contents readdir ~default_vcs ~path ~dune_file ~dirs_visited ~project ~dir_status:status
 ;;
 
-let make_root_node () =
+let make_root_node ~read_only =
   Memo.lazy_node
   @@ fun () ->
   let path = Path.Source.root in
-  let dir_status : Source_dir_status.t = Normal in
+  (* A read-only source tree (e.g. backed by a git sha or a fetched
+     archive) is fully vendored: the user can't be expected to edit its
+     dune files. Starting the root as [Vendored] propagates through the
+     usual eval_status machinery so every directory below is Vendored
+     too. *)
+  let dir_status : Source_dir_status.t = if read_only then Vendored else Normal in
   let* readdir =
     Dir_contents.of_source_path path
     >>| function
@@ -302,9 +307,13 @@ let make_root_node () =
     ~dir_status
 ;;
 
-type t = { root_node : (unit, Dir0.t) Memo.Node.t }
+type t =
+  { root_node : (unit, Dir0.t) Memo.Node.t
+  ; read_only : bool
+  }
 
-let default = { root_node = make_root_node () }
+let default = { root_node = make_root_node ~read_only:false; read_only = false }
+let read_only t = t.read_only
 let root t = Memo.Node.read t.root_node
 let for_context_callback : (Context_name.t -> t Memo.t) Fdecl.t = Fdecl.create Dyn.opaque
 let set_for_context_callback f = Fdecl.set for_context_callback f
