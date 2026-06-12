@@ -107,22 +107,40 @@ let get_installed_binaries ~(context : Context.t) stanzas =
   >>| Filename.Map.union_all ~f:merge
 ;;
 
+(* Forward reference so [all] can call [get] on siblings. Resolution
+   happens at sibling-lookup time, after [all] has been constructed. *)
+let get_fdecl
+  : (Context.t -> Artifacts.t Memo.t) Fdecl.t
+  =
+  Fdecl.create Dyn.opaque
+;;
+
 let all =
   Memo.lazy_ ~name:"Artifacts_db.all"
   @@ fun () ->
   let+ contexts = Context.DB.all () in
   Context_name.Map.of_list_map_exn contexts ~f:(fun context ->
+    let context_name = Context.name context in
     let artifacts =
       let local_bins =
         Memo.lazy_ ~name:"get_installed_binaries" (fun () ->
-          Context.name context |> Dune_load.dune_files >>= get_installed_binaries ~context)
+          context_name |> Dune_load.dune_files >>= get_installed_binaries ~context)
       in
-      Artifacts.create context ~local_bins |> Memo.return
+      let siblings =
+        Memo.lazy_ ~name:"artifacts-siblings" (fun () ->
+          let* sibling_names = Per_context.siblings context_name in
+          Memo.parallel_map sibling_names ~f:(fun sib ->
+            let* sib_ctx = Context.DB.get sib in
+            (Fdecl.get get_fdecl) sib_ctx))
+      in
+      Artifacts.create context ~local_bins ~siblings |> Memo.return
     in
-    Context.name context, artifacts)
+    context_name, artifacts)
 ;;
 
 let get (context : Context.t) =
-  let* all = Memo.Lazy.force all in
-  Context_name.Map.find_exn all (Context.name context)
+  let* m = Memo.Lazy.force all in
+  Context_name.Map.find_exn m (Context.name context)
 ;;
+
+let () = Fdecl.set get_fdecl get

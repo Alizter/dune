@@ -1,6 +1,6 @@
 An executable lives in a mounted source tree; the workspace references
-it via %{bin:...}. This pins the current behaviour for cross-mount
-binary resolution.
+it via [%{bin:...}]. The Artifacts.t sibling fallback in the rules
+layer resolves the cross-mount binary.
 
 Mount: a public executable [helper].
 
@@ -18,7 +18,7 @@ Mount: a public executable [helper].
   > let () = print_endline "hello from helper"
   > EOF
 
-Workspace: a rule that runs %{bin:helper}.
+Workspace: a rule that runs [%{bin:helper}].
 
   $ mkdir wksp
   $ cd wksp
@@ -43,15 +43,10 @@ Mount-context build of the executable on its own:
   $ test -f _build/default.mount-src/helper.exe && echo built
   built
 
-Workspace context cannot resolve [%{bin:helper}] because the binary
-artifact lookup, like library scope, is workspace-only and does not
-include the mount's executable (task #25 / #26 — per-context scope
-and per-context install/binary enumeration).
+Workspace context now resolves [%{bin:helper}] via the sibling
+fallback. The rule runs successfully and writes the helper's output to
+[out].
 
-  $ dune build out 2>&1 | head -5
-  File "dune", line 3, characters 40-53:
-  3 |  (action (with-stdout-to %{target} (run %{bin:helper}))))
-                                              ^^^^^^^^^^^^^
-  Error: Program helper not found in the tree or in PATH
-   (context: default)
-  [1]
+  $ dune build out
+  $ cat _build/default/out
+  hello from helper

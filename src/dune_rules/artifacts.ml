@@ -33,6 +33,11 @@ type t =
        but the artifacts database is depended on by the logic which expands
        globs. The computation of this field is deferred to break the cycle. *)
     local_bins : local_bins Memo.Lazy.t
+  ; (* Sibling-context [Artifacts.t]s, consulted by [analyze_binary] when
+       the local lookup and PATH fail. Enables cross-mount [%{bin:...}]
+       resolution; deferred via [Memo.Lazy] to avoid construction-time
+       cycles between sibling contexts. *)
+    siblings : t list Memo.Lazy.t
   }
 
 let force { local_bins; _ } =
@@ -47,11 +52,41 @@ let local_binaries { local_bins; _ } =
     | _, Origin _origins -> None)
 ;;
 
+(* Local-only lookup: consults [t.local_bins] and returns [`Resolved],
+   [`Origin], or [`None]. No PATH probe, no sibling fallback. Used by
+   sibling lookups from [analyze_binary] to avoid recursion through
+   the cross-mount layer. *)
+let analyze_binary_local t lookup_name =
+  let* local_bins = Memo.Lazy.force t.local_bins in
+  match Filename.Map.find local_bins lookup_name with
+  | None -> Memo.return `None
+  | Some (Resolved p) -> Memo.return (`Resolved (Path.build p.path))
+  | Some (Origin origins) ->
+    Memo.parallel_map origins ~f:(fun origin ->
+      origin.enabled_if
+      >>| function
+      | true -> Some origin
+      | false -> None)
+    >>| List.filter_opt
+    >>| (function
+     | [] -> `None
+     | [ x ] -> `Origin x
+     | x :: rest ->
+       let loc x = File_binding.Unexpanded.loc x.binding in
+       User_error.raise
+         ~loc:(loc x)
+         [ Pp.textf
+             "binary %S is available from more than one definition. It is also \
+              available in:"
+             (Filename.to_string lookup_name)
+         ; Pp.enumerate rest ~f:(fun x -> Pp.verbatim (Loc.to_file_colon_line (loc x)))
+         ])
+;;
+
 let analyze_binary t ~dir name =
   match Filename.analyze_program_name name with
   | Absolute -> Memo.return (`Resolved (Path.of_filename_relative_to_initial_cwd name))
   | (In_path | Relative_to_current_dir) as kind ->
-    let* local_bins = Memo.Lazy.force t.local_bins in
     let lookup_name =
       match kind with
       | In_path -> Filename.of_string name
@@ -70,29 +105,35 @@ let analyze_binary t ~dir name =
          | None -> `None
          | Some path -> `Resolved path)
     in
-    (match Option.bind lookup_name ~f:(Filename.Map.find local_bins) with
-     | Some (Resolved p) -> Memo.return (`Resolved (Path.build p.path))
-     | None -> which ()
-     | Some (Origin origins) ->
-       Memo.parallel_map origins ~f:(fun origin ->
-         origin.enabled_if
-         >>| function
-         | true -> Some origin
-         | false -> None)
-       >>| List.filter_opt
+    let try_siblings () =
+      (* Only fall back to siblings for [In_path] (bare binary names).
+         [Relative_to_current_dir] is anchored to the caller's directory
+         and doesn't have a meaningful interpretation across mounts. *)
+      match kind, lookup_name with
+      | In_path, Some lookup_name ->
+        let* siblings = Memo.Lazy.force t.siblings in
+        Memo.parallel_map siblings ~f:(fun sib ->
+          analyze_binary_local sib lookup_name)
+        >>| List.find_map ~f:(function
+          | `None -> None
+          | (`Resolved _ | `Origin _) as r -> Some r)
+        >>= (function
+         | Some r -> Memo.return r
+         | None -> Memo.return `None)
+      | _ -> Memo.return `None
+    in
+    let* local =
+      match lookup_name with
+      | None -> Memo.return `None
+      | Some lookup_name -> analyze_binary_local t lookup_name
+    in
+    (match local with
+     | `Resolved _ | `Origin _ -> Memo.return local
+     | `None ->
+       which ()
        >>= (function
-        | [] -> which ()
-        | [ x ] -> Memo.return (`Origin x)
-        | x :: rest ->
-          let loc x = File_binding.Unexpanded.loc x.binding in
-          User_error.raise
-            ~loc:(loc x)
-            [ Pp.textf
-                "binary %S is available from more than one definition. It is also \
-                 available in:"
-                name
-            ; Pp.enumerate rest ~f:(fun x -> Pp.verbatim (Loc.to_file_colon_line (loc x)))
-            ]))
+        | (`Resolved _ | `Origin _) as r -> Memo.return r
+        | `None -> try_siblings ()))
 ;;
 
 let binary t ?hint ?(where = Original_path) ~dir ~loc name =
@@ -153,7 +194,8 @@ let add_binaries t ~dir l =
 
 let create =
   fun (context : Context.t)
-    ~(local_bins : origin Appendable_list.t Filename.Map.t Memo.Lazy.t) ->
+    ~(local_bins : origin Appendable_list.t Filename.Map.t Memo.Lazy.t)
+    ~(siblings : t list Memo.Lazy.t) ->
   let local_bins =
     Memo.lazy_ (fun () ->
       let+ local_bins = Memo.Lazy.force local_bins in
@@ -162,5 +204,5 @@ let create =
         , Origin (Appendable_list.to_list sources) ))
       |> Filename.Map.of_list_exn)
   in
-  { context; local_bins }
+  { context; local_bins; siblings }
 ;;
