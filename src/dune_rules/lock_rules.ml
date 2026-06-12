@@ -283,7 +283,7 @@ let resolve_project_pins project_pins =
 (* CR-soon Alizter: This function is duplicated in bin/pkg/lock.ml. We should
    factor out pin handling logic into a shared module in dune_pkg. *)
 let project_pins =
-  Dune_load.projects ()
+  Dune_load.workspace_projects ()
   >>| List.fold_left ~init:Pin.DB.empty ~f:(fun acc project ->
     let pins = project_and_package_pins project in
     Pin.DB.combine_exn acc pins)
@@ -310,7 +310,7 @@ let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
       (let open Action_builder.O in
        let+ packages =
          let open Memo.O in
-         Dune_load.packages ()
+         Dune_load.workspace_packages ()
          >>| Dune_lang.Package.Name.Map.map ~f:Local_package.of_package
          |> Action_builder.of_memo
        and+ repos =

@@ -762,7 +762,7 @@ let raise_on_lock_dir_out_of_sync =
       then
         let* path, lock_dir = Lock_dir.get_with_path ctx >>| User_error.ok_exn in
         let+ local_packages =
-          Dune_load.packages ()
+          Dune_load.packages ctx
           >>| Dune_lang.Package.Name.Map.map ~f:Dune_pkg.Local_package.of_package
         in
         match

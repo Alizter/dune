@@ -397,7 +397,7 @@ module Valid = struct
   let valid_libs_and_packages =
     let run (ctx, all, projects) =
       let* libs_and_pkgs =
-        let* mask = Dune_load.mask () in
+        let* mask = Dune_load.mask (Context.name ctx) in
         Scope.DB.with_all ctx ~f:(fun find ->
           Memo.List.fold_left projects ~init:([], []) ~f:(fun (libs_acc, pkg_acc) proj ->
             let* vendored =
@@ -489,7 +489,7 @@ module Valid = struct
   ;;
 
   let get ctx ~all =
-    let* projects = Dune_load.projects () in
+    let* projects = Dune_load.projects (Context.name ctx) in
     Memo.exec valid_libs_and_packages (ctx, all, projects)
   ;;
 
@@ -1285,7 +1285,7 @@ let ext_package_mlds (ctx : Context.t) (pkg : Package.Name.t) =
 ;;
 
 let pkg_mlds sctx pkg =
-  let* pkgs = Dune_load.packages () in
+  let* pkgs = Dune_load.packages (Context.name (Super_context.context sctx)) in
   if Package.Name.Map.mem pkgs pkg
   then
     let+ res, warnings = Odoc.mlds sctx pkg in

@@ -144,7 +144,7 @@ module Inherit = struct
         (sprintf "%s-root" name)
         ~input:(module Path.Source)
         (fun dir ->
-           let* projects_by_root = Dune_load.projects_by_root ()
+           let* projects_by_root = Dune_load.projects_by_root context
            and* envs = Memo.Lazy.force for_context in
            let project = Path.Source.Map.find_exn projects_by_root dir in
            let root = root context project in

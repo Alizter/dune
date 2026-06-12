@@ -400,7 +400,7 @@ module DB = struct
   let all =
     Per_context.create_by_name ~name:"scope" (fun context ->
       Memo.Lazy.create (fun () ->
-        let* projects_by_root = Dune_load.projects_by_root ()
+        let* projects_by_root = Dune_load.projects_by_root context
         and* stanzas = Dune_load.dune_files context in
         create_from_stanzas ~projects_by_root ~context stanzas)
       |> Memo.Lazy.force)

@@ -523,7 +523,7 @@ let solve
 
 let project_pins =
   let open Memo.O in
-  Dune_rules.Dune_load.projects ()
+  Dune_rules.Dune_load.workspace_projects ()
   >>| List.fold_left ~init:Pin.DB.empty ~f:(fun acc project ->
     let pins = project_and_package_pins project in
     Pin.DB.combine_exn acc pins)

@@ -312,8 +312,7 @@ let create ~(context : Context.t) ~(host : t option) ~packages ~stanzas =
 
 let all =
   Memo.lazy_ ~name:"Super_context.all" (fun () ->
-    let* packages = Dune_load.packages ()
-    and* contexts = Context.DB.all () in
+    let* contexts = Context.DB.all () in
     let rec sctxs =
       lazy
         (Context_name.Map.of_list_map_exn contexts ~f:(fun (c : Context.t) ->
@@ -331,8 +330,12 @@ let all =
           in
           Some sctx
       in
-      let* host, stanzas =
-        Memo.fork_and_join host (fun () -> Dune_load.dune_files (Context.name context))
+      let* host, stanzas, packages =
+        Memo.fork_and_join host (fun () ->
+          Memo.fork_and_join
+            (fun () -> Dune_load.dune_files (Context.name context))
+            (fun () -> Dune_load.packages (Context.name context)))
+        >>| fun (host, (stanzas, packages)) -> host, stanzas, packages
       in
       create ~host ~context ~packages ~stanzas
     in

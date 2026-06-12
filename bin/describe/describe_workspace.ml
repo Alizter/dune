@@ -617,7 +617,7 @@ module Crawl = struct
     in
     let* project_libs =
       (* the list of libraries declared in the project *)
-      Dune_load.projects ()
+      Dune_load.projects (Context.name context)
       >>= Memo.parallel_map ~f:(fun project ->
         Scope.DB.find_by_project (Context.name context) project
         >>| Scope.libs

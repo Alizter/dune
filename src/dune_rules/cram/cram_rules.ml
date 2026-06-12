@@ -205,7 +205,10 @@ let collect_stanzas =
 let rules ~sctx ~dir tests project =
   let* stanzas = collect_stanzas ~dir
   and* with_package_mask =
-    let+ mask = Dune_load.mask () >>| Only_packages.enumerate in
+    let+ mask =
+      Dune_load.mask (Context.name (Super_context.context sctx))
+      >>| Only_packages.enumerate
+    in
     match
       Dune_project.exclusive_package project ~dir:(Path.Build.drop_build_context_exn dir)
       |> Option.map ~f:Package.Id.name
