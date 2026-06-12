@@ -32,7 +32,8 @@ module File = struct
 
   module Map = Map.Make (T)
 
-  let of_source_path p = Fs_memo.path_stat (In_source_dir p) >>| Result.map ~f:of_stats
+  let of_path p = Fs_memo.path_stat p >>| Result.map ~f:of_stats
+  let of_source_path p = of_path (Path.Outside_build_dir.In_source_dir p)
 end
 
 type t =
@@ -77,20 +78,24 @@ let is_temp_file fn =
   || String.ends_with ~suffix:"~" fn
 ;;
 
-let of_source_path_impl path =
-  Fs_memo.dir_contents (In_source_dir path)
+(* [path_for_hint] is the [Path.Source.t] identity of the directory being
+   read, used for the "(dirs \ ...) hint" in the diagnostic. [physical] is
+   the actual location the bytes are read from. For the workspace root
+   these coincide; for an externally-rooted source tree they differ. *)
+let of_outside_build_dir_impl ~path_for_hint ~physical =
+  Fs_memo.dir_contents physical
   >>= function
   | Error unix_error ->
     User_warning.emit
       [ Pp.textf
           "Unable to read directory %s. Ignoring."
-          (Path.Source.to_string_maybe_quoted path)
+          (Path.Source.to_string_maybe_quoted path_for_hint)
       ; Pp.text "Remove this message by ignoring by adding:"
-      ; Pp.textf "(dirs \\ %s)" (Path.Source.basename path |> Filename.to_string)
+      ; Pp.textf "(dirs \\ %s)" (Path.Source.basename path_for_hint |> Filename.to_string)
       ; Pp.textf
           "to the dune file: %s"
           (Path.Source.to_string_maybe_quoted
-             (Path.Source.relative (Path.Source.parent_exn path) "dune"))
+             (Path.Source.relative (Path.Source.parent_exn path_for_hint) "dune"))
       ; Unix_error.Detailed.pp_reason unix_error
       ];
     Memo.return (Error unix_error)
@@ -98,22 +103,23 @@ let of_source_path_impl path =
     let+ files, dirs =
       Fs_memo.Dir_contents.to_list dir_contents
       |> Memo.parallel_map ~f:(fun (fn, (kind : File_kind.t)) ->
-        let path = Path.Source.relative_fname path fn in
-        if is_special kind || Path.Source.is_in_build_dir path || is_temp_file fn
+        let identity = Path.Source.relative_fname path_for_hint fn in
+        let child_physical = Path.Outside_build_dir.relative_fname physical fn in
+        if is_special kind || Path.Source.is_in_build_dir identity || is_temp_file fn
         then Memo.return List.Skip
         else
           let+ is_directory, file =
             match kind with
             | S_DIR ->
               let+ file =
-                File.of_source_path path
+                File.of_path child_physical
                 >>| function
                 | Ok file -> file
                 | Error _ -> File.dummy
               in
               true, file
             | S_LNK ->
-              Fs_memo.path_stat (In_source_dir path)
+              Fs_memo.path_stat child_physical
               >>| (function
                | Ok ({ st_kind = S_DIR; _ } as st) -> true, File.of_stats st
                | Ok _ | Error _ -> false, File.dummy)
@@ -124,6 +130,10 @@ let of_source_path_impl path =
     in
     let dirs = Filename.Array.Map.of_sorted_list_exn dirs in
     { files = Filename.Array.Set.of_sorted_list files; dirs } |> Result.ok
+;;
+
+let of_source_path_impl path =
+  of_outside_build_dir_impl ~path_for_hint:path ~physical:(In_source_dir path)
 ;;
 
 (* Having a cutoff here speeds up incremental rebuilds quite a bit when a
@@ -137,3 +147,10 @@ let of_source_path_memo =
 ;;
 
 let of_source_path = Memo.exec of_source_path_memo
+
+let of_outside_build_dir ~path_for_hint ~physical =
+  match physical with
+  | Path.Outside_build_dir.In_source_dir p when Path.Source.equal p path_for_hint ->
+    of_source_path path_for_hint
+  | _ -> of_outside_build_dir_impl ~path_for_hint ~physical
+;;

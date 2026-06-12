@@ -472,7 +472,7 @@ let rec to_dir_map ast ~dune_version =
   Dir_map.merge_all (node :: subdirs)
 ;;
 
-let decode ~file project sexps =
+let decode ~resolve ~file project sexps =
   let decoder =
     { decode =
         (fun ast d ->
@@ -480,7 +480,7 @@ let decode ~file project sexps =
           Dune_lang.Decoder.parse d Univ_map.empty (Dune_lang.Ast.List (Loc.none, ast)))
     }
   in
-  let context = Include_stanza.in_src_file file in
+  let context = Include_stanza.in_src_file_with_resolve ~resolve file in
   let inside_include = false in
   let inside_subdir = false in
   Ast.decode ~inside_include ~inside_subdir
@@ -522,11 +522,11 @@ let dirs_stanza_loc t =
 
 let files t = (Dir_map.root t.plain).files
 
-let load_plain sexps ~file ~from_parent ~project =
+let load_plain ~resolve sexps ~file ~from_parent ~project =
   let+ parsed =
     match file with
     | None -> Memo.return Dir_map.empty
-    | Some file -> decode ~file project sexps
+    | Some file -> decode ~resolve ~file project sexps
   in
   match from_parent with
   | None -> parsed
@@ -535,16 +535,16 @@ let load_plain sexps ~file ~from_parent ~project =
 
 let sub_dirnames t = Dir_map.sub_dirs t.plain
 
-let load file ~from_parent ~project =
+let load ~resolve file ~from_parent ~project =
   let+ kind, plain =
-    let load_plain = load_plain ~file ~from_parent ~project in
+    let load_plain = load_plain ~resolve ~file ~from_parent ~project in
     match file with
     | None ->
       let+ plain = load_plain [] in
       Plain, plain
     | Some file ->
       let* kind, ast =
-        Fs_memo.with_lexbuf_from_file (In_source_dir file) ~f:(fun lb ->
+        Fs_memo.with_lexbuf_from_file (resolve file) ~f:(fun lb ->
           let kind, ast =
             if Dune_lang.Dune_file_script.is_script lb
             then Ocaml_script, []
@@ -595,7 +595,11 @@ let ensure_dune_project_file_exists =
     | Error -> impl ~is_error:true project
 ;;
 
-let load ~dir (status : Source_dir_status.t) project ~files ~parent =
+let default_resolve : Path.Source.t -> Path.Outside_build_dir.t =
+  fun p -> Path.Outside_build_dir.In_source_dir p
+;;
+
+let load ?(resolve = default_resolve) ~dir (status : Source_dir_status.t) project ~files ~parent =
   let file =
     if status = Data_only
     then None
@@ -617,8 +621,16 @@ let load ~dir (status : Source_dir_status.t) project ~files ~parent =
     let* () =
       match file with
       | None -> Memo.return ()
-      | Some _ -> ensure_dune_project_file_exists project
+      | Some _ ->
+        (* The missing-dune-project warning is workspace-centric: it checks
+           the workspace filesystem and gives a user-actionable hint. For
+           externally-rooted source trees we skip it — the read_only flag
+           on those trees will eventually suppress parse warnings entirely
+           (#31). *)
+        if resolve == default_resolve
+        then ensure_dune_project_file_exists project
+        else Memo.return ()
     in
     let file = Option.map file ~f:(fun file -> Path.Source.relative_fname dir file) in
-    load file ~from_parent:parent ~project >>| Option.some
+    load ~resolve file ~from_parent:parent ~project >>| Option.some
 ;;

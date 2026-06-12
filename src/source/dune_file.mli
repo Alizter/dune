@@ -40,8 +40,14 @@ val files : t -> Files.t
 (** Directories introduced via [(subdir ..)] *)
 val sub_dirnames : t -> Filename.Array.Set.t
 
+(** [load] reads the dune file at [dir] (workspace-relative). [resolve]
+    translates the logical [Path.Source.t] into the physical
+    [Path.Outside_build_dir.t] from which bytes are read; the default
+    treats source paths as workspace-rooted. Source trees with a
+    different backing pass a custom resolver. *)
 val load
-  :  dir:Path.Source.t
+  :  ?resolve:(Path.Source.t -> Path.Outside_build_dir.t)
+  -> dir:Path.Source.t
   -> Source_dir_status.t
   -> Dune_project.t
   -> files:Filename.Array.Set.t

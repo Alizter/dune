@@ -12,6 +12,10 @@ module type Path = sig
   val with_lexbuf_from_file : t -> f:(Lexing.lexbuf -> 'a) -> 'a Memo.t
 end
 
+let default_resolve : Path.Source.t -> Path.Outside_build_dir.t =
+  fun p -> Path.Outside_build_dir.In_source_dir p
+;;
+
 module Source = struct
   include Path.Source
 
@@ -19,6 +23,19 @@ module Source = struct
   let file_exists t = Fs_memo.file_exists (In_source_dir t)
   let with_lexbuf_from_file t ~f = Fs_memo.with_lexbuf_from_file (In_source_dir t) ~f
 end
+
+(* A [Source]-like [Path] module where filesystem reads go through a
+   custom resolver. Used to load (include ...) directives from
+   externally-rooted source trees. *)
+let source_module_with_resolve resolve : (module Path with type t = Path.Source.t) =
+  (module struct
+    include Path.Source
+
+    let relative t loc f = relative ~error_loc:loc t f
+    let file_exists t = Fs_memo.file_exists (resolve t)
+    let with_lexbuf_from_file t ~f = Fs_memo.with_lexbuf_from_file (resolve t) ~f
+  end)
+;;
 
 module Build = struct
   include Path.Build
@@ -41,6 +58,12 @@ type 'a context =
 let in_file file path = { current_file = file; include_stack = []; path }
 let in_src_file file = in_file file (module Source)
 let in_build_file file = in_file file (module Build)
+
+let in_src_file_with_resolve ?(resolve = default_resolve) file =
+  if resolve == default_resolve
+  then in_src_file file
+  else in_file file (source_module_with_resolve resolve)
+;;
 
 let file_path (type a) { path; current_file; _ } loc fn =
   let module Path = (val path : Path with type t = a) in
