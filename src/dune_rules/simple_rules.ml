@@ -286,7 +286,17 @@ let copy_files sctx ~dir ~expander ~src_dir (def : Copy_files.t) =
       | true -> src_in_src
       | false -> src_in_build
     in
-    Build_system.eval_pred (File_selector.of_glob ~dir glob)
+    match only_sources, src_in_src with
+    | true, In_source_tree p ->
+      Source_tree.find_dir p
+      >>| (function
+       | None -> Filename_set.empty ~dir
+       | Some d ->
+         Source_tree.Dir.filenames d
+         |> Filename.Array.Set.filter ~f:(fun fn ->
+           Glob.test glob (Filename.to_string fn))
+         |> Filename_set.create ~dir)
+    | _ -> Build_system.eval_pred (File_selector.of_glob ~dir glob)
   in
   if def.syntax_version >= (3, 17) && Filename_set.is_empty files
   then User_error.raise ~loc [ Pp.textf "Does not match any files" ];
