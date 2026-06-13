@@ -66,6 +66,28 @@ end
 
 include T
 
+let find_repo_root start =
+  let candidate dir name =
+    let p = Path.relative dir (Filename.to_string name) in
+    if Fpath.exists (Path.to_string p) then Kind.of_dir_name name else None
+  in
+  let rec walk dir =
+    let found =
+      match candidate dir Filename.git_dir_basename with
+      | Some _ as k -> k
+      | None -> candidate dir Filename.hg_dir_basename
+    in
+    match found with
+    | Some kind -> Some { root = dir; kind }
+    | None ->
+      (match Path.parent dir with
+       | None -> None
+       | Some parent when Path.equal parent dir -> None
+       | Some parent -> walk parent)
+  in
+  walk start
+;;
+
 let git_path = lazy (Bin.which ~path:(Env_path.path Env.initial) "git")
 
 let git_for ~needed_for =

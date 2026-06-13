@@ -23,6 +23,12 @@ type t =
 val equal : t -> t -> bool
 val to_dyn : t -> Dyn.t
 
+(** Walk [start] and its parent directories looking for a VCS metadata
+    directory ([.git] or [.hg]). Returns the deepest matching repo, or
+    [None] if no VCS is detected. Does not stat or open the repo;
+    callers downstream (e.g. [Vcs_tree]) are responsible for that. *)
+val find_repo_root : Path.t -> t option
+
 (** Nice description of the current tip *)
 val describe : t -> needed_for:string -> string option Memo.t
 
