@@ -535,7 +535,7 @@ let load_plain ~resolve sexps ~file ~from_parent ~project =
 
 let sub_dirnames t = Dir_map.sub_dirs t.plain
 
-let load ~resolve file ~from_parent ~project =
+let load ~resolve ~byte_provider file ~from_parent ~project =
   let+ kind, plain =
     let load_plain = load_plain ~resolve ~file ~from_parent ~project in
     match file with
@@ -544,13 +544,17 @@ let load ~resolve file ~from_parent ~project =
       Plain, plain
     | Some file ->
       let* kind, ast =
-        Fs_memo.with_lexbuf_from_file (resolve file) ~f:(fun lb ->
-          let kind, ast =
-            if Dune_lang.Dune_file_script.is_script lb
-            then Ocaml_script, []
-            else Plain, Dune_lang.Parser.parse lb ~mode:Many
-          in
-          kind, ast)
+        let+ contents = byte_provider file in
+        let lb = Lexing.from_string contents in
+        lb.lex_curr_p
+        <- { pos_fname = Path.Source.to_string file
+           ; pos_lnum = 1
+           ; pos_bol = 0
+           ; pos_cnum = 0
+           };
+        if Dune_lang.Dune_file_script.is_script lb
+        then Ocaml_script, []
+        else Plain, Dune_lang.Parser.parse lb ~mode:Many
       in
       let+ ast = load_plain ast in
       kind, ast
@@ -597,6 +601,7 @@ let ensure_dune_project_file_exists =
 
 let load
       ?(resolver = Source_resolver.workspace)
+      ~byte_provider
       ~dir
       (status : Source_dir_status.t)
       project
@@ -636,5 +641,5 @@ let load
     in
     let file = Option.map file ~f:(fun file -> Path.Source.relative_fname dir file) in
     let resolve = Source_resolver.resolve resolver in
-    load ~resolve file ~from_parent:parent ~project >>| Option.some
+    load ~resolve ~byte_provider file ~from_parent:parent ~project >>| Option.some
 ;;

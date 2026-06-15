@@ -225,7 +225,14 @@ and contents
   =
   let files = Dir_contents.files readdir in
   let+ dune_file =
-    Dune_file.load ~resolver ~dir:path dir_status project ~files ~parent:dune_file
+    Dune_file.load
+      ~resolver
+      ~byte_provider
+      ~dir:path
+      dir_status
+      project
+      ~files
+      ~parent:dune_file
   in
   let files =
     let predicate =

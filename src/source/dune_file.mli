@@ -40,14 +40,22 @@ val files : t -> Files.t
 (** Directories introduced via [(subdir ..)] *)
 val sub_dirnames : t -> Filename.Array.Set.t
 
-(** [load] reads the dune file at [dir] (workspace-relative). [resolver]
-    translates logical [Path.Source.t] identities to the physical
-    [Path.Outside_build_dir.t] from which bytes are read; the workspace
-    resolver maps to [In_source_dir]. The workspace-centric "missing
-    dune-project" warning fires only when [resolver] is the workspace
-    one. *)
+(** [load] reads the dune file at [dir] (workspace-relative).
+
+    [byte_provider] returns the bytes of a given source path; the dune
+    file is parsed from those bytes via [Lexing.from_string]. For a
+    filesystem-backed source tree, callers pass a closure that delegates
+    to [Fs_memo.file_contents]; for a non-filesystem backing (e.g. a
+    git tree) the closure reads from the backend directly without
+    materialising the file on disk.
+
+    [resolver] is still consulted for [Path.Source.t -> Path.Outside_build_dir.t]
+    translation by ancillary code paths ((include ...) stanzas, the
+    missing-dune-project warning). The workspace-centric warning fires
+    only when [resolver] is the workspace one. *)
 val load
   :  ?resolver:Source_resolver.t
+  -> byte_provider:(Path.Source.t -> string Memo.t)
   -> dir:Path.Source.t
   -> Source_dir_status.t
   -> Dune_project.t
