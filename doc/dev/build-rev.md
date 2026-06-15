@@ -187,20 +187,52 @@ cache key to the **git blob sha** (already in `t.blob_shas`) so the
 same content across revs is read at most once. Cheap fix; pairs
 naturally with batching.
 
-### 3. Investigate the zero-cache-hit anomaly
+### 3. Make `compute_rule_digest` context-invariant (separate work item)
 
-The trace shows 134k cache stores and 0 hits across 38 commits of
-the same project. The small cram test
-(`build-rev/cache-share.t`) proves the cache machinery works when
-inputs are truly identical — so either:
+`build-rev/cache-share-compile.t` confirms that an OCaml compile
+action **does not** share results across revs even when the .ml
+input is byte-identical: the trace shows pure `miss` events for
+`.cmi`/`.cma` on the second rev's build. Storage dedup (hardlink to
+existing cache entry) happens because contents collide, but the
+**action re-runs** every time.
 
-- Hit events aren't emitted unless `DUNE_TRACE=cache` is set.
-- The trace digest is being polluted by something rev-specific
-  (the synthesised context name? the build path? the Vcs_blob
-  Memo's reproducibility tag?) and breaking cross-rev sharing.
+Root cause is in `Build_system.compute_rule_digest`
+(`src/dune_engine/build_system.ml:218`). The action representation
+itself (`Action.digest`, line 242) already uses `Path.reach
+p ~from:dir` everywhere, so the command line is
+context-invariant. But three outer digest inputs include
+context-qualified path strings:
 
-Worth a focused investigation under `DUNE_TRACE=cache` + a 2-rev
-repro that's known to have identical compile inputs.
+1. `digest_target_paths` (line 167) — uses `Path.Build.to_string`
+   on each target, producing `default-<sha>/foo.cmi`.
+2. `Dep.Facts.digest` → `Dep.Stable_for_digest.File.path_digest`
+   (`src/dune_engine/dep.ml:334` and `:419`) — digests
+   `Path.to_string p` for each dep file path.
+3. The anonymous-action rule's `dir` field (line 777) —
+   `Path.Build.to_string dir`.
+
+All three include the build-context prefix, so two contexts with
+identical effective work compute different rule digests and never
+share cache entries.
+
+The fix is mechanical: introduce a `path_build_for_digest` helper
+that strips the context prefix via `Path.Build.extract_build_context`
+and use it at all three sites. Cross-compile contexts remain
+correctly distinguished because `Action.digest` captures the
+compiler's absolute program path, which differs per toolchain.
+
+Why this is **not** done as part of the `--rev` work:
+
+- It's a dune-engine change that touches every build, not just
+  vcs-backed ones.
+- The `rule_digest_version` must be bumped (29 → 30), invalidating
+  every existing shared-cache entry across all dune users on the
+  first new-version build.
+- The performance win is large and worth measuring separately
+  (multi-context workspaces, mounts, and cross-rev all benefit).
+
+Tracking it as a follow-up. `cache-share-compile.t` is in place to
+flip from `miss` → `hit` once the fix lands.
 
 ### 4. Deduplicate `Dune load` across rev contexts
 
