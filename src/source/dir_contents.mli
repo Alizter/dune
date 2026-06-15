@@ -7,6 +7,13 @@ module File : sig
   val of_source_path : Path.Source.t -> (t, Unix_error.Detailed.t) result Memo.t
   val of_path : Path.Outside_build_dir.t -> (t, Unix_error.Detailed.t) result Memo.t
 
+  (** Synthetic identity derived from a string. Used by source-tree
+      backings that don't have real inode/dev numbers (e.g. vcs trees)
+      to give each directory a distinct, reproducible [t] that won't
+      collide with sibling directories under
+      [Dirs_visited]'s symlink-loop check. *)
+  val synthetic : string -> t
+
   module Map : Map.S with type key = t
 end
 

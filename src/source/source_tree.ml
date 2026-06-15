@@ -403,6 +403,10 @@ let vcs_backing vcs_tree =
   let byte_provider source =
     Memo.of_non_reproducible_fiber (Dune_vcs.Vcs_tree.read_file vcs_tree source)
   in
+  (* Each directory in the vcs tree gets a synthetic [File.t] derived
+     from its path, so [Dirs_visited]'s symlink-loop check (which keys
+     directories by their inode) doesn't see false-positive collisions. *)
+  let dir_identity path = Dir_contents.File.synthetic (Path.Source.to_string path) in
   let readdir path =
     let+ entries =
       Memo.of_non_reproducible_fiber (Dune_vcs.Vcs_tree.list_dir vcs_tree path)
@@ -410,7 +414,7 @@ let vcs_backing vcs_tree =
     let files, dirs =
       List.partition_map entries ~f:(function
         | `File fn -> Left fn
-        | `Dir fn -> Right (fn, Dir_contents.File.dummy))
+        | `Dir fn -> Right (fn, dir_identity (Path.Source.relative_fname path fn)))
     in
     let dirs =
       List.sort dirs ~compare:(fun (a, _) (b, _) -> Filename.compare a b)
@@ -421,7 +425,7 @@ let vcs_backing vcs_tree =
     in
     Dir_contents.make ~files ~dirs
   in
-  let file_identity _ = Memo.return Dir_contents.File.dummy in
+  let file_identity path = Memo.return (dir_identity path) in
   (* The resolver is kept around to satisfy callers that branch on
      [Source_resolver.is_workspace] (notably the missing-dune-project
      warning), but [file_path] errors before consulting it. *)

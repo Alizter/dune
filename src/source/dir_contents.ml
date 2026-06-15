@@ -34,6 +34,13 @@ module File = struct
 
   let of_path p = Fs_memo.path_stat p >>| Result.map ~f:of_stats
   let of_source_path p = of_path (Path.Outside_build_dir.In_source_dir p)
+
+  (* Derive a stable distinct File.t from a string. The hash is wide
+     enough (63-bit on 64-bit systems) that collisions across the
+     directories of a single tree are astronomically unlikely. Used by
+     non-filesystem-backed source trees where there are no real
+     inodes. *)
+  let synthetic s = { ino = Poly.hash s; dev = 0 }
 end
 
 type t =
