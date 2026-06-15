@@ -979,7 +979,7 @@ module Builder = struct
         value
         & opt_all string []
         & info
-            [ "rev" ]
+            [ "rev"; "r" ]
             ~docv:"REV"
             ~doc:
               (Some

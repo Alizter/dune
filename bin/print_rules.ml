@@ -320,7 +320,7 @@ let term =
       value
       & flag
       & info
-          [ "r"; "recursive" ]
+          [ "recursive" ]
           ~doc:
             (Some
                "Print all rules needed to build the transitive dependencies of the given \
