@@ -123,6 +123,7 @@ module Context : sig
       ; merlin : Merlin.t
       ; cms_cmt_dependency : Cms_cmt_dependency.t
       ; mounts : Mount.t list
+      ; vcs_tree : Dune_vcs.Vcs_tree.t option
       }
   end
 
@@ -174,11 +175,6 @@ type t = private
   ; dir : Path.Source.t
   ; pins : Pin_stanza.Workspace.t
   ; vcs_revs : (Context_name.t * Dune_vcs.Vcs_tree.t) list
-    (** Synthesised user-facing contexts that read source from a VCS
-        revision (one entry per [-r <rev>] CLI flag). Each entry
-        contributes one [Build_context.t] with a [Vcs_rev] source.
-        Empty in workspaces parsed from [dune-workspace]; populated
-        by [synthesise_for_revs]. *)
   }
 
 val equal : t -> t -> bool
@@ -216,10 +212,15 @@ val workspace : unit -> t Memo.t
     is not consulted. *)
 val synthesise_for_revs : (Context_name.t * Dune_vcs.Vcs_tree.t) list -> t
 
-(** One-shot hook used by [workspace ()]: when set, the synthesised
-    workspace is used instead of parsing [dune-workspace]. Called by
-    the CLI layer when [-r] flags are present. *)
-val set_synthesised_for_revs : (Context_name.t * Dune_vcs.Vcs_tree.t) list -> unit
+(** One-shot hook used by [workspace ()]: when set, the resolver is
+    invoked once inside the Memo computation that loads the workspace,
+    and the resulting list is used to synthesise it (bypassing
+    [dune-workspace] parsing entirely). Called by the CLI layer when
+    [-r] flags are present; the resolver does the actual rev lookup
+    (e.g., [Vcs_tree.resolve_set]). *)
+val set_synthesised_for_revs
+  :  (unit -> (Context_name.t * Dune_vcs.Vcs_tree.t) list Fiber.t)
+  -> unit
 
 (** Same as [workspace ()] except that if there are errors related to fields
     other than the ones of [config], they are not reported. *)

@@ -516,6 +516,11 @@ module Context = struct
       ; merlin : Merlin.t
       ; cms_cmt_dependency : Cms_cmt_dependency.t
       ; mounts : Mount.t list
+      ; vcs_tree : Vcs_tree.t option
+        (** When [Some], this context reads source from a VCS revision
+            rather than the workspace filesystem. Used by the
+            [--rev] CLI flag (see [synthesise_for_revs]); not settable
+            via [dune-workspace] syntax. *)
       }
 
     let repr =
@@ -545,6 +550,7 @@ module Context = struct
           ; merlin
           ; cms_cmt_dependency
           ; mounts
+          ; vcs_tree
           }
           t
       =
@@ -563,6 +569,7 @@ module Context = struct
       && Merlin.equal merlin t.merlin
       && Cms_cmt_dependency.equal cms_cmt_dependency t.cms_cmt_dependency
       && List.equal Mount.equal mounts t.mounts
+      && Option.equal Vcs_tree.equal vcs_tree t.vcs_tree
     ;;
 
     let fdo_suffix t =
@@ -677,6 +684,7 @@ module Context = struct
                 | false -> Not_selected))
         ; cms_cmt_dependency
         ; mounts
+        ; vcs_tree = None
         }
     ;;
   end
@@ -871,6 +879,30 @@ module Context = struct
           ; merlin = Not_selected
           ; cms_cmt_dependency = Cms_cmt_dependency.No_dependency
           ; mounts = []
+          ; vcs_tree = None
+          }
+      }
+  ;;
+
+  let for_rev ~name ~vcs_tree =
+    Default
+      { lock_dir = None
+      ; base =
+          { loc = Loc.of_pos __POS__
+          ; targets = [ Target.Native ]
+          ; profile = Profile.default
+          ; name
+          ; host_context = None
+          ; env = None
+          ; toolchain = None
+          ; paths = []
+          ; fdo_target_exe = None
+          ; dynamically_linked_foreign_archives = true
+          ; instrument_with = []
+          ; merlin = Not_selected
+          ; cms_cmt_dependency = Cms_cmt_dependency.No_dependency
+          ; mounts = []
+          ; vcs_tree = Some vcs_tree
           }
       }
   ;;
@@ -888,7 +920,12 @@ module Context = struct
           let name = Context_name.target name ~toolchain in
           Some (Build_context.create ~name, source))
     in
-    let workspace = for_base ~name:parent Build_context_source.Workspace in
+    let primary_source : Build_context_source.t =
+      match common.vcs_tree with
+      | Some v -> Vcs_rev v
+      | None -> Workspace
+    in
+    let workspace = for_base ~name:parent primary_source in
     let mounts =
       List.concat_map common.mounts ~f:(fun (mount : Mount.t) ->
         let mount_name = Mount.internal_name mount in
@@ -1397,60 +1434,65 @@ let synthesise_for_revs revs =
       ~config_from_command_line:Dune_config.Partial.empty
       ~config_from_workspace_file:Dune_config.Partial.empty
   in
+  let contexts =
+    List.map revs ~f:(fun (name, vcs_tree) -> Context.for_rev ~name ~vcs_tree)
+  in
   { merlin_context = None
-  ; contexts = []
+  ; contexts
   ; env = None
   ; config
   ; repos = default_repositories
   ; lock_dirs = []
   ; dir = Path.Source.root
   ; pins = Pin_stanza.Workspace.empty
-  ; vcs_revs = revs
+  ; vcs_revs = []
   }
 ;;
 
-let synthesised_revs_ref : (Context_name.t * Vcs_tree.t) list ref = ref []
-let set_synthesised_for_revs revs = synthesised_revs_ref := revs
-
-let synthesised_for_revs () =
-  match !synthesised_revs_ref with
-  | [] -> None
-  | revs -> Some revs
+let synthesised_revs_resolver
+  : (unit -> (Context_name.t * Vcs_tree.t) list Fiber.t) option ref
+  =
+  ref None
 ;;
 
-let synthesised_step1 _clflags revs =
-  let t = synthesise_for_revs revs in
-  { Step1.t = lazy t; config = t.config }
+let set_synthesised_for_revs resolver = synthesised_revs_resolver := Some resolver
+let synthesised_for_revs () = !synthesised_revs_resolver
+
+(* Config used for a synthesised-for-revs workspace: independent of any
+   on-disk dune-workspace, so consultable without yielding on rev
+   resolution. *)
+let synthesised_config () =
+  create_final_config
+    ~config_from_config_file:Dune_config.Partial.empty
+    ~config_from_command_line:Dune_config.Partial.empty
+    ~config_from_workspace_file:Dune_config.Partial.empty
 ;;
 
 let workspace_step1 =
   let open Memo.O in
   let f () =
     let clflags = Clflags.t () in
-    match synthesised_for_revs () with
-    | Some revs -> Memo.return (synthesised_step1 clflags revs)
-    | None ->
-      let* workspace_file =
-        match clflags.workspace_file with
-        | None ->
-          let p = Path.Outside_build_dir.of_string (Filename.to_string filename) in
-          let+ exists = Fs_memo.file_exists p in
-          Option.some_if exists p
-        | Some p ->
-          Fs_memo.file_exists p
-          >>| (function
-           | true -> Some p
-           | false ->
-             User_error.raise
-               [ Pp.textf
-                   "Workspace file %s does not exist"
-                   (Path.Outside_build_dir.to_string_maybe_quoted p)
-               ])
-      in
-      let clflags = { clflags with workspace_file } in
-      (match workspace_file with
-       | None -> Memo.return (default_step1 clflags)
-       | Some p -> load_step1 clflags p)
+    let* workspace_file =
+      match clflags.workspace_file with
+      | None ->
+        let p = Path.Outside_build_dir.of_string (Filename.to_string filename) in
+        let+ exists = Fs_memo.file_exists p in
+        Option.some_if exists p
+      | Some p ->
+        Fs_memo.file_exists p
+        >>| (function
+         | true -> Some p
+         | false ->
+           User_error.raise
+             [ Pp.textf
+                 "Workspace file %s does not exist"
+                 (Path.Outside_build_dir.to_string_maybe_quoted p)
+             ])
+    in
+    let clflags = { clflags with workspace_file } in
+    match workspace_file with
+    | None -> Memo.return (default_step1 clflags)
+    | Some p -> load_step1 clflags p
   in
   let memo = Memo.lazy_ ~name:"workspaces-internal" f in
   fun () -> Memo.Lazy.force memo
@@ -1458,18 +1500,40 @@ let workspace_step1 =
 
 let workspace_config () =
   let open Memo.O in
-  let+ step1 = workspace_step1 () in
-  step1.config
+  match synthesised_for_revs () with
+  | Some _ -> Memo.return (synthesised_config ())
+  | None ->
+    let+ step1 = workspace_step1 () in
+    step1.config
 ;;
 
 let workspace =
   let open Memo.O in
-  let f () =
-    let+ step1 = workspace_step1 () in
-    Lazy.force step1.t
+  let regular_memo =
+    let f () =
+      let+ step1 = workspace_step1 () in
+      Lazy.force step1.t
+    in
+    Memo.lazy_ ~cutoff:equal ~name:"workspace" f
   in
-  let memo = Memo.lazy_ ~cutoff:equal ~name:"workspace" f in
-  fun () -> Memo.Lazy.force memo
+  let synthesised_memo =
+    let f resolver =
+      let+ revs = Memo.of_non_reproducible_fiber (resolver ()) in
+      synthesise_for_revs revs
+    in
+    Memo.lazy_ ~cutoff:equal ~name:"workspace-synthesised-for-revs" (fun () ->
+      match synthesised_for_revs () with
+      | Some resolver -> f resolver
+      | None ->
+        Code_error.raise
+          "Workspace.workspace: synthesised resolver disappeared between dispatch and \
+           force"
+          [])
+  in
+  fun () ->
+    match synthesised_for_revs () with
+    | Some _ -> Memo.Lazy.force synthesised_memo
+    | None -> Memo.Lazy.force regular_memo
 ;;
 
 let update_execution_parameters t ep =
@@ -1479,10 +1543,5 @@ let update_execution_parameters t ep =
 ;;
 
 let build_contexts t : (Build_context.t * Build_context_source.t) list =
-  let from_contexts = List.concat_map t.contexts ~f:Context.build_contexts in
-  let from_revs =
-    List.map t.vcs_revs ~f:(fun (name, vcs_tree) ->
-      Build_context.create ~name, Build_context_source.Vcs_rev vcs_tree)
-  in
-  from_contexts @ from_revs
+  List.concat_map t.contexts ~f:Context.build_contexts
 ;;

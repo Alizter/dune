@@ -3,6 +3,7 @@ include Dune_vcs
 include Dune_util
 include Dune_config_file
 module Console = Console
+module Fiber = Fiber
 
 include struct
   open Dune_engine

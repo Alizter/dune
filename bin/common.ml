@@ -607,6 +607,7 @@ module Builder = struct
     ; force : bool
     ; no_print_directory : bool
     ; store_orig_src_dir : bool
+    ; revs : string list
     ; default_target : Arg.Dep.t (* For build & runtest only *)
     ; watch : Dune_rpc_impl.Watch_mode_config.t
     ; dump_gc_stats : Path.External.t option
@@ -973,6 +974,20 @@ module Builder = struct
             [ "action-runner" ]
             ~docs
             ~doc:(Some "Run spawned build processes in an external dune action runner."))
+    and+ revs =
+      Arg.(
+        value
+        & opt_all string []
+        & info
+            [ "rev" ]
+            ~docv:"REV"
+            ~doc:
+              (Some
+                 "Build the project at the given VCS revision instead of the working \
+                  tree. Each occurrence is passed verbatim to the backend's revset \
+                  resolver (e.g., git rev-list, hg log -r), so single shas, ranges \
+                  (HEAD~3..HEAD) and richer revsets all work. Repeatable; revs are \
+                  deduped and built as independent contexts named default-<short-rev>."))
     in
     { no_build
     ; debug_dep_path
@@ -1019,6 +1034,7 @@ module Builder = struct
     ; target_exec
     ; action_runner
     ; sandbox_actions
+    ; revs
     }
   ;;
 
@@ -1060,6 +1076,7 @@ module Builder = struct
         ; target_exec
         ; action_runner
         ; sandbox_actions
+        ; revs
         }
     =
     No_build.equal t.no_build no_build
@@ -1101,6 +1118,7 @@ module Builder = struct
     && Option.equal String.equal t.target_exec target_exec
     && Bool.equal t.action_runner action_runner
     && Bool.equal t.sandbox_actions sandbox_actions
+    && List.equal String.equal t.revs revs
   ;;
 end
 
@@ -1303,6 +1321,9 @@ let init_with_root_and_rpc ~(root : Workspace_root.t) ~rpc_build (builder : Buil
      can interpret errors in the workspace file. *)
   print_entering_message c;
   Workspace.Clflags.set c.builder.workspace_config;
+  (match c.builder.revs with
+   | [] -> ()
+   | revs -> Workspace.set_synthesised_for_revs (fun () -> Revs.resolve ~revs));
   let config =
     (* Here we make the assumption that this computation doesn't yield. *)
     Fiber.run (Memo.run (Workspace.workspace_config ())) ~iter:(fun () -> assert false)

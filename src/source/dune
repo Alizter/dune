@@ -12,6 +12,7 @@
   dune_trace
   dune_util
   dune_vcs
+  fiber
   memo
   ocaml_config
   predicate_lang

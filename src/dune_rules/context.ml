@@ -158,6 +158,7 @@ module Builder = struct
         ; merlin
         ; cms_cmt_dependency
         ; mounts = _
+        ; vcs_tree = _
         }
     =
     let env =
