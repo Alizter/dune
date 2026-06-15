@@ -127,6 +127,7 @@ let error_unable_to_load ~path unix_error =
 
 let rec physical
           ~resolver
+          ~byte_provider
           ~project
           ~default_vcs
           ~dir
@@ -151,6 +152,7 @@ let rec physical
             Memo.lazy_node (fun () ->
               find_dir_raw
                 ~resolver
+                ~byte_provider
                 ~default_vcs
                 ~path
                 ~basename:fn
@@ -162,7 +164,16 @@ let rec physical
             |> Memo.Node.read
         })
 
-and virtual_ ~resolver ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
+and virtual_
+      ~resolver
+      ~byte_provider
+      ~project
+      ~sub_dirs
+      ~parent_status
+      ~dune_file
+      ~init
+      ~path
+  =
   match dune_file with
   | None -> init
   | Some df ->
@@ -185,6 +196,7 @@ and virtual_ ~resolver ~project ~sub_dirs ~parent_status ~dune_file ~init ~path 
                     Memo.lazy_node (fun () ->
                       find_dir_raw
                         ~resolver
+                        ~byte_provider
                         ~default_vcs:Dir0.Vcs.Ancestor_vcs
                         ~path:(Path.Source.relative_fname path fn)
                         ~basename:fn
@@ -202,6 +214,7 @@ and virtual_ ~resolver ~project ~sub_dirs ~parent_status ~dune_file ~init ~path 
 
 and contents
       ~resolver
+      ~byte_provider
       readdir
       ~default_vcs
       ~path
@@ -232,6 +245,7 @@ and contents
     let dirs =
       physical
         ~resolver
+        ~byte_provider
         ~default_vcs:vcs
         ~project
         ~dir:path
@@ -243,6 +257,7 @@ and contents
     in
     virtual_
       ~resolver
+      ~byte_provider
       ~project
       ~sub_dirs
       ~parent_status:dir_status
@@ -254,6 +269,7 @@ and contents
 
 and find_dir_raw
       ~resolver
+      ~byte_provider
       ~virtual_
       ~default_vcs
       ~dune_file
@@ -282,20 +298,20 @@ and find_dir_raw
   let* project =
     if status = Data_only
     then Memo.return project
-    else (
-      let read source = Dune_engine.Fs_memo.file_contents (resolve source) in
+    else
       Dune_project.gen_load
-        ~read
+        ~read:byte_provider
         ~dir:path
         ~files:(Dir_contents.files readdir)
         ~infer_from_opam_files:false
         ~load_opam_file_with_contents:Dune_pkg.Opam_file.load_opam_file_with_contents
       >>| Option.map
             ~f:(Only_packages.filter_packages_in_project ~vendored:(status = Vendored))
-      >>| Option.value ~default:project)
+      >>| Option.value ~default:project
   in
   contents
     ~resolver
+    ~byte_provider
     readdir
     ~default_vcs
     ~path
@@ -305,7 +321,7 @@ and find_dir_raw
     ~dir_status:status
 ;;
 
-let make_root_node ~resolver ~read_only =
+let make_root_node ~resolver ~byte_provider ~read_only =
   Memo.lazy_node
   @@ fun () ->
   let resolve = Source_resolver.resolve resolver in
@@ -324,9 +340,8 @@ let make_root_node ~resolver ~read_only =
   in
   let vcs = Dir0.Vcs.get_vcs ~default:Ancestor_vcs ~readdir ~path in
   let* project =
-    let read source = Dune_engine.Fs_memo.file_contents (resolve source) in
     Dune_project.gen_load
-      ~read
+      ~read:byte_provider
       ~dir:path
       ~files:(Dir_contents.files readdir)
       ~infer_from_opam_files:true
@@ -344,6 +359,7 @@ let make_root_node ~resolver ~read_only =
   in
   contents
     ~resolver
+    ~byte_provider
     readdir
     ~default_vcs:vcs
     ~path
@@ -358,8 +374,21 @@ type t =
   ; read_only : bool
   }
 
+(* Default byte provider for filesystem-backed source trees: route reads
+   through Fs_memo at the resolver's translated path. Vcs-backed trees
+   override this with a closure that goes through [Vcs_tree.read_file]
+   instead. *)
+let fs_memo_byte_provider resolver source =
+  Dune_engine.Fs_memo.file_contents (Source_resolver.resolve resolver source)
+;;
+
 let default =
-  { root_node = make_root_node ~resolver:Source_resolver.workspace ~read_only:false
+  let resolver = Source_resolver.workspace in
+  { root_node =
+      make_root_node
+        ~resolver
+        ~byte_provider:(fs_memo_byte_provider resolver)
+        ~read_only:false
   ; read_only = false
   }
 ;;
@@ -373,7 +402,10 @@ let of_external_root ?(read_only = true) root =
         Path.Outside_build_dir.External
           (Path.External.relative root (Path.Source.to_string p)))
   in
-  { root_node = make_root_node ~resolver ~read_only; read_only }
+  { root_node =
+      make_root_node ~resolver ~byte_provider:(fs_memo_byte_provider resolver) ~read_only
+  ; read_only
+  }
 ;;
 
 let read_only t = t.read_only
