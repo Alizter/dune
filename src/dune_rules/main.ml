@@ -77,6 +77,19 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
   let promote_source ~chmod ~delete_dst_if_it_is_a_directory ~src ~dst =
     let open Fiber.O in
     let* ctx = Path.Build.parent_exn src |> Context.DB.by_dir |> Memo.run in
+    let* source_tree = Memo.run (Source_tree.for_context (Context.name ctx)) in
+    if Source_tree.read_only source_tree
+    then
+      User_error.raise
+        [ Pp.textf
+            "Cannot promote %s into a read-only source tree."
+            (Path.Build.to_string_maybe_quoted src)
+        ; Pp.textf
+            "Context %S is backed by a read-only source (e.g. a VCS revision under [dune \
+             build -r]); promotion would either silently write to the workspace's \
+             working tree or fail."
+            (Context_name.to_string (Context.name ctx))
+        ];
     let conf = Artifact_substitution.Conf.of_context ctx in
     let src = Path.build src in
     let dst = Path.source dst in
