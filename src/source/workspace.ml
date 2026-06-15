@@ -1428,10 +1428,20 @@ let load_step1 clflags p =
 let filename = Filename.dune_workspace
 
 let synthesise_for_revs revs =
+  let { Clflags.x = _
+      ; profile = _
+      ; instrument_with = _
+      ; workspace_file = _
+      ; config_from_command_line
+      ; config_from_config_file
+      }
+    =
+    Clflags.t ()
+  in
   let config =
     create_final_config
-      ~config_from_config_file:Dune_config.Partial.empty
-      ~config_from_command_line:Dune_config.Partial.empty
+      ~config_from_config_file
+      ~config_from_command_line
       ~config_from_workspace_file:Dune_config.Partial.empty
   in
   let contexts =
@@ -1458,13 +1468,25 @@ let synthesised_revs_resolver
 let set_synthesised_for_revs resolver = synthesised_revs_resolver := Some resolver
 let synthesised_for_revs () = !synthesised_revs_resolver
 
-(* Config used for a synthesised-for-revs workspace: independent of any
-   on-disk dune-workspace, so consultable without yielding on rev
-   resolution. *)
+(* Config used for a synthesised-for-revs workspace. The on-disk
+   dune-workspace is ignored, but the user-config-file and
+   command-line config still apply (so e.g. [--config-file cache.cfg]
+   continues to enable the shared cache). Consultable without
+   yielding on rev resolution. *)
 let synthesised_config () =
+  let { Clflags.x = _
+      ; profile = _
+      ; instrument_with = _
+      ; workspace_file = _
+      ; config_from_command_line
+      ; config_from_config_file
+      }
+    =
+    Clflags.t ()
+  in
   create_final_config
-    ~config_from_config_file:Dune_config.Partial.empty
-    ~config_from_command_line:Dune_config.Partial.empty
+    ~config_from_config_file
+    ~config_from_command_line
     ~config_from_workspace_file:Dune_config.Partial.empty
 ;;
 
