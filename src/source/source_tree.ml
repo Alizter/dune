@@ -333,16 +333,19 @@ and find_dir_raw
     ~dir_status:status
 ;;
 
-let make_root_node ~backing ~read_only =
+let make_root_node ~backing ~read_only ~vendored =
   Memo.lazy_node
   @@ fun () ->
   let path = Path.Source.root in
-  (* A read-only source tree (e.g. backed by a git sha or a fetched
-     archive) is fully vendored: the user can't be expected to edit its
-     dune files. Starting the root as [Vendored] propagates through the
-     usual eval_status machinery so every directory below is Vendored
-     too. *)
-  let dir_status : Source_dir_status.t = if read_only then Vendored else Normal in
+  (* [vendored] is set by callers that intend the tree to be treated
+     as third-party (fetched dependencies, vendored mounts): warnings
+     are suppressed and packages are filtered as if listed in
+     [(vendored_dirs ...)]. It's independent of [read_only] (which
+     only controls promotion). A vcs revision is read-only but not
+     vendored — it's the user's own code at a specific point in
+     time. *)
+  let _ = read_only in
+  let dir_status : Source_dir_status.t = if vendored then Vendored else Normal in
   let* readdir = backing.readdir path in
   let vcs = Dir0.Vcs.get_vcs ~default:Ancestor_vcs ~readdir ~path in
   let* project =
@@ -440,6 +443,7 @@ let default =
       make_root_node
         ~backing:(filesystem_backing Source_resolver.workspace)
         ~read_only:false
+        ~vendored:false
   ; read_only = false
   }
 ;;
@@ -453,13 +457,21 @@ let of_external_root ?(read_only = true) root =
         Path.Outside_build_dir.External
           (Path.External.relative root (Path.Source.to_string p)))
   in
-  { root_node = make_root_node ~backing:(filesystem_backing resolver) ~read_only
+  (* External roots default to read-only-and-vendored; this is the
+     classic "fetched dependency" mode used by [dune pkg] and
+     vendored mounts. *)
+  { root_node =
+      make_root_node ~backing:(filesystem_backing resolver) ~read_only ~vendored:read_only
   ; read_only
   }
 ;;
 
 let of_vcs_tree vcs_tree =
-  { root_node = make_root_node ~backing:(vcs_backing vcs_tree) ~read_only:true
+  (* A vcs revision is read-only (no promotion) but NOT vendored: it's
+     the user's own code at a specific point in time, and we want
+     dune to generate rules, run @runtest, etc. against it normally. *)
+  { root_node =
+      make_root_node ~backing:(vcs_backing vcs_tree) ~read_only:true ~vendored:false
   ; read_only = true
   }
 ;;
