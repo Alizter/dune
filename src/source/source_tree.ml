@@ -31,6 +31,19 @@ end = struct
   ;;
 end
 
+(* Per-tree closures controlling how the source tree's bytes and
+   directory structure are read. Filesystem-backed trees route reads
+   through Fs_memo + the resolver; vcs-backed trees pull bytes and
+   listings from a [Vcs_tree.t] directly without touching the
+   filesystem. *)
+type backing =
+  { resolver : Source_resolver.t
+  ; byte_provider : Path.Source.t -> string Memo.t
+  ; readdir : Path.Source.t -> Dir_contents.t Memo.t
+  ; file_identity : Path.Source.t -> Dir_contents.File.t Memo.t
+  ; vcs_tree : Dune_vcs.Vcs_tree.t option
+  }
+
 module Dir0 = struct
   module Vcs = struct
     type nonrec t =
@@ -56,7 +69,7 @@ module Dir0 = struct
     ; dune_file : Dune_file.t option
     ; project : Dune_project.t
     ; vcs : Vcs.t
-    ; resolver : Source_resolver.t
+    ; backing : backing
     }
 
   and sub_dir =
@@ -72,7 +85,7 @@ module Dir0 = struct
             ; sub_dirs
             ; vcs = _
             ; project = _
-            ; resolver = _
+            ; backing = _
             }
     =
     Dyn.record
@@ -100,8 +113,24 @@ module Dir0 = struct
   let sub_dir_as_t (s : sub_dir) = s.sub_dir_as_t
 
   let file_path t filename =
+    match t.backing.vcs_tree with
+    | Some _ ->
+      Code_error.raise
+        "Source_tree.Dir.file_path called on a vcs-backed directory; callers must use \
+         file_source instead."
+        [ "path", Path.Source.to_dyn t.path; "filename", Filename.to_dyn filename ]
+    | None ->
+      let logical = Path.Source.relative_fname t.path filename in
+      Source_resolver.resolve t.backing.resolver logical
+  ;;
+
+  let file_source t filename : Dune_engine.Build_config.source_file =
     let logical = Path.Source.relative_fname t.path filename in
-    Source_resolver.resolve t.resolver logical
+    match t.backing.vcs_tree with
+    | Some vcs_tree ->
+      Vcs_blob
+        (Memo.of_non_reproducible_fiber (Dune_vcs.Vcs_tree.read_file vcs_tree logical))
+    | None -> Filesystem (Source_resolver.resolve t.backing.resolver logical)
   ;;
 end
 
@@ -126,8 +155,7 @@ let error_unable_to_load ~path unix_error =
 ;;
 
 let rec physical
-          ~resolver
-          ~byte_provider
+          ~backing
           ~project
           ~default_vcs
           ~dir
@@ -151,8 +179,7 @@ let rec physical
         ; sub_dir_as_t =
             Memo.lazy_node (fun () ->
               find_dir_raw
-                ~resolver
-                ~byte_provider
+                ~backing
                 ~default_vcs
                 ~path
                 ~basename:fn
@@ -164,16 +191,7 @@ let rec physical
             |> Memo.Node.read
         })
 
-and virtual_
-      ~resolver
-      ~byte_provider
-      ~project
-      ~sub_dirs
-      ~parent_status
-      ~dune_file
-      ~init
-      ~path
-  =
+and virtual_ ~backing ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
   match dune_file with
   | None -> init
   | Some df ->
@@ -195,8 +213,7 @@ and virtual_
                 ; sub_dir_as_t =
                     Memo.lazy_node (fun () ->
                       find_dir_raw
-                        ~resolver
-                        ~byte_provider
+                        ~backing
                         ~default_vcs:Dir0.Vcs.Ancestor_vcs
                         ~path:(Path.Source.relative_fname path fn)
                         ~basename:fn
@@ -213,8 +230,7 @@ and virtual_
     Filename.Array.Map.union_left_biased init virtual_dirs
 
 and contents
-      ~resolver
-      ~byte_provider
+      ~backing
       readdir
       ~default_vcs
       ~path
@@ -226,8 +242,8 @@ and contents
   let files = Dir_contents.files readdir in
   let+ dune_file =
     Dune_file.load
-      ~resolver
-      ~byte_provider
+      ~resolver:backing.resolver
+      ~byte_provider:backing.byte_provider
       ~dir:path
       dir_status
       project
@@ -251,8 +267,7 @@ and contents
     in
     let dirs =
       physical
-        ~resolver
-        ~byte_provider
+        ~backing
         ~default_vcs:vcs
         ~project
         ~dir:path
@@ -263,8 +278,7 @@ and contents
         ~parent_status:dir_status
     in
     virtual_
-      ~resolver
-      ~byte_provider
+      ~backing
       ~project
       ~sub_dirs
       ~parent_status:dir_status
@@ -272,11 +286,10 @@ and contents
       ~path
       ~init:dirs
   in
-  { Dir0.project; vcs; status = dir_status; path; files; sub_dirs; dune_file; resolver }
+  { Dir0.project; vcs; status = dir_status; path; files; sub_dirs; dune_file; backing }
 
 and find_dir_raw
-      ~resolver
-      ~byte_provider
+      ~backing
       ~virtual_
       ~default_vcs
       ~dune_file
@@ -287,27 +300,20 @@ and find_dir_raw
       ~basename
   : Dir0.t Memo.t
   =
-  let resolve = Source_resolver.resolve resolver in
   let status =
     if Dune_project.cram project && Cram_test.is_cram_suffix basename
     then Source_dir_status.Data_only
     else status
   in
   let* readdir =
-    if virtual_
-    then Memo.return Dir_contents.empty
-    else
-      Dir_contents.of_outside_build_dir ~path_for_hint:path ~physical:(resolve path)
-      >>| function
-      | Ok dir -> dir
-      | Error _ -> Dir_contents.empty
+    if virtual_ then Memo.return Dir_contents.empty else backing.readdir path
   in
   let* project =
     if status = Data_only
     then Memo.return project
     else
       Dune_project.gen_load
-        ~read:byte_provider
+        ~read:backing.byte_provider
         ~dir:path
         ~files:(Dir_contents.files readdir)
         ~infer_from_opam_files:false
@@ -317,8 +323,7 @@ and find_dir_raw
       >>| Option.value ~default:project
   in
   contents
-    ~resolver
-    ~byte_provider
+    ~backing
     readdir
     ~default_vcs
     ~path
@@ -328,10 +333,9 @@ and find_dir_raw
     ~dir_status:status
 ;;
 
-let make_root_node ~resolver ~byte_provider ~read_only =
+let make_root_node ~backing ~read_only =
   Memo.lazy_node
   @@ fun () ->
-  let resolve = Source_resolver.resolve resolver in
   let path = Path.Source.root in
   (* A read-only source tree (e.g. backed by a git sha or a fetched
      archive) is fully vendored: the user can't be expected to edit its
@@ -339,16 +343,11 @@ let make_root_node ~resolver ~byte_provider ~read_only =
      usual eval_status machinery so every directory below is Vendored
      too. *)
   let dir_status : Source_dir_status.t = if read_only then Vendored else Normal in
-  let* readdir =
-    Dir_contents.of_outside_build_dir ~path_for_hint:path ~physical:(resolve path)
-    >>| function
-    | Ok dir -> dir
-    | Error unix_error -> error_unable_to_load ~path unix_error
-  in
+  let* readdir = backing.readdir path in
   let vcs = Dir0.Vcs.get_vcs ~default:Ancestor_vcs ~readdir ~path in
   let* project =
     Dune_project.gen_load
-      ~read:byte_provider
+      ~read:backing.byte_provider
       ~dir:path
       ~files:(Dir_contents.files readdir)
       ~infer_from_opam_files:true
@@ -358,15 +357,10 @@ let make_root_node ~resolver ~byte_provider ~read_only =
      | None -> Dune_project.anonymous ~dir:path Package_info.empty Package.Name.Map.empty)
     >>| Only_packages.filter_packages_in_project ~vendored:(dir_status = Vendored)
   in
-  let* dirs_visited =
-    Dir_contents.File.of_path (resolve path)
-    >>| function
-    | Ok file -> Dirs_visited.singleton path file
-    | Error unix_error -> error_unable_to_load ~path unix_error
-  in
+  let* file = backing.file_identity path in
+  let dirs_visited = Dirs_visited.singleton path file in
   contents
-    ~resolver
-    ~byte_provider
+    ~backing
     readdir
     ~default_vcs:vcs
     ~path
@@ -381,20 +375,66 @@ type t =
   ; read_only : bool
   }
 
-(* Default byte provider for filesystem-backed source trees: route reads
-   through Fs_memo at the resolver's translated path. Vcs-backed trees
-   override this with a closure that goes through [Vcs_tree.read_file]
-   instead. *)
-let fs_memo_byte_provider resolver source =
-  Dune_engine.Fs_memo.file_contents (Source_resolver.resolve resolver source)
+(* Filesystem backing: every closure delegates to Fs_memo + the
+   resolver. This is the existing pre-vcs behaviour, factored out so
+   vcs-backed trees can supply a different backing. *)
+let filesystem_backing resolver =
+  let resolve = Source_resolver.resolve resolver in
+  let byte_provider source = Dune_engine.Fs_memo.file_contents (resolve source) in
+  let readdir path =
+    Dir_contents.of_outside_build_dir ~path_for_hint:path ~physical:(resolve path)
+    >>| function
+    | Ok dir -> dir
+    | Error _ -> Dir_contents.empty
+  in
+  let file_identity path =
+    Dir_contents.File.of_path (resolve path)
+    >>| function
+    | Ok file -> file
+    | Error unix_error -> error_unable_to_load ~path unix_error
+  in
+  { resolver; byte_provider; readdir; file_identity; vcs_tree = None }
+;;
+
+(* Vcs backing: directory listings come from the in-memory tree,
+   bytes come from [Vcs_tree.read_file] (which shells out to the
+   backend); no filesystem reads happen at any point. *)
+let vcs_backing vcs_tree =
+  let byte_provider source =
+    Memo.of_non_reproducible_fiber (Dune_vcs.Vcs_tree.read_file vcs_tree source)
+  in
+  let readdir path =
+    let+ entries =
+      Memo.of_non_reproducible_fiber (Dune_vcs.Vcs_tree.list_dir vcs_tree path)
+    in
+    let files, dirs =
+      List.partition_map entries ~f:(function
+        | `File fn -> Left fn
+        | `Dir fn -> Right (fn, Dir_contents.File.dummy))
+    in
+    let dirs =
+      List.sort dirs ~compare:(fun (a, _) (b, _) -> Filename.compare a b)
+      |> Filename.Array.Map.of_sorted_list_exn
+    in
+    let files =
+      List.sort files ~compare:Filename.compare |> Filename.Array.Set.of_sorted_list
+    in
+    Dir_contents.make ~files ~dirs
+  in
+  let file_identity _ = Memo.return Dir_contents.File.dummy in
+  (* The resolver is kept around to satisfy callers that branch on
+     [Source_resolver.is_workspace] (notably the missing-dune-project
+     warning), but [file_path] errors before consulting it. *)
+  let resolver =
+    Source_resolver.create (fun p -> Path.Outside_build_dir.In_source_dir p)
+  in
+  { resolver; byte_provider; readdir; file_identity; vcs_tree = Some vcs_tree }
 ;;
 
 let default =
-  let resolver = Source_resolver.workspace in
   { root_node =
       make_root_node
-        ~resolver
-        ~byte_provider:(fs_memo_byte_provider resolver)
+        ~backing:(filesystem_backing Source_resolver.workspace)
         ~read_only:false
   ; read_only = false
   }
@@ -409,9 +449,14 @@ let of_external_root ?(read_only = true) root =
         Path.Outside_build_dir.External
           (Path.External.relative root (Path.Source.to_string p)))
   in
-  { root_node =
-      make_root_node ~resolver ~byte_provider:(fs_memo_byte_provider resolver) ~read_only
+  { root_node = make_root_node ~backing:(filesystem_backing resolver) ~read_only
   ; read_only
+  }
+;;
+
+let of_vcs_tree vcs_tree =
+  { root_node = make_root_node ~backing:(vcs_backing vcs_tree) ~read_only:true
+  ; read_only = true
   }
 ;;
 

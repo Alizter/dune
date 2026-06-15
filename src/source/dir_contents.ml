@@ -50,6 +50,7 @@ let equal x y =
 ;;
 
 let empty = { files = Filename.Array.Set.empty; dirs = Filename.Array.Map.empty }
+let make ~files ~dirs = { files; dirs }
 
 let to_dyn { files; dirs } =
   let open Dyn in

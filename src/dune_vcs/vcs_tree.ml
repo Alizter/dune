@@ -16,10 +16,14 @@ type t =
   ; root : Path.t
   ; rev_id : string
   ; tree : tree_node Path.Source.Map.t
+  ; blob_shas : string Path.Source.Map.t
+  ; files : Path.Source.t list
   }
 
 let rev_id t = t.rev_id
 let kind t = t.kind
+let blob_sha t path = Path.Source.Map.find t.blob_shas path
+let files t = t.files
 
 let not_implemented kind =
   User_error.raise
@@ -78,7 +82,21 @@ let resolve_git_set ~root ~rev =
   in
   Fiber.parallel_map commits ~f:(fun sha ->
     let+ entries = Git_subprocess.ls_tree_recursive git ~commit:sha in
-    { kind = Vcs.Kind.Git; root; rev_id = sha; tree = index_tree entries })
+    let blob_shas =
+      List.fold_left entries ~init:Path.Source.Map.empty ~f:(fun acc (path, blob_sha) ->
+        Path.Source.Map.set acc (Path.Source.of_local path) blob_sha)
+    in
+    let files =
+      List.map entries ~f:(fun (path, _) -> Path.Source.of_local path)
+      |> List.sort ~compare:Path.Source.compare
+    in
+    { kind = Vcs.Kind.Git
+    ; root
+    ; rev_id = sha
+    ; tree = index_tree entries
+    ; blob_shas
+    ; files
+    })
 ;;
 
 let resolve_set (vcs : Vcs.t) ~rev =

@@ -285,29 +285,39 @@ module rec Load_rules : sig
 end = struct
   open Load_rules
 
-  let copy_source_action ~src_physical ~build_path : Action.Full.t Action_builder.t =
-    let action =
+  let copy_source_action ~(src : Build_config.source_file) ~build_path
+    : Action.Full.t Action_builder.t
+    =
+    match src with
+    | Filesystem src_physical ->
+      let action =
+        Action.Full.make
+          (Action.copy (Path.outside_build_dir src_physical) build_path)
+          (* Sandboxing this action doesn't make much sense: if we can copy
+             [src_physical] to the sandbox, we might as well copy it to the
+             build directory directly. *)
+          ~sandbox:Sandbox_config.no_sandboxing
+      in
+      Action_builder.Expert.record_dep_on_source_file_exn
+        action
+        ~loc:Current_rule_loc.get
+        src_physical
+    | Vcs_blob bytes ->
+      let open Action_builder.O in
+      let+ contents = Action_builder.of_memo bytes in
       Action.Full.make
-        (Action.copy (Path.outside_build_dir src_physical) build_path)
-        (* Sandboxing this action doesn't make much sense: if we can copy
-           [src_physical] to the sandbox, we might as well copy it to the
-           build directory directly. *)
+        (Action.Write_file (build_path, Action.File_perm.Normal, contents))
         ~sandbox:Sandbox_config.no_sandboxing
-    in
-    Action_builder.Expert.record_dep_on_source_file_exn
-      action
-      ~loc:Current_rule_loc.get
-      src_physical
   ;;
 
   let create_copy_rules ~dir ~ctx_dir ~non_target_source_files =
-    Filename.Map.to_list_map non_target_source_files ~f:(fun filename src_physical ->
+    Filename.Map.to_list_map non_target_source_files ~f:(fun filename src ->
       let src_path = Path.Source.relative_fname dir filename in
       let build_path = Path.Build.append_source ctx_dir src_path in
       Rule.make
         ~info:(Source_file_copy src_path)
         ~targets:(Targets.File.create build_path)
-        (copy_source_action ~src_physical ~build_path))
+        (copy_source_action ~src ~build_path))
   ;;
 
   let compile_rules ~dir ~source_dirs rules =
@@ -696,13 +706,12 @@ end = struct
 
   module Source_files_and_dirs = struct
     type t =
-      { source_files : Path.Outside_build_dir.t Filename.Map.t
-        (** Each source filename mapped to the physical location from
-            which its bytes should be read. Resolved at the
-            [Build_config.Source_tree] boundary so the engine never has
-            to interpret [Path.Source.t] itself — a mount-backed context
-            yields an external path here, a workspace-backed context an
-            in-source-tree one. *)
+      { source_files : Build_config.source_file Filename.Map.t
+        (** Each source filename mapped to its [source_file] descriptor.
+            Resolved at the [Build_config.Source_tree] boundary so the
+            engine never has to interpret [Path.Source.t] itself:
+            workspace- or mount-backed contexts yield a filesystem path,
+            vcs-backed contexts yield a memoised byte-providing closure. *)
       ; source_dirs : Filename.Array.Set.t
       }
 
@@ -727,7 +736,7 @@ end = struct
          let source_files =
            Source_tree.Dir.filenames st_dir
            |> Filename.Array.Set.to_list_map ~f:(fun fn ->
-             fn, Source_tree.Dir.file_path st_dir fn)
+             fn, Source_tree.Dir.file_source st_dir fn)
            |> Filename.Map.of_list_exn
            |> Filename.Map.filteri ~f:(fun fn _ ->
              not (Filename.Array.Set.mem source_paths_to_ignore.filenames fn))

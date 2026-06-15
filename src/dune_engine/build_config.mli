@@ -84,6 +84,14 @@ module Gen_rules : sig
   end
 end
 
+(** Where the bytes of a source file come from. [Filesystem] points at a
+    real on-disk path; [Vcs_blob] carries a [Memo]-tracked closure that
+    produces the file's bytes from a version-control backend (e.g. a
+    git blob) without ever touching the filesystem on the source side. *)
+type source_file =
+  | Filesystem of Path.Outside_build_dir.t
+  | Vcs_blob of string Memo.t
+
 module type Source_tree = sig
   module Dir : sig
     type t
@@ -94,8 +102,15 @@ module type Source_tree = sig
     (** Physical location of a file in this directory. Routes through
         the per-context source-tree backing, so for a mount-backed
         context this returns the resolved external path rather than a
-        workspace-relative one. *)
+        workspace-relative one. Raises [Code_error] for vcs-backed
+        contexts — callers that may encounter such must use
+        [file_source]. *)
     val file_path : t -> Filename.t -> Path.Outside_build_dir.t
+
+    (** Backing-aware analogue of [file_path]. Use this from rule
+        generation code that needs to handle vcs-backed contexts where
+        the bytes come from a git blob rather than a real file. *)
+    val file_source : t -> Filename.t -> source_file
   end
 
   val find_dir : Path.Source.t -> Dir.t option Memo.t

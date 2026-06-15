@@ -76,6 +76,10 @@ module Gen_rules = struct
   end
 end
 
+type source_file =
+  | Filesystem of Path.Outside_build_dir.t
+  | Vcs_blob of string Memo.t
+
 module type Source_tree = sig
   module Dir : sig
     type t
@@ -83,6 +87,7 @@ module type Source_tree = sig
     val sub_dir_names : t -> Filename.Array.Set.t
     val filenames : t -> Filename.Array.Set.t
     val file_path : t -> Filename.t -> Path.Outside_build_dir.t
+    val file_source : t -> Filename.t -> source_file
   end
 
   val find_dir : Path.Source.t -> Dir.t option Memo.t

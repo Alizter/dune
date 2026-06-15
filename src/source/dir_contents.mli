@@ -16,6 +16,12 @@ val empty : t
 val dirs : t -> File.t Filename.Array.Map.t
 val files : t -> Filename.Array.Set.t
 val to_dyn : t -> Dyn.t
+
+(** Construct a [t] directly from listings, bypassing the filesystem.
+    Used by source-tree backings (e.g. vcs trees) that already know
+    their directory structure. *)
+val make : files:Filename.Array.Set.t -> dirs:File.t Filename.Array.Map.t -> t
+
 val of_source_path : Path.Source.t -> (t, Unix_error.Detailed.t) result Memo.t
 
 (** Like [of_source_path], but reads the directory contents from

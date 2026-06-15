@@ -35,3 +35,14 @@ val list_dir
 (** [read_file t path] reads the bytes of [path] at this rev. Errors if
     [path] does not exist in the tree. *)
 val read_file : t -> Path.Source.t -> string Fiber.t
+
+(** [blob_sha t path] is the backend's content-hash for [path] at this
+    rev (a git blob sha, etc.). [None] if [path] is not a file in the
+    tree. Stable across invocations; suitable for use as a build-system
+    dep digest without going through filesystem stat / digest. *)
+val blob_sha : t -> Path.Source.t -> string option
+
+(** Flat list of every file path in the rev's tree, in lexicographic
+    order. Used by stagers that need to materialise every tracked file
+    up front. *)
+val files : t -> Path.Source.t list

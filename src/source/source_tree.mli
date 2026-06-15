@@ -11,10 +11,17 @@ module Dir : sig
   (** Physical location of a file in this directory. For a
       workspace-backed tree this is the [In_source_dir] interpretation;
       for an externally-rooted tree the [External] interpretation
-      rooted at the mount path. Callers use this to read the bytes
-      (e.g. copy-from-source rules) without needing to know about
-      path-resolution mechanics. *)
+      rooted at the mount path.
+
+      Raises [Code_error] for vcs-backed directories — callers that
+      may encounter such trees must use [file_source] instead. *)
   val file_path : t -> Filename.t -> Path.Outside_build_dir.t
+
+  (** Backing-aware analogue of [file_path]: returns a [source_file]
+      (see [Dune_engine.Build_config]) that describes how to read the
+      bytes without committing to a filesystem path. Use this from
+      rule-generation code that needs to handle vcs-backed contexts. *)
+  val file_source : t -> Filename.t -> Dune_engine.Build_config.source_file
 
   type sub_dir
 
@@ -65,6 +72,14 @@ val default : t
     project on the local filesystem that should still accept
     promotions. *)
 val of_external_root : ?read_only:bool -> Path.External.t -> t
+
+(** [of_vcs_tree vcs_tree] is a source tree whose contents come from
+    [vcs_tree]'s revision via the underlying VCS backend (e.g. git).
+    The directory structure is built once from the rev's recursive
+    listing; file bytes are read on demand through
+    [Dune_vcs.Vcs_tree.read_file]. The tree is always read-only — a
+    revision is immutable. *)
+val of_vcs_tree : Dune_vcs.Vcs_tree.t -> t
 
 (** [read_only t] is [true] when this source tree is not user-editable —
     e.g., backed by a git sha or a fetched archive. Such trees are
