@@ -127,9 +127,7 @@ module Dir0 = struct
   let file_source t filename : Dune_engine.Build_config.source_file =
     let logical = Path.Source.relative_fname t.path filename in
     match t.backing.vcs_tree with
-    | Some vcs_tree ->
-      Vcs_blob
-        (Memo.of_non_reproducible_fiber (Dune_vcs.Vcs_tree.read_file vcs_tree logical))
+    | Some vcs_tree -> Vcs_blob (Dune_vcs.Vcs_tree.read_file vcs_tree logical)
     | None -> Filesystem (Source_resolver.resolve t.backing.resolver logical)
   ;;
 end
@@ -403,9 +401,7 @@ let filesystem_backing resolver =
    bytes come from [Vcs_tree.read_file] (which shells out to the
    backend); no filesystem reads happen at any point. *)
 let vcs_backing vcs_tree =
-  let byte_provider source =
-    Memo.of_non_reproducible_fiber (Dune_vcs.Vcs_tree.read_file vcs_tree source)
-  in
+  let byte_provider source = Dune_vcs.Vcs_tree.read_file vcs_tree source in
   (* Each directory in the vcs tree gets a synthetic [File.t] derived
      from its path, so [Dirs_visited]'s symlink-loop check (which keys
      directories by their inode) doesn't see false-positive collisions. *)

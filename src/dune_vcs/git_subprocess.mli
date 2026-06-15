@@ -22,5 +22,9 @@ val rev_list : t -> string -> string list option Fiber.t
     [(path, sha)] pairs. *)
 val ls_tree_recursive : t -> commit:string -> (Path.Local.t * string) list Fiber.t
 
-(** [cat_file_blob t ~commit ~path] reads the bytes of [path] in [commit]. *)
-val cat_file_blob : t -> commit:string -> path:Path.Local.t -> string Fiber.t
+(** [cat_file_blob t ~sha] reads the bytes of the git blob object at
+    [sha]. Looking up by blob sha rather than [<commit>:<path>] means
+    two revisions that share a byte-identical file resolve to the
+    same call — and, with the right memoisation in
+    {!Vcs_tree.read_file}, are read at most once. *)
+val cat_file_blob : t -> sha:string -> string Fiber.t

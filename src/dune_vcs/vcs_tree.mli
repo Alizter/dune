@@ -40,9 +40,11 @@ val list_dir
   -> Path.Source.t
   -> [ `File of Filename.t | `Dir of Filename.t ] list Fiber.t
 
-(** [read_file t path] reads the bytes of [path] at this rev. Errors if
-    [path] does not exist in the tree. *)
-val read_file : t -> Path.Source.t -> string Fiber.t
+(** [read_file t path] reads the bytes of [path] at this rev. Errors
+    if [path] does not exist in the tree. Memoised by underlying
+    blob hash (for Git: the blob sha), so two revs that contain a
+    byte-identical file share a single read across the build. *)
+val read_file : t -> Path.Source.t -> string Memo.t
 
 (** [blob_sha t path] is the backend's content-hash for [path] at this
     rev (a git blob sha, etc.). [None] if [path] is not a file in the

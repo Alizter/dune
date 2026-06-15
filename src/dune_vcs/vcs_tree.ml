@@ -140,11 +140,40 @@ let list_dir t dir =
   Fiber.return entries
 ;;
 
+(* Process-global cache of blob bytes, keyed by (repo root, blob
+   hash). Two revs that contain a byte-identical file resolve to the
+   same key and share a single [git cat-file] invocation. *)
+module Blob_input = struct
+  type t = Path.t * string
+
+  let hash (root, sha) = Tuple.T2.hash Path.hash String.hash (root, sha)
+  let equal (r1, s1) (r2, s2) = Path.equal r1 r2 && String.equal s1 s2
+  let to_dyn (root, sha) = Dyn.Tuple [ Path.to_dyn root; Dyn.string sha ]
+end
+
+let read_git_blob =
+  let memo =
+    Memo.create
+      "vcs_tree_git_blob"
+      ~input:(module Blob_input)
+      (fun (root, sha) ->
+         let git = Git_subprocess.create ~root in
+         Memo.of_reproducible_fiber (Git_subprocess.cat_file_blob git ~sha))
+  in
+  Memo.exec memo
+;;
+
 let read_file t path =
   match t.kind with
   | Git ->
-    let git = Git_subprocess.create ~root:t.root in
-    let local = Path.Source.to_local path in
-    Git_subprocess.cat_file_blob git ~commit:t.rev_id ~path:local
+    (match Path.Source.Map.find t.blob_shas path with
+     | None ->
+       User_error.raise
+         [ Pp.textf
+             "Path %S is not a file in the tree at rev %s."
+             (Path.Source.to_string path)
+             t.rev_id
+         ]
+     | Some sha -> read_git_blob (t.root, sha))
   | Hg -> not_implemented t.kind
 ;;

@@ -76,9 +76,8 @@ let ls_tree_recursive { root } ~commit =
   List.filter_map lines ~f:parse_ls_tree_line
 ;;
 
-let cat_file_blob { root } ~commit ~path =
+let cat_file_blob { root } ~sha =
   let git = git () in
-  let arg = sprintf "%s:%s" commit (Path.Local.to_string path) in
   let+ out, code =
     Process.run_capture
       ~dir:root
@@ -86,16 +85,9 @@ let cat_file_blob { root } ~commit ~path =
       ~env
       Return
       git
-      [ "cat-file"; "blob"; arg ]
+      [ "cat-file"; "blob"; sha ]
   in
   if code <> 0
-  then
-    User_error.raise
-      [ Pp.textf
-          "git cat-file failed for %s:%s (exit %d)"
-          commit
-          (Path.Local.to_string path)
-          code
-      ];
+  then User_error.raise [ Pp.textf "git cat-file failed for blob %s (exit %d)" sha code ];
   out
 ;;
