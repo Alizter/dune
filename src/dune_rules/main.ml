@@ -138,7 +138,7 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
           ~init:Path.External.Map.empty
           ~f:(fun acc ((_ctx : Build_context.t), source) ->
             match (source : Workspace.Build_context_source.t) with
-            | Workspace -> acc
+            | Workspace | Vcs_rev _ -> acc
             | Mount path ->
               if Path.External.Map.mem acc path
               then acc
@@ -155,6 +155,7 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
             match (source : Workspace.Build_context_source.t) with
             | Workspace -> Source_tree.default
             | Mount path -> Path.External.Map.find_exn mount_trees path
+            | Vcs_rev vcs_tree -> Source_tree.of_vcs_tree vcs_tree
           in
           ctx.name, tree))
   in

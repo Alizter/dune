@@ -24,6 +24,25 @@ let rev_id t = t.rev_id
 let kind t = t.kind
 let blob_sha t path = Path.Source.Map.find t.blob_shas path
 let files t = t.files
+let equal a b = Vcs.Kind.equal a.kind b.kind && String.equal a.rev_id b.rev_id
+
+let hash t =
+  let kind_tag =
+    match t.kind with
+    | Vcs.Kind.Git -> 0
+    | Hg -> 1
+  in
+  Tuple.T2.hash Int.hash String.hash (kind_tag, t.rev_id)
+;;
+
+let to_dyn t =
+  let kind_s =
+    match t.kind with
+    | Vcs.Kind.Git -> "Git"
+    | Hg -> "Hg"
+  in
+  Dyn.record [ "kind", Dyn.string kind_s; "rev_id", Dyn.string t.rev_id ]
+;;
 
 let not_implemented kind =
   User_error.raise

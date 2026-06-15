@@ -10,6 +10,14 @@ open Stdune
 
 type t
 
+(** Two views are equal when they refer to the same rev of the same
+    backend. Comparing by [(kind, rev_id)] avoids comparing the
+    in-memory tree map, which is derivable from those. *)
+val equal : t -> t -> bool
+
+val hash : t -> int
+val to_dyn : t -> Dyn.t
+
 (** Resolve a user-supplied rev *or revset/range* against the VCS at
     [root]. The string is passed verbatim to the backend's resolver — for
     Git, [git rev-parse]/[git rev-list]; for Hg, [hg log -r]. Returns

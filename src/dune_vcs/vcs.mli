@@ -7,6 +7,7 @@ module Kind : sig
     | Git
     | Hg
 
+  val equal : t -> t -> bool
   val of_dir_name : Filename.t -> t option
 
   val of_dir_contents

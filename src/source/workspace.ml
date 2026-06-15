@@ -311,17 +311,20 @@ module Build_context_source = struct
   type t =
     | Workspace
     | Mount of Path.External.t
+    | Vcs_rev of Vcs_tree.t
 
   let equal a b =
     match a, b with
     | Workspace, Workspace -> true
     | Mount p, Mount q -> Path.External.equal p q
-    | (Workspace | Mount _), _ -> false
+    | Vcs_rev a, Vcs_rev b -> Vcs_tree.equal a b
+    | (Workspace | Mount _ | Vcs_rev _), _ -> false
   ;;
 
   let to_dyn = function
     | Workspace -> Dyn.variant "Workspace" []
     | Mount p -> Dyn.variant "Mount" [ Path.External.to_dyn p ]
+    | Vcs_rev v -> Dyn.variant "Vcs_rev" [ Vcs_tree.to_dyn v ]
   ;;
 end
 
@@ -905,6 +908,7 @@ type t =
   ; lock_dirs : Lock_dir.t list
   ; dir : Path.Source.t
   ; pins : Pin_stanza.Workspace.t
+  ; vcs_revs : (Context_name.t * Vcs_tree.t) list
   }
 
 let repr =
@@ -924,12 +928,21 @@ let repr =
     ; Repr.field "solver" (Repr.list Lock_dir.repr) ~get:(fun t -> t.lock_dirs)
     ; Repr.field "dir" Path.Source.repr ~get:(fun t -> t.dir)
     ; Repr.field "pins" (Repr.abstract Pin_stanza.Workspace.to_dyn) ~get:(fun t -> t.pins)
+    ; Repr.field
+        "vcs_revs"
+        (Repr.list
+           (Repr.abstract (fun (n, v) ->
+              Dyn.Tuple [ Context_name.to_dyn n; Vcs_tree.to_dyn v ])))
+        ~get:(fun t -> t.vcs_revs)
     ]
 ;;
 
 let to_dyn = Repr.to_dyn repr
 
-let equal { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins } w =
+let equal
+      { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins; vcs_revs }
+      w
+  =
   Option.equal Context_name.equal merlin_context w.merlin_context
   && List.equal Context.equal contexts w.contexts
   && Option.equal Dune_env.equal env w.env
@@ -938,9 +951,13 @@ let equal { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins }
   && List.equal Lock_dir.equal lock_dirs w.lock_dirs
   && Path.Source.equal dir w.dir
   && Pin_stanza.Workspace.equal pins w.pins
+  && List.equal
+       (fun (n1, v1) (n2, v2) -> Context_name.equal n1 n2 && Vcs_tree.equal v1 v2)
+       vcs_revs
+       w.vcs_revs
 ;;
 
-let hash { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins } =
+let hash { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins; vcs_revs } =
   Poly.hash
     ( Option.hash Context_name.hash merlin_context
     , List.hash Context.hash contexts
@@ -949,7 +966,9 @@ let hash { merlin_context; contexts; env; config; repos; lock_dirs; dir; pins } 
     , List.hash Repository.hash repos
     , List.hash Lock_dir.hash lock_dirs
     , Path.Source.hash dir
-    , Pin_stanza.Workspace.hash pins )
+    , Pin_stanza.Workspace.hash pins
+    , List.hash (fun (n, v) -> Poly.hash (Context_name.hash n, Vcs_tree.hash v)) vcs_revs
+    )
 ;;
 
 let source_path_of_lock_dir_path path =
@@ -1313,6 +1332,7 @@ let step1 ~(lang : Lang.Instance.t) clflags =
        ; lock_dirs
        ; dir
        ; pins
+       ; vcs_revs = []
        })
   in
   { Step1.t; config }
@@ -1348,6 +1368,7 @@ let default clflags =
   ; lock_dirs = []
   ; dir = Path.Source.root
   ; pins = Pin_stanza.Workspace.empty
+  ; vcs_revs = []
   }
 ;;
 
@@ -1369,31 +1390,67 @@ let load_step1 clflags p =
 
 let filename = Filename.dune_workspace
 
+let synthesise_for_revs revs =
+  let config =
+    create_final_config
+      ~config_from_config_file:Dune_config.Partial.empty
+      ~config_from_command_line:Dune_config.Partial.empty
+      ~config_from_workspace_file:Dune_config.Partial.empty
+  in
+  { merlin_context = None
+  ; contexts = []
+  ; env = None
+  ; config
+  ; repos = default_repositories
+  ; lock_dirs = []
+  ; dir = Path.Source.root
+  ; pins = Pin_stanza.Workspace.empty
+  ; vcs_revs = revs
+  }
+;;
+
+let synthesised_revs_ref : (Context_name.t * Vcs_tree.t) list ref = ref []
+let set_synthesised_for_revs revs = synthesised_revs_ref := revs
+
+let synthesised_for_revs () =
+  match !synthesised_revs_ref with
+  | [] -> None
+  | revs -> Some revs
+;;
+
+let synthesised_step1 _clflags revs =
+  let t = synthesise_for_revs revs in
+  { Step1.t = lazy t; config = t.config }
+;;
+
 let workspace_step1 =
   let open Memo.O in
   let f () =
     let clflags = Clflags.t () in
-    let* workspace_file =
-      match clflags.workspace_file with
-      | None ->
-        let p = Path.Outside_build_dir.of_string (Filename.to_string filename) in
-        let+ exists = Fs_memo.file_exists p in
-        Option.some_if exists p
-      | Some p ->
-        Fs_memo.file_exists p
-        >>| (function
-         | true -> Some p
-         | false ->
-           User_error.raise
-             [ Pp.textf
-                 "Workspace file %s does not exist"
-                 (Path.Outside_build_dir.to_string_maybe_quoted p)
-             ])
-    in
-    let clflags = { clflags with workspace_file } in
-    match workspace_file with
-    | None -> Memo.return (default_step1 clflags)
-    | Some p -> load_step1 clflags p
+    match synthesised_for_revs () with
+    | Some revs -> Memo.return (synthesised_step1 clflags revs)
+    | None ->
+      let* workspace_file =
+        match clflags.workspace_file with
+        | None ->
+          let p = Path.Outside_build_dir.of_string (Filename.to_string filename) in
+          let+ exists = Fs_memo.file_exists p in
+          Option.some_if exists p
+        | Some p ->
+          Fs_memo.file_exists p
+          >>| (function
+           | true -> Some p
+           | false ->
+             User_error.raise
+               [ Pp.textf
+                   "Workspace file %s does not exist"
+                   (Path.Outside_build_dir.to_string_maybe_quoted p)
+               ])
+      in
+      let clflags = { clflags with workspace_file } in
+      (match workspace_file with
+       | None -> Memo.return (default_step1 clflags)
+       | Some p -> load_step1 clflags p)
   in
   let memo = Memo.lazy_ ~name:"workspaces-internal" f in
   fun () -> Memo.Lazy.force memo
@@ -1422,5 +1479,10 @@ let update_execution_parameters t ep =
 ;;
 
 let build_contexts t : (Build_context.t * Build_context_source.t) list =
-  List.concat_map t.contexts ~f:Context.build_contexts
+  let from_contexts = List.concat_map t.contexts ~f:Context.build_contexts in
+  let from_revs =
+    List.map t.vcs_revs ~f:(fun (name, vcs_tree) ->
+      Build_context.create ~name, Build_context_source.Vcs_rev vcs_tree)
+  in
+  from_contexts @ from_revs
 ;;

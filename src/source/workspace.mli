@@ -43,6 +43,7 @@ module Build_context_source : sig
   type t =
     | Workspace
     | Mount of Path.External.t
+    | Vcs_rev of Dune_vcs.Vcs_tree.t
 
   val equal : t -> t -> bool
   val to_dyn : t -> Dyn.t
@@ -172,6 +173,12 @@ type t = private
   ; lock_dirs : Lock_dir.t list
   ; dir : Path.Source.t
   ; pins : Pin_stanza.Workspace.t
+  ; vcs_revs : (Context_name.t * Dune_vcs.Vcs_tree.t) list
+    (** Synthesised user-facing contexts that read source from a VCS
+        revision (one entry per [-r <rev>] CLI flag). Each entry
+        contributes one [Build_context.t] with a [Vcs_rev] source.
+        Empty in workspaces parsed from [dune-workspace]; populated
+        by [synthesise_for_revs]. *)
   }
 
 val equal : t -> t -> bool
@@ -201,6 +208,18 @@ end
 val filename : Filename.t
 
 val workspace : unit -> t Memo.t
+
+(** Synthesise a workspace consisting solely of vcs-rev contexts —
+    one user-facing [Build_context.t] per [(name, vcs_tree)] entry,
+    named exactly as given. Used to back [dune build -r <rev>] without
+    requiring a [dune-workspace] file. The on-disk [dune-workspace]
+    is not consulted. *)
+val synthesise_for_revs : (Context_name.t * Dune_vcs.Vcs_tree.t) list -> t
+
+(** One-shot hook used by [workspace ()]: when set, the synthesised
+    workspace is used instead of parsing [dune-workspace]. Called by
+    the CLI layer when [-r] flags are present. *)
+val set_synthesised_for_revs : (Context_name.t * Dune_vcs.Vcs_tree.t) list -> unit
 
 (** Same as [workspace ()] except that if there are errors related to fields
     other than the ones of [config], they are not reported. *)
