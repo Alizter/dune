@@ -2681,3 +2681,49 @@ let pkg_digest_of_project_dependency ctx package_name =
   |> List.find ~f:(fun (pkg_digest : Pkg_digest.t) ->
     Package.Name.equal pkg_digest.name package_name)
 ;;
+
+(* Enumerate (dune)-built packages in [ctx]'s lockfile, returning each
+   pkg's name along with the [Path.Build.t] where its source bytes
+   will be materialised. The path follows the existing [Paths.make]
+   scheme (keyed by the resolved [Pkg_digest.t]) — the lazy chain
+   from [Lock_dir.get] through [DB.Pkg_table.entries_by_name_of_lock_dir]
+   forces resolution to learn each digest.
+
+   Returns an empty list when the context has no active lockdir, the
+   lockfile fails to load, or no pkg has [Build_command.Dune]. *)
+let dune_built_pkgs_source_dirs ctx =
+  Lock_dir.lock_dir_active ctx
+  >>= function
+  | false -> Memo.return []
+  | true ->
+    Lock_dir.get ctx
+    >>= (function
+     | Error _ -> Memo.return []
+     | Ok lock_dir ->
+       let+ platform = Lock_dir.Sys_vars.solver_env in
+       let entries =
+         DB.Pkg_table.entries_by_name_of_lock_dir
+           lock_dir
+           ~platform
+           ~system_provided:DB.default_system_provided
+       in
+       let universe = Package_universe.Dependencies ctx in
+       Package.Name.Map.foldi
+         entries
+         ~init:[]
+         ~f:(fun name (entry : DB.Pkg_table.entry) acc ->
+           match
+             Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
+               entry.pkg.build_command
+               ~platform
+           with
+           | Some Build_command.Dune ->
+             let paths =
+               Paths.make
+                 entry.pkg_digest
+                 universe
+                 ~relative:Path.Build.relative
+             in
+             (name, paths.source_dir) :: acc
+           | _ -> acc))
+;;

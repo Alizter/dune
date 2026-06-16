@@ -53,3 +53,14 @@ val pkg_digest_of_project_dependency
   :  Context_name.t
   -> Package.Name.t
   -> Pkg_digest.t option Memo.t
+
+(** Enumerate [(build (dune))] packages in [ctx]'s lockfile, each
+    paired with the [Path.Build.t] where its source bytes will be
+    materialised by the existing fetch / copy actions.
+
+    Returns an empty list when the context has no active lockdir, the
+    lockfile fails to load, or no pkg has a [Dune] build command for
+    the current platform. *)
+val dune_built_pkgs_source_dirs
+  :  Context_name.t
+  -> (Package.Name.t * Path.Build.t) list Memo.t
