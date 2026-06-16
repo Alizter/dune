@@ -312,19 +312,22 @@ module Build_context_source = struct
     | Workspace
     | Mount of Path.External.t
     | Vcs_rev of Vcs_tree.t
+    | Pkg of Path.Build.t
 
   let equal a b =
     match a, b with
     | Workspace, Workspace -> true
     | Mount p, Mount q -> Path.External.equal p q
     | Vcs_rev a, Vcs_rev b -> Vcs_tree.equal a b
-    | (Workspace | Mount _ | Vcs_rev _), _ -> false
+    | Pkg p, Pkg q -> Path.Build.equal p q
+    | (Workspace | Mount _ | Vcs_rev _ | Pkg _), _ -> false
   ;;
 
   let to_dyn = function
     | Workspace -> Dyn.variant "Workspace" []
     | Mount p -> Dyn.variant "Mount" [ Path.External.to_dyn p ]
     | Vcs_rev v -> Dyn.variant "Vcs_rev" [ Vcs_tree.to_dyn v ]
+    | Pkg p -> Dyn.variant "Pkg" [ Path.Build.to_dyn p ]
   ;;
 end
 
