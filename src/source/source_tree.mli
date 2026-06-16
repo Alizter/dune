@@ -81,6 +81,16 @@ val of_external_root : ?read_only:bool -> Path.External.t -> t
     revision is immutable. *)
 val of_vcs_tree : Dune_vcs.Vcs_tree.t -> t
 
+(** [of_build_dir root] is a source tree rooted at the build path
+    [root]. Bytes and directory listings flow through
+    [Build_system.read_file] / [Build_system.build_dir], so reads are
+    correctly ordered against the action graph: the producing action
+    (e.g. a [Fetch] action populating a pkg source dir) runs before
+    rule generation reads the tree. The tree is always read-only and
+    vendored — the contents are owned by the build system, not the
+    user. *)
+val of_build_dir : Path.Build.t -> t
+
 (** [read_only t] is [true] when this source tree is not user-editable —
     e.g., backed by a git sha or a fetched archive. Such trees are
     treated as fully vendored: warnings/alerts are suppressed in

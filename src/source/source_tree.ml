@@ -472,6 +472,65 @@ let of_vcs_tree vcs_tree =
   }
 ;;
 
+(* Build-dir backing: bytes and listings come from a [Path.Build.t]
+   root via the [Build_system]. Each read forces the producing rule
+   first, so source-tree reads are correctly ordered against the
+   action graph — the same pattern [(dynamic_include ...)] uses to
+   read dune-files emitted by actions (see
+   [src/source/include_stanza.ml]). Used by pkg mounts where the
+   pkg's source dir is the directory target of a Fetch / copy
+   action. *)
+let build_dir_backing (root : Path.Build.t) =
+  let physical_of source =
+    if Path.Source.is_root source
+    then Path.build root
+    else Path.build (Path.Build.append_source root source)
+  in
+  let byte_provider source = Build_system.read_file (physical_of source) in
+  let dir_identity path =
+    Dir_contents.File.synthetic ("build:" ^ Path.Source.to_string path)
+  in
+  let readdir path =
+    let dir = physical_of path in
+    let* () = Build_system.build_dir dir in
+    match Path.Untracked.readdir_unsorted_with_kinds dir with
+    | Error _ -> Memo.return Dir_contents.empty
+    | Ok entries ->
+      let files, dirs =
+        List.partition_map entries ~f:(fun (fn, (kind : Unix.file_kind)) ->
+          match kind with
+          | S_DIR -> Right (fn, dir_identity (Path.Source.relative_fname path fn))
+          | _ -> Left fn)
+      in
+      let dirs =
+        List.sort dirs ~compare:(fun (a, _) (b, _) -> Filename.compare a b)
+        |> Filename.Array.Map.of_sorted_list_exn
+      in
+      let files =
+        List.sort files ~compare:Filename.compare |> Filename.Array.Set.of_sorted_list
+      in
+      Memo.return (Dir_contents.make ~files ~dirs)
+  in
+  let file_identity path = Memo.return (dir_identity path) in
+  (* Vestigial resolver — kept so callers branching on
+     [Source_resolver.is_workspace] (e.g. the missing-dune-project
+     warning) behave consistently. Actual reads go through
+     [byte_provider] / [readdir]. *)
+  let resolver =
+    Source_resolver.create (fun p -> Path.Outside_build_dir.In_source_dir p)
+  in
+  { resolver; byte_provider; readdir; file_identity; vcs_tree = None }
+;;
+
+let of_build_dir root =
+  (* Bytes are produced by an action; treat the tree as read-only and
+     vendored (no promotion, no parse-warning emission). *)
+  { root_node =
+      make_root_node ~backing:(build_dir_backing root) ~read_only:true ~vendored:true
+  ; read_only = true
+  }
+;;
+
 let read_only t = t.read_only
 let root t = Memo.Node.read t.root_node
 let for_context_callback : (Context_name.t -> t Memo.t) Fdecl.t = Fdecl.create Dyn.opaque
