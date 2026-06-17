@@ -132,14 +132,14 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
       (* Mounts of the same external path share a single [Source_tree.t]
          across toolchain variants, so [Source_resolver] identity (and
          memo caches) stay consistent. *)
-      let mount_trees =
+      let external_mount_trees =
         List.fold_left
           contexts
           ~init:Path.External.Map.empty
           ~f:(fun acc ((_ctx : Build_context.t), source) ->
             match (source : Workspace.Build_context_source.t) with
-            | Workspace | Vcs_rev _ | Pkg _ -> acc
-            | Mount path ->
+            | Workspace | Vcs_rev _ | Mount (Build _) -> acc
+            | Mount (External path) ->
               if Path.External.Map.mem acc path
               then acc
               else
@@ -154,9 +154,9 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
           let tree =
             match (source : Workspace.Build_context_source.t) with
             | Workspace -> Source_tree.default
-            | Mount path -> Path.External.Map.find_exn mount_trees path
+            | Mount (External path) -> Path.External.Map.find_exn external_mount_trees path
+            | Mount (Build root) -> Source_tree.of_build_dir root
             | Vcs_rev vcs_tree -> Source_tree.of_vcs_tree vcs_tree
-            | Pkg root -> Source_tree.of_build_dir root
           in
           ctx.name, tree))
   in

@@ -39,18 +39,24 @@ end
 (** Per-internal-build-context source-tree backing. Each entry returned
     by [build_contexts] is paired with one of these, telling callers
     which source tree the internal context reads from. *)
+module Mount_path : sig
+  (** A mount's underlying path. External paths come from
+      [(mount ...)] stanzas in [dune-workspace]; build paths come from
+      synthesised pkg-mount contexts whose source bytes live under
+      [_build/]. *)
+  type t =
+    | External of Path.External.t
+    | Build of Path.Build.t
+
+  val equal : t -> t -> bool
+  val to_dyn : t -> Dyn.t
+end
+
 module Build_context_source : sig
   type t =
     | Workspace
-    | Mount of Path.External.t
+    | Mount of Mount_path.t
     | Vcs_rev of Dune_vcs.Vcs_tree.t
-    | Pkg of Path.Build.t
-    (** A synthesised pkg-context source tree rooted at a build path.
-            Used for lockfile pkgs whose build directive is [(dune)]:
-            the pkg's source bytes live at [_build/<user-ctx>/.pkg/<pkg-digest>/source/],
-            produced by the existing Fetch / copy actions, and dune
-            generates rules against them through a build-dir source-tree
-            backing (see [Source_tree.of_build_dir]). *)
 
   val equal : t -> t -> bool
   val to_dyn : t -> Dyn.t
@@ -96,7 +102,7 @@ module Context : sig
         is rooted at [path]. *)
     type t =
       { loc : Loc.t
-      ; path : Path.External.t
+      ; path : Mount_path.t
       }
 
     val equal : t -> t -> bool

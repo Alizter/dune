@@ -307,27 +307,47 @@ module Lock_dir_selection = struct
   ;;
 end
 
+module Mount_path = struct
+  type t =
+    | External of Path.External.t
+    | Build of Path.Build.t
+
+  let equal a b =
+    match a, b with
+    | External a, External b -> Path.External.equal a b
+    | Build a, Build b -> Path.Build.equal a b
+    | _, _ -> false
+  ;;
+
+  let to_dyn = function
+    | External p -> Dyn.variant "External" [ Path.External.to_dyn p ]
+    | Build p -> Dyn.variant "Build" [ Path.Build.to_dyn p ]
+  ;;
+
+  let basename = function
+    | External p -> Filename.basename (Path.External.to_string p)
+    | Build p -> Filename.to_string (Path.Build.basename p)
+  ;;
+end
+
 module Build_context_source = struct
   type t =
     | Workspace
-    | Mount of Path.External.t
+    | Mount of Mount_path.t
     | Vcs_rev of Vcs_tree.t
-    | Pkg of Path.Build.t
 
   let equal a b =
     match a, b with
     | Workspace, Workspace -> true
-    | Mount p, Mount q -> Path.External.equal p q
+    | Mount p, Mount q -> Mount_path.equal p q
     | Vcs_rev a, Vcs_rev b -> Vcs_tree.equal a b
-    | Pkg p, Pkg q -> Path.Build.equal p q
-    | (Workspace | Mount _ | Vcs_rev _ | Pkg _), _ -> false
+    | (Workspace | Mount _ | Vcs_rev _), _ -> false
   ;;
 
   let to_dyn = function
     | Workspace -> Dyn.variant "Workspace" []
-    | Mount p -> Dyn.variant "Mount" [ Path.External.to_dyn p ]
+    | Mount p -> Dyn.variant "Mount" [ Mount_path.to_dyn p ]
     | Vcs_rev v -> Dyn.variant "Vcs_rev" [ Vcs_tree.to_dyn v ]
-    | Pkg p -> Dyn.variant "Pkg" [ Path.Build.to_dyn p ]
   ;;
 end
 
@@ -478,20 +498,20 @@ module Context = struct
   module Mount = struct
     type t =
       { loc : Loc.t
-      ; path : Path.External.t
+      ; path : Mount_path.t
       }
 
-    let equal { loc = _; path } t = Path.External.equal path t.path
-    let to_dyn { loc = _; path } = Dyn.record [ "path", Path.External.to_dyn path ]
+    let equal { loc = _; path } t = Mount_path.equal path t.path
+    let to_dyn { loc = _; path } = Dyn.record [ "path", Mount_path.to_dyn path ]
 
     let decode =
       let open Dune_lang.Decoder in
       let+ loc, path = located string in
-      { loc; path = Path.External.parse_string_exn ~loc path }
+      { loc; path = Mount_path.External (Path.External.parse_string_exn ~loc path) }
     ;;
 
     let internal_name t =
-      let basename = Filename.basename (Path.External.to_string t.path) in
+      let basename = Mount_path.basename t.path in
       match Context_name.of_string_opt basename with
       | Some n -> n
       | None ->
