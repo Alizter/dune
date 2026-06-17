@@ -1552,19 +1552,48 @@ let workspace_config () =
     step1.config
 ;;
 
+(* Synthesises additional pkg-mount entries to attach to each context.
+   Set by main.ml after Workspace is built; receives a context name
+   and returns the list of pkg-derived mounts (Build paths) to append
+   to that context's [Common.t.mounts]. *)
+let pkg_mounts_synthesiser
+  : (Context_name.t -> Context.Mount.t list Memo.t) ref
+  =
+  ref (fun _ -> Memo.return [])
+;;
+
+let set_pkg_mounts_synthesiser f = pkg_mounts_synthesiser := f
+
+let augment_with_pkg_mounts (t : t) =
+  let open Memo.O in
+  let+ contexts =
+    Memo.parallel_map t.contexts ~f:(fun (ctx : Context.t) ->
+      let+ extra = !pkg_mounts_synthesiser (Context.name ctx) in
+      match extra with
+      | [] -> ctx
+      | _ :: _ ->
+        let base = Context.base ctx in
+        let base = { base with mounts = base.mounts @ extra } in
+        (match ctx with
+         | Default d -> Context.Default { d with base }
+         | Opam o -> Context.Opam { o with base }))
+  in
+  { t with contexts }
+;;
+
 let workspace =
   let open Memo.O in
   let regular_memo =
     let f () =
-      let+ step1 = workspace_step1 () in
-      Lazy.force step1.t
+      let* step1 = workspace_step1 () in
+      augment_with_pkg_mounts (Lazy.force step1.t)
     in
     Memo.lazy_ ~cutoff:equal ~name:"workspace" f
   in
   let synthesised_memo =
     let f resolver =
-      let+ revs = Memo.of_non_reproducible_fiber (resolver ()) in
-      synthesise_for_revs revs
+      let* revs = Memo.of_non_reproducible_fiber (resolver ()) in
+      augment_with_pkg_mounts (synthesise_for_revs revs)
     in
     Memo.lazy_ ~cutoff:equal ~name:"workspace-synthesised-for-revs" (fun () ->
       match synthesised_for_revs () with

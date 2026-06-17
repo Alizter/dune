@@ -235,6 +235,14 @@ val set_synthesised_for_revs
   :  (unit -> (Context_name.t * Dune_vcs.Vcs_tree.t) list Fiber.t)
   -> unit
 
+(** Hook for pkg-mount synthesis: for each context, return additional
+    [Mount.t] entries (typically with [Build] paths) to append to its
+    [Common.t.mounts]. Called by [Main.init] to wire [(dune)] pkgs
+    into the existing mount machinery. *)
+val set_pkg_mounts_synthesiser
+  :  (Context_name.t -> Context.Mount.t list Memo.t)
+  -> unit
+
 (** Same as [workspace ()] except that if there are errors related to fields
     other than the ones of [config], they are not reported. *)
 val workspace_config : unit -> Dune_config.t Memo.t
