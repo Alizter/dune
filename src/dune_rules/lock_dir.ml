@@ -329,12 +329,19 @@ let lock_dir_active ctx =
   | Set (_, `Enabled) -> Memo.return true
   | Set (_, `Disabled) -> Memo.return false
   | Unset ->
-    get_source_path_for_context ctx
-    >>= (function
-     | None -> Memo.return false
-     | Some source ->
-       let* source_tree = Source_tree.for_context ctx in
-       Source_tree.find_dir source_tree source >>| Option.is_some)
+    let* source_tree = Source_tree.for_context ctx in
+    (* Sibling contexts (pkg mounts, external mounts, vcs revisions) read
+       from a read-only tree that doesn't host its own lockdir — the
+       lockdir always belongs to the workspace source. Short-circuit to
+       avoid forcing the sibling tree's root, which can cycle when the
+       sibling is itself a build-path-rooted [of_build_dir] tree. *)
+    if Source_tree.read_only source_tree
+    then Memo.return false
+    else
+      get_source_path_for_context ctx
+      >>= (function
+       | None -> Memo.return false
+       | Some source -> Source_tree.find_dir source_tree source >>| Option.is_some)
 ;;
 
 let source_kind (source : Dune_pkg.Source.t) =

@@ -2682,13 +2682,18 @@ let pkg_digest_of_project_dependency ctx package_name =
     Package.Name.equal pkg_digest.name package_name)
 ;;
 
-(* Source-side lockfile parse for synthesis. Skips Build_system. *)
+(* Source-side lockfile parse for synthesis. Skips Build_system.
+   Only pkgs whose source kind makes [source_dir] a directory target
+   (Fetch or Local File) are returned — for Local Directory sources,
+   [source_dir] is populated by per-file copy rules and isn't a
+   directory target, so [Build_system.build_dir source_dir] cannot
+   anchor a [Source_tree.of_build_dir] backing. *)
 let dune_built_pkgs_at_source ~source_path ~ctx =
   Lock_dir.read_at_source_path source_path
   >>= function
   | None -> Memo.return []
   | Some lock_dir ->
-    let+ platform = Lock_dir.Sys_vars.solver_env in
+    let* platform = Lock_dir.Sys_vars.solver_env in
     let entries =
       DB.Pkg_table.entries_by_name_of_lock_dir
         lock_dir
@@ -2696,21 +2701,27 @@ let dune_built_pkgs_at_source ~source_path ~ctx =
         ~system_provided:DB.default_system_provided
     in
     let universe = Package_universe.Dependencies ctx in
-    Package.Name.Map.foldi
-      entries
-      ~init:[]
-      ~f:(fun name (entry : DB.Pkg_table.entry) acc ->
-        match
-          Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
-            entry.pkg.build_command
-            ~platform
-        with
-        | Some Build_command.Dune ->
-          let paths =
-            Paths.make entry.pkg_digest universe ~relative:Path.Build.relative
-          in
-          (name, paths.source_dir) :: acc
-        | _ -> acc)
+    Package.Name.Map.to_list entries
+    |> Memo.parallel_map ~f:(fun (name, (entry : DB.Pkg_table.entry)) ->
+      match
+        Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
+          entry.pkg.build_command
+          ~platform
+      with
+      | Some Build_command.Dune ->
+        (match entry.pkg.info.source with
+         | None -> Memo.return None
+         | Some source ->
+           Lock_dir.source_kind source
+           >>| (function
+            | `Local (`Directory, _) -> None
+            | `Local (`File, _) | `Fetch ->
+              let paths =
+                Paths.make entry.pkg_digest universe ~relative:Path.Build.relative
+              in
+              Some (name, paths.source_dir)))
+      | _ -> Memo.return None)
+    >>| List.filter_map ~f:Fun.id
 ;;
 
 let dune_built_pkgs_source_dirs ctx =
