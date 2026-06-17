@@ -103,14 +103,16 @@ module Context : sig
     type t =
       { loc : Loc.t
       ; path : Mount_path.t
+      ; name_override : Context_name.t option
       }
 
     val equal : t -> t -> bool
     val to_dyn : t -> Dyn.t
 
-    (** Internal-context-name suffix derived from the mount's path. Currently
-        the path's basename; raises a [User_error] if the basename is not a
-        valid [Context_name.t]. *)
+    (** Internal-context-name suffix. Uses [name_override] when set
+        (e.g. for synthesised pkg mounts); otherwise derives from the
+        mount path's basename. Raises [User_error] if the basename
+        isn't a valid [Context_name.t] and no override is set. *)
     val internal_name : t -> Context_name.t
   end
 
@@ -235,12 +237,13 @@ val set_synthesised_for_revs
   :  (unit -> (Context_name.t * Dune_vcs.Vcs_tree.t) list Fiber.t)
   -> unit
 
-(** Hook for pkg-mount synthesis: for each context, return additional
-    [Mount.t] entries (typically with [Build] paths) to append to its
-    [Common.t.mounts]. Called by [Main.init] to wire [(dune)] pkgs
-    into the existing mount machinery. *)
+(** Hook for pkg-mount synthesis: given a context name and its
+    lockdir source path, return additional [Mount.t] entries
+    (typically with [Build] paths) to append to its [Common.t.mounts].
+    Called by [Main.init] to wire [(dune)] pkgs into the existing
+    mount machinery. *)
 val set_pkg_mounts_synthesiser
-  :  (Context_name.t -> Context.Mount.t list Memo.t)
+  :  (Context_name.t -> source_path:Path.Source.t -> Context.Mount.t list Memo.t)
   -> unit
 
 (** Same as [workspace ()] except that if there are errors related to fields

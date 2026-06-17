@@ -64,3 +64,11 @@ val pkg_digest_of_project_dependency
 val dune_built_pkgs_source_dirs
   :  Context_name.t
   -> (Package.Name.t * Path.Build.t) list Memo.t
+
+(** Like [dune_built_pkgs_source_dirs] but takes the source path
+    directly. Safe to call during workspace synthesis (does not force
+    [Workspace.workspace]). *)
+val dune_built_pkgs_at_source
+  :  source_path:Path.Source.t
+  -> ctx:Context_name.t
+  -> (Package.Name.t * Path.Build.t) list Memo.t

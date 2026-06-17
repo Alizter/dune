@@ -2682,10 +2682,37 @@ let pkg_digest_of_project_dependency ctx package_name =
     Package.Name.equal pkg_digest.name package_name)
 ;;
 
-(* Reads the source-side lockfile (no Build_system, no Source_tree) so
-   it's safe to call before Build_config.set is fully wired. Autolocked
-   pkgs aren't enumerated since the lockfile is only generated during
-   the build. *)
+(* Source-side lockfile parse for synthesis. Skips Build_system. *)
+let dune_built_pkgs_at_source ~source_path ~ctx =
+  Lock_dir.read_at_source_path source_path
+  >>= function
+  | None -> Memo.return []
+  | Some lock_dir ->
+    let+ platform = Lock_dir.Sys_vars.solver_env in
+    let entries =
+      DB.Pkg_table.entries_by_name_of_lock_dir
+        lock_dir
+        ~platform
+        ~system_provided:DB.default_system_provided
+    in
+    let universe = Package_universe.Dependencies ctx in
+    Package.Name.Map.foldi
+      entries
+      ~init:[]
+      ~f:(fun name (entry : DB.Pkg_table.entry) acc ->
+        match
+          Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
+            entry.pkg.build_command
+            ~platform
+        with
+        | Some Build_command.Dune ->
+          let paths =
+            Paths.make entry.pkg_digest universe ~relative:Path.Build.relative
+          in
+          (name, paths.source_dir) :: acc
+        | _ -> acc)
+;;
+
 let dune_built_pkgs_source_dirs ctx =
   Lock_dir.read_source ctx
   >>= function

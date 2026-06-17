@@ -275,17 +275,29 @@ let of_dev_tool_if_lock_dir_exists dev_tool =
   else Memo.return None
 ;;
 
+let read_at_source_path =
+  let memo =
+    Memo.create
+      "read-lock-dir-source"
+      ~input:(module Path.Source)
+      (fun source_path ->
+         Fs_memo.dir_exists (Path.Outside_build_dir.In_source_dir source_path)
+         >>= function
+         | false -> Memo.return None
+         | true ->
+           Load.load (Path.source source_path)
+           >>| (function
+            | Ok t -> Some t
+            | Error _ -> None))
+  in
+  Memo.exec memo
+;;
+
 let read_source ctx =
   get_source_path_for_context ctx
   >>= function
   | None -> Memo.return None
-  | Some source_path ->
-    Fs_memo.dir_exists (Path.Outside_build_dir.In_source_dir source_path)
-    >>= (function
-     | false -> Memo.return None
-     | true ->
-       let+ t = Load.load_exn (Path.source source_path) in
-       Some t)
+  | Some source_path -> read_at_source_path source_path
 ;;
 
 let lock_dirs_of_workspace (workspace : Workspace.t) =

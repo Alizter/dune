@@ -18,6 +18,10 @@ val lock_dir_active : Context_name.t -> bool Memo.t
     is absent (e.g. autolocked or no lockfile at all). *)
 val read_source : Context_name.t -> t option Memo.t
 
+(** Like [read_source] but takes the source path directly, skipping the
+    [Workspace]-driven lookup. Safe to call during workspace synthesis. *)
+val read_at_source_path : Path.Source.t -> t option Memo.t
+
 val get_path : Context_name.t -> Path.t option Memo.t
 
 (** The default filesystem location where the lock dir is going to get created *)

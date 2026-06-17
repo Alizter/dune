@@ -499,27 +499,47 @@ module Context = struct
     type t =
       { loc : Loc.t
       ; path : Mount_path.t
+      ; name_override : Context_name.t option
       }
 
-    let equal { loc = _; path } t = Mount_path.equal path t.path
-    let to_dyn { loc = _; path } = Dyn.record [ "path", Mount_path.to_dyn path ]
+    let equal { loc = _; path; name_override } t =
+      Mount_path.equal path t.path
+      && Option.equal Context_name.equal name_override t.name_override
+    ;;
+
+    let to_dyn { loc = _; path; name_override } =
+      Dyn.record
+        [ "path", Mount_path.to_dyn path
+        ; "name_override", Dyn.option Context_name.to_dyn name_override
+        ]
+    ;;
 
     let decode =
       let open Dune_lang.Decoder in
       let+ loc, path = located string in
-      { loc; path = Mount_path.External (Path.External.parse_string_exn ~loc path) }
+      { loc
+      ; path = Mount_path.External (Path.External.parse_string_exn ~loc path)
+      ; name_override = None
+      }
     ;;
 
     let internal_name t =
-      let basename = Mount_path.basename t.path in
-      match Context_name.of_string_opt basename with
+      match t.name_override with
       | Some n -> n
       | None ->
-        User_error.raise
-          ~loc:t.loc
-          [ Pp.textf "cannot derive a context name from mount path basename %S" basename ]
-          ~hints:
-            [ Pp.text "An explicit (name ...) field for mounts is not yet supported." ]
+        let basename = Mount_path.basename t.path in
+        (match Context_name.of_string_opt basename with
+         | Some n -> n
+         | None ->
+           User_error.raise
+             ~loc:t.loc
+             [ Pp.textf
+                 "cannot derive a context name from mount path basename %S"
+                 basename
+             ]
+             ~hints:
+               [ Pp.text "An explicit (name ...) field for mounts is not yet supported."
+               ])
     ;;
   end
 
@@ -1552,31 +1572,50 @@ let workspace_config () =
     step1.config
 ;;
 
-(* Synthesises additional pkg-mount entries to attach to each context.
-   Set by main.ml after Workspace is built; receives a context name
+(* Synthesises additional pkg-mount entries to attach to each
+   context. Set by main.ml; receives (ctx_name, lockdir_source_path)
    and returns the list of pkg-derived mounts (Build paths) to append
-   to that context's [Common.t.mounts]. *)
+   to that context's [Common.t.mounts]. Path is passed explicitly so
+   the synthesiser doesn't re-enter [Workspace.workspace] via lookup. *)
 let pkg_mounts_synthesiser
-  : (Context_name.t -> Context.Mount.t list Memo.t) ref
+  : (Context_name.t
+     -> source_path:Path.Source.t
+     -> Context.Mount.t list Memo.t)
+      ref
   =
-  ref (fun _ -> Memo.return [])
+  ref (fun _ ~source_path:_ -> Memo.return [])
 ;;
 
 let set_pkg_mounts_synthesiser f = pkg_mounts_synthesiser := f
+
+(* Default lockdir source path. Mirrors Lock_dir.default_source_path
+   (in dune_rules) but inlined here to avoid forward-dependency. *)
+let default_lockdir_source_path = Path.Source.(relative root "dune.lock")
 
 let augment_with_pkg_mounts (t : t) =
   let open Memo.O in
   let+ contexts =
     Memo.parallel_map t.contexts ~f:(fun (ctx : Context.t) ->
-      let+ extra = !pkg_mounts_synthesiser (Context.name ctx) in
-      match extra with
-      | [] -> ctx
-      | _ :: _ ->
-        let base = Context.base ctx in
-        let base = { base with mounts = base.mounts @ extra } in
-        (match ctx with
-         | Default d -> Context.Default { d with base }
-         | Opam o -> Context.Opam { o with base }))
+      let source_path =
+        match ctx with
+        | Default { lock_dir = None; _ } -> Some default_lockdir_source_path
+        | Default { lock_dir = Some _; _ } | Opam _ ->
+          (* Lock_dir_selection support deferred; only default lockdir
+             paths drive pkg synthesis for now. *)
+          None
+      in
+      match source_path with
+      | None -> Memo.return ctx
+      | Some source_path ->
+        let+ extra = !pkg_mounts_synthesiser (Context.name ctx) ~source_path in
+        (match extra with
+         | [] -> ctx
+         | _ :: _ ->
+           let base = Context.base ctx in
+           let base = { base with mounts = base.mounts @ extra } in
+           (match ctx with
+            | Default d -> Context.Default { d with base }
+            | Opam o -> Context.Opam { o with base })))
   in
   { t with contexts }
 ;;
