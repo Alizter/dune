@@ -2719,10 +2719,7 @@ let dune_built_pkgs_source_dirs ctx =
            with
            | Some Build_command.Dune ->
              let paths =
-               Paths.make
-                 entry.pkg_digest
-                 universe
-                 ~relative:Path.Build.relative
+               Paths.make entry.pkg_digest universe ~relative:Path.Build.relative
              in
              (name, paths.source_dir) :: acc
            | _ -> acc))

@@ -43,8 +43,10 @@ let all_direct_targets dir =
     | None -> Source_tree.root Source_tree.default
     | Some dir -> Source_tree.nearest_dir Source_tree.default dir
   and* contexts = Memo.Lazy.force (Build_config.get ()).contexts in
-  Context_name.Map.values contexts
-  |> List.filter_map ~f:(fun (ctx, (ctx_type : Build_config.Context_type.t)) ->
+  let* contexts =
+    Context_name.Map.values contexts |> Memo.parallel_map ~f:Memo.Lazy.force
+  in
+  List.filter_map contexts ~f:(fun (ctx, (ctx_type : Build_config.Context_type.t)) ->
     match ctx_type with
     | Empty -> None
     | With_sources -> Some ctx)

@@ -170,7 +170,7 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
     Memo.lazy_ (fun () ->
       let open Memo.O in
       let+ map = Memo.Lazy.force source_tree_of_context in
-      Context_name.Map.map map ~f:module_of_source_tree)
+      Context_name.Map.map map ~f:(fun t -> Memo.Lazy.of_val (module_of_source_tree t)))
   in
   Build_config.set
     ~sandboxing_preference

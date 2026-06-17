@@ -94,7 +94,8 @@ module type Source_tree = sig
 end
 
 type t =
-  { contexts : (Build_context.t * Context_type.t) Context_name.Map.t Memo.Lazy.t
+  { contexts :
+      (Build_context.t * Context_type.t) Memo.Lazy.t Context_name.Map.t Memo.Lazy.t
   ; rule_generator : (module Gen_rules.Rule_generator)
   ; sandboxing_preference : Sandbox_mode.t list
   ; promote_source :
@@ -106,9 +107,7 @@ type t =
   ; implicit_default_alias : Path.Build.t -> unit Action_builder.t option Memo.t
   ; execution_parameters :
       Context_name.t -> dir:Path.Build.t -> Execution_parameters.t Memo.t
-  ; source_trees : (module Source_tree) Context_name.Map.t Memo.Lazy.t
-    (** Per-context [Source_tree]. The engine looks these up when serving
-      queries about a particular build directory's source view. *)
+  ; source_trees : (module Source_tree) Memo.Lazy.t Context_name.Map.t Memo.Lazy.t
   }
 
 let t : t Fdecl.t = Fdecl.create Dyn.opaque
@@ -129,7 +128,8 @@ let set
       let+ contexts = Memo.Lazy.force contexts in
       Context_name.Map.of_list_map_exn
         contexts
-        ~f:(fun ((ctx : Build_context.t), ctx_type) -> ctx.name, (ctx, ctx_type)))
+        ~f:(fun ((ctx : Build_context.t), ctx_type) ->
+          ctx.name, Memo.Lazy.of_val (ctx, ctx_type)))
   in
   Fdecl.set
     t

@@ -131,11 +131,12 @@ val set
   -> implicit_default_alias:(Path.Build.t -> unit Action_builder.t option Memo.t)
   -> execution_parameters:
        (Context_name.t -> dir:Path.Build.t -> Execution_parameters.t Memo.t)
-  -> source_trees:(module Source_tree) Context_name.Map.t Memo.Lazy.t
+  -> source_trees:(module Source_tree) Memo.Lazy.t Context_name.Map.t Memo.Lazy.t
   -> unit
 
 type t = private
-  { contexts : (Build_context.t * Context_type.t) Context_name.Map.t Memo.Lazy.t
+  { contexts :
+      (Build_context.t * Context_type.t) Memo.Lazy.t Context_name.Map.t Memo.Lazy.t
   ; rule_generator : (module Gen_rules.Rule_generator)
   ; sandboxing_preference : Sandbox_mode.t list
   ; promote_source :
@@ -147,7 +148,7 @@ type t = private
   ; implicit_default_alias : Path.Build.t -> unit Action_builder.t option Memo.t
   ; execution_parameters :
       Context_name.t -> dir:Path.Build.t -> Execution_parameters.t Memo.t
-  ; source_trees : (module Source_tree) Context_name.Map.t Memo.Lazy.t
+  ; source_trees : (module Source_tree) Memo.Lazy.t Context_name.Map.t Memo.Lazy.t
   }
 
 val get : unit -> t

@@ -121,11 +121,11 @@ let get_dir_triage ~dir =
   | Build (Invalid _) ->
     Memo.return @@ Dir_triage.Known (Loaded.no_rules ~allowed_subdirs:Dir_set.empty)
   | Build (Regular (With_context (context_name, sub_dir))) ->
-    let+ contexts = Memo.Lazy.force (Build_config.get ()).contexts in
+    let* contexts = Memo.Lazy.force (Build_config.get ()).contexts in
     (match Context_name.Map.find contexts context_name with
-     | None -> Dir_triage.no_rules
-     | Some ((_ : Build_context.t), context_type) ->
-       (* In this branch, [dir] is in the build directory. *)
+     | None -> Memo.return Dir_triage.no_rules
+     | Some lazy_ctx ->
+       let+ (_ : Build_context.t), context_type = Memo.Lazy.force lazy_ctx in
        let dir = Path.as_in_build_dir_exn dir in
        Dir_triage.Build_directory { dir; context_name; context_type; sub_dir })
 ;;
@@ -467,7 +467,8 @@ end = struct
         let* source_trees = Memo.Lazy.force (Build_config.get ()).source_trees in
         (match Context_name.Map.find source_trees ctx with
          | None -> Memo.return Filename.Array.Set.empty
-         | Some (module Source_tree) ->
+         | Some lazy_st ->
+           let* (module Source_tree) = Memo.Lazy.force lazy_st in
            Source_tree.find_dir sub_dir
            >>| (function
             | None -> Filename.Array.Set.empty
@@ -728,7 +729,8 @@ end = struct
     let* source_trees = Memo.Lazy.force (Build_config.get ()).source_trees in
     match Context_name.Map.find source_trees context_name with
     | None -> Memo.return Source_files_and_dirs.empty
-    | Some (module Source_tree) ->
+    | Some lazy_st ->
+      let* (module Source_tree) = Memo.Lazy.force lazy_st in
       Source_tree.find_dir dir
       >>| (function
        | None -> Source_files_and_dirs.empty
