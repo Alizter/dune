@@ -275,6 +275,19 @@ let of_dev_tool_if_lock_dir_exists dev_tool =
   else Memo.return None
 ;;
 
+let read_source ctx =
+  get_source_path_for_context ctx
+  >>= function
+  | None -> Memo.return None
+  | Some source_path ->
+    Fs_memo.dir_exists (Path.Outside_build_dir.In_source_dir source_path)
+    >>= (function
+     | false -> Memo.return None
+     | true ->
+       let+ t = Load.load_exn (Path.source source_path) in
+       Some t)
+;;
+
 let lock_dirs_of_workspace (workspace : Workspace.t) =
   let module Set = Path.Source.Set in
   let+ lock_dirs_from_ctx =
