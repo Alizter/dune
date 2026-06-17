@@ -491,8 +491,11 @@ let build_dir_backing (root : Path.Build.t) =
     Dir_contents.File.synthetic ("build:" ^ Path.Source.to_string path)
   in
   let readdir path =
+    (* Just untracked readdir: returns empty when the dir doesn't yet
+       exist. The producing action runs separately via the regular
+       rule pipeline; this read picks up whatever is currently on
+       disk. *)
     let dir = physical_of path in
-    let* () = Build_system.build_dir dir in
     match Path.Untracked.readdir_unsorted_with_kinds dir with
     | Error _ -> Memo.return Dir_contents.empty
     | Ok entries ->

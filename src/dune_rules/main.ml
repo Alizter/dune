@@ -101,6 +101,15 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
       ~conf
       ()
   in
+  Workspace.set_pkg_mounts_synthesiser (fun ctx_name ~source_path ->
+    let open Memo.O in
+    Pkg_rules.dune_built_pkgs_at_source ~source_path ~ctx:ctx_name
+    >>| List.map ~f:(fun (pkg_name, source_dir) ->
+      { Workspace.Context.Mount.loc = Loc.of_pos __POS__
+      ; path = Workspace.Mount_path.Build source_dir
+      ; name_override =
+          Some (Context_name.of_string (Package.Name.to_string pkg_name))
+      }));
   let workspace_build_contexts =
     Memo.lazy_ (fun () ->
       let open Memo.O in
