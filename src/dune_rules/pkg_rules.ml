@@ -2510,6 +2510,13 @@ let setup_rules ~components ~dir ctx =
 ;;
 
 let resolve_pkg_dep context (loc, package_name) =
+  (* Pkg artefacts (DB, digest table, [Paths.make]) are keyed on the
+     user-facing context. Sibling contexts — pkg mounts, external
+     mounts, cross-targets — don't own pkg installations; they reuse
+     the parent's. Redirect here so the three [resolve_pkg_dep]
+     callers ([ocaml_toolchain], [find_package],
+     [resolve_installed_file]) all see the parent's paths. *)
+  let* context = Per_context.user_facing context in
   let* db, pkg_digest = DB.of_project_pkg context package_name in
   Resolve.resolve db loc pkg_digest (Dependencies context)
 ;;
@@ -2622,6 +2629,10 @@ let exported_env context =
 ;;
 
 let find_package ctx pkg =
+  (* Sibling contexts (mounts, pkg-mounts, cross-targets) don't own a
+     lockdir — the parent does. Redirect so [lock_dir_active] succeeds
+     and [resolve_pkg_dep] sees the right pkg DB. *)
+  let* ctx = Per_context.user_facing ctx in
   lock_dir_active ctx
   >>= function
   | false -> Memo.return None

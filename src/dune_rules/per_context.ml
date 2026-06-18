@@ -56,6 +56,13 @@ let siblings ctx =
         if Context_name.equal parent_name entry_parent_name then name :: acc else acc))
 ;;
 
+let user_facing ctx =
+  let+ map = Memo.Lazy.force all in
+  match Context_name.Map.find map ctx with
+  | None -> ctx
+  | Some (`Native uc) | Some (`Target (uc, _)) -> Workspace.Context.name uc
+;;
+
 let create_db ?cutoff ~name f =
   let cutoff = Option.map cutoff ~f:(fun equal -> Context_name.Map.equal ~equal) in
   let map =
