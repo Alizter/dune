@@ -296,25 +296,57 @@ pays the full evaluation cost up front.
 ### 3. Dedup source trees by shared source URL
 
 When two packages share the same upstream `(source (fetch ...))`
-URL+checksum, the existing fetch-cache mechanism shares the
+URL+checksum (a common shape in opam repositories — multiple
+installable packages built from one release tarball, e.g. `eio_*` or
+`mirage-crypto*`), the existing fetch-cache mechanism shares the
 downloaded bytes (one `_build/.fetch/<checksum>` entry). But each
-package still gets its own `_build/_private/<ctx>/.pkg/<digest>/source`
-copy because `Paths.make` keys on `pkg_digest`, not on source.
+lockfile entry still gets its own
+`_build/_private/<ctx>/.pkg/<digest>/source` copy because
+`Paths.make` keys on `pkg_digest`, not on source.
 
-Per-package source dirs aren't a correctness problem, but each one
-materialises its own `Source_tree.t` and own sibling context. For
-real lockdirs (e.g. multiple `eio_*` packages from the same tarball)
-this is several redundant trees of the same bytes. Two fixes are
-plausible:
+The shape today (see
+`test/blackbox-tests/test-cases/pkg/mount/shared-source-dup.t`):
 
-- Key `source_dir` on `(source_url, checksum)` instead of `pkg_digest`
-  so multiple packages reuse one directory. Bigger refactor of
-  `Paths.make`.
-- Dedup at the `Source_tree.t` level in `source_tree_of_context`
-  (analogous to the existing external-mount dedup keyed on
-  `Path.External.t`). No-op given today's `Paths.make`, but it's a
-  one-line change that becomes useful as soon as the first option
-  goes in.
+- Two pkg-mount siblings (`default.a`, `default.b`) materialise.
+- The same tarball is unpacked twice, once per pkg-digest.
+- Each unpacked tree carries the full dune-project declaring BOTH
+  packages, so the package declarations for `a` and `b` are visible
+  from both sibling contexts.
+
+A simple `dune exec ./main.exe` linking against `a` and `b` still
+succeeds — `Dune_load.packages` keeps a per-context package map, so
+"`a` declared in `default.a`'s source tree" and "`a` declared in
+`default.b`'s source tree" don't collide. But the duplication is real
+and bites in three places that the cram test doesn't yet probe:
+
+- **Install rules.** Both sibling contexts emit install rules for
+  both libraries `a` and `b` (since both source trees declare both
+  via dune files). Running `dune build @install` would emit two rules
+  for each install path.
+- **Cross-context resolution determinism.** When the workspace
+  resolves `(libraries b)`, sibling fallback could find lib `b` in
+  either `default.a` or `default.b`. Whichever wins, the consumed
+  cma/cmx and exported env come from a context whose pkg-build
+  artefacts may differ.
+- **Per-mount sctx cost.** Each redundant `Source_tree.t` triggers
+  its own `Dune_load.dune_files`, `Super_context.make_sctx`, library
+  resolution, etc. For a 173-pkg lockfile with many shared-source
+  bundles, this multiplies the eager evaluation cost (compounding
+  issue 2).
+
+The dedup cleanup should:
+
+- Key source-dir materialisation on `(source_url, checksum)` rather
+  than `pkg_digest` in `Pkg_rules.Paths.make`, so multiple lockfile
+  entries with the same upstream source share one unpacked tree.
+- Mask each pkg-mount's `Source_tree.t` view of the shared
+  dune-project to the single package its lockfile entry installs
+  (the existing per-context `Only_packages` mask is the right
+  primitive — see issue #50 in the task list).
+- Optionally also dedup at the `Source_tree.t` level in
+  `source_tree_of_context` (analogous to the existing external-mount
+  dedup keyed on `Path.External.t`), so identical source-dirs share
+  one `Source_tree.t` value and one Memo identity.
 
 ### 4. Local-directory pins skipped
 
