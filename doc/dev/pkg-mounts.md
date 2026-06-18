@@ -132,6 +132,46 @@ This unification means `Dir.file_source` is a single line — no
 conditional on the backing kind — and adding new backings won't need
 to extend `load_rules.copy_source_action`.
 
+### Backing-aware `(include ...)` resolution
+
+`Source_resolver.t` used to carry only a `Path.Source.t ->
+Path.Outside_build_dir.t` translator, locking `(include foo.inc)` into
+filesystem reads via `Fs_memo`. VCS and build-dir backings installed
+*vestigial* resolvers that satisfied the type but pointed includes at
+the workspace source root rather than the backing's actual bytes —
+silently breaking `(include foo.inc)` whenever a package ships
+generated dune files in its tarball (`js_of_ocaml`, `mdx`, `ppxlib`,
+...).
+
+The resolver is now backing-aware: it carries `file_exists` and
+`with_lexbuf_from_file` closures alongside `resolve`. Each backing
+installs the right closures:
+
+| Backing | `(include ...)` reads via |
+|---|---|
+| `filesystem_backing` / `of_external_root` | `Fs_memo` at the resolved path (unchanged) |
+| `of_vcs_tree` | `Vcs_tree.read_file` → string → lexbuf |
+| `of_build_dir` | `Build_system.with_file (root/path)` |
+
+The resolver is persisted on `Source.Dune_file.t` (via `resolver :
+Source_resolver.t`) so `src/dune_rules/dune_file.ml`'s `parse_stanzas`
+— which re-evaluates `(include ...)` directives on persisted sexps —
+uses the same read mechanism as the original load. Same for the
+OCaml-syntax dune file path (`Script.t` carries the resolver).
+
+The narrow `is_workspace` check (used only to suppress the
+missing-dune-project warning for non-workspace trees) is preserved.
+
+### Filesystem-only resolver fields (cleanup follow-up)
+
+`backing.byte_provider` and `backing.file_source` are conceptually the
+same "how do I get bytes" concern as the resolver's reads, just
+wrapped differently (`string Memo.t` and `Build_config.source_file`
+respectively). Once Source_resolver fully owns reads, `byte_provider`
+can be removed and `file_source` derived from the resolver. Not done
+in this round — the current shape works and the refactor is
+mechanical.
+
 ### Lock_dir_active short-circuits on read-only trees
 
 Sibling contexts (pkg mounts, external mounts, vcs revisions) do not
@@ -183,73 +223,77 @@ they pin the sibling-context synthesis, not just that the inner
 subprocess happens to produce the right output.
 
 
+Resolved Issues
+---------------
+
+These came up while scaling to real lockdirs (cohttp's 173-pkg
+lockfile) and have been fixed.
+
+### Toolchain not shared across sibling contexts (FIXED)
+
+Each pkg-mount context used to resolve `ocaml-base-compiler` through
+its own `Pkg_rules.DB.of_ctx <sibling-name>`, computing paths under
+`_build/_private/<sibling>/.pkg/...` where no rule existed. Fix:
+`Pkg_rules.resolve_pkg_dep` and `Pkg_rules.find_package` redirect
+through a new `Per_context.user_facing` helper, so all pkg lookups
+(`ocaml_toolchain`, `find_package`, `resolve_installed_file`) on a
+sibling resolve through the parent context's DB and produce the
+correct `_build/_private/<parent>/.pkg/...` paths.
+
+### `(include ...)` resolution bypassed source-tree backings (FIXED)
+
+`Source_resolver.t` carried only a `Path.Source.t ->
+Path.Outside_build_dir.t` translator; `Include_stanza` used it to
+read via `Fs_memo`. VCS and build-dir backings installed vestigial
+resolvers that satisfied the type but pointed includes at the
+workspace source root, breaking `(include foo.inc)` for any package
+shipping generated dune files (js_of_ocaml, mdx, ppxlib, ...).
+
+Fix: `Source_resolver.t` now carries `file_exists` and
+`with_lexbuf_from_file` closures alongside `resolve`. Each backing
+installs the right read mechanism (Fs_memo / Vcs_tree / Build_system).
+Persisted on `Source.Dune_file.t` and threaded into `parse_stanzas`
+so re-resolution uses the same backing. See "Backing-aware `(include
+...)` resolution" above.
+
+
 Open Issues
 -----------
 
-The substrate works end-to-end on the focused tests, but scaling to a
-real lockfile (e.g. cohttp's 173-pkg lockdir, all `(build (dune))`
-entries) exposes the next layer of architectural work.
+### 1. OCaml-syntax dune files in pkg mounts
 
-### 1. Toolchain not shared across sibling contexts
-
-Each pkg-mount context resolves `ocaml-base-compiler` through its own
-`Pkg_rules.DB.of_ctx <sibling-name>`. The DB has no entries for that
-name (the lockdir is keyed on the parent context), so:
-
-```
-Error: No rule found for
-default.camlp-streams/.pkg/ocaml-base-compiler.<digest>/target/cookie
-(context _private)
--> required by loading the OCaml compiler for context "default.camlp-streams"
-```
-
-The sibling should inherit the parent's already-built compiler
-installation directly, not look up its own. This requires either:
-
-- A separate code path for "sibling context toolchain loading" that
-  bypasses `DB.of_ctx` and resolves through the parent's DB, or
-- Making `DB.of_ctx <sibling>` transparently delegate to the parent
-  context's DB.
-
-The second is more consistent with how `Lib.DB` already does sibling
-fallback. Either way, the per-pkg `lock_dir_active` check is no
-longer the only place sibling contexts diverge from "full
-user-facing context" semantics.
-
-### 2. Eager dune-file evaluation of generated files
-
-Several packages (`js_of_ocaml-compiler`, `mdx`, ...) ship `dune.inc`
-or `dune.manual` files that are generated by build rules in the
-package's own source tree. The outer dune walks the pkg source via
-`Dune_load.dune_files`, finds the `(include ...)` directive in the
-dune file, and tries to read the include target before the rule that
-produces it has fired:
+Packages like `lwt` ship `src/unix/dune` as OCaml code that reads
+sibling files relative to its cwd. `Script.eval_one` runs the
+generated program with `cwd = Path.source eval.dir`, which for
+pkg-mounts is the *workspace-relative* path interpretation of the
+mount's source — not the actual build-mirror location where the bytes
+live. Errors look like:
 
 ```
-Error: File doc/dune.inc doesn't exist.
+Error: open(src/dune): No such file or directory
+-> required by - evaluating dune file "src/unix/dune" in OCaml syntax
 ```
 
-This is the same pattern as existing dynamic-include handling; the
-fix is to route those reads through `Build_system.build_file` (so the
-producing rule runs first), but the include resolution currently
-assumes the included file lives in the source tree as-is.
+The fix needs `Script.eval_one` to use the mount's actual physical
+path (via the backing's resolver or the of_build_dir root) for the
+cwd, not `Path.source eval.dir`. Different code path from the
+`(include ...)` fix and not addressed yet.
 
-### 3. Eager `Super_context.all` for siblings
+### 2. Eager `Super_context.all` for siblings
 
 `Super_context.all` forces sctx construction for every context,
 including pkg-mount siblings. Each sctx calls `Dune_load.dune_files`,
 which walks the mount's source tree. For 100+ pkg mounts this is
-both wasteful (most are never queried by the workspace build) and
-the source of (1) and (2) firing prematurely.
+wasteful (most are never queried by the workspace build) and it's
+also the reason every pkg's dune files get evaluated up-front, even
+ones whose libraries the workspace never uses.
 
-The user's intuition is that sibling sctxs should be constructed
-lazily — only when something actually resolves a library / binary /
-artefact through a sibling-fallback lookup. This is the right
-shape; it's just not done yet. Once it is, the toolchain and
-include-file issues become much rarer (only the pkg mounts the
-workspace actually depends on hit them).
+Sibling sctxs should be constructed lazily — only when something
+actually resolves a library / binary / artefact through a
+sibling-fallback lookup. Until that lands, every pkg-mount sibling
+pays the full evaluation cost up front.
 
-### 4. Dedup source trees by shared source URL
+### 3. Dedup source trees by shared source URL
 
 When two packages share the same upstream `(source (fetch ...))`
 URL+checksum, the existing fetch-cache mechanism shares the
@@ -269,20 +313,31 @@ plausible:
 - Dedup at the `Source_tree.t` level in `source_tree_of_context`
   (analogous to the existing external-mount dedup keyed on
   `Path.External.t`). No-op given today's `Paths.make`, but it's a
-  one-line change that becomes useful as soon as (1) goes in.
+  one-line change that becomes useful as soon as the first option
+  goes in.
 
-### 5. Local-directory pins skipped
+### 4. Local-directory pins skipped
 
-As noted in the architecture section, pinned local directories
-don't get a pkg mount because `source_dir` isn't a directory
-target. The existing `dune build -p` subprocess handles them.
+As noted in the architecture section, pinned local directories don't
+get a pkg mount because `source_dir` isn't a directory target. The
+existing `dune build -p` subprocess handles them.
 
 If we want pkg-mount to fully subsume the subprocess for every
-`(dune)` lockfile entry, we'd need to either declare `source_dir`
-as a directory target even for local-directory sources (which
-conflicts with the per-file copy rules) or point the mount at the
-pin's actual on-disk source as an `External` path.
+`(dune)` lockfile entry, we'd need to either declare `source_dir` as
+a directory target even for local-directory sources (which conflicts
+with the per-file copy rules) or point the mount at the pin's actual
+on-disk source as an `External` path.
 
 The second is cleaner and consistent: a pinned local directory IS an
 external source, just like a workspace mount. The synthesiser would
 emit `Mount_path.External <pin_source>` for these.
+
+### 5. `backing.byte_provider` redundancy
+
+`Source_resolver` now owns the read mechanism, but `backing` still
+carries a separate `byte_provider : Path.Source.t -> string Memo.t`
+and a `file_source : Path.Source.t ->
+Dune_engine.Build_config.source_file`. Both are derivable from
+`resolver`'s reads. Removing the redundancy is mechanical but
+non-trivial because both fields have many call sites; deferred until
+a cleanup pass.
