@@ -103,17 +103,22 @@ type eval =
   ; mask : Stanza.t Mask.t
   }
 
-let parse_stanzas ~file ~(eval : eval) sexps =
+let parse_stanzas ~resolver ~file ~(eval : eval) sexps =
   let warnings = Warning_emit.Bag.create () in
   let* stanzas =
     let context =
-      Include_stanza.in_src_file
-      @@
-      match file with
-      | Some f -> f
-      | None ->
-        (* TODO this is wrong *)
-        Path.Source.relative_fname eval.dir Source.Dune_file.fname
+      let file =
+        match file with
+        | Some f -> f
+        | None ->
+          (* TODO this is wrong *)
+          Path.Source.relative_fname eval.dir Source.Dune_file.fname
+      in
+      (* Use the backing's resolver so [(include ...)] in re-parsed
+         stanzas resolves through the same read mechanism the
+         dune file was originally loaded with (filesystem, vcs, or
+         build-dir). *)
+      Include_stanza.in_src_file_with_resolver resolver file
     in
     let stanza_parser =
       Dune_project.stanza_parser ~dir:eval.dir eval.project
@@ -145,8 +150,8 @@ let parse_stanzas ~file ~(eval : eval) sexps =
   stanzas, dynamic_includes
 ;;
 
-let parse sexps ~file ~(eval : eval) =
-  let+ stanzas, dynamic_includes = parse_stanzas sexps ~file ~eval in
+let parse sexps ~resolver ~file ~(eval : eval) =
+  let+ stanzas, dynamic_includes = parse_stanzas sexps ~resolver ~file ~eval in
   ( { dir = eval.dir
     ; project = eval.project
     ; static_stanzas = stanzas
@@ -305,13 +310,14 @@ module Script = struct
     { file : Path.Source.t
     ; eval : eval
     ; from_parent : Dune_lang.Ast.t list
+    ; resolver : Source_resolver.t
     }
 
   (* CR-someday rgrinberg: context handling code should be aware of this special
      directory *)
   let generated_dune_files_dir = Path.Build.relative Path.Build.root ".dune"
 
-  let eval_one ~context { file; from_parent; eval } =
+  let eval_one ~context { file; from_parent; eval; resolver } =
     let generated_dune_file =
       Path.Build.append_source
         (Path.Build.relative generated_dune_files_dir (Context_name.to_string context))
@@ -355,7 +361,7 @@ module Script = struct
     Path.build generated_dune_file
     |> Io.Untracked.with_lexbuf_from_file ~f:(Dune_lang.Parser.parse ~mode:Many)
     |> List.rev_append from_parent
-    |> parse ~file:(Some file) ~eval
+    |> parse ~resolver ~file:(Some file) ~eval
   ;;
 end
 
@@ -386,10 +392,11 @@ module Eval = struct
 
   let context_independent ~eval dune_file =
     let file = Source.Dune_file.path dune_file in
+    let resolver = Source.Dune_file.resolver dune_file in
     let static = Source.Dune_file.get_static_sexp dune_file in
     match Source.Dune_file.kind dune_file with
     | Plain ->
-      let+ dune_file, dynamic_includes = parse static ~file ~eval in
+      let+ dune_file, dynamic_includes = parse static ~resolver ~file ~eval in
       Literal (eval, dune_file, dynamic_includes)
     | Ocaml_script ->
       Memo.return
@@ -399,6 +406,7 @@ module Eval = struct
                (* we can't introduce ocaml syntax with [(sudir ..)] *)
                Option.value_exn file
            ; from_parent = static
+           ; resolver
            })
   ;;
 
@@ -417,7 +425,13 @@ module Eval = struct
            let* ast, include_context =
              Include_stanza.load_sexps ~context:include_context (loc, include_file)
            in
-           let* stanzas, dynamic_includes = parse_stanzas ast ~file:None ~eval in
+           (* Dynamic include contents come from the build dir; any
+              [(include ...)] inside them resolves against the build
+              tree, not a source backing. The workspace resolver is
+              the previous behaviour for this path. *)
+           let* stanzas, dynamic_includes =
+             parse_stanzas ast ~resolver:Source_resolver.workspace ~file:None ~eval
+           in
            let+ dynamic =
              collect_dynamic_includes eval include_context origin dynamic_includes
            in

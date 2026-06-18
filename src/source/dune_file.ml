@@ -472,7 +472,7 @@ let rec to_dir_map ast ~dune_version =
   Dir_map.merge_all (node :: subdirs)
 ;;
 
-let decode ~resolve ~file project sexps =
+let decode ~resolver ~file project sexps =
   let decoder =
     { decode =
         (fun ast d ->
@@ -480,7 +480,7 @@ let decode ~resolve ~file project sexps =
           Dune_lang.Decoder.parse d Univ_map.empty (Dune_lang.Ast.List (Loc.none, ast)))
     }
   in
-  let context = Include_stanza.in_src_file_with_resolve ~resolve file in
+  let context = Include_stanza.in_src_file_with_resolver resolver file in
   let inside_include = false in
   let inside_subdir = false in
   Ast.decode ~inside_include ~inside_subdir
@@ -499,9 +499,16 @@ type t =
   ; kind : kind
   ; (* for [kind = Ocaml_script], this is the part inserted with subdir *)
     plain : Dir_map.t
+  ; resolver : Source_resolver.t
+    (** Snapshot of the backing's resolver, used by
+        [src/dune_rules/dune_file.ml]'s [parse_stanzas] when it
+        re-resolves [(include ...)] directives on the persisted
+        sexps. For workspace-source files this is the workspace
+        resolver (filesystem reads); for vcs / build-dir mounts it
+        routes through the backing's bytes. *)
   }
 
-let to_dyn { path; kind; plain } =
+let to_dyn { path; kind; plain; resolver = _ } =
   let open Dyn in
   record
     [ "path", option Path.Source.to_dyn path
@@ -513,6 +520,7 @@ let to_dyn { path; kind; plain } =
 let get_static_sexp t = (Dir_map.root t.plain).sexps
 let kind t = t.kind
 let path t = t.path
+let resolver t = t.resolver
 let sub_dir_status t = Source_dir_status.Spec.create (Dir_map.root t.plain).subdir_status
 
 let dirs_stanza_loc t =
@@ -522,11 +530,11 @@ let dirs_stanza_loc t =
 
 let files t = (Dir_map.root t.plain).files
 
-let load_plain ~resolve sexps ~file ~from_parent ~project =
+let load_plain ~resolver sexps ~file ~from_parent ~project =
   let+ parsed =
     match file with
     | None -> Memo.return Dir_map.empty
-    | Some file -> decode ~resolve ~file project sexps
+    | Some file -> decode ~resolver ~file project sexps
   in
   match from_parent with
   | None -> parsed
@@ -535,9 +543,9 @@ let load_plain ~resolve sexps ~file ~from_parent ~project =
 
 let sub_dirnames t = Dir_map.sub_dirs t.plain
 
-let load ~resolve ~byte_provider file ~from_parent ~project =
+let load ~resolver ~byte_provider file ~from_parent ~project =
   let+ kind, plain =
-    let load_plain = load_plain ~resolve ~file ~from_parent ~project in
+    let load_plain = load_plain ~resolver ~file ~from_parent ~project in
     match file with
     | None ->
       let+ plain = load_plain [] in
@@ -559,7 +567,7 @@ let load ~resolve ~byte_provider file ~from_parent ~project =
       let+ ast = load_plain ast in
       kind, ast
   in
-  { path = file; kind; plain }
+  { path = file; kind; plain; resolver }
 ;;
 
 let ensure_dune_project_file_exists =
@@ -640,6 +648,5 @@ let load
         else Memo.return ()
     in
     let file = Option.map file ~f:(fun file -> Path.Source.relative_fname dir file) in
-    let resolve = Source_resolver.resolve resolver in
-    load ~resolve ~byte_provider file ~from_parent:parent ~project >>| Option.some
+    load ~resolver ~byte_provider file ~from_parent:parent ~project >>| Option.some
 ;;

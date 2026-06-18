@@ -28,6 +28,13 @@ val sub_dir_status : t -> Source_dir_status.Spec.t
 (** The location of the (dirs ...) stanza if present *)
 val dirs_stanza_loc : t -> Loc.t option
 
+(** Snapshot of the backing's resolver. Callers that re-resolve
+    [(include ...)] directives on the persisted sexps (notably
+    [src/dune_rules/dune_file.ml]'s [parse_stanzas]) must pass this
+    to [Include_stanza] so the resolution goes through the same
+    backing (filesystem, vcs, or build-dir) as the original load. *)
+val resolver : t -> Source_resolver.t
+
 module Files : sig
   type t
 
@@ -49,10 +56,10 @@ val sub_dirnames : t -> Filename.Array.Set.t
     git tree) the closure reads from the backend directly without
     materialising the file on disk.
 
-    [resolver] is still consulted for [Path.Source.t -> Path.Outside_build_dir.t]
-    translation by ancillary code paths ((include ...) stanzas, the
-    missing-dune-project warning). The workspace-centric warning fires
-    only when [resolver] is the workspace one. *)
+    [resolver] supplies the per-backing read closures used by
+    [(include ...)] resolution AND the [Path.Source.t ->
+    Path.Outside_build_dir.t] translation used by the missing-dune-project
+    warning (which fires only when [resolver] is the workspace one). *)
 val load
   :  ?resolver:Source_resolver.t
   -> byte_provider:(Path.Source.t -> string Memo.t)

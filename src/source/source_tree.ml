@@ -432,11 +432,28 @@ let vcs_backing vcs_tree =
     Dir_contents.make ~files ~dirs
   in
   let file_identity path = Memo.return (dir_identity path) in
-  (* The resolver is kept around to satisfy callers that branch on
-     [Source_resolver.is_workspace] (notably the missing-dune-project
-     warning), but [file_path] errors before consulting it. *)
+  (* Custom resolver: vestigial [resolve] returns [In_source_dir p]
+     for [is_workspace] consistency (missing-dune-project warning is
+     suppressed); reads route through [Vcs_tree.read_file] so
+     [(include ...)] resolves against git blobs rather than the
+     workspace source. *)
   let resolver =
-    Source_resolver.create (fun p -> Path.Outside_build_dir.In_source_dir p)
+    Source_resolver.create_custom
+      ~resolve:(fun p -> Path.Outside_build_dir.In_source_dir p)
+      ~file_exists:(fun _ -> Memo.return true)
+      ~with_lexbuf_from_file:
+        { f =
+            (fun p ~f ->
+              let+ contents = Dune_vcs.Vcs_tree.read_file vcs_tree p in
+              let lb = Lexing.from_string contents in
+              lb.lex_curr_p
+              <- { pos_fname = Path.Source.to_string p
+                 ; pos_lnum = 1
+                 ; pos_bol = 0
+                 ; pos_cnum = 0
+                 };
+              f lb)
+        }
   in
   let file_source path : Dune_engine.Build_config.source_file =
     Vcs_blob (Dune_vcs.Vcs_tree.read_file vcs_tree path)
@@ -462,7 +479,7 @@ let default =
 
 let of_external_root ?(read_only = true) root =
   let resolver =
-    Source_resolver.create (fun p ->
+    Source_resolver.create_fs (fun p ->
       if Path.Source.is_root p
       then Path.Outside_build_dir.External root
       else
@@ -528,12 +545,20 @@ let build_dir_backing (root : Path.Build.t) =
       Memo.return (Dir_contents.make ~files ~dirs)
   in
   let file_identity path = Memo.return (dir_identity path) in
-  (* Vestigial resolver — kept so callers branching on
-     [Source_resolver.is_workspace] (e.g. the missing-dune-project
-     warning) behave consistently. Actual reads go through
-     [byte_provider] / [readdir]. *)
+  (* Custom resolver: vestigial [resolve] keeps [is_workspace]
+     suppression of the missing-dune-project warning; reads route
+     through [Build_system.with_file] so [(include ...)] resolves
+     against the mount's actual bytes under [_build/]. *)
   let resolver =
-    Source_resolver.create (fun p -> Path.Outside_build_dir.In_source_dir p)
+    Source_resolver.create_custom
+      ~resolve:(fun p -> Path.Outside_build_dir.In_source_dir p)
+      ~file_exists:(fun _ -> Memo.return true)
+      ~with_lexbuf_from_file:
+        { f =
+            (fun p ~f ->
+              Build_system.with_file (physical_of p) ~f:(fun path ->
+                Io.Untracked.with_lexbuf_from_file path ~f))
+        }
   in
   let file_source path : Dune_engine.Build_config.source_file =
     Vcs_blob (byte_provider path)
