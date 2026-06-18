@@ -13,7 +13,7 @@ Set up a git-backed dependency that builds with dune.
   $ cd _dep
   $ git init -q --initial-branch=main
   $ cat > dune-project << EOF
-  > (lang dune 3.21)
+  > (lang dune 3.25)
   > (package (name dep))
   > EOF
   $ cat > dep.ml << EOF
@@ -37,7 +37,7 @@ exactly the case the pkg-mount synthesiser targets.
   > (executable (name main) (libraries dep))
   > EOF
   $ cat > dune-project << EOF
-  > (lang dune 3.21)
+  > (lang dune 3.25)
   > (pin (url "git+file://$PWD/_dep") (package (name dep)))
   > (package (name main) (depends dep))
   > EOF
@@ -48,3 +48,11 @@ produce the dep source mount and build through it.
   $ dune pkg lock 2> /dev/null
   $ dune exec ./main.exe 2>&1 | head -30
   from dep
+
+The pkg-mount synthesiser should have materialised a sibling context
+for [dep]. The internal context name is [default.dep], with its build
+dir under [_build/default.dep/].
+
+  $ ls _build | grep -E '^default' | sort
+  default
+  default.dep

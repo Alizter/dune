@@ -42,6 +42,12 @@ type backing =
   ; readdir : Path.Source.t -> Dir_contents.t Memo.t
   ; file_identity : Path.Source.t -> Dir_contents.File.t Memo.t
   ; vcs_tree : Dune_vcs.Vcs_tree.t option
+  ; file_source : Path.Source.t -> Dune_engine.Build_config.source_file
+    (** How [Dir.file_source] resolves bytes. Filesystem backings
+        return [Filesystem path]; backings whose bytes don't live in
+        a source-side directory (vcs, build-dir mounts) return
+        [Vcs_blob memo] so the action layer reads bytes through the
+        memo. *)
   }
 
 module Dir0 = struct
@@ -126,9 +132,7 @@ module Dir0 = struct
 
   let file_source t filename : Dune_engine.Build_config.source_file =
     let logical = Path.Source.relative_fname t.path filename in
-    match t.backing.vcs_tree with
-    | Some vcs_tree -> Vcs_blob (Dune_vcs.Vcs_tree.read_file vcs_tree logical)
-    | None -> Filesystem (Source_resolver.resolve t.backing.resolver logical)
+    t.backing.file_source logical
   ;;
 end
 
@@ -394,7 +398,10 @@ let filesystem_backing resolver =
     | Ok file -> file
     | Error unix_error -> error_unable_to_load ~path unix_error
   in
-  { resolver; byte_provider; readdir; file_identity; vcs_tree = None }
+  let file_source path : Dune_engine.Build_config.source_file =
+    Filesystem (resolve path)
+  in
+  { resolver; byte_provider; readdir; file_identity; vcs_tree = None; file_source }
 ;;
 
 (* Vcs backing: directory listings come from the in-memory tree,
@@ -431,7 +438,16 @@ let vcs_backing vcs_tree =
   let resolver =
     Source_resolver.create (fun p -> Path.Outside_build_dir.In_source_dir p)
   in
-  { resolver; byte_provider; readdir; file_identity; vcs_tree = Some vcs_tree }
+  let file_source path : Dune_engine.Build_config.source_file =
+    Vcs_blob (Dune_vcs.Vcs_tree.read_file vcs_tree path)
+  in
+  { resolver
+  ; byte_provider
+  ; readdir
+  ; file_identity
+  ; vcs_tree = Some vcs_tree
+  ; file_source
+  }
 ;;
 
 let default =
@@ -519,7 +535,10 @@ let build_dir_backing (root : Path.Build.t) =
   let resolver =
     Source_resolver.create (fun p -> Path.Outside_build_dir.In_source_dir p)
   in
-  { resolver; byte_provider; readdir; file_identity; vcs_tree = None }
+  let file_source path : Dune_engine.Build_config.source_file =
+    Vcs_blob (byte_provider path)
+  in
+  { resolver; byte_provider; readdir; file_identity; vcs_tree = None; file_source }
 ;;
 
 let of_build_dir root =

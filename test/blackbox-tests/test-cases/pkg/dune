@@ -79,7 +79,8 @@
   extra-sources
   ocamlformat-dev-tool
   dev-tool-conflict-test
-  broken-symlink-in-dependency))
+  broken-symlink-in-dependency
+  mount/tarball-dune))
 
 (cram
  (deps %{bin:tar})
@@ -89,7 +90,8 @@
   pin-depends
   extra-sources
   pkg-extract-fail
-  broken-symlink-in-dependency))
+  broken-symlink-in-dependency
+  mount/tarball-dune))
 
 (cram
  (deps %{bin:ocaml_index})
