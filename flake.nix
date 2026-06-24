@@ -1,7 +1,6 @@
 {
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    nixpkgs-old.url = "github:nixos/nixpkgs/7f50d4b33363d3948543f6a02b90a2c66852a453";
     melange = {
       url = "github:melange-re/melange/v6-54";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -24,7 +23,6 @@
     revdeps-dune = {
       url = "github:ocaml/dune";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.nixpkgs-old.follows = "nixpkgs-old";
       inputs.odoc-src.follows = "odoc-src";
       inputs.oxcaml.follows = "oxcaml";
       inputs.ocaml-overlays.follows = "ocaml-overlays";
@@ -48,7 +46,6 @@
     {
       self,
       nixpkgs,
-      nixpkgs-old,
       melange,
       ocaml-overlays,
       odoc-src,
@@ -58,6 +55,12 @@
       menhir-src,
     }:
     let
+      nixpkgs-old-src = builtins.fetchTree {
+        type = "github";
+        owner = "nixos";
+        repo = "nixpkgs";
+        rev = "7f50d4b33363d3948543f6a02b90a2c66852a453";
+      };
       forAllSystems =
         f:
         nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed (
@@ -223,9 +226,13 @@
             meta = (old.meta or { }) // pkgs.ocamlPackages.ocaml.meta;
           });
           # Older nixpkgs for OCaml 4.02 support
-          pkgs-old = nixpkgs-old.legacyPackages.${pkgs.stdenv.hostPlatform.system}.appendOverlays [
-            ocaml-overlays.overlays.default
-          ];
+          pkgs-old =
+            (import nixpkgs-old-src {
+              system = pkgs.stdenv.hostPlatform.system;
+            }).appendOverlays
+              [
+                ocaml-overlays.overlays.default
+              ];
           ocamlformat =
             let
               lists = pkgs.lib.lists;
