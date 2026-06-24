@@ -9,20 +9,11 @@
       url = "github:nix-ocaml/nix-overlays";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    oxcaml = {
-      url = "github:oxcaml/oxcaml/5.2.0minus-31";
-    };
-    oxcaml-opam-repository = {
-      url = "github:oxcaml/opam-repository/231c88c2e564fdca40e15e750aacad5fb0887435";
-      flake = false;
-    };
     revdeps-dune = {
       url = "github:ocaml/dune";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.oxcaml.follows = "oxcaml";
       inputs.ocaml-overlays.follows = "ocaml-overlays";
       inputs.melange.follows = "melange";
-      inputs.oxcaml-opam-repository.follows = "oxcaml-opam-repository";
       inputs.revdeps-dune.follows = "revdeps-dune";
     };
   };
@@ -38,8 +29,6 @@
       nixpkgs,
       melange,
       ocaml-overlays,
-      oxcaml,
-      oxcaml-opam-repository,
       revdeps-dune,
     }:
     let
@@ -48,14 +37,6 @@
         owner = "nixos";
         repo = "nixpkgs";
         rev = "7f50d4b33363d3948543f6a02b90a2c66852a453";
-      };
-      # Pinned menhir snapshot required by OxCaml.
-      menhir-src = builtins.fetchTree {
-        type = "gitlab";
-        host = "gitlab.inria.fr";
-        owner = "fpottier";
-        repo = "menhir";
-        rev = "d3d815e4f554da68b8c247241c8f8678926eecaa";
       };
       forAllSystems =
         f:
@@ -157,6 +138,7 @@
             inherit nixpkgs ocaml-overlays pkgs;
             src = ./.;
           };
+          oxcaml-setup = import ./nix/oxcaml.nix { inherit pkgs; };
         in
         {
           inherit (dune-package) default dune-static;
@@ -175,7 +157,8 @@
                 '';
               };
               menhirPackages = import ./nix/menhir.nix {
-                inherit pkgs menhir-src;
+                inherit pkgs;
+                menhir-src = oxcaml-setup.menhir-src;
               };
             in
             # nix build .#oxcaml-trunk-build --no-link --impure
@@ -212,16 +195,7 @@
         pkgs:
         let
           INSIDE_NIX = "true";
-          oxPackageSet = import ./nix/ox-package-set.nix {
-            inherit pkgs;
-            lib = pkgs.lib;
-            oxcamlOpamRepo = oxcaml-opam-repository;
-          };
-          oxcamlCompiler = oxcaml.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs (old: {
-            NIX_CFLAGS_COMPILE = "-std=gnu17";
-            passthru = (old.passthru or { }) // pkgs.ocamlPackages.ocaml.passthru;
-            meta = (old.meta or { }) // pkgs.ocamlPackages.ocaml.meta;
-          });
+          oxcaml-setup = import ./nix/oxcaml.nix { inherit pkgs; };
           # Older nixpkgs for OCaml 4.02 support
           pkgs-old =
             (import nixpkgs-old-src {
@@ -398,7 +372,7 @@
             inherit INSIDE_NIX;
             buildInputs = [
               pkgs.gnumake
-              oxcamlCompiler
+              oxcaml-setup.compiler
             ];
             meta.description = ''
               Provides a minimal shell environment with OxCaml in order to
@@ -410,9 +384,9 @@
             includeTestDeps = false;
             packageOverrides =
               oself: osuper:
-              (oxPackageSet oself osuper)
+              (oxcaml-setup.packageSet oself osuper)
               // {
-                ocaml = oxcamlCompiler;
+                ocaml = oxcaml-setup.compiler;
               };
             meta.description = ''
               Provides a minimal shell environment with OxCaml in order to
@@ -423,7 +397,8 @@
           ox-trunk =
             let
               menhirPackages = import ./nix/menhir.nix {
-                inherit pkgs menhir-src;
+                inherit pkgs;
+                menhir-src = oxcaml-setup.menhir-src;
               };
             in
             pkgs.mkShell {
@@ -460,9 +435,9 @@
               ]);
             packageOverrides =
               oself: osuper:
-              (oxPackageSet oself osuper)
+              (oxcaml-setup.packageSet oself osuper)
               // {
-                ocaml = oxcamlCompiler;
+                ocaml = oxcaml-setup.compiler;
               };
             meta.description = ''
               Provides a full shell environment with the OxCaml compiler to
