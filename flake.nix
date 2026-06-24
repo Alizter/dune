@@ -32,12 +32,6 @@
       revdeps-dune,
     }:
     let
-      nixpkgs-old-src = builtins.fetchTree {
-        type = "github";
-        owner = "nixos";
-        repo = "nixpkgs";
-        rev = "7f50d4b33363d3948543f6a02b90a2c66852a453";
-      };
       forAllSystems =
         f:
         nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed (
@@ -149,14 +143,6 @@
         pkgs:
         let
           INSIDE_NIX = "true";
-          # Older nixpkgs for OCaml 4.02 support
-          pkgs-old =
-            (import nixpkgs-old-src {
-              system = pkgs.stdenv.hostPlatform.system;
-            }).appendOverlays
-              [
-                ocaml-overlays.overlays.default
-              ];
           ocamlformat =
             let
               lists = pkgs.lib.lists;
@@ -297,17 +283,27 @@
             '';
           };
 
-          bootstrap-check = pkgs.mkShell {
-            inherit INSIDE_NIX;
-            buildInputs = [
-              pkgs.gnumake
-              pkgs-old.ocaml-ng.ocamlPackages_4_02.ocaml
-            ];
-            meta.description = ''
-              Provides a minimal shell environment with OCaml 4.02 in order
-              to test the bootstrapping script.
-            '';
-          };
+          bootstrap-check =
+            let
+              # Older nixpkgs needed only to source OCaml 4.02.
+              pkgs_4_02 = import (builtins.fetchTree {
+                type = "github";
+                owner = "nixos";
+                repo = "nixpkgs";
+                rev = "7f50d4b33363d3948543f6a02b90a2c66852a453";
+              }) { inherit (pkgs.stdenv.hostPlatform) system; };
+            in
+            pkgs.mkShell {
+              inherit INSIDE_NIX;
+              buildInputs = [
+                pkgs.gnumake
+                pkgs_4_02.ocaml-ng.ocamlPackages_4_02.ocaml
+              ];
+              meta.description = ''
+                Provides a minimal shell environment with OCaml 4.02 in order
+                to test the bootstrapping script.
+              '';
+            };
 
           bootstrap-check_4_14 = pkgs.mkShell {
             inherit INSIDE_NIX;
