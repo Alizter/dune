@@ -2666,6 +2666,28 @@ let exported_env context =
   Env.extend Env.empty ~vars
 ;;
 
+let bin_path_env ~(packages : Package.Name.Set.t option) context =
+  Memo.push_stack_frame ~human_readable_description:(fun () ->
+    Pp.textf
+      "lock directory PATH of %s for context %S"
+      (describe_packages packages)
+      (Context_name.to_string context))
+  @@ fun () ->
+  lock_dir_active context
+  >>= function
+  | false -> Memo.return Env.empty
+  | true ->
+    let+ deps = project_deps_closure ~packages context in
+    let env = Pkg.build_env_of_deps deps in
+    (match Env.Map.find env Env_path.var with
+     | None -> Env.empty
+     | Some values ->
+       Env.add
+         Env.empty
+         ~var:Env_path.var
+         ~value:(Value_list_env.string_of_env_values values))
+;;
+
 let find_package ctx pkg =
   lock_dir_active ctx
   >>= function
