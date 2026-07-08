@@ -2,6 +2,7 @@ Test multi-mode single context installed packages when melc is not available
 
 Set up an environment that deliberately hides melc.
 
+  $ export OCAMLLIB=$(ocamlc -where)
   $ mkdir _path
   $ for bin in dune ocamlc ocamldep ocamlopt ocamlobjinfo git gcc ar as ranlib \
   >   clang cc ld; do

@@ -9,6 +9,7 @@ Test cases when melc is not available
 
 Set up some fake environment without melc
 
+  $ export OCAMLLIB=$(ocamlc -where)
   $ mkdir _path
   $ for bin in dune ocamlc ocamldep ocamlopt ocamlobjinfo; do
   >   if command -v "$bin" > /dev/null; then
