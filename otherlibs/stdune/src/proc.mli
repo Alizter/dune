@@ -1,4 +1,14 @@
-(** [Proc.restore_cwd_and_execve prog args ~env] runs [prog] with [args] in [env].
+(** [execve prog args ~env] replaces the current process with [prog], preserving the
+    current working directory.
+
+    [args] does not include the program name; [prog] is used as [argv[0]].
+
+    On platforms without [execve], it waits for [prog] and exits with a corresponding
+    status. *)
+val execve : string -> string list -> env:Env.t -> _
+
+(** [restore_cwd_and_execve prog args ~env] restores Dune's initial working directory and
+    replaces the current process with [prog].
 
   - [prog] is the program being run. It should be a filename in the current working
     directory.

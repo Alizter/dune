@@ -5,12 +5,9 @@
    behaviour of [Unix.execve] on Unix. *)
 external sys_exit : int -> 'a = "caml_sys_exit"
 
-let restore_cwd_and_execve prog argv ~env =
+let execve_after_at_exit prog argv ~env =
   let env = Env.to_unix env |> Array.of_list in
   let argv = Array.of_list (prog :: argv) in
-  (* run at_exit before changing the working directory *)
-  Stdlib.do_at_exit ();
-  Sys.chdir (Path.External.to_string Path.External.initial_cwd);
   if Sys.win32 || Platform.OS.value = Platform.OS.Haiku
   then (
     let pid = Unix.create_process_env prog argv env Unix.stdin Unix.stdout Unix.stderr in
@@ -21,6 +18,18 @@ let restore_cwd_and_execve prog argv ~env =
   else (
     ignore (Unix.sigprocmask SIG_SETMASK [] : int list);
     Unix.execve prog argv env)
+;;
+
+let execve prog argv ~env =
+  Stdlib.do_at_exit ();
+  execve_after_at_exit prog argv ~env
+;;
+
+let restore_cwd_and_execve prog argv ~env =
+  (* run at_exit before changing the working directory *)
+  Stdlib.do_at_exit ();
+  Sys.chdir (Path.External.to_string Path.External.initial_cwd);
+  execve_after_at_exit prog argv ~env
 ;;
 
 module Resource_usage = struct
