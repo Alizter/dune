@@ -105,6 +105,10 @@ module type Helpers = sig
 end
 
 module Exec = struct
+  type execution_mode =
+    | Build
+    | Shell_replay
+
   type context =
     { targets : Targets.Validated.t option
     ; context : Build_context.t option
@@ -112,6 +116,7 @@ module Exec = struct
     ; sandbox : Process.Sandbox.t option
     ; rule_loc : Loc.t
     ; build_deps : Dep.Set.t -> unit Fiber.t
+    ; mode : execution_mode
     }
 
   type env =

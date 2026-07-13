@@ -2,13 +2,6 @@ open Import
 
 let name = Action_runner_name.of_string "action-runner"
 
-let dune_prog () =
-  let prog = Sys.executable_name in
-  if Filename.is_relative prog && not (Fpath.contains_path_sep prog)
-  then Util.find_in_path_exn prog
-  else Path.of_filename_relative_to_initial_cwd prog
-;;
-
 let socketpair () =
   if Sys.win32
   then User_error.raise [ Pp.text "action runners are not supported on Windows" ];
@@ -46,7 +39,7 @@ let create ~config ~sandbox_actions =
         in
         let trace_fd = Dune_trace.duplicate_global_fd () in
         let prog, argv =
-          let dune_prog = dune_prog () in
+          let dune_prog = Util.dune_executable () in
           let worker_argv =
             [ Path.to_string dune_prog
             ; "internal"
