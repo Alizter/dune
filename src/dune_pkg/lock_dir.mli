@@ -91,6 +91,7 @@ module Packages : sig
   type t
 
   val to_pkg_list : t -> Pkg.t list
+  val mem : t -> Package_name.t -> bool
   val pkgs_on_platform_by_name : t -> platform:Solver_env.t -> Pkg.t Package_name.Map.t
 
   (** All the packages grouped by the platforms where they are enabled. *)
@@ -160,6 +161,12 @@ end
 val read_disk : Path.t -> (t, User_message.t) result
 val read_disk_exn : Path.t -> t
 
+val check_packages
+  :  Packages.t
+  -> lock_dir_path:Path.t
+  -> external_packages:Package_name.Set.t
+  -> (unit, User_message.t) result
+
 module Make_load (Io : sig
     include Monad.S
 
@@ -167,6 +174,7 @@ module Make_load (Io : sig
     val readdir_with_kinds : Path.t -> (Filename.t * Unix.file_kind) list t
     val with_lexbuf_from_file : Path.t -> f:(Lexing.lexbuf -> 'a) -> 'a t
   end) : sig
+  val load_unchecked : Path.t -> t Io.t
   val load : Path.t -> (t, User_message.t) result Io.t
   val load_exn : Path.t -> t Io.t
 end

@@ -205,6 +205,10 @@ let packages () =
   packages
 ;;
 
+let () =
+  Lock_dir.set_project_packages (fun () -> packages () >>| Package.Name.Set.of_keys)
+;;
+
 let dune_files context =
   let* t = load () in
   t.dune_files context

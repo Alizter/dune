@@ -3,6 +3,13 @@ open Memo.O
 open Dune_pkg
 include Dune_pkg.Lock_dir
 
+let project_packages_fdecl : (unit -> Package.Name.Set.t Memo.t) Fdecl.t =
+  Fdecl.create Dyn.opaque
+;;
+
+let set_project_packages f = Fdecl.set project_packages_fdecl f
+let project_packages () = Fdecl.get project_packages_fdecl ()
+
 module Sys_vars = struct
   type t =
     { os : string option Memo.Lazy.t
@@ -222,7 +229,7 @@ let get_with_path =
          ~input:(module Path)
          (fun path ->
             let* () = Build_system.build_dir path in
-            Load.load path))
+            Load.load_unchecked path))
   in
   Per_context.create_by_name ~name:"lock-dir-get" (fun ctx ->
     Memo.lazy_ (fun () ->
@@ -235,10 +242,16 @@ let get_with_path =
             "No lock dir path for context available"
             [ "context", Context_name.to_dyn ctx ]
       in
-      read_lockdir path
-      >>= function
+      let* lock_dir = read_lockdir path
+      and* project_packages = project_packages () in
+      match
+        check_packages
+          lock_dir.packages
+          ~lock_dir_path:path
+          ~external_packages:project_packages
+      with
       | Error e -> Memo.return (Error e)
-      | Ok lock_dir ->
+      | Ok () ->
         let+ workspace_lock_dir = get_workspace_lock_dir ctx in
         (match workspace_lock_dir with
          | None -> ()

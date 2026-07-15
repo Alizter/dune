@@ -1019,6 +1019,8 @@ module Packages = struct
     Package_name.Map.values t |> List.concat_map ~f:Package_version.Map.values
   ;;
 
+  let mem = Package_name.Map.mem
+
   let of_pkg_list pkgs =
     List.map pkgs ~f:(fun (pkg : Pkg.t) -> pkg.info.name, (pkg.info.version, pkg))
     |> Package_name.Map.of_list_multi
@@ -1142,7 +1144,7 @@ let to_dyn
    consolidated with non-portable lock directories. *)
 let uses_versioned_paths t = not (List.is_empty (snd t.solved_for_platforms))
 
-type missing_dependency =
+type invalid_dependency =
   { dependant_package : Pkg.t
   ; dependency : Package_name.t
   ; loc : Loc.t
@@ -1152,7 +1154,18 @@ type missing_dependency =
    [Error (`Missing_dependencies missing_dependencies)] where
    [missing_dependencies] is a non-empty list with an element for each package
    dependency which doesn't have a corresponding entry in [packages]. *)
-let validate_packages packages =
+let validate_packages packages ~external_packages =
+  let ambiguous_dependencies =
+    Packages.to_pkg_list packages
+    |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
+      List.concat_map dependant_package.depends ~f:(fun conditional_depends ->
+        List.filter_map conditional_depends.value ~f:(fun depend ->
+          if
+            Package_name.Map.mem packages depend.name
+            && Package_name.Set.mem external_packages depend.name
+          then Some { dependant_package; dependency = depend.name; loc = depend.loc }
+          else None)))
+  in
   let missing_dependencies =
     Packages.to_pkg_list packages
     |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
@@ -1163,12 +1176,14 @@ let validate_packages packages =
           if
             Package_name.Map.mem packages depend.name
             || Package_name.equal depend.name Dune_dep.name
+            || Package_name.Set.mem external_packages depend.name
           then None
           else Some { dependant_package; dependency = depend.name; loc = depend.loc })))
   in
-  if List.is_empty missing_dependencies
-  then Ok ()
-  else Error (`Missing_dependencies missing_dependencies)
+  match ambiguous_dependencies, missing_dependencies with
+  | _ :: _, _ -> Error (`Ambiguous_dependencies ambiguous_dependencies)
+  | [], _ :: _ -> Error (`Missing_dependencies missing_dependencies)
+  | [], [] -> Ok ()
 ;;
 
 let create_latest_version
@@ -1184,8 +1199,17 @@ let create_latest_version
     Package_name.Map.map packages ~f:(fun (pkg : Pkg.t) ->
       Package_version.Map.singleton pkg.info.version pkg)
   in
-  (match validate_packages packages with
+  (match validate_packages packages ~external_packages:Package_name.Set.empty with
    | Ok () -> ()
+   | Error (`Ambiguous_dependencies ambiguous_dependencies) ->
+     List.map ambiguous_dependencies ~f:(fun { dependant_package; dependency; loc = _ } ->
+       ( "ambiguous dependency"
+       , Dyn.record
+           [ "dependency", Package_name.to_dyn dependency
+           ; "dependency of", Package_name.to_dyn dependant_package.info.name
+           ] ))
+     @ [ "packages", Packages.to_dyn packages ]
+     |> Code_error.raise "Invalid package table"
    | Error (`Missing_dependencies missing_dependencies) ->
      List.map missing_dependencies ~f:(fun { dependant_package; dependency; loc = _ } ->
        ( "missing dependency"
@@ -1570,6 +1594,59 @@ module Write_disk = struct
   let commit t = t ()
 end
 
+let check_packages packages ~lock_dir_path ~external_packages =
+  match validate_packages packages ~external_packages with
+  | Ok () -> Ok ()
+  | Error (`Ambiguous_dependencies ambiguous_dependencies) ->
+    List.iter ambiguous_dependencies ~f:(fun { dependant_package; dependency; loc } ->
+      User_message.prerr
+        (User_message.make
+           ~loc
+           [ Pp.textf
+               "The package %S depends on the package %S, but %S appears both in the \
+                lockdir %s and in the workspace."
+               (Package_name.to_string dependant_package.info.name)
+               (Package_name.to_string dependency)
+               (Package_name.to_string dependency)
+               (Path.to_string_maybe_quoted lock_dir_path)
+           ]));
+    Error
+      (User_error.make
+         [ Pp.text
+             "A package dependency cannot be resolved unambiguously because the same \
+              package name exists in both the lockdir and the workspace."
+         ])
+  | Error (`Missing_dependencies missing_dependencies) ->
+    List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->
+      User_message.prerr
+        (User_message.make
+           ~loc
+           [ Pp.textf
+               "The package %S depends on the package %S, but %S does not appear in the \
+                lockdir %s."
+               (Package_name.to_string dependant_package.info.name)
+               (Package_name.to_string dependency)
+               (Package_name.to_string dependency)
+               (Path.to_string_maybe_quoted lock_dir_path)
+           ]));
+    Error
+      (User_error.make
+         ~hints:
+           [ Pp.concat
+               ~sep:Pp.space
+               [ Pp.text
+                   "This could indicate that the lockdir is corrupted. Delete it and \
+                    then regenerate it by running:"
+               ; User_message.command "dune pkg lock"
+               ]
+           ]
+         [ Pp.textf
+             "At least one package dependency is itself not present as a package in the \
+              lockdir %s."
+             (Path.to_string_maybe_quoted lock_dir_path)
+         ])
+;;
+
 module Make_load (Io : sig
     include Monad.S
 
@@ -1658,41 +1735,7 @@ struct
       package_name
   ;;
 
-  let check_packages packages ~lock_dir_path =
-    match validate_packages packages with
-    | Ok () -> Ok ()
-    | Error (`Missing_dependencies missing_dependencies) ->
-      List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->
-        User_message.prerr
-          (User_message.make
-             ~loc
-             [ Pp.textf
-                 "The package %S depends on the package %S, but %S does not appear in \
-                  the lockdir %s."
-                 (Package_name.to_string dependant_package.info.name)
-                 (Package_name.to_string dependency)
-                 (Package_name.to_string dependency)
-                 (Path.to_string_maybe_quoted lock_dir_path)
-             ]));
-      Error
-        (User_error.make
-           ~hints:
-             [ Pp.concat
-                 ~sep:Pp.space
-                 [ Pp.text
-                     "This could indicate that the lockdir is corrupted. Delete it and \
-                      then regenerate it by running:"
-                 ; User_message.command "dune pkg lock"
-                 ]
-             ]
-           [ Pp.textf
-               "At least one package dependency is itself not present as a package in \
-                the lockdir %s."
-               (Path.to_string_maybe_quoted lock_dir_path)
-           ])
-  ;;
-
-  let load lock_dir_path =
+  let load_unchecked lock_dir_path =
     let event =
       Dune_trace.(
         Out.start (global ()) (fun () ->
@@ -1735,20 +1778,22 @@ struct
         pkg)
       >>| Packages.of_pkg_list
     in
-    let result =
-      check_packages packages ~lock_dir_path
-      |> Result.map ~f:(fun () ->
-        { version
-        ; dependency_hash
-        ; packages
-        ; ocaml
-        ; repos
-        ; expanded_solver_variable_bindings
-        ; solved_for_platforms
-        })
-    in
     Option.iter (Dune_trace.global ()) ~f:(fun trace -> Dune_trace.Out.finish trace event);
-    result
+    { version
+    ; dependency_hash
+    ; packages
+    ; ocaml
+    ; repos
+    ; expanded_solver_variable_bindings
+    ; solved_for_platforms
+    }
+  ;;
+
+  let load lock_dir_path =
+    let open Io.O in
+    let+ t = load_unchecked lock_dir_path in
+    check_packages t.packages ~lock_dir_path ~external_packages:Package_name.Set.empty
+    |> Result.map ~f:(fun () -> t)
   ;;
 
   let load_exn lock_dir_path =

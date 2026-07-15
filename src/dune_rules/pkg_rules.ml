@@ -244,6 +244,19 @@ module Paths = struct
 
   let extra_source t extra_source = Path.append_local t.extra_sources extra_source
 
+  let of_install_layout name ~root ~relative =
+    let install_roots = lazy (install_roots ~target_dir:root ~relative) in
+    let install_paths = lazy (install_paths (Lazy.force install_roots) name ~relative) in
+    { source_dir = root
+    ; target_dir = root
+    ; extra_sources = root
+    ; name
+    ; install_paths
+    ; install_roots
+    ; prefix = root
+    }
+  ;;
+
   let extra_source_build t extra_source =
     Path.Build.append_local t.extra_sources extra_source
   ;;
@@ -450,6 +463,7 @@ module Pkg = struct
     ; build_command : Build_command.t option
     ; install_command : Dune_lang.Action.t option
     ; depends : t list
+    ; workspace_deps : Package.Name.Set.t
     ; depends_on_dune : bool
       (* whether the package declares a dependency on Dune, even if Dune is stripped from [depends] *)
     ; depexts : Depexts.t list
@@ -477,6 +491,12 @@ module Pkg = struct
   ;;
 
   let deps_closure t = top_closure t.depends
+
+  let workspace_deps_closure t =
+    t :: deps_closure t
+    |> List.fold_left ~init:Package.Name.Set.empty ~f:(fun acc (pkg : t) ->
+      Package.Name.Set.union acc pkg.workspace_deps)
+  ;;
 
   let source_files t ~loc =
     let skip_dir = function
@@ -1173,6 +1193,53 @@ module Action_expander = struct
             in
             { binaries; dep_info }))
     ;;
+
+    let of_workspace_deps context workspace_deps =
+      if Package.Name.Set.is_empty workspace_deps
+      then Memo.return empty
+      else (
+        let root = Install_layout.root context workspace_deps in
+        let paths name =
+          Paths.of_install_layout name ~root ~relative:Path.Build.relative
+          |> Paths.map_path ~f:Path.build
+        in
+        let+ entries = Install_layout.entries context workspace_deps
+        and+ variables =
+          Memo.parallel_map (Package.Name.Set.to_list workspace_deps) ~f:(fun package ->
+            let+ variables = Install_layout.package_variables context package in
+            package, variables)
+        in
+        let variables = Package.Name.Map.of_list_exn variables in
+        let binaries =
+          Path.Build.Map.foldi
+            entries
+            ~init:Filename.Map.empty
+            ~f:(fun dst (entry : Path.t Install.Entry.Expanded.t) binaries ->
+              match entry.section, entry.kind with
+              | Bin, File ->
+                Filename.Map.set
+                  binaries
+                  (Filename.of_string_exn
+                     (Bin.strip_exe (Path.Build.basename dst |> Filename.to_string)))
+                  (Path.build dst)
+              | _ -> binaries)
+        in
+        let dep_info =
+          Package.Name.Set.fold
+            workspace_deps
+            ~init:Package.Name.Map.empty
+            ~f:(fun name dep_info ->
+              let variables = Package.Name.Map.find_exn variables name in
+              Package.Name.Map.add_exn dep_info name (variables, paths name))
+        in
+        { binaries; dep_info })
+    ;;
+
+    let union a b =
+      { binaries = Filename.Map.union a.binaries b.binaries ~f:(fun _ _ b -> Some b)
+      ; dep_info = Package.Name.Map.union a.dep_info b.dep_info ~f:(fun _ _ b -> Some b)
+      }
+    ;;
   end
 
   let expander context (pkg : Pkg.t) =
@@ -1182,7 +1249,13 @@ module Action_expander = struct
           Pp.textf
             "Computing closure for package %S"
             (Package.Name.to_string pkg.info.name))
-        (fun () -> Pkg.deps_closure pkg |> Artifacts_and_deps.of_closure)
+        (fun () ->
+           let+ lockdir_deps = Pkg.deps_closure pkg |> Artifacts_and_deps.of_closure
+           and+ workspace_deps =
+             Pkg.workspace_deps_closure pkg
+             |> Artifacts_and_deps.of_workspace_deps context
+           in
+           Artifacts_and_deps.union lockdir_deps workspace_deps)
     in
     let env = Pkg.exported_value_env pkg in
     let depends =
@@ -1270,9 +1343,17 @@ module DB = struct
     type entry =
       { pkg : Pkg.t
       ; deps : dep list
+      ; workspace_deps : Package.Name.Set.t
       ; has_dune_dep : bool
       ; pkg_digest : Pkg_digest.t
       }
+
+    type resolved_dep =
+      | Lockdir of Pkg.t
+      | Workspace
+      | Dune
+      | System
+      | Unavailable_lockdir
 
     let entries_by_name_of_lock_dir
           (lock_dir : Dune_pkg.Lock_dir.t)
@@ -1280,6 +1361,19 @@ module DB = struct
           ~system_provided
       =
       let pkgs_by_name = Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform in
+      let resolve_dep name =
+        if Package.Name.equal name Dune_dep.name
+        then Dune
+        else if Package.Name.Set.mem system_provided name
+        then System
+        else (
+          match Package.Name.Map.find pkgs_by_name name with
+          | Some pkg -> Lockdir pkg
+          | None ->
+            if Dune_pkg.Lock_dir.Packages.mem lock_dir.packages name
+            then Unavailable_lockdir
+            else Workspace)
+      in
       let cache =
         (* Cache so that the digest of each package is only computed once *)
         Package.Name.Table.create 10
@@ -1300,35 +1394,43 @@ module DB = struct
         Package.Name.Table.find_or_add cache pkg.info.name ~f:(fun name ->
           let seen_set = Package.Name.Set.add seen_set name in
           let seen_list = pkg :: seen_list in
-          let has_dune_dep, deps =
+          let has_dune_dep, deps, workspace_deps =
             Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform pkg.depends ~platform
             |> Option.value ~default:[]
             |> List.fold_right
-                 ~init:(false, [])
+                 ~init:(false, [], Package.Name.Set.empty)
                  ~f:
                    (fun
                      { Dune_pkg.Lock_dir.Dependency.name; loc = dep_loc }
-                     (has_dune_dep, acc)
+                     (has_dune_dep, deps, workspace_deps)
                    ->
-                   match
-                     ( Dune_lang.Package_name.equal name Dune_dep.name
-                     , Package.Name.Set.mem system_provided name )
-                   with
-                   | true, _ -> true, acc
-                   | false, true -> has_dune_dep, acc
-                   | _, false ->
-                     let dep_pkg = Package.Name.Map.find_exn pkgs_by_name name in
+                   match resolve_dep name with
+                   | Dune -> true, deps, workspace_deps
+                   | System -> has_dune_dep, deps, workspace_deps
+                   | Workspace ->
+                     has_dune_dep, deps, Package.Name.Set.add workspace_deps name
+                   | Unavailable_lockdir ->
+                     User_error.raise
+                       ~loc:dep_loc
+                       [ Pp.textf
+                           "The package %S depends on the package %S, but %S is not \
+                            available on the current platform."
+                           (Package.Name.to_string pkg.info.name)
+                           (Package.Name.to_string name)
+                           (Package.Name.to_string name)
+                       ]
+                   | Lockdir dep_pkg ->
                      let dep_entry = compute_entry dep_pkg ~seen_set ~seen_list in
                      ( has_dune_dep
-                     , { dep_pkg; dep_loc; dep_pkg_digest = dep_entry.pkg_digest } :: acc
-                     ))
+                     , { dep_pkg; dep_loc; dep_pkg_digest = dep_entry.pkg_digest } :: deps
+                     , workspace_deps ))
           in
           let pkg_digest =
             Pkg_digest.create
               pkg
               (List.map deps ~f:(fun { dep_pkg_digest; _ } -> dep_pkg_digest))
           in
-          { pkg; deps; has_dune_dep; pkg_digest })
+          { pkg; deps; workspace_deps; has_dune_dep; pkg_digest })
       in
       Package.Name.Map.map
         pkgs_by_name
@@ -1351,8 +1453,18 @@ module DB = struct
        dependencies are identical as a sanity check. *)
     let union_check
           pkg_digest
-          ({ pkg = pkg_a; deps = deps_a; has_dune_dep = _; pkg_digest = _ } as entry)
-          { pkg = pkg_b; deps = deps_b; has_dune_dep = _; pkg_digest = _ }
+          ({ pkg = pkg_a
+           ; deps = deps_a
+           ; workspace_deps = _
+           ; has_dune_dep = _
+           ; pkg_digest = _
+           } as entry)
+          { pkg = pkg_b
+          ; deps = deps_b
+          ; workspace_deps = _
+          ; has_dune_dep = _
+          ; pkg_digest = _
+          }
       =
       if not (Pkg.equal (Pkg.remove_locs pkg_a) (Pkg.remove_locs pkg_b))
       then
@@ -1576,6 +1688,7 @@ end = struct
             ; enabled_on_platforms = _
             } as pkg
         ; deps
+        ; workspace_deps
         ; has_dune_dep
         ; pkg_digest = _
         } ->
@@ -1651,6 +1764,7 @@ end = struct
         ; build_command
         ; install_command
         ; depends
+        ; workspace_deps
         ; depends_on_dune = has_dune_dep
         ; depexts
         ; paths
@@ -2132,6 +2246,20 @@ let add_env env action =
   Action_builder.With_targets.map action ~f:(Action.Full.add_env env)
 ;;
 
+let add_workspace_env context_name (pkg : Pkg.t) action =
+  let workspace_deps = Pkg.workspace_deps_closure pkg in
+  if Package.Name.Set.is_empty workspace_deps
+  then action
+  else
+    Action_builder.With_targets.map_build action ~f:(fun build ->
+      let open Action_builder.O in
+      let+ (action : Action.Full.t) = build
+      and+ workspace_env = Install_layout.env context_name workspace_deps in
+      Action.Full.add_env
+        (Install.Roots.extend_env_concat_path_vars action.env workspace_env)
+        action)
+;;
+
 let rule ?loc { Action_builder.With_targets.build; targets } =
   (* TODO this ignores the workspace file *)
   Rule.make ~info:(Rule.Info.of_loc_opt loc) ~targets build |> Rules.Produce.rule
@@ -2366,6 +2494,7 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
    Action_builder.deps deps |> Action_builder.with_no_targets)
   (* TODO should we add env deps on these? *)
   >>> add_env (Pkg.exported_env pkg) build_action
+  |> add_workspace_env context_name pkg
   |> Action_builder.With_targets.add_directories
        ~directory_targets:[ pkg.write_paths.target_dir ]
 ;;
