@@ -252,6 +252,55 @@ let handler (t : t Fdecl.t) : unit Handler.t =
       ~diff
   in
   let () =
+    let equal_stats
+          { Build_system.Request.Stats.number_of_rules_discovered = discovered_a
+          ; number_of_rules_validated = validated_a
+          }
+          { Build_system.Request.Stats.number_of_rules_discovered = discovered_b
+          ; number_of_rules_validated = validated_b
+          }
+      =
+      Int.equal discovered_a discovered_b && Int.equal validated_a validated_b
+    in
+    let source session request_id =
+      Source.Computed
+        { get =
+            (fun () ->
+              match (Fdecl.get t).build with
+              | Disabled -> None
+              | Enabled { build_loop; _ } ->
+                Build_loop.rpc_request_stats
+                  build_loop
+                  ~session_id:(Session.id session)
+                  ~request_id)
+        ; poll_every = Time.Span.of_secs 0.2
+        }
+    in
+    let diff ~last ~now =
+      match last, now with
+      | Some (Some _), None -> None
+      | _, None -> Some Progress.Waiting
+      | ( _
+        , Some
+            { Build_system.Request.Stats.number_of_rules_discovered
+            ; number_of_rules_validated
+            } ) ->
+        (* Per-request Memo statistics do not yet distinguish failed rules. *)
+        Some
+          (Progress.In_progress
+             { complete = number_of_rules_validated
+             ; remaining = number_of_rules_discovered - number_of_rules_validated
+             ; failed = 0
+             })
+    in
+    Handler.implement_long_poll_by_id
+      rpc
+      Procedures.Poll.build_progress
+      ~source
+      ~equal:(Option.equal equal_stats)
+      ~diff
+  in
+  let () =
     Handler.declare_notification rpc Procedures.Server_side.abort;
     Handler.declare_notification rpc Procedures.Server_side.log
   in

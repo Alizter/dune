@@ -138,6 +138,16 @@ module Handler : sig
     -> diff:(last:'state option -> now:'state -> 'diff)
     -> unit
 
+  (** Like [implement_long_poll], but chooses a source from the session and subscription
+      ID. Returning [None] from [diff] terminates the subscription. *)
+  val implement_long_poll_by_id
+    :  'session t
+    -> 'diff Procedures.Poll.t
+    -> source:('session Session.t -> Dune_rpc.Private.Id.t -> 'state Long_poll.Source.t)
+    -> equal:('state -> 'state -> bool)
+    -> diff:(last:'state option -> now:'state -> 'diff option)
+    -> unit
+
   module For_tests : sig
     (** Raw long polling machinery only good for tests *)
 

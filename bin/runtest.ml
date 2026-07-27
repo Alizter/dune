@@ -56,7 +56,7 @@ let runtest_term =
     in
     Scheduler_setup.no_build_no_rpc ~config (fun () ->
       let open Fiber.O in
-      Rpc.Rpc_common.fire_request
+      Rpc.Rpc_common.fire_build_request
         ~name:"runtest"
         ~wait:false
         ~lock_held_by

@@ -6,6 +6,14 @@ connected over RPC.
   $ setup_xdg_runtime_dir
 
   $ make_simple_rpc_watch_project
+  $ REQUEST_STARTED="$PWD/request-started"
+  $ REQUEST_RELEASE="$PWD/request-release"
+  $ cat > dune <<EOF
+  > (rule
+  >  (target x)
+  >  (action
+  >   (bash "touch '$REQUEST_STARTED'; while test ! -f '$REQUEST_RELEASE'; do sleep 0.1; done; echo ok > x")))
+  > EOF
 
   $ export INSIDE_EMACS=1
   $ export DUNE_CONFIG__THREADED_CONSOLE=disabled
@@ -18,9 +26,25 @@ connected over RPC.
 
   $ : > .#dune-output
   $ INSIDE_EMACS=1 DUNE_CONFIG__THREADED_CONSOLE=disabled \
-  >   with_timeout dune build --display progress x > output 2>&1
+  >   with_timeout dune build --display progress x > output 2>&1 &
+  $ BUILD_PID=$!
+  $ with_timeout dune_cmd wait-for-file-to-appear "$REQUEST_STARTED"
   $ tr '\r' '\n' < output | grep "Connected to RPC server" | awk 'NR == 1'
   Connected to RPC server
+  $ i=200
+  $ while [ "$i" != 0 ]; do
+  >   tr '\r' '\n' < output | grep -a -q "Done:" && break
+  >   i=$((i - 1))
+  >   sleep 0.01
+  > done
+  $ if tr '\r' '\n' < output | grep -a -q "Done:"; then
+  >   echo "request progress displayed"
+  > else
+  >   echo "request progress missing"
+  > fi
+  request progress displayed
+  $ touch "$REQUEST_RELEASE"
+  $ wait "$BUILD_PID"
   $ tr '\r' '\n' < .#dune-output | grep -a "\[rpc 1\]" | awk 'NR == 1'
   [rpc 1]
   $ tr '\r' '\n' < .#dune-output \

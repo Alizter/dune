@@ -39,6 +39,19 @@ val fire_request
   -> 'a
   -> 'b Fiber.t
 
+(** Send a build-backed request while subscribing to progress for the same RPC request
+    ID. Falls back to [fire_request] behavior when the server does not support the
+    subscription. *)
+val fire_build_request
+  :  name:string
+  -> wait:bool
+  -> ?warn_forwarding:bool
+  -> ?lock_held_by:Global_lock.Lock_held_by.t
+  -> Common.Builder.t
+  -> ('a, 'b) Dune_rpc.Decl.request
+  -> 'a
+  -> 'b Fiber.t
+
 (** Send a notification to the RPC server. If [wait], it will poll forever until a server is listening.
     Should be scheduled by a scheduler that does not come with a RPC server on its own.
 

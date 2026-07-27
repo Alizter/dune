@@ -391,9 +391,25 @@ module Poll = struct
     ;;
   end
 
+  module Build_progress = struct
+    let name = "build-progress"
+
+    let v1 =
+      Decl.Request.make_current_gen
+        ~req:Id.sexp
+        ~resp:(Conv.option Exported_types.Progress.sexp)
+        ~version:1
+    ;;
+  end
+
   let progress =
     let open Progress in
     make name [ v1; v2 ]
+  ;;
+
+  let build_progress =
+    let open Build_progress in
+    make name [ v1 ]
   ;;
 
   let diagnostic =
@@ -444,9 +460,11 @@ module Builtin = struct
     ; request (Poll.poll Poll.running_jobs)
     ; request (Poll.poll Poll.diagnostic)
     ; request (Poll.poll Poll.progress)
+    ; request (Poll.poll Poll.build_progress)
     ; notification (Poll.cancel Poll.running_jobs)
     ; notification (Poll.cancel Poll.diagnostic)
     ; notification (Poll.cancel Poll.progress)
+    ; notification (Poll.cancel Poll.build_progress)
     ]
   ;;
 

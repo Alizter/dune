@@ -171,6 +171,10 @@ let%expect_test "print digests for all declared RPCs" =
       Version 2:
         Request: Sexp
         Response: 929074caab98360dc7116b6f27c2b9ad
+    poll/build-progress
+      Version 1:
+        Request: Sexp
+        Response: 929074caab98360dc7116b6f27c2b9ad
     cancel-poll/running-jobs
       Version 1:
         Payload: Sexp
@@ -178,6 +182,9 @@ let%expect_test "print digests for all declared RPCs" =
       Version 1:
         Payload: Sexp
     cancel-poll/progress
+      Version 1:
+        Payload: Sexp
+    cancel-poll/build-progress
       Version 1:
         Payload: Sexp
     |}]

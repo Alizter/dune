@@ -58,6 +58,7 @@ module Poll : sig
   val make : Name.t -> (Id.t, 'a option) Decl.Request.gen list -> 'a t
   val name : 'a t -> Name.t
   val progress : Progress.t t
+  val build_progress : Progress.t t
   val diagnostic : Diagnostic.Event.t list t
   val running_jobs : Job.Event.t list t
 end

@@ -42,12 +42,12 @@ end
 (** [make_on_poll set source ~equal ~diff session poller] computes the response for one
     poll request against [set]: it waits (respecting [poller]'s cancellation) until
     [source]'s value differs (per [equal]) from the last one served, records it, and
-    returns [diff ~last ~now]. *)
+    returns [diff ~last ~now]. Returning [None] from [diff] terminates the poller. *)
 val make_on_poll
   :  'a Active_set.t
   -> 'a Source.t
   -> equal:('a -> 'a -> bool)
-  -> diff:(last:'a option -> now:'a -> 'b)
+  -> diff:(last:'a option -> now:'a -> 'b option)
   -> 'session
   -> Poller.t
   -> 'b option Fiber.t

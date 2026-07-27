@@ -698,7 +698,7 @@ module H = struct
         | `Closing | `Closed -> raise Long_poll.Poll_cancelled
         | `Open ->
           let poller = Session.find_or_create_poller session id in
-          let+ res = on_poll session poller in
+          let+ res = on_poll session id poller in
           if Long_poll.Poller.cancelled poller
           then raise Long_poll.Poll_cancelled
           else (
@@ -717,25 +717,42 @@ module H = struct
             "rpc poll request cancelled"
             [ "id", Dune_rpc.Private.Id.to_dyn id ];
           let* () = Long_poll.Poller.fire_cancel poller in
-          on_cancel session poller
+          on_cancel session id poller
       in
       implement_request t (Procedures.Poll.poll sub) on_poll;
       implement_notification t (Procedures.Poll.cancel sub) on_cancel
     ;;
 
-    let implement_long_poll (rpc : _ t) proc source ~equal ~diff =
+    let implement_long_poll_by_id (rpc : _ t) proc ~source ~equal ~diff =
       let active_set = Long_poll.Active_set.create () in
       implement_poll
         rpc
         proc
-        ~on_cancel:(fun _session poller -> Long_poll.Active_set.cancel active_set poller)
-        ~on_poll:(Long_poll.make_on_poll active_set source ~equal ~diff)
+        ~on_cancel:(fun _session _id poller ->
+          Long_poll.Active_set.cancel active_set poller)
+        ~on_poll:(fun session id poller ->
+          Long_poll.make_on_poll
+            active_set
+            (source session id)
+            ~equal
+            ~diff
+            session
+            poller)
+    ;;
+
+    let implement_long_poll (rpc : _ t) proc source ~equal ~diff =
+      implement_long_poll_by_id
+        rpc
+        proc
+        ~source:(fun _session _id -> source)
+        ~equal
+        ~diff:(fun ~last ~now -> Some (diff ~last ~now))
     ;;
 
     module For_tests = struct
       let implement_poll t poll ~on_poll ~on_cancel =
-        let on_poll session _poller = on_poll session in
-        let on_cancel session _poller = on_cancel session in
+        let on_poll session _id _poller = on_poll session in
+        let on_cancel session _id _poller = on_cancel session in
         implement_poll t poll ~on_poll ~on_cancel
       ;;
     end

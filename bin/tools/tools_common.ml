@@ -40,7 +40,7 @@ let try_build_dev_tool_via_rpc builder lock_held_by dev_tool =
   let target = dev_tool_build_target dev_tool in
   let targets = Rpc.Rpc_common.prepare_targets [ target ] in
   let open Fiber.O in
-  Rpc.Rpc_common.fire_request
+  Rpc.Rpc_common.fire_build_request
     ~name:"build"
     ~wait:false
     ~lock_held_by

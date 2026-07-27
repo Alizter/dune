@@ -10,7 +10,12 @@ let term =
   @@ fun () ->
   let open Fiber.O in
   let+ response =
-    Rpc_common.fire_request ~name:"build" ~wait builder Dune_rpc_impl.Decl.build targets
+    Rpc_common.fire_build_request
+      ~name:"build"
+      ~wait
+      builder
+      Dune_rpc_impl.Decl.build
+      targets
   in
   match response with
   | Success -> print_endline "Success"

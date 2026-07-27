@@ -48,6 +48,20 @@ let request_exn client request arg =
   | Error e -> raise (Dune_rpc.Version_error.E e)
 ;;
 
+let request_with_id_exn client ~id request arg =
+  let open Fiber.O in
+  let* decl =
+    Client.Versioned.prepare_request client (Dune_rpc.Decl.Request.witness request)
+  in
+  match decl with
+  | Ok decl ->
+    Client.request ~id client decl arg
+    >>| (function
+     | Ok response -> response
+     | Error e -> raise_rpc_error e)
+  | Error e -> raise (Dune_rpc.Version_error.E e)
+;;
+
 let notify_exn client notification arg =
   let open Fiber.O in
   let* res =
@@ -155,11 +169,39 @@ let with_rpc_connected_status_line f =
   Fiber.finalize_now f ~finally:(fun () -> Console.Status_line.remove_section section)
 ;;
 
-let send_request ~f connection name =
+let with_rpc_build_progress_status_line progress f =
+  let status () =
+    match (!progress : Dune_rpc.Progress.t) with
+    | Waiting -> Pp.verbatim "Connected to RPC server"
+    | In_progress { complete; remaining; failed } ->
+      let total = complete + remaining in
+      Pp.textf
+        "Done: %d%% (%d/%d, %d left%s)"
+        (if total = 0 then 0 else complete * 100 / total)
+        complete
+        total
+        remaining
+        (if failed = 0 then "" else sprintf ", %d failed" failed)
+    | Failed -> Pp.verbatim "Build failed"
+    | Interrupted -> Pp.verbatim "Restarting current build..."
+    | Success -> Pp.verbatim "Success"
+  in
+  let section = Console.Status_line.add_section (Live status) in
+  Fiber.finalize f ~finally:(fun () ->
+    Console.Status_line.remove_section section;
+    Fiber.return ())
+;;
+
+let send_request_raw ~f connection name =
   Dune_rpc_impl.Client.client
     connection
     (Dune_rpc.Initialize.Request.create ~id:(Dune_rpc.Id.make (Sexp.Atom name)))
-    ~f:(fun client -> with_rpc_connected_status_line (fun () -> f client))
+    ~f
+;;
+
+let send_request ~f connection name =
+  send_request_raw connection name ~f:(fun client ->
+    with_rpc_connected_status_line (fun () -> f client))
 ;;
 
 let fire ~name ~wait ~warn_forwarding ~lock_held_by builder f =
@@ -180,6 +222,47 @@ let fire_request
   =
   fire ~name ~wait ~warn_forwarding ~lock_held_by builder (fun client ->
     request_exn client request arg)
+;;
+
+let fire_build_request
+      ~name
+      ~wait
+      ?(warn_forwarding = true)
+      ?(lock_held_by = Global_lock.Lock_held_by.Unknown)
+      builder
+      request
+      arg
+  =
+  let open Fiber.O in
+  let* connection = establish_client_session ~wait ~lock_held_by in
+  if should_warn ~warn_forwarding builder then warn_ignore_arguments lock_held_by;
+  send_request_raw connection name ~f:(fun client ->
+    let request_id = Dune_rpc.Id.make (Sexp.Atom "build") in
+    Client.poll ~id:request_id client Dune_rpc.Public.Sub.build_progress
+    >>= function
+    | Error _ ->
+      with_rpc_connected_status_line (fun () ->
+        request_with_id_exn client ~id:request_id request arg)
+    | Ok poller ->
+      let progress = ref Dune_rpc.Progress.Waiting in
+      let rec consume_progress () =
+        Client.Stream.next poller
+        >>= function
+        | None -> Fiber.return ()
+        | Some update ->
+          progress := update;
+          consume_progress ()
+      in
+      with_rpc_build_progress_status_line progress (fun () ->
+        Fiber.fork_and_join
+          (fun () ->
+             Fiber.finalize
+               (fun () -> request_with_id_exn client ~id:request_id request arg)
+               ~finally:(fun () -> Client.Stream.cancel poller))
+          (fun () ->
+             Fiber.collect_errors consume_progress
+             >>| fun (_ : (unit, Exn_with_backtrace.t list) result) -> ())
+        >>| fst))
 ;;
 
 let fire_notification

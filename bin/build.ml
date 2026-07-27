@@ -193,7 +193,7 @@ let build =
       in
       Scheduler_setup.go_without_rpc_server ~common ~config (fun () ->
         let open Fiber.O in
-        Rpc.Rpc_common.fire_request
+        Rpc.Rpc_common.fire_build_request
           ~name:"build"
           ~wait:false
           ~lock_held_by

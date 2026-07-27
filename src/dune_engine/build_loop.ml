@@ -415,7 +415,7 @@ let cancel_rpc_requests_by_session t ~session_id =
 let cancel_all_rpc_requests t = cancel_rpc_requests t ~f:(fun _ _ -> true)
 
 let submit_rpc_request t ~session_id ~request_id ~build =
-  let request = Build_system.Request.Goal.create build in
+  let request = Build_system.Request.Goal.create_with_progress build in
   let id = Rpc_request_id.create ~session_id ~request_id in
   let* () = Fiber.return () in
   (match Rpc_request_id.Map.find t.rpc_requests id with
@@ -428,6 +428,12 @@ let submit_rpc_request t ~session_id ~request_id ~build =
   let+ outcome = Build_system.Request.Goal.await request in
   t.rpc_requests <- Rpc_request_id.Map.remove t.rpc_requests id;
   outcome
+;;
+
+let rpc_request_stats t ~session_id ~request_id =
+  let id = Rpc_request_id.create ~session_id ~request_id in
+  Rpc_request_id.Map.find t.rpc_requests id
+  |> Option.map ~f:Build_system.Request.Goal.stats
 ;;
 
 type rpc_poll_iter_result =

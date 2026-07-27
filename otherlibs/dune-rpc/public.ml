@@ -35,5 +35,6 @@ module Sub = struct
 
   let diagnostic = Sub.of_procedure Procedures.Poll.diagnostic
   let progress = Sub.of_procedure Procedures.Poll.progress
+  let build_progress = Sub.of_procedure Procedures.Poll.build_progress
   let running_jobs = Sub.of_procedure Procedures.Poll.running_jobs
 end

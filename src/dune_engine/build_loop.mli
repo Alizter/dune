@@ -18,6 +18,13 @@ val submit_rpc_request
   -> build:unit Action_builder.t
   -> Build_outcome.t Fiber.t
 
+(** Statistics for the active RPC request identified by this session and request ID. *)
+val rpc_request_stats
+  :  t
+  -> session_id:Rpc.Server.Session.Id.t
+  -> request_id:Dune_rpc.Id.t
+  -> Build_system.Request.Stats.t option
+
 val cancel_rpc_requests_by_session
   :  t
   -> session_id:Rpc.Server.Session.Id.t

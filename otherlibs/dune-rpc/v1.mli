@@ -269,6 +269,12 @@ module Sub : sig
   type 'a t
 
   val progress : Progress.t t
+
+  (** Progress for a build-backed request made on the same session with the same explicit
+      {!Request.Id.t} as this subscription. The subscription should be opened before the
+      request is sent. *)
+  val build_progress : Progress.t t
+
   val diagnostic : Diagnostic.Event.t list t
 end
 

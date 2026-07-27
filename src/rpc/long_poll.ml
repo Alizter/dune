@@ -113,6 +113,8 @@ module Active_set = struct
     | None -> Code_error.raise "Active_set.update on a non-existent poller" []
   ;;
 
+  let remove (t : _ t) poller = t := Map.remove !t poller
+
   let find_and_remove_cancelled (t : _ t) poller =
     let res = Map.find !t poller in
     (match res with
@@ -124,7 +126,7 @@ end
 
 let make_on_poll active_set source ~equal ~diff _session poller =
   let cancel = Poller.cancel poller in
-  let wait_for_change last =
+  let wait_for_change source last =
     let wait () =
       match last with
       | None -> Fiber.return ()
@@ -137,8 +139,8 @@ let make_on_poll active_set source ~equal ~diff _session poller =
     in
     ()
   in
-  let send last =
-    let* () = wait_for_change last in
+  let send source last =
+    let* () = wait_for_change source last in
     if Poller.cancelled poller
     then raise Poll_cancelled
     else (
@@ -146,15 +148,18 @@ let make_on_poll active_set source ~equal ~diff _session poller =
       match Active_set.update active_set poller now with
       | `Poller_was_cancelled -> raise Poll_cancelled
       | `Updated ->
-        let to_send = diff ~last ~now in
-        Fiber.return (Some to_send))
+        (match diff ~last ~now with
+         | Some _ as response -> Fiber.return response
+         | None ->
+           Active_set.remove active_set poller;
+           Fiber.return None))
   in
   match Active_set.find_and_remove_cancelled active_set poller with
   | None ->
     let initial = { source; on_cancel = (fun _ -> Fiber.return ()) } in
     Active_set.initialize active_set poller initial;
-    send None
-  | Some (Initialized _) -> send None
-  | Some (Active a) -> send (Some a.value)
+    send source None
+  | Some (Initialized initial) -> send initial.source None
+  | Some (Active a) -> send a.initial.source (Some a.value)
   | Some Cancelled -> raise Poll_cancelled
 ;;

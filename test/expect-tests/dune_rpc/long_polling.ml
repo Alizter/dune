@@ -149,6 +149,78 @@ let%expect_test "long polling - computed (poll/ref) source" =
     server: finished. |}]
 ;;
 
+let%expect_test "long polling - source selected by subscription id" =
+  let first_id = Id.make (Atom "first") in
+  let second_id = Id.make (Atom "second") in
+  let first = Fiber.Svar.create 0 in
+  let second = Fiber.Svar.create 10 in
+  let handler =
+    let rpc = rpc () in
+    Rpc.Server.Handler.implement_long_poll_by_id
+      rpc
+      sub_proc
+      ~source:(fun _session id ->
+        if Id.equal id first_id
+        then Rpc.Long_poll.Source.Svar first
+        else if Id.equal id second_id
+        then Rpc.Long_poll.Source.Svar second
+        else Code_error.raise "unexpected subscription id" [ "id", Id.to_dyn id ])
+      ~equal:Int.equal
+      ~diff:(fun ~last ~now ->
+        Some
+          (match last with
+           | None -> now
+           | Some last -> now - last));
+    rpc
+  in
+  let client client =
+    let* first_poller = poll_exn ~id:first_id client in
+    let* second_poller = poll_exn ~id:second_id client in
+    let* () = print_next "first initial" first_poller in
+    let* () = print_next "second initial" second_poller in
+    let* () = Fiber.Svar.write first 1 in
+    let* () = print_next "first update" first_poller in
+    let* () = Fiber.Svar.write second 15 in
+    print_next "second update" second_poller
+  in
+  test ~init ~client ~handler ~private_menu:[ Poll sub_proc ] ();
+  [%expect
+    {|
+    client: first initial received 0
+    client: second initial received 10
+    client: first update received 1
+    client: second update received 5
+    server: finished.
+    |}]
+;;
+
+let%expect_test "long polling - per-id diff can terminate the subscription" =
+  let state = Fiber.Svar.create (Some 1) in
+  let handler =
+    let rpc = rpc () in
+    Rpc.Server.Handler.implement_long_poll_by_id
+      rpc
+      sub_proc
+      ~source:(fun _session _id -> Rpc.Long_poll.Source.Svar state)
+      ~equal:(Option.equal Int.equal)
+      ~diff:(fun ~last:_ ~now -> now);
+    rpc
+  in
+  let client client =
+    let* poller = poll_exn client in
+    let* () = print_next "active" poller in
+    let* () = Fiber.Svar.write state None in
+    print_next "finished" poller
+  in
+  test ~init ~client ~handler ~private_menu:[ Poll sub_proc ] ();
+  [%expect
+    {|
+    client: active received 1
+    client: finished no more values
+    server: finished.
+    |}]
+;;
+
 let%expect_test "long polling - server side termination" =
   let client client =
     printfn "client: long polling";
