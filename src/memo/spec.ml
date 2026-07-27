@@ -25,6 +25,8 @@ module Node_kind : sig
 
   (** Notify the node about an event. *)
   val notify : ('i, _) t -> 'i -> Event.t -> unit
+
+  val has_event_tracker : _ t -> bool
 end = struct
   (* This is a product of two options, flattened to avoid unnecessary
      indirections. Note that only a small number of [t]s have event tracking. *)
@@ -62,6 +64,11 @@ end = struct
     | Vanilla | With_cutoff _ -> ()
     | With_event_tracker { on_event }
     | With_cutoff_and_event_tracker { on_event; equal = _ } -> on_event input event
+  ;;
+
+  let has_event_tracker = function
+    | Vanilla | With_cutoff _ -> false
+    | With_event_tracker _ | With_cutoff_and_event_tracker _ -> true
   ;;
 end
 
@@ -103,3 +110,4 @@ let output_changed t ~old_value ~new_value =
 
 let has_cutoff t = Node_kind.has_cutoff t.node_kind
 let notify t input event = Node_kind.notify t.node_kind input event
+let has_event_tracker t = Node_kind.has_event_tracker t.node_kind

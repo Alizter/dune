@@ -35,6 +35,33 @@ module Event : sig
         or by confirming that a cached value is still up to date. *)
 end
 
+module Evaluation : sig
+  module Counts : sig
+    type t =
+      { live : int
+        (** Unique event-tracked nodes reached by the evaluation and live in the current
+          Memo run. *)
+      ; validated : int
+        (** Live nodes whose value has been validated. This includes nodes containing a
+          cached error. *)
+      }
+  end
+
+  type t
+
+  val create : unit -> t
+
+  (** [observe t computation] attributes event-tracked nodes reachable from [computation]
+      to [t]. Reachability is propagated through nodes without event tracking and through
+      dependency graphs already cached in the current Memo run. An evaluation may only be
+      observed once. *)
+  val observe : t -> 'a memo -> 'a memo
+
+  (** Counts of unique event-tracked nodes reachable from this evaluation. May be called
+      before, during or after [observe]. *)
+  val counts : t -> Counts.t
+end
+
 (* CR-someday amokhov: Return the set of exceptions explicitly. *)
 val run : 'a t -> 'a Fiber.t
 

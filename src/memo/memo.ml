@@ -38,6 +38,7 @@ exception Non_reproducible = Exec.Non_reproducible
 open Node
 module Error = Node.Error
 module Cycle_error = Node.Cycle_error
+module Evaluation = Node.Evaluation
 
 let () =
   Printexc.register_printer (fun exn ->
@@ -157,6 +158,7 @@ let make_dep_node ~spec ~input : _ Dep_node.t =
   ; value = Uninitialized
   ; runs = Run.Pair.invalid
   ; deps = Deps.empty
+  ; evaluation_children = []
   }
 ;;
 

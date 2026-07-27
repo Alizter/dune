@@ -42,6 +42,8 @@ val changed_or_not
   -> f:(ok_to_recompute_eagerly:bool -> 'node -> 'cycle Changed_or_not.t Fiber.t)
   -> 'cycle Changed_or_not.t Fiber.t
 
+val to_list : 'node t -> 'node list
+
 module For_debugging : sig
   val to_list : 'node t -> 'node list
 

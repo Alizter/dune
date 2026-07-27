@@ -29,6 +29,11 @@ let report_and_collect_errors f =
 
 let check_point = ref (Fiber.return ())
 
+let notify node event =
+  Evaluation.notify node event;
+  Spec.notify node.spec node.input event
+;;
+
 (* The run in which we last computed a non-reproducible error. [reset_if_necessary]
    uses it to force a new run even when the invalidation is empty, so that
    non-reproducible errors (which are never restored from the cache) get recomputed. *)
@@ -76,6 +81,7 @@ let rec restore_from_cache
     Deps.changed_or_not
       node.deps
       ~f:(fun[@inline] ~ok_to_recompute_eagerly (Dep_node.T dep) ->
+        Evaluation.add_dependency node dep;
         (* If the [Run.is_current] check succeeds then the node must have been [Cached] in
            the current run, so there is no need to restore it (which would allocate a
            fiber). We can compare the timestamps directly. *)
@@ -124,10 +130,11 @@ and compute : 'i 'o. ('i, 'o) Dep_node.t -> unit Fiber.t =
   let+ res =
     report_and_collect_errors (fun () ->
       let* () = !check_point in
-      Deps_collector.run_apply
-        deps_collector
-        ~f:(fun (node : (_, _) Dep_node.t) -> node.spec.f node.input)
-        node)
+      Evaluation.with_parent node (fun () ->
+        Deps_collector.run_apply
+          deps_collector
+          ~f:(fun (node : (_, _) Dep_node.t) -> node.spec.f node.input)
+          node))
   in
   (match res with
    | Error { reproducible = false; _ } ->
@@ -148,6 +155,7 @@ and start_restoring : 'i 'o. ('i, 'o) Dep_node.t -> Cycle_error.t Changed_or_not
   =
   fun node ->
   let computation = Computation.create () in
+  Evaluation.start node;
   node.state <- Restoring { restore_from_cache = computation };
   Computation.force computation ~dep_node:node (fun _stack_frame ->
     let* restore_result = restore_from_cache node in
@@ -170,6 +178,7 @@ and start_restoring : 'i 'o. ('i, 'o) Dep_node.t -> Cycle_error.t Changed_or_not
 and start_computing : 'i 'o. ('i, 'o) Dep_node.t -> unit Fiber.t =
   fun node ->
   let computation = Computation.create () in
+  Evaluation.start node;
   node.state <- Computing { compute = computation };
   Computation.force computation ~dep_node:node (fun _stack_frame -> compute node)
 
@@ -181,7 +190,7 @@ and consider_and_restore_from_cache_without_adding_dep
   fun node ->
   match node.state with
   | Cached ->
-    Spec.notify node.spec node.input Live;
+    notify node Live;
     start_restoring node
   | Restoring { restore_from_cache } ->
     Computation.read_but_first_check_for_cycles
@@ -216,7 +225,7 @@ and consider_and_compute_without_adding_dep
     Fiber.return (Ok ())
   | Restoring _ -> assert false
   | Not_cached ->
-    Spec.notify node.spec node.input Live;
+    notify node Live;
     start_computing node >>| Result.ok
   | Out_of_date -> start_computing node >>| Result.ok
   | Computing { compute } ->
@@ -260,7 +269,7 @@ let after_restore
     Fiber.bind_apply (consider_and_compute_without_adding_dep node) after_compute node
 ;;
 
-let exec_dep_node_now : type i o. (i, o) Dep_node.t -> o Fiber.t =
+let exec_dep_node_after_reaching : type i o. (i, o) Dep_node.t -> o Fiber.t =
   fun node ->
   (* Doing the check here before creating any fibers, rather than in
      [consider_and_restore_from_cache_without_adding_dep], is a measurable win. *)
@@ -273,4 +282,14 @@ let exec_dep_node_now : type i o. (i, o) Dep_node.t -> o Fiber.t =
       node
 ;;
 
+let exec_dep_node_now : type i o. (i, o) Dep_node.t -> o Fiber.t =
+  fun node ->
+  match Evaluation.reach_from_caller node with
+  | None -> exec_dep_node_after_reaching node
+  | Some reached ->
+    let* () = reached in
+    exec_dep_node_after_reaching node
+;;
+
 let exec_dep_node node = Fiber.of_thunk_apply exec_dep_node_now node
+;;

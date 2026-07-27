@@ -50,3 +50,5 @@ val has_cutoff : _ t -> bool
 
 (** [notify spec input event] runs [spec]'s [on_event] callback, if it has one. *)
 val notify : ('i, _) t -> 'i -> Event.t -> unit
+
+val has_event_tracker : _ t -> bool

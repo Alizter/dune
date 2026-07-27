@@ -119,16 +119,18 @@ let changed_or_not (t : 'node t) ~f =
   loop ~ok_to_recompute_eagerly:false t
 ;;
 
+let to_list (t : 'node t) =
+  let rec loop acc = function
+    | Static.Empty -> acc
+    | Singleton node -> node :: acc
+    | Seq arr | Par arr ->
+      Array.Immutable.fold_right arr ~init:acc ~f:(fun t acc -> loop acc t)
+  in
+  loop [] t
+;;
+
 module For_debugging = struct
-  let to_list (t : 'node t) =
-    let rec loop acc = function
-      | Static.Empty -> acc
-      | Singleton node -> node :: acc
-      | Seq arr | Par arr ->
-        Array.Immutable.fold_right arr ~init:acc ~f:(fun t acc -> loop acc t)
-    in
-    loop [] t
-  ;;
+  let to_list = to_list
 
   let to_dyn node_to_dyn t =
     let rec loop (t : _ Static.t) =

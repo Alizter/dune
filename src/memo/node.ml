@@ -67,6 +67,10 @@ module M = struct
              partial (rather than total) order on dependencies, so [deps] should be
              a linearisation of this partial order. *)
         mutable deps : packed Deps.t
+      ; (* Dependencies reached while this node is being evaluated. Unlike [deps], these
+             are recorded before the dependency has completed so that evaluations waiting
+             on the same in-flight node can observe subsequently discovered dependencies. *)
+        mutable evaluation_children : packed list
       }
 
     and packed = T : (_, _) t -> packed [@@unboxed]
@@ -273,6 +277,183 @@ module Computation0 = struct
   let create () = { ivar = Fiber.Ivar.create (); dag_node = Lazy_dag_node.create () }
 end
 
+(* Evaluations are one-shot roots over the shared Memo graph. [context] identifies the
+   caller of each [Memo.exec]. A new dependency edge is propagated to every active
+   evaluation that has reached its parent, while [reach] replays cached or already
+   discovered children for evaluations that arrive later. *)
+module Evaluation = struct
+  module Evaluation_id = Stdune.Id.Make ()
+
+  module Counts = struct
+    type t =
+      { live : int
+      ; validated : int
+      }
+  end
+
+  type status =
+    | Created
+    | Active
+    | Finished
+
+  type t =
+    { id : Evaluation_id.t
+    ; mutable status : status
+    ; mutable seen : Id.Set.t
+    ; mutable live : Id.Set.t
+    ; mutable validated : Id.Set.t
+    ; mutable number_of_live_nodes : int
+    ; mutable number_of_validated_nodes : int
+    }
+
+  type context =
+    | Outside
+    | Root of t
+    | Parent of Dep_node.packed
+
+  let context = Fiber.Var.create Outside
+  let active = ref []
+
+  let create () =
+    { id = Evaluation_id.gen ()
+    ; status = Created
+    ; seen = Id.Set.empty
+    ; live = Id.Set.empty
+    ; validated = Id.Set.empty
+    ; number_of_live_nodes = 0
+    ; number_of_validated_nodes = 0
+    }
+  ;;
+
+  let counts t : Counts.t =
+    { live = t.number_of_live_nodes; validated = t.number_of_validated_nodes }
+  ;;
+
+  let mark_live t id =
+    if not (Id.Set.mem t.live id)
+    then (
+      t.live <- Id.Set.add t.live id;
+      t.number_of_live_nodes <- t.number_of_live_nodes + 1)
+  ;;
+
+  let mark_validated t id =
+    mark_live t id;
+    if not (Id.Set.mem t.validated id)
+    then (
+      t.validated <- Id.Set.add t.validated id;
+      t.number_of_validated_nodes <- t.number_of_validated_nodes + 1)
+  ;;
+
+  let reach t root =
+    let rec loop = function
+      | [] -> ()
+      | Dep_node.T node :: pending ->
+        if Id.Set.mem t.seen node.id
+        then loop pending
+        else (
+          t.seen <- Id.Set.add t.seen node.id;
+          let children =
+            match node.state with
+            | Cached when Run.is_current (Dep_node.last_validated_at node) ->
+              if Spec.has_event_tracker node.spec then mark_validated t node.id;
+              Deps.to_list node.deps
+            | Restoring _ | Computing _ | Out_of_date ->
+              if Spec.has_event_tracker node.spec then mark_live t node.id;
+              (* An interrupted attempt can leave children here until [start] resets the
+                 list. Replaying them may transiently overestimate an evaluation's
+                 progress, but keeps its counts monotonic. *)
+              node.evaluation_children
+            | Cached | Not_cached -> []
+          in
+          loop (List.rev_append children pending))
+    in
+    loop [ root ]
+  ;;
+
+  let add_dependency_packed (Dep_node.T parent) child =
+    if not (List.is_empty !active)
+    then (
+      parent.evaluation_children <- child :: parent.evaluation_children;
+      List.iter !active ~f:(fun evaluation ->
+        if Id.Set.mem evaluation.seen parent.id then reach evaluation child))
+  ;;
+
+  let add_dependency parent child =
+    add_dependency_packed (Dep_node.T parent) (Dep_node.T child)
+  ;;
+
+  let reach_from_context context child =
+    match context with
+    | Outside -> ()
+    | Root evaluation -> reach evaluation child
+    | Parent parent -> add_dependency_packed parent child
+  ;;
+
+  let reach_from_caller node =
+    if List.is_empty !active
+    then None
+    else Some (Fiber.Var.get_apply_map context reach_from_context (Dep_node.T node))
+  ;;
+
+  let notify (node : _ Dep_node.t) event =
+    match !active with
+    | [] -> ()
+    | active ->
+      let observes_node evaluation = Id.Set.mem evaluation.seen node.id in
+      if List.exists active ~f:observes_node
+      then (
+        let event_tracked = Spec.has_event_tracker node.spec in
+        let dependencies =
+          match (event : Event.t) with
+          | Live -> []
+          | Validated -> Deps.to_list node.deps
+        in
+        List.iter active ~f:(fun evaluation ->
+          if observes_node evaluation
+          then (
+            match (event : Event.t) with
+            | Live -> if event_tracked then mark_live evaluation node.id
+            | Validated ->
+              List.iter dependencies ~f:(reach evaluation);
+              if event_tracked then mark_validated evaluation node.id)))
+  ;;
+
+  let start node = node.Dep_node.evaluation_children <- []
+
+  let with_parent node f =
+    if List.is_empty !active
+    then f ()
+    else Fiber.Var.set context (Parent (Dep_node.T node)) f
+  ;;
+
+  let activate t =
+    match t.status with
+    | Created ->
+      t.status <- Active;
+      active := t :: !active
+    | Active | Finished ->
+      Code_error.raise
+        "Memo evaluation may only be observed once"
+        [ "evaluation", Evaluation_id.to_dyn t.id ]
+  ;;
+
+  let deactivate t =
+    t.status <- Finished;
+    active
+    := List.filter !active ~f:(fun active -> not (Evaluation_id.equal active.id t.id))
+  ;;
+
+  let observe t computation =
+    Fiber.of_thunk (fun () ->
+      activate t;
+      Fiber.finalize
+        (fun () -> Fiber.Var.set context (Root t) (fun () -> computation))
+        ~finally:(fun () ->
+          deactivate t;
+          Fiber.return ()))
+  ;;
+end
+
 (* For debugging *)
 let _print_dep_node ?prefix (dep_node : _ Dep_node.t) =
   let prefix =
@@ -309,6 +490,8 @@ let validate_value (node : _ Dep_node.t) =
   node.runs
   <- Run.Pair.with_last_validated_at node.runs ~last_validated_at:(Run.current ());
   node.state <- Cached;
+  Evaluation.notify node Validated;
+  node.evaluation_children <- [];
   Spec.notify node.spec node.input Validated
 ;;
 

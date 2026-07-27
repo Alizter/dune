@@ -54,6 +54,7 @@ module M : sig
       ; mutable value : 'o Value.t
       ; mutable runs : Run.Pair.t
       ; mutable deps : packed Deps.t
+      ; mutable evaluation_children : packed list
       }
 
     and packed = T : ('a, 'b) t -> packed [@@unboxed]
@@ -105,6 +106,7 @@ module Dep_node : sig
     ; mutable deps : packed Deps.t
       (** The dependencies captured at [last_validated_at], in the order they were depended
         on. *)
+    ; mutable evaluation_children : packed list
     }
 
   and packed = M.Dep_node.packed = T : ('a, 'b) t -> packed [@@unboxed]
@@ -183,6 +185,26 @@ module Computation0 : sig
     }
 
   val create : unit -> 'a t
+end
+
+module Evaluation : sig
+  module Counts : sig
+    type t =
+      { live : int
+      ; validated : int
+      }
+  end
+
+  type t
+
+  val create : unit -> t
+  val counts : t -> Counts.t
+  val reach_from_caller : ('i, 'o) Dep_node.t -> unit Fiber.t option
+  val add_dependency : ('i, 'o) Dep_node.t -> ('a, 'b) Dep_node.t -> unit
+  val notify : ('i, 'o) Dep_node.t -> Spec.Event.t -> unit
+  val start : ('i, 'o) Dep_node.t -> unit
+  val with_parent : ('i, 'o) Dep_node.t -> (unit -> 'a Fiber.t) -> 'a Fiber.t
+  val observe : t -> 'a Fiber.t -> 'a Fiber.t
 end
 
 val _print_dep_node : ?prefix:string -> ('a, 'b) Dep_node.t -> unit
