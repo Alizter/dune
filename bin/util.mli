@@ -10,4 +10,12 @@ type checked =
 val find_in_path_exn : string -> Path.t
 val check_path : Context.t list -> Path.t -> checked
 val restore_cwd_and_execve : Workspace_root.t -> string -> string list -> Env.t -> 'a
+
+val progress_status_line
+  :  complete:int
+  -> remaining:int
+  -> failed:int
+  -> jobs:int option
+  -> _ Pp.t
+
 val setup : unit -> Dune_rules.Main.build_system Memo.t

@@ -67,16 +67,11 @@ end = struct
   ;;
 
   let done_status ~complete ~remaining ~failed state =
-    Pp.textf
-      "Done: %d%% (%d/%d, %d left%s) (jobs: %d)"
-      (if complete + remaining = 0 then 0 else complete * 100 / (complete + remaining))
-      complete
-      (complete + remaining)
-      remaining
-      (match failed with
-       | 0 -> ""
-       | failed -> sprintf ", %d failed" failed)
-      (Job_id_map.cardinal state.jobs)
+    Util.progress_status_line
+      ~complete
+      ~remaining
+      ~failed
+      ~jobs:(Some (Job_id_map.cardinal state.jobs))
   ;;
 
   let waiting_for_file_system_changes message =

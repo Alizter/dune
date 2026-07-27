@@ -174,14 +174,7 @@ let with_rpc_build_progress_status_line progress f =
     match (!progress : Dune_rpc.Progress.t) with
     | Waiting -> Pp.verbatim "Connected to RPC server"
     | In_progress { complete; remaining; failed } ->
-      let total = complete + remaining in
-      Pp.textf
-        "Done: %d%% (%d/%d, %d left%s)"
-        (if total = 0 then 0 else complete * 100 / total)
-        complete
-        total
-        remaining
-        (if failed = 0 then "" else sprintf ", %d failed" failed)
+      Util.progress_status_line ~complete ~remaining ~failed ~jobs:None
     | Failed -> Pp.verbatim "Build failed"
     | Interrupted -> Pp.verbatim "Restarting current build..."
     | Success -> Pp.verbatim "Success"
