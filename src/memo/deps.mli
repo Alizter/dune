@@ -42,6 +42,12 @@ val changed_or_not
   -> f:(ok_to_recompute_eagerly:bool -> 'node -> 'cycle Changed_or_not.t Fiber.t)
   -> 'cycle Changed_or_not.t Fiber.t
 
+(** Iterate over dependencies in discovery order without materializing a list. *)
+val iter : 'node t -> f:('node -> unit) -> unit
+
+(** Fold over dependencies in discovery order without materializing a list. *)
+val fold_left : 'node t -> init:'acc -> f:('acc -> 'node -> 'acc) -> 'acc
+
 val to_list : 'node t -> 'node list
 
 module For_debugging : sig

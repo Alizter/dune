@@ -296,12 +296,15 @@ module Evaluation = struct
     | Active
     | Finished
 
+  type node_status =
+    | Reached
+    | Live_rule
+    | Validated_rule
+
   type t =
     { id : Evaluation_id.t
     ; mutable status : status
-    ; mutable seen : Id.Set.t
-    ; mutable live : Id.Set.t
-    ; mutable validated : Id.Set.t
+    ; nodes : node_status Id.Table.t
     ; mutable number_of_live_nodes : int
     ; mutable number_of_validated_nodes : int
     }
@@ -317,9 +320,7 @@ module Evaluation = struct
   let create () =
     { id = Evaluation_id.gen ()
     ; status = Created
-    ; seen = Id.Set.empty
-    ; live = Id.Set.empty
-    ; validated = Id.Set.empty
+    ; nodes = Id.Table.create 128
     ; number_of_live_nodes = 0
     ; number_of_validated_nodes = 0
     }
@@ -329,43 +330,59 @@ module Evaluation = struct
     { live = t.number_of_live_nodes; validated = t.number_of_validated_nodes }
   ;;
 
-  let mark_live t id =
-    if not (Id.Set.mem t.live id)
-    then (
-      t.live <- Id.Set.add t.live id;
-      t.number_of_live_nodes <- t.number_of_live_nodes + 1)
+  let mark_live t id = function
+    | Reached ->
+      Id.Table.set t.nodes id Live_rule;
+      t.number_of_live_nodes <- t.number_of_live_nodes + 1
+    | Live_rule | Validated_rule -> ()
   ;;
 
-  let mark_validated t id =
-    mark_live t id;
-    if not (Id.Set.mem t.validated id)
-    then (
-      t.validated <- Id.Set.add t.validated id;
-      t.number_of_validated_nodes <- t.number_of_validated_nodes + 1)
+  let mark_validated t id = function
+    | Reached ->
+      Id.Table.set t.nodes id Validated_rule;
+      t.number_of_live_nodes <- t.number_of_live_nodes + 1;
+      t.number_of_validated_nodes <- t.number_of_validated_nodes + 1
+    | Live_rule ->
+      Id.Table.set t.nodes id Validated_rule;
+      t.number_of_validated_nodes <- t.number_of_validated_nodes + 1
+    | Validated_rule -> ()
+  ;;
+
+  let add_reached t id node_status =
+    Id.Table.set t.nodes id node_status;
+    match node_status with
+    | Reached -> ()
+    | Live_rule -> t.number_of_live_nodes <- t.number_of_live_nodes + 1
+    | Validated_rule ->
+      t.number_of_live_nodes <- t.number_of_live_nodes + 1;
+      t.number_of_validated_nodes <- t.number_of_validated_nodes + 1
   ;;
 
   let reach t root =
     let rec loop = function
       | [] -> ()
       | Dep_node.T node :: pending ->
-        if Id.Set.mem t.seen node.id
+        if Id.Table.mem t.nodes node.id
         then loop pending
         else (
-          t.seen <- Id.Set.add t.seen node.id;
-          let children =
+          let event_tracked = Spec.has_event_tracker node.spec in
+          let pending =
             match node.state with
             | Cached when Run.is_current (Dep_node.last_validated_at node) ->
-              if Spec.has_event_tracker node.spec then mark_validated t node.id;
-              Deps.to_list node.deps
+              add_reached t node.id (if event_tracked then Validated_rule else Reached);
+              Deps.fold_left node.deps ~init:pending ~f:(fun pending child ->
+                child :: pending)
             | Restoring _ | Computing _ | Out_of_date ->
-              if Spec.has_event_tracker node.spec then mark_live t node.id;
+              add_reached t node.id (if event_tracked then Live_rule else Reached);
               (* An interrupted attempt can leave children here until [start] resets the
                  list. Replaying them may transiently overestimate an evaluation's
                  progress, but keeps its counts monotonic. *)
-              node.evaluation_children
-            | Cached | Not_cached -> []
+              List.rev_append node.evaluation_children pending
+            | Cached | Not_cached ->
+              add_reached t node.id Reached;
+              pending
           in
-          loop (List.rev_append children pending))
+          loop pending)
     in
     loop [ root ]
   ;;
@@ -375,7 +392,7 @@ module Evaluation = struct
     then (
       parent.evaluation_children <- child :: parent.evaluation_children;
       List.iter !active ~f:(fun evaluation ->
-        if Id.Set.mem evaluation.seen parent.id then reach evaluation child))
+        if Id.Table.mem evaluation.nodes parent.id then reach evaluation child))
   ;;
 
   let add_dependency parent child =
@@ -399,23 +416,16 @@ module Evaluation = struct
     match !active with
     | [] -> ()
     | active ->
-      let observes_node evaluation = Id.Set.mem evaluation.seen node.id in
-      if List.exists active ~f:observes_node
-      then (
-        let event_tracked = Spec.has_event_tracker node.spec in
-        let dependencies =
-          match (event : Event.t) with
-          | Live -> []
-          | Validated -> Deps.to_list node.deps
-        in
-        List.iter active ~f:(fun evaluation ->
-          if observes_node evaluation
-          then (
-            match (event : Event.t) with
-            | Live -> if event_tracked then mark_live evaluation node.id
-            | Validated ->
-              List.iter dependencies ~f:(reach evaluation);
-              if event_tracked then mark_validated evaluation node.id)))
+      let event_tracked = Spec.has_event_tracker node.spec in
+      List.iter active ~f:(fun evaluation ->
+        match Id.Table.find evaluation.nodes node.id with
+        | None -> ()
+        | Some node_status ->
+          (match (event : Event.t) with
+           | Live -> if event_tracked then mark_live evaluation node.id node_status
+           | Validated ->
+             Deps.iter node.deps ~f:(reach evaluation);
+             if event_tracked then mark_validated evaluation node.id node_status))
   ;;
 
   let start node = node.Dep_node.evaluation_children <- []

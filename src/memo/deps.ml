@@ -129,6 +129,33 @@ let to_list (t : 'node t) =
   loop [] t
 ;;
 
+let iter (t : 'node t) ~f =
+  let rec loop = function
+    | Static.Empty -> ()
+    | Singleton node -> f node
+    | Seq arr | Par arr ->
+      for i = 0 to Array.Immutable.length arr - 1 do
+        loop (Array.Immutable.get arr i)
+      done
+  in
+  loop t
+;;
+
+let fold_left (t : 'node t) ~init ~f =
+  let rec loop acc = function
+    | Static.Empty -> acc
+    | Singleton node -> f acc node
+    | Seq arr | Par arr ->
+      let rec fold_array acc i =
+        if i = Array.Immutable.length arr
+        then acc
+        else fold_array (loop acc (Array.Immutable.get arr i)) (i + 1)
+      in
+      fold_array acc 0
+  in
+  loop init t
+;;
+
 module For_debugging = struct
   let to_list = to_list
 

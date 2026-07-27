@@ -54,7 +54,10 @@ module Evaluation : sig
   (** [observe t computation] attributes event-tracked nodes reachable from [computation]
       to [t]. Reachability is propagated through nodes without event tracking and through
       dependency graphs already cached in the current Memo run. An evaluation may only be
-      observed once. *)
+      observed once.
+
+      Replaying an already cached dependency graph is synchronous and does not yield to
+      other fibers. *)
   val observe : t -> 'a memo -> 'a memo
 
   (** Counts of unique event-tracked nodes reachable from this evaluation. May be called

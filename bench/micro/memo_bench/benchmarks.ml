@@ -20,6 +20,15 @@ module Memo = struct
     Fiber.run fiber ~iter:(fun _ -> failwith "deadlock?")
   ;;
 
+  let exec_observed build =
+    sample_count := 0;
+    Memo.reset !invalidation_acc;
+    invalidation_acc := Memo.Invalidation.empty;
+    let evaluation = Memo.Evaluation.create () in
+    let fiber = Memo.run (Memo.Evaluation.observe evaluation build) in
+    Fiber.run fiber ~iter:(fun _ -> failwith "deadlock?")
+  ;;
+
   let memoize t =
     let l = Memo.lazy_ ~name:"memoize" ~cutoff:(fun _ _ -> false) (fun () -> t) in
     Memo.of_thunk (fun () -> Memo.Lazy.force l)
@@ -74,7 +83,7 @@ module Case = struct
     ; restore_from_cache : unit -> unit -> 'a
     }
 
-  let create (f : unit -> _ Var.t * 'a Memo.t) : 'a t =
+  let create_with_run ~run (f : unit -> _ Var.t * 'a Memo.t) : 'a t =
     let create_and_compute () () = run (f () |> snd) in
     let incr_and_recompute () =
       let var, build = f () in
@@ -90,6 +99,8 @@ module Case = struct
     in
     { create_and_compute; incr_and_recompute; restore_from_cache }
   ;;
+
+  let create f = create_with_run ~run f
 end
 
 let one_bind =
@@ -139,28 +150,41 @@ let%bench_fun "clique (create and compute)" = clique.create_and_compute ()
 let%bench_fun "clique (incr and recompute)" = clique.incr_and_recompute ()
 let%bench_fun "clique (restore from cache)" = clique.restore_from_cache ()
 
-let bipartite =
-  Case.create (fun () ->
-    let first_var = Var.create 0 in
-    let inputs =
-      List.init 30 ~f:(fun i ->
-        let v = if i = 0 then first_var else Var.create 0 in
-        Memo.memoize (Var.read v))
-    in
-    let matrix i j = if i = j then 1 else 0 in
-    let outputs =
-      List.init 30 ~f:(fun i ->
-        Memo.memoize
-          (Memo.all
-             (List.mapi inputs ~f:(fun j x -> Memo.map x ~f:(fun x -> matrix i j * x)))
-           |> Memo.map ~f:(List.fold_left ~init:0 ~f:( + ))))
-    in
-    first_var, Memo.memoize (Memo.all outputs))
+let bipartite_case () =
+  let first_var = Var.create 0 in
+  let inputs =
+    List.init 30 ~f:(fun i ->
+      let v = if i = 0 then first_var else Var.create 0 in
+      Memo.memoize (Var.read v))
+  in
+  let matrix i j = if i = j then 1 else 0 in
+  let outputs =
+    List.init 30 ~f:(fun i ->
+      Memo.memoize
+        (Memo.all
+           (List.mapi inputs ~f:(fun j x -> Memo.map x ~f:(fun x -> matrix i j * x)))
+         |> Memo.map ~f:(List.fold_left ~init:0 ~f:( + ))))
+  in
+  first_var, Memo.memoize (Memo.all outputs)
 ;;
 
+let bipartite = Case.create bipartite_case
+let bipartite_observed = Case.create_with_run ~run:Memo.exec_observed bipartite_case
 let%bench_fun "bipartite (create and compute)" = bipartite.create_and_compute ()
 let%bench_fun "bipartite (incr and recompute)" = bipartite.incr_and_recompute ()
 let%bench_fun "bipartite (restore from cache)" = bipartite.restore_from_cache ()
+
+let%bench_fun "bipartite observed (create and compute)" =
+  bipartite_observed.create_and_compute ()
+;;
+
+let%bench_fun "bipartite observed (incr and recompute)" =
+  bipartite_observed.incr_and_recompute ()
+;;
+
+let%bench_fun "bipartite observed (restore from cache)" =
+  bipartite_observed.restore_from_cache ()
+;;
 
 let memo_diamonds =
   Case.create (fun () ->
