@@ -48,13 +48,34 @@ val dep_on_alias_definition : Rules.Dir_rules.Alias_spec.item -> unit Action_bui
 val run_exn : (unit -> 'a Memo.t) -> 'a Fiber.t
 
 module Request : sig
+  module Stats : sig
+    type t =
+      { number_of_rules_discovered : int
+        (** Unique rule and anonymous-action nodes reached by this goal in the current
+            build attempt. *)
+      ; number_of_rules_validated : int
+        (** Discovered nodes whose value has been validated in the current attempt. *)
+      }
+  end
+
   module Goal : sig
     type t
 
+    (** Create a goal without collecting per-goal progress statistics. *)
     val create : unit Action_builder.t -> t
+
+    (** Create a goal that collects per-goal progress statistics. Tracking has a cost
+        proportional to the portion of the Memo graph reached by the goal. *)
+    val create_with_progress : unit Action_builder.t -> t
+
     val await : t -> Build_outcome.t Fiber.t
     val is_finished : t -> bool
     val complete : t -> Build_outcome.t -> unit Fiber.t
+
+    (** Statistics for the most recently started build attempt. The counts are zero before
+        the first attempt, when progress collection was not requested, and are replaced
+        when the goal is retried. *)
+    val stats : t -> Stats.t
   end
 
   type t

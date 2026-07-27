@@ -1280,13 +1280,37 @@ let run_with_error_collection ?restart_started_at ~build_started_at ~build colle
 ;;
 
 module Request = struct
+  module Stats = struct
+    type t =
+      { number_of_rules_discovered : int
+      ; number_of_rules_validated : int
+      }
+
+    let init = { number_of_rules_discovered = 0; number_of_rules_validated = 0 }
+
+    let of_evaluation evaluation =
+      let { Memo.Evaluation.Counts.live; validated } =
+        Memo.Evaluation.counts evaluation
+      in
+      { number_of_rules_discovered = live; number_of_rules_validated = validated }
+    ;;
+  end
+
   module Goal = struct
+    type progress = { mutable evaluation : Memo.Evaluation.t option }
+
     type t =
       { build : unit Action_builder.t
       ; outcome : Build_outcome.t Fiber.Ivar.t
+      ; progress : progress option
       }
 
-    let create build = { build; outcome = Fiber.Ivar.create () }
+    let create build = { build; outcome = Fiber.Ivar.create (); progress = None }
+
+    let create_with_progress build =
+      { build; outcome = Fiber.Ivar.create (); progress = Some { evaluation = None } }
+    ;;
+
     let await t = Fiber.Ivar.read t.outcome
     let is_finished t = Option.is_some (Fiber.Ivar.peek t.outcome)
 
@@ -1298,6 +1322,21 @@ module Request = struct
     ;;
 
     let build t = t.build
+    let collects_progress t = Option.is_some t.progress
+
+    let start_attempt t =
+      Option.map t.progress ~f:(fun progress ->
+        let evaluation = Memo.Evaluation.create () in
+        progress.evaluation <- Some evaluation;
+        evaluation)
+    ;;
+
+    let stats t =
+      match t.progress with
+      | None -> Stats.init
+      | Some { evaluation = None } -> Stats.init
+      | Some { evaluation = Some evaluation } -> Stats.of_evaluation evaluation
+    ;;
   end
 
   type completion =
@@ -1333,11 +1372,17 @@ let run_build_requests ?restart_started_at ~build_started_at ?build (request : R
     | Complete_goals, _ -> Request.Goal.complete goal outcome
   in
   let run_request goal =
+    let evaluation = Request.Goal.start_attempt goal in
     Fiber.collect_errors (fun () ->
       Memo.run_with_error_handler ~handle_error_no_raise:report_early_exn (fun () ->
-        Request.Goal.build goal
-        |> Action_builder.evaluate_and_collect_facts
-        |> Memo.map ~f:fst))
+        let build =
+          Request.Goal.build goal
+          |> Action_builder.evaluate_and_collect_facts
+          |> Memo.map ~f:fst
+        in
+        match evaluation with
+        | None -> build
+        | Some evaluation -> Memo.Evaluation.observe evaluation build))
     >>= function
     | Ok () ->
       let+ () = finish_request goal Success in
@@ -1349,7 +1394,13 @@ let run_build_requests ?restart_started_at ~build_started_at ?build (request : R
       Error exns
   in
   run_with_error_collection ?restart_started_at ~build_started_at ~build (fun () ->
-    Request.goals request
+    let progress_goals, other_goals =
+      List.partition (Request.goals request) ~f:Request.Goal.collects_progress
+    in
+    (* A tracked goal activates its evaluation before yielding. Start tracked goals
+       first so work begun by an untracked goal records the in-flight edges that a
+       tracked goal may subsequently share. *)
+    progress_goals @ other_goals
     |> Fiber.parallel_map ~f:run_request
     >>| List.concat_map ~f:(function
       | Ok () -> []
