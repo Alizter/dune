@@ -197,9 +197,21 @@ module Evaluation : sig
 
   type t
 
+  (** The evaluation-related identity of the currently running computation: the observed
+      evaluation at the root of [observe], or the node whose computation is running. *)
+  type context
+
+  val context : context Fiber.Var.t
   val create : unit -> t
   val counts : t -> Counts.t
-  val reach_from_caller : ('i, 'o) Dep_node.t -> unit Fiber.t option
+
+  (** Whether any evaluation is currently observed. When [false], the hooks below are
+      no-ops. *)
+  val tracking : unit -> bool
+
+  (** Attribute [child] to the evaluations that can reach it through [context]. *)
+  val reach_from_context : context -> Dep_node.packed -> unit
+
   val add_dependency : ('i, 'o) Dep_node.t -> ('a, 'b) Dep_node.t -> unit
   val notify : ('i, 'o) Dep_node.t -> Spec.Event.t -> unit
   val start : ('i, 'o) Dep_node.t -> unit

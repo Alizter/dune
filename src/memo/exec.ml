@@ -282,13 +282,21 @@ let exec_dep_node_after_reaching : type i o. (i, o) Dep_node.t -> o Fiber.t =
       node
 ;;
 
+(* Kept as a hoisted function so that [Fiber.Var.get_apply] below runs without
+   allocating a closure, an intermediate fiber or a bind on every [exec]. *)
+let exec_dep_node_in_context
+  : 'i 'o. Evaluation.context -> ('i, 'o) Dep_node.t -> 'o Fiber.t
+  =
+  fun context node ->
+  Evaluation.reach_from_context context (Dep_node.T node);
+  exec_dep_node_after_reaching node
+;;
+
 let exec_dep_node_now : type i o. (i, o) Dep_node.t -> o Fiber.t =
   fun node ->
-  match Evaluation.reach_from_caller node with
-  | None -> exec_dep_node_after_reaching node
-  | Some reached ->
-    let* () = reached in
-    exec_dep_node_after_reaching node
+  if Evaluation.tracking ()
+  then Fiber.Var.get_apply Evaluation.context exec_dep_node_in_context node
+  else exec_dep_node_after_reaching node
 ;;
 
 let exec_dep_node node = Fiber.of_thunk_apply exec_dep_node_now node

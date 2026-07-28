@@ -399,17 +399,13 @@ module Evaluation = struct
     add_dependency_packed (Dep_node.T parent) (Dep_node.T child)
   ;;
 
+  let tracking () = not (List.is_empty !active)
+
   let reach_from_context context child =
     match context with
     | Outside -> ()
     | Root evaluation -> reach evaluation child
     | Parent parent -> add_dependency_packed parent child
-  ;;
-
-  let reach_from_caller node =
-    if List.is_empty !active
-    then None
-    else Some (Fiber.Var.get_apply_map context reach_from_context (Dep_node.T node))
   ;;
 
   let notify (node : _ Dep_node.t) event =
