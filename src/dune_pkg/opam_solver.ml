@@ -2109,15 +2109,6 @@ let solve_lock_dir
          List.map platform_overlays ~f:(fun overlay ->
            Solver_env.extend solver_env overlay)
        in
-       (* Used where the surrounding code still needs a single platform's
-          full env (e.g. choosing reachability for the primary platform).
-          The empty-list case is unreachable: [platform_overlays = []] is
-          rejected with [Code_error] above. *)
-       let primary_full_solver_env =
-         match full_solver_envs with
-         | env :: _ -> env
-         | [] -> solver_env
-       in
        let context =
          let rec context =
            lazy
@@ -2305,38 +2296,45 @@ let solve_lock_dir
             let* pkgs_by_name = pkgs_by_name
             and* ocaml = ocaml in
             let+ () =
+              (* A repository package must not evade validation by depending on
+                 a workspace package only on a non-primary platform, so check
+                 the dependency choices for every requested platform. *)
               Package_name.Map.values pkgs_by_name
               |> Result.List.map
                    ~f:(fun { Lock_dir.Pkg.depends; info = { name; _ }; _ } ->
-                     match
-                       Lock_dir.Conditional_choice.choose_for_platform
-                         depends
-                         ~platform:primary_full_solver_env
-                     with
-                     | None -> Ok ()
-                     | Some depends ->
-                       Result.List.map
-                         depends
-                         ~f:(fun { Lock_dir.Dependency.name = dep_name; loc } ->
-                           match
-                             (not (is_dune dep_name))
-                             && Package_name.Map.mem local_packages dep_name
-                           with
-                           | false -> Ok ()
-                           | true ->
-                             Error
-                               (User_error.make
-                                  ~loc
-                                  [ Pp.textf
-                                      "Dune does not support packages outside the \
-                                       workspace depending on packages in the workspace. \
-                                       The package %S is not in the workspace but it \
-                                       depends on the package %S which is in the \
-                                       workspace."
-                                      (Package_name.to_string name)
-                                      (Package_name.to_string dep_name)
-                                  ]))
-                       |> Result.map ~f:(fun (_ : unit list) -> ()))
+                     List.fold_left full_solver_envs ~init:(Ok ()) ~f:(fun acc env ->
+                       match acc with
+                       | Error _ -> acc
+                       | Ok () ->
+                         (match
+                            Lock_dir.Conditional_choice.choose_for_platform
+                              depends
+                              ~platform:env
+                          with
+                          | None -> Ok ()
+                          | Some depends ->
+                            Result.List.map
+                              depends
+                              ~f:(fun { Lock_dir.Dependency.name = dep_name; loc } ->
+                                match
+                                  (not (is_dune dep_name))
+                                  && Package_name.Map.mem local_packages dep_name
+                                with
+                                | false -> Ok ()
+                                | true ->
+                                  Error
+                                    (User_error.make
+                                       ~loc
+                                       [ Pp.textf
+                                           "Dune does not support packages outside the \
+                                            workspace depending on packages in the \
+                                            workspace. The package %S is not in the \
+                                            workspace but it depends on the package %S \
+                                            which is in the workspace."
+                                           (Package_name.to_string name)
+                                           (Package_name.to_string dep_name)
+                                       ]))
+                            |> Result.map ~f:(fun (_ : unit list) -> ()))))
               |> Result.map ~f:(fun (_ : unit list) -> ())
             in
             let expanded_solver_variable_bindings =
