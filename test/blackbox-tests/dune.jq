@@ -14,6 +14,8 @@ def redactCommandTimes:
 
 def targets: (.target_files // []) + (.target_dirs // []);
 
+def satSolveEvents: select(.cat == "sat" and .name == "solve");
+
 def actionNames:
   select(.cat == "action") | .args.name? // empty;
 
