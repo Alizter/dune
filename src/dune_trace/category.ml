@@ -26,7 +26,6 @@ type t =
   | Thread
   | Runtime
   | Sat
-;;
 
 let all =
   [ Rpc
@@ -84,7 +83,6 @@ let to_string = function
   | Runtime -> "runtime"
   | Sat -> "sat"
 ;;
-
 
 let of_string =
   let all = List.map all ~f:(fun a -> to_string a, a) in
