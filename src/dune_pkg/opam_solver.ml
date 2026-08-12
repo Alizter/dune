@@ -2075,6 +2075,13 @@ let solve_lock_dir
       ~selected_depopts
       ~portable_lock_dir
   =
+  (* Deduplicate platforms before solving: a duplicate in [solve_for_platforms]
+     must not change the solution, the lock directory contents, or the number
+     of SAT runs. *)
+  let platform_overlays =
+    List.fold_left platform_overlays ~init:[] ~f:(fun acc overlay ->
+      if List.exists acc ~f:(Solver_env.equal overlay) then acc else acc @ [ overlay ])
+  in
   match platform_overlays with
   | [] -> Code_error.raise "solve_lock_dir called with empty platform_overlays" []
   | _ ->
