@@ -1405,8 +1405,13 @@ start_dune () {
 
 timeout="$(command -v timeout || echo gtimeout)"
 
+# The default timeout is generous because these helpers are used both for
+# liveness checks (rpc ping) and for real RPC build requests. A cold build
+# request has to cover client startup, the dependency solve, compilation and
+# the link step, which can take several seconds under load; 2s used to make
+# tests like autolock-with-watch-server.t flaky.
 with_timeout () {
-    $timeout 2 "$@"
+    $timeout 30 "$@"
     exit_code=$?
     if [ "$exit_code" = 124 ]
     then
@@ -1419,7 +1424,7 @@ with_timeout () {
 
 with_timeout_quiet () {
     output=$(mktemp)
-    $timeout 2 "$@" >"$output" 2>&1
+    $timeout 30 "$@" >"$output" 2>&1
     exit_code=$?
     if [ "$exit_code" = 124 ]
     then

@@ -41,7 +41,7 @@ configuration. Fix for https://github.com/ocaml/dune/issues/15587
 
   $ build a.exe
   Success
-  $ wait_for_line_with_timeout .#dune-output "Success, waiting for filesystem changes..." 200
+  $ wait_for_line_with_timeout .#dune-output "Success, waiting for filesystem changes..." 2000
   $ cat .#dune-output
   Success, waiting for filesystem changes...
 
