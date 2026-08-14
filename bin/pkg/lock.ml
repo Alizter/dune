@@ -6,6 +6,7 @@ module Lock_dir = Dune_pkg.Lock_dir
 module Pin_stanza = Dune_lang.Pin_stanza
 module Pin = Dune_pkg.Pin
 module Solver_env = Dune_pkg.Solver_env
+module Platform_id = Dune_pkg.Opam_solver.Platform_id
 
 module Progress_indicator = struct
   module Per_lockdir = struct
@@ -142,15 +143,37 @@ let solve_multiple_platforms
   match result with
   | Ok solver_result -> `All_ok solver_result
   | Error message ->
-    let error_message : Platforms_by_message.Message.t =
+    let (error_message, problematic_platforms)
+      : Platforms_by_message.Message.t * Platform_id.Set.t option
+      =
       match message with
-      | `Solve_error m -> Solve_error m
-      | `Manifest_error m -> Manifest_error m
+      | `Solve_error (m, problematic_platforms) ->
+        Solve_error m, Some problematic_platforms
+      | `Manifest_error m -> Manifest_error m, None
     in
-    (* Associate error with all platforms (filtered to platform-specific vars only
-       for cleaner display). Single-solve fails for all platforms together. *)
+    (* Associate error with the platforms it applies to (filtered to
+       platform-specific vars only for cleaner display). The solver reports
+       the platforms on which it failed to find a solution; if it couldn't
+       attribute the failure to any platform in particular, list them all. *)
     let platform_envs =
-      List.map platform_overlays ~f:Solver_env.remove_all_except_platform_specific
+      let select problematic overlays =
+        List.filteri overlays ~f:(fun i _ ->
+          Platform_id.Set.mem problematic (Platform_id.of_int i))
+        |> List.map ~f:Solver_env.remove_all_except_platform_specific
+      in
+      match problematic_platforms with
+      | Some problematic when not (Platform_id.Set.is_empty problematic) ->
+        (* Platform ids are indices into the deduplicated overlay list (see
+           [Dune_pkg.Opam_solver.solve_lock_dir]); redo the dedup so the
+           indices line up. *)
+        let overlays =
+          List.fold_left platform_overlays ~init:[] ~f:(fun acc overlay ->
+            if List.exists acc ~f:(Solver_env.equal overlay)
+            then acc
+            else acc @ [ overlay ])
+        in
+        select problematic overlays
+      | _ -> List.map platform_overlays ~f:Solver_env.remove_all_except_platform_specific
     in
     `All_error (Platforms_by_message.Message_map.singleton error_message platform_envs)
 ;;

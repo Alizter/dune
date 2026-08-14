@@ -9,6 +9,23 @@ module Solver_result : sig
     }
 end
 
+module Platform_id : sig
+  type t
+
+  val to_dyn : t -> Dyn.t
+  val of_int : int -> t
+
+  module Map : Map.S with type key = t
+
+  module Set : sig
+    type elt = t
+    type t
+
+    val is_empty : t -> bool
+    val mem : t -> elt -> bool
+  end
+end
+
 val solve_lock_dir
   :  Solver_env.t
   -> platform_overlays:Solver_env.t list
@@ -28,7 +45,8 @@ val solve_lock_dir
            Once portable lockdirs are enabled unconditionally, remove this
            argument. *)
   -> ( Solver_result.t
-       , [ `Solve_error of User_message.Style.t Pp.t | `Manifest_error of User_message.t ]
-       )
+       , [ `Solve_error of User_message.Style.t Pp.t * Platform_id.Set.t
+         | `Manifest_error of User_message.t
+         ] )
        result
        Fiber.t

@@ -80,8 +80,8 @@ Modify the "a" package so the solver error is different on different platforms:
   > EOF
 
 With a joint solve, a single solver failure means the requested platform set
-has no solution; the diagnostic lists the whole platform set and the conflict
-the solver found (here, the linux-only `= 0.1` requirement):
+has no solution; the diagnostic lists the whole platform set and one row per
+distinct failure mode (`= 0.1` on linux, `= 0.3` elsewhere):
   $ dune pkg lock
   Error:
   Unable to solve dependencies while generating lock directory: dune.lock
@@ -98,4 +98,8 @@ the solver found (here, the linux-only `= 0.1` requirement):
       a 0.0.1 requires = 0.1
       Rejected candidates:
         c.0.2: Incompatible with restriction: = 0.1
+  - c -> (problem)
+      a 0.0.1 requires = 0.3
+      Rejected candidates:
+        c.0.2: Incompatible with restriction: = 0.3
   [1]

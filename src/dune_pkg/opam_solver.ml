@@ -1504,27 +1504,31 @@ module Solver = struct
         | None -> Pp.text "(problem)"
       ;;
 
-      (* The platform a package was selected on, as in "on arch = arm64; os =
-         linux". Only passed for packages whose selection matters per platform
-         (see pp_rolemap); packages that fail on every platform have nothing
-         to attribute. *)
-      let pp_on_platform (context : Context.t) platform =
-        match Platform_id.Map.find context.platform_overlays platform with
-        | None -> Pp.nop
-        | Some env -> Pp.text " on " ++ Solver_env.pp_oneline env
+      (* The platforms a package was selected on, as in "on arch = arm64; os =
+         linux; arch = x86_64; os = linux". Only passed for packages whose
+         selection matters per platform (see pp_rolemap); packages that fail
+         on every platform have nothing to attribute. *)
+      let pp_on_platform (context : Context.t) platforms =
+        let envs =
+          List.filter_map platforms ~f:(fun platform ->
+            Platform_id.Map.find context.platform_overlays platform)
+        in
+        match envs with
+        | [] -> Pp.nop
+        | _ ->
+          Pp.text " on "
+          ++ Pp.concat_map ~sep:(Pp.text "; ") envs ~f:Solver_env.pp_oneline
       ;;
 
       (* Format a textual description of this component's report. *)
-      let pp ~verbose ~context ?platform t =
-        let platform_suffix =
-          match platform with
-          | None -> Pp.nop
-          | Some platform -> pp_on_platform context platform
-        in
+      let pp ~verbose ~context ~platforms t =
         Pp.vbox
           ~indent:2
           (Pp.hovbox
-             (Input.pp_role t.role ++ Pp.text " -> " ++ pp_outcome t ++ platform_suffix)
+             (Input.pp_role t.role
+              ++ Pp.text " -> "
+              ++ pp_outcome t
+              ++ pp_on_platform context platforms)
            ++ pp_notes t
            ++ pp_candidates ~verbose t)
       ;;
@@ -1745,6 +1749,13 @@ module Solver = struct
              true)))
   ;;
 
+  (* A group of bad components that render identically (see [pp_rolemap]). *)
+  type group =
+    { representative : Diagnostics.Component.t
+    ; content : User_message.Style.t Pp.t
+    ; platforms : Platform_id.t list ref
+    }
+
   let pp_rolemap ~verbose context reasons =
     let good, bad, unknown =
       Input.Role.Map.to_list reasons
@@ -1776,49 +1787,56 @@ module Solver = struct
              | Some pkg -> OpamPackage.Name.Set.add (OpamPackage.name pkg) acc
              | None -> acc))
     in
-    (* For packages selected on some platforms, the platform attribution
-       matters: show the problem for each failing platform separately. For
-       packages that fail everywhere, keep a single representative. A single
-       pass preserves the solver's component order in the diagnostics. *)
-    let deduplicate_components bad =
-      let seen = ref OpamPackage.Name.Map.empty in
-      List.filter bad ~f:(fun (c : Diagnostics.Component.t) ->
-        match c.role with
-        | Input.Virtual _ -> true
-        | Input.Real (name, platform) ->
-          let platforms =
-            Option.value
-              (OpamPackage.Name.Map.find_opt name !seen)
-              ~default:Platform_id.Set.empty
+    (* Group bad components that would render identically, joining the
+       platforms of the group in a single row. Components are keyed by (name,
+       rendered content), where content is everything after the row head; a
+       package that fails with the same error on several platforms is shown
+       once, with the platforms joined in the suffix, instead of once per
+       platform. Virtual roles are never grouped. A single pass preserves the
+       solver's component order in the diagnostics. *)
+    let group_components bad =
+      let groups = ref [] in
+      let () =
+        List.iter bad ~f:(fun (c : Diagnostics.Component.t) ->
+          let content =
+            Diagnostics.Component.pp_outcome c
+            ++ Diagnostics.Component.pp_notes c
+            ++ Diagnostics.Component.pp_candidates ~verbose c
           in
-          let is_dup =
-            if OpamPackage.Name.Set.mem name selected_names
-            then Platform_id.Set.mem platforms platform
-            else not (Platform_id.Set.is_empty platforms)
-          in
-          if is_dup
-          then false
-          else (
-            seen
-            := OpamPackage.Name.Map.add
-                 name
-                 (Platform_id.Set.add platforms platform)
-                 !seen;
-            true))
+          match c.role with
+          | Input.Virtual _ ->
+            groups := { representative = c; content; platforms = ref [] } :: !groups
+          | Input.Real (name, platform) ->
+            (match
+               List.find_opt !groups ~f:(fun g ->
+                 match g.representative.role with
+                 | Input.Virtual _ -> false
+                 | Input.Real (gname, _) ->
+                   OpamPackage.Name.equal name gname
+                   && Ordering.is_eq
+                        (Pp.compare ~compare:User_message.Style.compare content g.content))
+             with
+             | Some g -> g.platforms := platform :: !(g.platforms)
+             | None ->
+               groups
+               := { representative = c; content; platforms = ref [ platform ] } :: !groups))
+      in
+      List.rev !groups
     in
-    let bad = deduplicate_components bad in
+    let bad = group_components bad in
     let unknown = deduplicate_roles_by_name unknown in
-    let pp_bad (component : Diagnostics.Component.t) =
+    let pp_bad (group : group) =
       (* A package that is selected on some platforms can still have no
          solution on others. Attribute such problems to the platform they
          apply to instead of hiding them. *)
-      let platform =
-        match component.role with
-        | Input.Real (name, platform) when OpamPackage.Name.Set.mem name selected_names ->
-          Some platform
-        | _ -> None
+      let platforms =
+        match group.representative.role with
+        | Input.Real (name, _) when OpamPackage.Name.Set.mem name selected_names ->
+          (* Accumulated newest-first; restore first-seen order *)
+          List.rev !(group.platforms)
+        | Input.Virtual _ | Input.Real _ -> []
       in
-      Diagnostics.Component.pp ~verbose ~context ?platform component
+      Diagnostics.Component.pp ~verbose ~context ~platforms group.representative
     in
     let pp_unknown role = Pp.box (Input.Role.pp role) in
     match unknown with
@@ -1841,11 +1859,25 @@ module Solver = struct
     >>= Diagnostics.of_result context
   ;;
 
+  (* Platforms with at least one component that has no selected
+     implementation. These are the platforms the failure is attributed to:
+     rejected components and components with no candidates count; selections
+     with notes do not. *)
+  let problematic_platforms (diag : Diagnostics.Component.t Input.Role.Map.t) =
+    Input.Role.Map.foldi diag ~init:Platform_id.Set.empty ~f:(fun role component acc ->
+      match role, Diagnostics.Component.selected_impl component with
+      | Input.Real (_, platform), None -> Platform_id.Set.add acc platform
+      | _ -> acc)
+  ;;
+
   let diagnostics ?(verbose = false) context req =
     let+ diag = diagnostics_rolemap context req in
-    Pp.paragraph "Couldn't solve the package dependency formula."
-    ++ Pp.cut
-    ++ Pp.vbox (pp_rolemap ~verbose context diag)
+    let message =
+      Pp.paragraph "Couldn't solve the package dependency formula."
+      ++ Pp.cut
+      ++ Pp.vbox (pp_rolemap ~verbose context diag)
+    in
+    message, problematic_platforms diag
   ;;
 
   let packages_of_result sels =
@@ -1899,8 +1931,8 @@ let solve_package_list packages ~context ~platforms =
     let packages_by_platform = Solver.packages_by_platform sels in
     Fiber.return @@ Ok (packages, packages_by_platform)
   | Error (`Diagnostics e) ->
-    let+ diagnostics = Solver.diagnostics context e in
-    Error (`Solve_error diagnostics)
+    let+ diagnostics, problematic_platforms = Solver.diagnostics context e in
+    Error (`Solve_error (diagnostics, problematic_platforms))
   | Error (`Exn exn) ->
     (match exn.exn with
      | OpamPp.(Bad_format _ | Bad_format_list _ | Bad_version _) as bad_format ->
