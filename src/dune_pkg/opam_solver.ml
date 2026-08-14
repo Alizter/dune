@@ -70,6 +70,7 @@ module Platform_id = struct
 
   include T
   module Map = Map.Make (T)
+  module Set = Set.Make (T) (Map)
 
   let hash = Int.hash
   let of_int x = x
@@ -597,7 +598,8 @@ module Solver = struct
 
     and pp_role = function
       | Real (name, _platform) ->
-        (* Don't show platform in user-facing output for now *)
+        (* Compact form: diagnostics append the platform separately (see
+           Diagnostics.Component.pp_on_platform). *)
         Pp.text (OpamPackage.Name.to_string name)
       | Virtual (_, impls) -> Pp.concat_map ~sep:(Pp.char '|') impls ~f:pp_impl
     ;;
@@ -1502,11 +1504,27 @@ module Solver = struct
         | None -> Pp.text "(problem)"
       ;;
 
+      (* The platform a package was selected on, as in "on arch = arm64; os =
+         linux". Only passed for packages whose selection matters per platform
+         (see pp_rolemap); packages that fail on every platform have nothing
+         to attribute. *)
+      let pp_on_platform (context : Context.t) platform =
+        match Platform_id.Map.find context.platform_overlays platform with
+        | None -> Pp.nop
+        | Some env -> Pp.text " on " ++ Solver_env.pp_oneline env
+      ;;
+
       (* Format a textual description of this component's report. *)
-      let pp ~verbose t =
+      let pp ~verbose ~context ?platform t =
+        let platform_suffix =
+          match platform with
+          | None -> Pp.nop
+          | Some platform -> pp_on_platform context platform
+        in
         Pp.vbox
           ~indent:2
-          (Pp.hovbox (Input.pp_role t.role ++ Pp.text " -> " ++ pp_outcome t)
+          (Pp.hovbox
+             (Input.pp_role t.role ++ Pp.text " -> " ++ pp_outcome t ++ platform_suffix)
            ++ pp_notes t
            ++ pp_candidates ~verbose t)
       ;;
@@ -1692,10 +1710,6 @@ module Solver = struct
 
   let deduplicate_roles_by_name = filter_dedup_by_name ~key:role_name
 
-  let deduplicate_components_by_name =
-    filter_dedup_by_name ~key:(fun (c : Diagnostics.Component.t) -> role_name c.role)
-  ;;
-
   (* Deduplicate impls by package name, keeping one representative per package.
      For VirtualImpls, skip them if all their deps point to packages we've already seen. *)
   let deduplicate_impls_by_name impls =
@@ -1731,7 +1745,7 @@ module Solver = struct
              true)))
   ;;
 
-  let pp_rolemap ~verbose reasons =
+  let pp_rolemap ~verbose context reasons =
     let good, bad, unknown =
       Input.Role.Map.to_list reasons
       |> List.partition_three ~f:(fun (role, component) ->
@@ -1742,26 +1756,70 @@ module Solver = struct
            | _, `No_candidates -> `Right role
            | _, _ -> `Middle component))
     in
-    (* Deduplicate to avoid showing the same package multiple times for different platforms.
-       Also exclude packages from 'bad' if they appear in 'good' (a package that's
-       selected on one platform shouldn't be shown as a problem due to another platform). *)
+    (* The report is keyed by role, so each component below corresponds to a
+       distinct (name, platform). *)
     let good = deduplicate_impls_by_name good in
-    let good_names =
-      List.filter_map good ~f:(fun impl ->
-        match Input.Impl.version impl with
-        | Some pkg -> Some (OpamPackage.name pkg)
-        | None -> None)
-      |> OpamPackage.Name.Set.of_list
+    (* Names with a selected implementation on at least one platform. A
+       package selected on some platforms can still have no solution on
+       others, and a cross-platform version conflict shows up as a note on
+       an otherwise satisfied selection; both must be attributed to the
+       platform they apply to. *)
+    let selected_names =
+      Input.Role.Map.foldi
+        reasons
+        ~init:OpamPackage.Name.Set.empty
+        ~f:(fun _role component acc ->
+          match Diagnostics.Component.selected_impl component with
+          | None -> acc
+          | Some impl ->
+            (match Input.Impl.version impl with
+             | Some pkg -> OpamPackage.Name.Set.add (OpamPackage.name pkg) acc
+             | None -> acc))
     in
-    let bad =
-      List.filter bad ~f:(fun (component : Diagnostics.Component.t) ->
-        match component.role with
+    (* For packages selected on some platforms, the platform attribution
+       matters: show the problem for each failing platform separately. For
+       packages that fail everywhere, keep a single representative. A single
+       pass preserves the solver's component order in the diagnostics. *)
+    let deduplicate_components bad =
+      let seen = ref OpamPackage.Name.Map.empty in
+      List.filter bad ~f:(fun (c : Diagnostics.Component.t) ->
+        match c.role with
         | Input.Virtual _ -> true
-        | Input.Real (name, _) -> not (OpamPackage.Name.Set.mem name good_names))
+        | Input.Real (name, platform) ->
+          let platforms =
+            Option.value
+              (OpamPackage.Name.Map.find_opt name !seen)
+              ~default:Platform_id.Set.empty
+          in
+          let is_dup =
+            if OpamPackage.Name.Set.mem name selected_names
+            then Platform_id.Set.mem platforms platform
+            else not (Platform_id.Set.is_empty platforms)
+          in
+          if is_dup
+          then false
+          else (
+            seen
+            := OpamPackage.Name.Map.add
+                 name
+                 (Platform_id.Set.add platforms platform)
+                 !seen;
+            true))
     in
-    let bad = deduplicate_components_by_name bad in
+    let bad = deduplicate_components bad in
     let unknown = deduplicate_roles_by_name unknown in
-    let pp_bad = Diagnostics.Component.pp ~verbose in
+    let pp_bad (component : Diagnostics.Component.t) =
+      (* A package that is selected on some platforms can still have no
+         solution on others. Attribute such problems to the platform they
+         apply to instead of hiding them. *)
+      let platform =
+        match component.role with
+        | Input.Real (name, platform) when OpamPackage.Name.Set.mem name selected_names ->
+          Some platform
+        | _ -> None
+      in
+      Diagnostics.Component.pp ~verbose ~context ?platform component
+    in
     let pp_unknown role = Pp.box (Input.Role.pp role) in
     match unknown with
     | [] ->
@@ -1787,7 +1845,7 @@ module Solver = struct
     let+ diag = diagnostics_rolemap context req in
     Pp.paragraph "Couldn't solve the package dependency formula."
     ++ Pp.cut
-    ++ Pp.vbox (pp_rolemap ~verbose diag)
+    ++ Pp.vbox (pp_rolemap ~verbose context diag)
   ;;
 
   let packages_of_result sels =

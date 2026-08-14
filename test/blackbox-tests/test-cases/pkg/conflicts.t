@@ -75,7 +75,13 @@ disjunction, either package is problematic:
   
   Couldn't solve the package dependency formula.
   Selected candidates: bar.0.0.1 bar2.0.0.1 x.dev
-  - dune -> dune.3.XX
+  - dune -> dune.3.XX on arch = x86_64; os = linux
+      User requested = 3.XX
+  - dune -> dune.3.XX on arch = arm64; os = linux
+      User requested = 3.XX
+  - dune -> dune.3.XX on arch = x86_64; os = macos
+      User requested = 3.XX
+  - dune -> dune.3.XX on arch = arm64; os = macos
       User requested = 3.XX
   - foo -> (problem)
       No usable implementations:
@@ -94,7 +100,13 @@ Adding a new version of `foo` only resolves one conflict:
   
   Couldn't solve the package dependency formula.
   Selected candidates: bar.0.0.1 bar2.0.0.1 foo.0.2 x.dev
-  - dune -> dune.3.XX
+  - dune -> dune.3.XX on arch = x86_64; os = linux
+      User requested = 3.XX
+  - dune -> dune.3.XX on arch = arm64; os = linux
+      User requested = 3.XX
+  - dune -> dune.3.XX on arch = x86_64; os = macos
+      User requested = 3.XX
+  - dune -> dune.3.XX on arch = arm64; os = macos
       User requested = 3.XX
   - foo2 -> (problem)
       No usable implementations:
