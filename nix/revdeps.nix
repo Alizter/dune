@@ -11,6 +11,7 @@ let
     # Override top-level dune and dune_3
     dune_3 = prev.dune_3.overrideAttrs (old: {
       src = revdeps-dune;
+      nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.git ];
     });
     dune = final.dune_3;
 
