@@ -790,7 +790,7 @@ let update_execution_parameters t ep =
        (if t.dune_version >= (3, 23) then Some t.root else None)
   |> Execution_parameters.set_should_remove_write_permissions_on_generated_files
        (t.dune_version >= (2, 4))
-  |> Execution_parameters.set_use_sandbox_policy (t.dune_version >= (3, 25))
+  |> Execution_parameters.set_use_sandbox_policy true
 ;;
 
 let opam_file_location t = t.opam_file_location
