@@ -135,6 +135,10 @@ let
         };
       }
     );
+
+    ocaml-ng = prev.ocaml-ng // {
+      ocamlPackages_5_5 = final.ocamlPackages;
+    };
   };
 
   # Instantiate nix-overlays with allowBroken so deps of broken pkgs can be
