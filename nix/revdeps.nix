@@ -20,6 +20,8 @@ let
       postPatch = (old.postPatch or "") + ''
         substituteInPlace dune-project \
           --replace-fail "(using coq 0.8)" ""
+        substituteInPlace dune \
+          --replace-fail "(coq (flags :standard -w +default))" ""
       '';
     });
 
