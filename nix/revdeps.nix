@@ -15,6 +15,14 @@ let
     });
     dune = final.dune_3;
 
+    # Rocq's own build doesn't use Dune's Coq language.
+    rocq-core = prev.rocq-core.overrideAttrs (old: {
+      postPatch = (old.postPatch or "") + ''
+        substituteInPlace dune-project \
+          --replace-fail "(using coq 0.8)" ""
+      '';
+    });
+
     ocamlPackages = prev.ocaml-ng.ocamlPackages_5_5.overrideScope (
       oself: osuper:
       let
