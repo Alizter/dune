@@ -25,3 +25,13 @@ Lock, build, and run the executable in the project:
   - foo.0.0.1
   $ dune exec bar
   Hello, World!
+
+The standard opam recipe contains a conditional `dune subst` step in addition
+to its build. Conservative action classification therefore retains the complete
+translated action and uses the legacy package pipeline:
+
+  $ legacy_root=$(echo _build/_private/default/.pkg/foo.0.0.1-*)
+  $ test -d "$legacy_root/target" && echo legacy-action-route
+  legacy-action-route
+  $ test ! -d _build/_default+lockfile/pkg/foo.0.0.1-* && echo not-mounted
+  not-mounted
