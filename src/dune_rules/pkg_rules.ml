@@ -242,6 +242,14 @@ module Paths = struct
     }
   ;;
 
+  let with_install_root t target_dir =
+    let install_roots = lazy (install_roots ~target_dir ~relative:Path.relative) in
+    let install_paths =
+      lazy (install_paths (Lazy.force install_roots) t.name ~relative:Path.relative)
+    in
+    { t with target_dir; install_roots; install_paths; prefix = target_dir }
+  ;;
+
   let extra_source t extra_source = Path.append_local t.extra_sources extra_source
 
   let extra_source_build t extra_source =
@@ -458,6 +466,7 @@ module Pkg = struct
     ; write_paths : Path.Build.t Paths.t
     ; files_dir : Path.Build.t
     ; pkg_digest : Pkg_digest.t
+    ; unexpanded_exported_env : String_with_vars.t Env_update.t list
     ; mutable exported_env : string Env_update.t list
     }
 
@@ -528,9 +537,8 @@ module Pkg = struct
 
   let dep t = Dep.file t.paths.target_dir
 
-  let package_deps t =
-    deps_closure t
-    |> List.fold_left ~init:Dep.Set.empty ~f:(fun acc t -> dep t |> Dep.Set.add acc)
+  let package_deps_of ts =
+    List.fold_left ts ~init:Dep.Set.empty ~f:(fun acc t -> dep t |> Dep.Set.add acc)
   ;;
 
   let install_roots t =
@@ -563,11 +571,6 @@ module Pkg = struct
       List.fold_left t.exported_env ~init:env ~f:Env_update.set)
   ;;
 
-  (* [build_env t] returns an env containing paths containing all the
-     tools and libraries required to build the package [t] inside the
-     faux opam directory contained in the _build dir. *)
-  let build_env t = build_env_of_deps @@ deps_closure t
-
   let base_env t =
     Env.Map.of_list_exn
       [ Opam_switch.opam_switch_prefix_var_name, [ Value.Path t.paths.target_dir ]
@@ -582,10 +585,10 @@ module Pkg = struct
       ]
   ;;
 
-  (* [exported_value_env t] returns the complete env that will be used
-     to build the package [t] *)
-  let exported_value_env t =
-    let package_env = build_env t |> Env.Map.superpose (base_env t) in
+  (* [exported_value_env_with_deps t deps] returns the complete environment used
+     to build [t], using the concrete installation roots in [deps]. *)
+  let exported_value_env_with_deps t deps =
+    let package_env = build_env_of_deps deps |> Env.Map.superpose (base_env t) in
     (* TODO: Run actions in a constrained environment. [Global.env ()] is the
        environment from which dune was executed, and some of the environment
        variables may affect builds in unintended ways and make builds less
@@ -594,6 +597,12 @@ module Pkg = struct
        shell's default $PATH variable doesn't include the location of standard
        programs or build tools (e.g. NixOS). *)
     Value_list_env.extend_concat_path (Lazy.force Value_list_env.global) package_env
+  ;;
+
+  let exported_value_env t = exported_value_env_with_deps t (deps_closure t)
+
+  let exported_env_with_deps t deps =
+    Value_list_env.to_env @@ exported_value_env_with_deps t deps
   ;;
 
   let exported_env t = Value_list_env.to_env @@ exported_value_env t
@@ -610,6 +619,56 @@ module Pkg_installed = struct
       Install_cookie.load_exn path
     in
     { cookie }
+  ;;
+end
+
+module Dependency_view = struct
+  type t =
+    { all : Pkg.t list
+    ; legacy : Pkg.t list
+    ; mounted : Pkg.t list
+    ; mounted_names : Package.Name.Set.t
+    }
+
+  let of_list context dependencies ~is_mounted =
+    let+ classified =
+      Memo.parallel_map dependencies ~f:(fun (dependency : Pkg.t) ->
+        let+ mounted = is_mounted dependency in
+        dependency, mounted)
+    in
+    let mounted_names =
+      List.fold_left
+        classified
+        ~init:Package.Name.Set.empty
+        ~f:(fun acc ((pkg : Pkg.t), mounted) ->
+          if mounted then Package.Name.Set.add acc pkg.info.name else acc)
+    in
+    let install_root =
+      if Package.Name.Set.is_empty mounted_names
+      then None
+      else Some (Install_layout.root context mounted_names |> Path.build)
+    in
+    let all, legacy, mounted =
+      List.fold_right
+        classified
+        ~init:([], [], [])
+        ~f:(fun ((pkg : Pkg.t), is_mounted) (all, legacy, mounted) ->
+          let pkg =
+            if is_mounted
+            then (
+              let install_root = Option.value_exn install_root in
+              { pkg with paths = Paths.with_install_root pkg.paths install_root })
+            else { pkg with exported_env = pkg.exported_env }
+          in
+          if is_mounted
+          then pkg :: all, legacy, pkg :: mounted
+          else pkg :: all, pkg :: legacy, mounted)
+    in
+    { all; legacy; mounted; mounted_names }
+  ;;
+
+  let make context (pkg : Pkg.t) ~is_mounted =
+    of_list context (Pkg.deps_closure pkg) ~is_mounted
   ;;
 end
 
@@ -1175,9 +1234,33 @@ module Action_expander = struct
             in
             { binaries; dep_info }))
     ;;
+
+    let of_dependency_view context (view : Dependency_view.t) =
+      let+ legacy = of_closure view.legacy
+      and+ mounted_binaries =
+        if Package.Name.Set.is_empty view.mounted_names
+        then Memo.return Filename.Map.empty
+        else Install_layout.binaries context view.mounted_names
+      in
+      let dep_info =
+        List.fold_left
+          view.mounted
+          ~init:legacy.dep_info
+          ~f:(fun dep_info (pkg : Pkg.t) ->
+            Package.Name.Map.add_exn
+              dep_info
+              pkg.info.name
+              (Pkg_info.variables pkg.info, pkg.paths))
+      in
+      let binaries =
+        Filename.Map.union legacy.binaries mounted_binaries ~f:(fun _ _ mounted ->
+          Some mounted)
+      in
+      { binaries; dep_info }
+    ;;
   end
 
-  let expander context (pkg : Pkg.t) =
+  let expander context (pkg : Pkg.t) (dependencies : Dependency_view.t) =
     let closure =
       Memo.lazy_
         ~name:"package-dependency-closure"
@@ -1185,9 +1268,9 @@ module Action_expander = struct
           Pp.textf
             "Computing closure for package %S"
             (Package.Name.to_string pkg.info.name))
-        (fun () -> Pkg.deps_closure pkg |> Artifacts_and_deps.of_closure)
+        (fun () -> Artifacts_and_deps.of_dependency_view context dependencies)
     in
-    let env = Pkg.exported_value_env pkg in
+    let env = Pkg.exported_value_env_with_deps pkg dependencies.all in
     let depends =
       Memo.Lazy.map
         ~name:"package-dependency-info"
@@ -1216,9 +1299,9 @@ module Action_expander = struct
 
   let sandbox = Sandbox_mode.Set.singleton Sandbox_mode.copy
 
-  let expand context (pkg : Pkg.t) action =
+  let expand context (pkg : Pkg.t) dependencies action =
     let+ action =
-      let expander = expander context pkg in
+      let expander = expander context pkg dependencies in
       expand action ~expander >>| Action.chdir pkg.paths.source_dir
     in
     (* TODO copying is needed for build systems that aren't dune and those
@@ -1236,9 +1319,9 @@ module Action_expander = struct
       Error (Action.Prog.Not_found.create ~loc:None ~context ~program:Filename.dune ())
   ;;
 
-  let build_command context (pkg : Pkg.t) =
+  let build_command context (pkg : Pkg.t) dependencies =
     Option.map pkg.build_command ~f:(function
-      | Action action -> expand context pkg action
+      | Action action -> expand context pkg dependencies action
       | Dune ->
         (* CR-someday rgrinberg: respect [dune subst] settings. *)
         Command.run_dyn_prog
@@ -1248,8 +1331,9 @@ module Action_expander = struct
         |> Memo.return)
   ;;
 
-  let install_command context (pkg : Pkg.t) =
-    Option.map pkg.install_command ~f:(fun action -> expand context pkg action)
+  let install_command context (pkg : Pkg.t) dependencies =
+    Option.map pkg.install_command ~f:(fun action ->
+      expand context pkg dependencies action)
   ;;
 
   let exported_env (expander : Expander.t) (env : _ Env_update.t) =
@@ -1258,6 +1342,15 @@ module Action_expander = struct
       value |> Value.to_string ~dir:expander.paths.source_dir
     in
     { env with value }
+  ;;
+
+  let refresh_exported_env context (dependencies : Dependency_view.t) =
+    Memo.parallel_iter dependencies.all ~f:(fun (pkg : Pkg.t) ->
+      let expander = expander context pkg dependencies in
+      let+ exported_env =
+        Memo.parallel_map pkg.unexpanded_exported_env ~f:(exported_env expander)
+      in
+      pkg.exported_env <- exported_env)
   ;;
 end
 
@@ -1507,6 +1600,15 @@ module DB = struct
   ;;
 end
 
+let is_project_mounted_pkg context (pkg : Pkg.t) =
+  Pkg_sources.find_mounted context pkg.info.name
+  >>= function
+  | None -> Memo.return false
+  | Some _ ->
+    let+ _, mounted_digest = DB.of_project_pkg context pkg.info.name in
+    Pkg_digest.equal pkg.pkg_digest mounted_digest
+;;
+
 module rec Resolve : sig
   val resolve : DB.t -> Loc.t -> Pkg_digest.t -> Package_universe.t -> Pkg.t Memo.t
 end = struct
@@ -1664,12 +1766,28 @@ end = struct
         ; info
         ; files_dir
         ; pkg_digest
+        ; unexpanded_exported_env = exported_env
         ; exported_env = []
         }
       in
+      let* dependencies =
+        Dependency_view.make
+          (Package_universe.context_name package_universe)
+          t
+          ~is_mounted:
+            (is_project_mounted_pkg (Package_universe.context_name package_universe))
+      in
+      let* () =
+        Action_expander.refresh_exported_env
+          (Package_universe.context_name package_universe)
+          dependencies
+      in
       let+ exported_env =
         let expander =
-          Action_expander.expander (Package_universe.context_name package_universe) t
+          Action_expander.expander
+            (Package_universe.context_name package_universe)
+            t
+            dependencies
         in
         Memo.parallel_map exported_env ~f:(Action_expander.exported_env expander)
       in
@@ -2263,6 +2381,13 @@ let dune_dep =
 ;;
 
 let build_rule context_name ~source_deps (pkg : Pkg.t) =
+  let* dependencies =
+    Dependency_view.make
+      context_name
+      pkg
+      ~is_mounted:(is_project_mounted_pkg context_name)
+  in
+  let* () = Action_expander.refresh_exported_env context_name dependencies in
   let+ build_action =
     let+ copy_action, build_action, install_action =
       let+ copy_action =
@@ -2313,11 +2438,11 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
           |> Action.Full.make
           |> Action_builder.With_targets.return)
       and+ build_action =
-        match Action_expander.build_command context_name pkg with
+        match Action_expander.build_command context_name pkg dependencies with
         | None -> Memo.return []
         | Some build_command -> build_command >>| List.singleton
       and+ install_action =
-        match Action_expander.install_command context_name pkg with
+        match Action_expander.install_command context_name pkg dependencies with
         | None -> Memo.return []
         | Some install_action ->
           let+ install_action = install_action in
@@ -2338,7 +2463,7 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
       let prefix_outside_build_dir = Path.as_outside_build_dir pkg.paths.prefix in
       Install_action.action
         pkg.write_paths
-        (match Action_expander.install_command context_name pkg with
+        (match pkg.install_command with
          | None -> `No_install_action
          | Some _ -> `Has_install_action)
         ~prefix_outside_build_dir
@@ -2364,15 +2489,20 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
     |> Action_builder.progn
   in
   let open Action_builder.With_targets.O in
-  (let deps =
-     let deps = Dep.Set.union source_deps (Pkg.package_deps pkg) in
-     match pkg.depends_on_dune with
-     | false -> deps
-     | true -> Dep.Set.add deps (Lazy.force dune_dep)
+  (let dependencies_builder =
+     let deps =
+       let deps = Dep.Set.union source_deps (Pkg.package_deps_of dependencies.legacy) in
+       match pkg.depends_on_dune with
+       | false -> deps
+       | true -> Dep.Set.add deps (Lazy.force dune_dep)
+     in
+     let legacy = Action_builder.deps deps |> Action_builder.with_no_targets in
+     legacy
+     >>> (Install_layout.deps context_name dependencies.mounted_names
+          |> Action_builder.with_no_targets)
    in
-   Action_builder.deps deps |> Action_builder.with_no_targets)
-  (* TODO should we add env deps on these? *)
-  >>> add_env (Pkg.exported_env pkg) build_action
+   dependencies_builder
+   >>> add_env (Pkg.exported_env_with_deps pkg dependencies.all) build_action)
   |> Action_builder.With_targets.map ~f:Action.Full.disable_sandbox_policy
   |> Action_builder.With_targets.add_directories
        ~directory_targets:[ pkg.write_paths.target_dir ]
@@ -2411,18 +2541,38 @@ let setup_pkg_install_alias =
     (* Fetching the package target implies that we will also fetch the extra
        sources. *)
     let open Action_builder.O in
-    let* pkg_digests =
+    let* pkg_digests, mounted_names =
       Action_builder.of_memo
         (let open Memo.O in
-         let+ db = DB.of_ctx ctx_name ~allow_sharing:true in
-         Pkg_digest.Map.values db.pkg_digest_table
-         |> List.map ~f:(fun { DB.Pkg_table.pkg_digest; _ } -> pkg_digest))
+         let* db = DB.of_ctx ctx_name ~allow_sharing:true
+         and* mounted = Pkg_sources.mounted ctx_name in
+         let mounted_names =
+           List.map mounted ~f:(fun mounted ->
+             Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.name)
+           |> Package.Name.Set.of_list
+         in
+         let* mounted_digests =
+           Memo.parallel_map (Package.Name.Set.to_list mounted_names) ~f:(fun name ->
+             DB.of_project_pkg ctx_name name >>| snd)
+         in
+         let mounted_digests = Pkg_digest.Set.of_list mounted_digests in
+         let pkg_digests =
+           Pkg_digest.Map.keys db.pkg_digest_table
+           |> List.filter ~f:(fun pkg_digest ->
+             not (Pkg_digest.Set.mem mounted_digests pkg_digest))
+         in
+         Memo.return (pkg_digests, mounted_names))
     in
-    List.map pkg_digests ~f:(fun pkg_digest ->
-      Paths.make ~relative:Path.Build.relative pkg_digest (Dependencies ctx_name)
-      |> Paths.target_dir
-      |> Path.build)
-    |> Action_builder.paths
+    let* () =
+      List.map pkg_digests ~f:(fun pkg_digest ->
+        Paths.make ~relative:Path.Build.relative pkg_digest (Dependencies ctx_name)
+        |> Paths.target_dir
+        |> Path.build)
+      |> Action_builder.paths
+    in
+    if Package.Name.Set.is_empty mounted_names
+    then Action_builder.return ()
+    else Install_layout.deps ctx_name mounted_names
   in
   fun ~dir ctx_name ->
     let rule =
@@ -2449,27 +2599,43 @@ let setup_pkg_install_alias =
 
 let setup_package_rules db ~package_universe ~dir ~pkg_digest : Gen_rules.result Memo.t =
   let* pkg = Resolve.resolve db Loc.none pkg_digest package_universe in
-  let paths = Paths.make pkg.pkg_digest package_universe ~relative:Path.Build.relative in
-  let+ directory_targets =
-    let map =
-      let target_dir = paths.target_dir in
-      Path.Build.Map.singleton target_dir Loc.none
+  let* mounted =
+    match package_universe with
+    | Dev_tool _ -> Memo.return false
+    | Dependencies context ->
+      Pkg_sources.find_mounted context pkg.info.name
+      >>= (function
+       | None -> Memo.return false
+       | Some _ ->
+         let+ _, mounted_digest = DB.of_project_pkg context pkg.info.name in
+         Pkg_digest.equal pkg_digest mounted_digest)
+  in
+  if mounted
+  then Memo.return Gen_rules.no_rules
+  else (
+    let paths =
+      Paths.make pkg.pkg_digest package_universe ~relative:Path.Build.relative
     in
-    match pkg.info.source with
-    | None -> Memo.return map
-    | Some source ->
-      Lock_dir.source_kind source
-      >>| (function
-       | `Local (`Directory, _) -> map
-       | `Local (`File, _) | `Fetch ->
-         Path.Build.Map.add_exn map paths.source_dir (fst source.url))
-  in
-  let build_dir_only_sub_dirs =
-    Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.empty
-  in
-  let context_name = Package_universe.context_name package_universe in
-  let rules = Rules.collect_unit (fun () -> gen_rules context_name pkg) in
-  Gen_rules.make ~directory_targets ~build_dir_only_sub_dirs rules
+    let+ directory_targets =
+      let map =
+        let target_dir = paths.target_dir in
+        Path.Build.Map.singleton target_dir Loc.none
+      in
+      match pkg.info.source with
+      | None -> Memo.return map
+      | Some source ->
+        Lock_dir.source_kind source
+        >>| (function
+         | `Local (`Directory, _) -> map
+         | `Local (`File, _) | `Fetch ->
+           Path.Build.Map.add_exn map paths.source_dir (fst source.url))
+    in
+    let build_dir_only_sub_dirs =
+      Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.empty
+    in
+    let context_name = Package_universe.context_name package_universe in
+    let rules = Rules.collect_unit (fun () -> gen_rules context_name pkg) in
+    Gen_rules.make ~directory_targets ~build_dir_only_sub_dirs rules)
 ;;
 
 let setup_rules ~components ~dir ctx =
@@ -2514,6 +2680,26 @@ let setup_rules ~components ~dir ctx =
 let resolve_pkg_dep context (loc, package_name) =
   let* db, pkg_digest = DB.of_project_pkg context package_name in
   Resolve.resolve db loc pkg_digest (Dependencies context)
+;;
+
+let binaries_for_package context package =
+  Memo.lazy_
+    ~name:"package-dependency-binaries"
+    ~human_readable_description:(fun () ->
+      Pp.textf
+        "Loading binaries for dependencies of package %S in context %S"
+        (Package.Name.to_string package)
+        (Context_name.to_string context))
+    (fun () ->
+       let* pkg = resolve_pkg_dep context (Loc.none, package) in
+       let* dependencies =
+         Dependency_view.make context pkg ~is_mounted:(is_project_mounted_pkg context)
+       in
+       let* () = Action_expander.refresh_exported_env context dependencies in
+       let+ { Action_expander.Artifacts_and_deps.binaries; dep_info = _ } =
+         Action_expander.Artifacts_and_deps.of_dependency_view context dependencies
+       in
+       binaries)
 ;;
 
 let ocaml_toolchain context =
@@ -2568,6 +2754,18 @@ let all_deps universe =
 
 let all_project_deps context = all_deps (Dependencies context)
 
+let project_dependency_view context =
+  let* dependencies = all_project_deps context in
+  let* view =
+    Dependency_view.of_list
+      context
+      dependencies
+      ~is_mounted:(is_project_mounted_pkg context)
+  in
+  let+ () = Action_expander.refresh_exported_env context view in
+  view
+;;
+
 let which context =
   let artifacts_and_deps =
     Memo.lazy_
@@ -2577,8 +2775,9 @@ let which context =
           "Loading all binaries in the lock directory for %S"
           (Context_name.to_string context))
       (fun () ->
-         let+ { binaries; dep_info = _ } =
-           all_project_deps context >>= Action_expander.Artifacts_and_deps.of_closure
+         let* view = project_dependency_view context in
+         let+ { Action_expander.Artifacts_and_deps.binaries; dep_info = _ } =
+           Action_expander.Artifacts_and_deps.of_dependency_view context view
          in
          binaries)
   in
@@ -2587,9 +2786,8 @@ let which context =
     Filename.Map.find artifacts program)
 ;;
 
-let ocamlpath universe =
-  let+ all_project_deps = all_deps universe in
-  let env = Pkg.build_env_of_deps all_project_deps in
+let ocamlpath_of_deps deps =
+  let env = Pkg.build_env_of_deps deps in
   Env.Map.find env Dune_findlib.Config.ocamlpath_var
   |> Option.value ~default:[]
   |> List.map ~f:(function
@@ -2597,8 +2795,16 @@ let ocamlpath universe =
     | String s -> Path.of_filename_relative_to_initial_cwd s)
 ;;
 
-let project_ocamlpath context = ocamlpath (Dependencies context)
-let dev_tool_ocamlpath dev_tool = ocamlpath (Dev_tool dev_tool)
+let project_ocamlpath context =
+  let+ view = project_dependency_view context in
+  ocamlpath_of_deps view.legacy
+;;
+
+let dev_tool_ocamlpath dev_tool =
+  let+ deps = all_deps (Dev_tool dev_tool) in
+  ocamlpath_of_deps deps
+;;
+
 let lock_dir_active = Lock_dir.lock_dir_active
 let lock_dir_path = Lock_dir.get_path
 
@@ -2618,8 +2824,8 @@ let exported_env context =
   Memo.push_stack_frame ~human_readable_description:(fun () ->
     Pp.textf "lock directory environment for context %S" (Context_name.to_string context))
   @@ fun () ->
-  let+ all_project_deps = all_project_deps context in
-  let env = Pkg.build_env_of_deps all_project_deps in
+  let+ view = project_dependency_view context in
+  let env = Pkg.build_env_of_deps view.all in
   let vars = Env.Map.map env ~f:Value_list_env.string_of_env_values in
   Env.extend Env.empty ~vars
 ;;
@@ -2672,7 +2878,11 @@ let resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file =
 let all_filtered_depexts context =
   let* all_project_deps = all_project_deps context in
   Memo.List.map all_project_deps ~f:(fun (pkg : Pkg.t) ->
-    let expander = Action_expander.expander context pkg in
+    let* dependencies =
+      Dependency_view.make context pkg ~is_mounted:(is_project_mounted_pkg context)
+    in
+    let* () = Action_expander.refresh_exported_env context dependencies in
+    let expander = Action_expander.expander context pkg dependencies in
     Action_expander.Expander.filtered_depexts expander)
   >>| List.concat
   >>| List.sort_uniq ~compare:String.compare

@@ -129,8 +129,8 @@ let include_dir_flags ~expander ~dir ~include_dirs =
       (let open Action_builder.O in
        let* include_dir = include_dir in
        let+ dep_args =
-         match Path.extract_build_context_dir include_dir with
-         | None ->
+         match (include_dir : Path.t) with
+         | External _ | In_source_tree _ ->
            (* This branch corresponds to an external directory. The
               current implementation tracks its contents
               NON-recursively. *)
@@ -161,40 +161,78 @@ let include_dir_flags ~expander ~dir ~include_dirs =
              |> Dep.Set.singleton
            in
            Command.Args.Hidden_deps deps
-         | Some (build_dir, source_dir) ->
+         | In_build_dir output_dir ->
+           let include_dir_does_not_exist () =
+             User_error.raise
+               ~loc
+               [ Pp.textf
+                   "Include directory %S does not exist."
+                   (Path.reach ~from:(Path.build dir) include_dir)
+               ]
+           in
+           let hidden_deps dir =
+             let deps =
+               File_selector.of_predicate_lang ~dir Predicate_lang.true_
+               |> Dep.file_selector
+               |> Dep.Set.singleton
+             in
+             Command.Args.Hidden_deps deps
+           in
            Action_builder.return
            @@ Command.Args.Dyn
-                ((* This branch corresponds to a source directory. We
-                    track its contents recursively. *)
-                 Action_builder.of_memo (Source_tree.find_dir source_dir)
-                 >>= function
-                 | None ->
-                   User_error.raise
-                     ~loc
-                     [ Pp.textf
-                         "Include directory %S does not exist."
-                         (Path.reach ~from:(Path.build dir) include_dir)
-                     ]
-                 | Some dir ->
-                   let+ l =
-                     Source_tree_map_reduce.map_reduce
-                       dir
-                       ~traverse:Source_dir_status.Set.all
-                       ~trace_event_name:"Foreign rules"
-                       ~f:(fun t ->
-                         let deps =
-                           let dir =
-                             Path.append_source build_dir (Source_tree.Dir.path t)
-                           in
-                           File_selector.of_predicate_lang ~dir Predicate_lang.true_
-                           |> Dep.file_selector
-                           |> Dep.Set.singleton
-                         in
-                         Command.Args.Hidden_deps deps
-                         |> Appendable_list.singleton
-                         |> Action_builder.return)
+                (let* loaded_project =
+                   Action_builder.of_memo (Dune_load.find_loaded_project ~dir:output_dir)
+                 in
+                 match Loaded_project.source_path loaded_project output_dir with
+                 | None -> include_dir_does_not_exist ()
+                 | Some (Source_path.Workspace source_dir) ->
+                   Action_builder.of_memo (Source_tree.find_dir source_dir)
+                   >>= (function
+                    | None -> include_dir_does_not_exist ()
+                    | Some source_dir ->
+                      let+ l =
+                        Source_tree_map_reduce.map_reduce
+                          source_dir
+                          ~traverse:Source_dir_status.Set.all
+                          ~trace_event_name:"Foreign rules"
+                          ~f:(fun source_dir ->
+                            let output_dir =
+                              Loaded_project.output_path
+                                loaded_project
+                                (Source_path.Workspace (Source_tree.Dir.path source_dir))
+                              |> Option.value_exn
+                            in
+                            hidden_deps (Path.build output_dir)
+                            |> Appendable_list.singleton
+                            |> Action_builder.return)
+                      in
+                      Command.Args.S (Appendable_list.to_list l))
+                 | Some (Source_path.Build source_dir) ->
+                   let rec collect contents_dir output_dir =
+                     let* contents =
+                       Action_builder.of_memo
+                         (Build_system.directory_target_contents_opt ~dir:contents_dir)
+                     in
+                     match contents with
+                     | None -> include_dir_does_not_exist ()
+                     | Some (_, subdirs) ->
+                       let+ children =
+                         Filename.Array.Set.to_list subdirs
+                         |> Action_builder.List.map ~f:(fun subdir ->
+                           collect
+                             (Path.Build.relative_fname contents_dir subdir)
+                             (Path.Build.relative_fname output_dir subdir))
+                       in
+                       hidden_deps (Path.build output_dir) :: List.concat children
                    in
-                   Command.Args.S (Appendable_list.to_list l))
+                   let* source_exists =
+                     Action_builder.of_memo
+                       (Build_system.directory_target_contents_opt ~dir:source_dir)
+                     >>| Option.is_some
+                   in
+                   let contents_dir = if source_exists then source_dir else output_dir in
+                   let+ deps = collect contents_dir output_dir in
+                   Command.Args.S deps)
        in
        Command.Args.S [ A "-I"; Path include_dir; dep_args ])
   in
@@ -301,11 +339,7 @@ let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), 
       let has_standard = Ordered_set_lang.Unexpanded.has_standard flags in
       let* project = Dune_load.find_project ~dir in
       let use_standard_flags = Dune_project.use_standard_c_and_cxx_flags project in
-      let+ is_vendored =
-        match Path.Build.drop_build_context dir with
-        | Some src_dir -> Source_tree.is_vendored src_dir
-        | None -> Memo.return false
-      in
+      let+ is_vendored = Dune_load.is_vendored ~dir in
       if
         Dune_project.dune_version project >= (2, 8)
         && Option.is_none use_standard_flags

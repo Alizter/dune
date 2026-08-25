@@ -30,7 +30,7 @@ type t =
       Source_tree.Dir.t (* XXX Will have to be modified once lock dirs are targets *)
   | Generated
   | Source_only of Source_tree.Dir.t
-  | Standalone of Source_tree.Dir.t * Dune_file.t
+  | Standalone of Source_tree.Dir.t option * Dune_file.t
   (* Directory not part of a multi-directory group. The argument is [None] for
      directory that are not from the source tree, such as generated ones. *)
   | Group_root of Group_root.t

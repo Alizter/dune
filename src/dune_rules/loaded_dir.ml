@@ -18,7 +18,9 @@ let create ~project ~source_dir =
         ; "project", Loaded_project.to_dyn project
         ]
   in
-  let output_dir = Path.Build.append_local (Loaded_project.output_root project) relative_dir in
+  let output_dir =
+    Path.Build.append_local (Loaded_project.output_root project) relative_dir
+  in
   { project; source_dir; relative_dir; output_dir }
 ;;
 

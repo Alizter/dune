@@ -13,7 +13,7 @@ end = struct
     let name = Dune_project.name project in
     let root = Dune_project.root project in
     let digest =
-      Digest.repr Repr.(pair Dune_project_name.repr Path.Source.repr) (name, root)
+      Digest.repr Repr.(pair Dune_project_name.repr Source_path.repr) (name, root)
       |> Digest.to_string
     in
     String.take digest 12
@@ -1120,7 +1120,9 @@ let setup_package_aliases_format sctx (pkg : Package.t) (output : Output_format.
   let name = Package.name pkg in
   let alias =
     let pkg_dir = Package.dir pkg in
-    let dir = Path.Build.append_source (Context.build_dir ctx) pkg_dir in
+    let dir =
+      Source_path.to_build_dir pkg_dir ~workspace_build_dir:(Context.build_dir ctx)
+    in
     Output_format.alias output ~dir
   in
   match (output : Output_format.t) with
@@ -1241,7 +1243,7 @@ let setup_private_library_doc_alias sctx ~scope ~dir (l : Library.t) =
   | Private _ ->
     let ctx = Super_context.context sctx in
     let* lib =
-      let src_dir = Path.drop_optional_build_context_src_exn (Path.build dir) in
+      let src_dir = Scope.source_dir scope dir in
       Lib.DB.find_lib_id_even_when_hidden
         (Scope.libs scope)
         (Local (Library.to_lib_id ~src_dir l))

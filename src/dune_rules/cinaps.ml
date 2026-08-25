@@ -102,20 +102,37 @@ let gen_rules sctx t ~dir ~scope =
       ]
   in
   let loc = t.loc in
+  let source_dir = Scope.source_dir scope dir in
   (* Files checked by cinaps *)
   let* cinapsed_files =
-    Source_tree.files_of (Path.Build.drop_build_context_exn dir)
-    >>| Path.Source.Set.to_list
-    >>| List.filter_map ~f:(fun p ->
-      if
-        Predicate_lang.Glob.test
-          t.files
-          (Path.Source.basename p |> Filename.to_string)
-          ~standard:Predicate_lang.true_
-      then
-        Some
-          (Path.Build.append_source (Super_context.context sctx |> Context.build_dir) p)
-      else None)
+    match source_dir with
+    | Workspace source_dir ->
+      Source_tree.files_of source_dir
+      >>| Path.Source.Set.to_list
+      >>| List.filter_map ~f:(fun source ->
+        if
+          Predicate_lang.Glob.test
+            t.files
+            (Path.Source.basename source |> Filename.to_string)
+            ~standard:Predicate_lang.true_
+        then
+          Some
+            (Path.Build.append_source
+               (Super_context.context sctx |> Context.build_dir)
+               source)
+        else None)
+    | Build source_dir ->
+      Build_system.files_of ~dir:(Path.build source_dir)
+      >>| Filename_set.filenames
+      >>| Filename.Array.Set.to_list
+      >>| List.filter_map ~f:(fun filename ->
+        if
+          Predicate_lang.Glob.test
+            t.files
+            (Filename.to_string filename)
+            ~standard:Predicate_lang.true_
+        then Some (Path.Build.relative_fname dir filename)
+        else None)
   in
   let cinaps_dir =
     let stamp =

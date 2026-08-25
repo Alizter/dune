@@ -38,6 +38,11 @@ let to_path = function
   | Build path -> Path.build path
 ;;
 
+let to_build_dir ~workspace_build_dir = function
+  | Workspace path -> Path.Build.append_source workspace_build_dir path
+  | Build path -> path
+;;
+
 let equal a b = Ordering.is_eq (compare a b)
 let hash t = Path.hash (to_path t)
 
@@ -74,8 +79,9 @@ let parent_exn t = Option.value_exn (parent t)
 let descendant t ~of_ =
   match t, of_ with
   | Workspace path, Workspace root ->
-    Path.drop_prefix (Path.source path) ~prefix:(Path.source root)
-  | Build path, Build root -> Path.drop_prefix (Path.build path) ~prefix:(Path.build root)
+    Path.Local.descendant (Path.Source.to_local path) ~of_:(Path.Source.to_local root)
+  | Build path, Build root ->
+    Path.Local.descendant (Path.Build.local path) ~of_:(Path.Build.local root)
   | Workspace _, Build _ | Build _, Workspace _ -> None
 ;;
 

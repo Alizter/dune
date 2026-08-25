@@ -6,9 +6,14 @@ open Import
 
 module Key : sig
   module Decoded : sig
+    type scope = private
+      { project : Loaded_project.Identity.t
+      ; dir : Path.Local.t
+      }
+
     type t = private
       { pps : Lib_name.t list
-      ; project_root : Path.Source.t option
+      ; scope : scope option
       }
   end
 
