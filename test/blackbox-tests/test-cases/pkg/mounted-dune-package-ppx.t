@@ -1,0 +1,96 @@
+A mounted package may define a PPX driver and use it to preprocess its own
+library. A workspace consumer uses the same driver, resolving its libraries from
+the mounted package without creating a second semantic workspace context.
+
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends foo))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (libraries foo)
+  >  (preprocess (staged_pps foo.ppx)))
+  > EOF
+  $ cat > main.ml <<'EOF'
+  > let () = print_endline Foo.message
+  > EOF
+
+  $ mkdir foo
+  $ cat > foo/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name foo))
+  > EOF
+  $ cat > foo/dune <<'EOF'
+  > (library
+  >  (name foo)
+  >  (public_name foo)
+  >  (modules foo)
+  >  (preprocess (staged_pps foo.ppx)))
+  > (library
+  >  (name foo_ppx_support)
+  >  (public_name foo.ppx_support)
+  >  (modules foo_ppx_support))
+  > (library
+  >  (name foo_ppx)
+  >  (public_name foo.ppx)
+  >  (modules foo_ppx)
+  >  (kind ppx_rewriter)
+  >  (libraries foo_ppx_support)
+  >  (ppx.driver (main Foo_ppx.main)))
+  > EOF
+  $ cat > foo/foo.ml <<'EOF'
+  > let message = "mounted ppx"
+  > EOF
+  $ cat > foo/foo_ppx_support.ml <<'EOF'
+  > let touch () = ()
+  > EOF
+  $ cat > foo/foo_ppx.ml <<'EOF'
+  > let main () =
+  >   Foo_ppx_support.touch ();
+  >   if Array.length Sys.argv >= 3 then (
+  >     let input_file = Sys.argv.(Array.length Sys.argv - 2) in
+  >     let output_file = Sys.argv.(Array.length Sys.argv - 1) in
+  >     let input = open_in_bin input_file in
+  >     let contents = really_input_string input (in_channel_length input) in
+  >     close_in input;
+  >     let output = open_out_bin output_file in
+  >     output_string output contents;
+  >     close_out output)
+  >   else
+  >     exit 2
+  > EOF
+  $ tar cf foo.tar foo
+  $ rm -rf foo
+
+  $ make_lockdir
+  $ make_lockpkg foo <<EOF
+  > (version 1.0)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/foo.tar)
+  >   (checksum md5=$(md5sum foo.tar | cut -f1 -d' '))))
+  > (build (run dune build @install))
+  > EOF
+
+  $ dune build ./main.exe --display quiet
+  $ ./_build/default/main.exe
+  mounted ppx
+
+The package objects use the mounted artifact root. The synthesized PPX executable
+is a tool of the workspace resolver and uses its ordinary [.ppx] directory.
+Loading the driver does not instantiate the old package pipeline.
+
+  $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
+  $ test -f "$foo_root/.foo.objs/native/foo.cmx" && echo mounted-library-artifact
+  mounted-library-artifact
+  $ test -n "$(find _build/default/.ppx -name ppx.exe -print -quit)" && echo workspace-resolver-ppx
+  workspace-resolver-ppx
+  $ test ! -e _build/_private/default/.pkg/foo.1.0-* && echo no-old-package-rules
+  no-old-package-rules

@@ -68,6 +68,8 @@
   unavailable-source-package.t
   compute-checksums-when-missing.t
   e2e.t
+  mounted-dune-package-http.t
+  sites-plugin.t
   ocamlformat-dev-tool.t
   source-caching.t
   tarball.t
@@ -83,6 +85,12 @@
   extra-sources.t
   ocamlformat-dev-tool.t
   dev-tool-conflict-test.t
+  mounted-dune-package.t
+  mounted-dune-package-http.t
+  mounted-dune-package-ppx.t
+  mounted-dune-package-projects.t
+  mounted-dune-package-tools.t
+  mounted-dune-package-watch.t
   broken-symlink-in-dependency.t))
 
 (cram
@@ -93,6 +101,13 @@
   pin-depends.t
   extra-sources.t
   pkg-extract-fail.t
+  mounted-dune-package.t
+  mounted-dune-package-autolock.t
+  mounted-dune-package-http.t
+  mounted-dune-package-ppx.t
+  mounted-dune-package-projects.t
+  mounted-dune-package-tools.t
+  mounted-dune-package-watch.t
   broken-symlink-in-dependency.t))
 
 (cram
