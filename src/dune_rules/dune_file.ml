@@ -2,17 +2,23 @@ open Import
 open Memo.O
 
 type t =
-  { dir : Path.Source.t
-  ; project : Dune_project.t
+  { loaded_dir : Loaded_dir.t
   ; stanzas : Stanza.t list Memo.Lazy.t
   ; static_stanzas : Stanza.t list
   }
 
-let dir t = t.dir
+let loaded_dir t = t.loaded_dir
+let source_dir t = Loaded_dir.source_dir t.loaded_dir
+let output_dir t = Loaded_dir.output_dir t.loaded_dir
+
+let dir t =
+  Source_path.as_workspace (source_dir t)
+  |> Option.value_exn
+;;
+
 let stanzas t = Memo.Lazy.force t.stanzas
 let static_stanzas t = t.static_stanzas
-let project t = t.project
-
+let project t = Loaded_project.project (Loaded_dir.project t.loaded_dir)
 module Mask = struct
   type 'a t =
     | True
@@ -145,12 +151,15 @@ let parse_stanzas ~file ~(eval : eval) sexps =
   stanzas, dynamic_includes
 ;;
 
+type parsed =
+  { source_dir : Path.Source.t
+  ; static_stanzas : Stanza.t list
+  }
+
 let parse sexps ~file ~(eval : eval) =
   let+ stanzas, dynamic_includes = parse_stanzas sexps ~file ~eval in
-  ( { dir = eval.dir
-    ; project = eval.project
+  ( { source_dir = eval.dir
     ; static_stanzas = stanzas
-    ; stanzas = Memo.Lazy.of_val stanzas
     }
   , dynamic_includes )
 ;;
@@ -158,12 +167,12 @@ let parse sexps ~file ~(eval : eval) =
 module Make_fold (M : Monad.S) = struct
   open M.O
 
-  let rec fold_static_stanzas l ~init ~f =
+  let rec fold_static_stanzas (l : t list) ~init ~f =
     match l with
     | [] -> M.return init
     | t :: l -> inner_fold t t.static_stanzas l ~init ~f
 
-  and inner_fold t inner_list l ~init ~f =
+  and inner_fold (t : t) inner_list l ~init ~f =
     match inner_list with
     | [] -> fold_static_stanzas l ~init ~f
     | x :: inner_list ->
@@ -178,7 +187,7 @@ module Id_fold = Make_fold (Monad.Id)
 let fold_static_stanzas t ~init ~f = Id_fold.fold_static_stanzas t ~init ~f
 let to_dyn = Dyn.opaque
 
-let find_stanzas t key =
+let find_stanzas (t : t) key =
   let+ stanzas = Memo.Lazy.force t.stanzas in
   (* CR-someday rgrinberg: save a map to represent the stanzas to make this fast. *)
   List.filter_map stanzas ~f:(Stanza.Key.get key)
@@ -379,7 +388,7 @@ let check_dynamic_stanza =
 
 module Eval = struct
   type script =
-    | Literal of eval * t * (Loc.t * string) list
+    | Literal of eval * parsed * (Loc.t * string) list
     | Script of Script.t
 
   open Memo.O
@@ -424,7 +433,7 @@ module Eval = struct
            List.rev_append stanzas dynamic))
   ;;
 
-  let set_dynamic_stanzas t ~context ~eval ~dynamic_includes =
+  let set_dynamic_stanzas t ~context ~loaded_project ~eval ~dynamic_includes =
     let stanzas =
       match dynamic_includes with
       | [] -> Memo.Lazy.of_val t.static_stanzas
@@ -443,7 +452,13 @@ module Eval = struct
         List.iter stanzas ~f:check_dynamic_stanza;
         t.static_stanzas @ stanzas
     in
-    { t with stanzas }
+    { loaded_dir =
+        Loaded_dir.create
+          ~project:loaded_project
+          ~source_dir:(Source_path.workspace t.source_dir)
+    ; stanzas
+    ; static_stanzas = t.static_stanzas
+    }
   ;;
 
   let eval dune_files mask =
@@ -460,8 +475,26 @@ module Eval = struct
         | Literal (eval, t, dynamic_includes) -> Left (eval, t, dynamic_includes)
         | Script s -> Right s)
     in
-    fun context ->
-      let set_dynamic_stanzas = set_dynamic_stanzas ~context in
+    fun context_name ->
+      let* context = Context.DB.get context_name in
+      let partition = Build_partition.workspace context in
+      let set_dynamic_stanzas (t : parsed) ~(eval : eval) ~dynamic_includes =
+        let source_root = Dune_project.root eval.project in
+        let loaded_project =
+          Loaded_project.create
+            ~project:eval.project
+            ~identity:(Loaded_project.Identity.workspace source_root)
+            ~source_root:(Source_path.workspace source_root)
+            ~partition
+            ~output_root:(Path.Build.append_source (Context.build_dir context) source_root)
+        in
+        set_dynamic_stanzas
+          t
+          ~context:context_name
+          ~loaded_project
+          ~eval
+          ~dynamic_includes
+      in
       let+ ocaml_syntax =
         Memo.parallel_map ocaml_syntax ~f:(fun script ->
           let+ dune_file, dynamic_includes =
@@ -470,7 +503,7 @@ module Eval = struct
                 Pp.textf
                   "- evaluating dune file %S in OCaml syntax"
                   (Path.Source.to_string script.file))
-              (fun () -> Script.eval_one ~context script)
+              (fun () -> Script.eval_one ~context:context_name script)
           in
           set_dynamic_stanzas dune_file ~eval:script.eval ~dynamic_includes)
       in
