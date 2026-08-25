@@ -94,18 +94,19 @@ used during solving is later given a value in the workspace file:
   Hint: 'dune pkg lock'
   [1]
 
-The default platform set is independent from [unset_solver_vars]. A variable
-listed there remains in explicit or default platform overlays.
+The platform selected for solving is independent from [unset_solver_vars].
+Without [solve_for_platforms], the current platform remains authoritative even
+when one of its variables is listed in [unset_solver_vars].
 
   $ generate_workspace > dune-workspace <<EOF
   > (unset_solver_vars os)
   > EOF
 
-Regenerating with [os] unset still records it in the default platform set:
+Regenerating with [os] unset still records it as part of the current platform:
   $ dune pkg lock >/dev/null
   Solution for dune.lock
   
   Dependencies common to all supported platforms:
   - bar.0.0.1
   $ grep -q '(os linux)' dune.lock/lock.dune
-  $ grep -q '(os macos)' dune.lock/lock.dune
+  $ grep -q '(arch x86_64)' dune.lock/lock.dune

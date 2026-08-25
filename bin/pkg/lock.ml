@@ -157,7 +157,7 @@ let solve_lock_dir
   let lock_dir = Workspace.find_lock_dir workspace lock_dir_path in
   let project_pins, solve_for_platforms =
     match lock_dir with
-    | None -> project_pins, Solver_env.popular_platform_envs
+    | None -> project_pins, None
     | Some lock_dir ->
       let workspace =
         Pin.DB.Workspace.of_stanza workspace.pins
@@ -168,22 +168,20 @@ let solve_lock_dir
   let solver_env_from_context =
     Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.solver_env)
   in
+  let unset_solver_vars_from_context =
+    unset_solver_vars_of_workspace workspace ~lock_dir_path
+  in
+  let solve_for_platforms =
+    match solve_for_platforms with
+    | Some solve_for_platforms -> solve_for_platforms
+    | None ->
+      [ Option.value solver_env_from_current_system ~default:Solver_env.empty ]
+  in
   let solver_env =
     solver_env
       ~solver_env_from_context
       ~solver_env_from_current_system
-      ~unset_solver_vars_from_context:
-        (unset_solver_vars_of_workspace workspace ~lock_dir_path)
-  in
-  let solve_for_platforms =
-    match portable_lock_dir with
-    | true ->
-      (match solver_env_from_context with
-       | Some solver_env_from_context ->
-         List.map solve_for_platforms ~f:(fun platform_env ->
-           Solver_env.extend solver_env_from_context platform_env)
-       | None -> solve_for_platforms)
-    | false -> []
+      ~unset_solver_vars_from_context
   in
   let time_start = Time.now () in
   let* repos =
@@ -349,8 +347,7 @@ let project_pins =
 
 let lock ~version_preference ~lock_dirs_arg ~print_perf_stats =
   let open Fiber.O in
-  let* solver_env_from_current_system =
-    poll_solver_env_from_current_system () >>| Option.some
+  let* solver_env_from_current_system = poll_solver_env_from_current_system ()
   and* workspace, local_packages, project_pins =
     Memo.run
     @@
@@ -368,7 +365,7 @@ let lock ~version_preference ~lock_dirs_arg ~print_perf_stats =
     workspace
     ~local_packages
     ~project_pins
-    ~solver_env_from_current_system
+    ~solver_env_from_current_system:(Some solver_env_from_current_system)
     ~version_preference
     ~lock_dirs
     ~print_perf_stats

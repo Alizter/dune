@@ -3,6 +3,7 @@ joint solution: no partial lock directory is written.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
 Make a package that is only available on macos.
   $ mkpkg foo <<EOF
@@ -15,8 +16,8 @@ Make a package that is only available on macos.
 
   $ make_portable_lockdirs_project
 
-The default platform set includes linux, where "foo" cannot be installed. The
-failure is reported once for the requested platform set:
+The explicitly requested platform set includes linux, where "foo" cannot be
+installed. The failure is reported once for the requested platform set:
 
   $ dune pkg lock
   Error:

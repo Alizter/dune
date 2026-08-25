@@ -23,7 +23,7 @@ Use an extra file to distinguish reuse from an identical regenerated lockdir.
   > else
   >   echo 'unchanged dev-tool lock regenerated'
   > fi
-  unchanged dev-tool lock regenerated
+  unchanged dev-tool lock reused
   $ rm -f "${dev_tool_lock_dir}"/relock-sentinel
 
 Change the compiler package's build recipe without changing its version, then

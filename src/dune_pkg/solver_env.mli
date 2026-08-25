@@ -49,11 +49,6 @@ val remove_all_except_platform_specific : t -> t
 
 val to_env : t -> OpamFilter.env
 
-(** A list of environments comprising the most common platforms. Dune will
-    solve dependencies for these platforms unless alternative platforms are
-    specified in dune-workspace. *)
-val popular_platform_envs : t list
-
 (** Assign each unset platform variable in [t] to a sentinel value. For a
     description of how sentinel values are chosen and why they are necessary,
     see the documentation of [Variable_value.sentinel_value_of_variable_name]. *)

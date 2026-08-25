@@ -3,6 +3,7 @@ even when they are encountered by multiple concurrent runs of the opam solver.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
 Project depending on a package "foo":
   $ write_portable_lockdirs_project

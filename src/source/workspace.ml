@@ -28,7 +28,7 @@ module Lock_dir = struct
     ; constraints : Dune_lang.Package_dependency.t list
     ; pins : (Loc.t * string) list
     ; depopts : (Loc.t * Package.Name.t) list
-    ; solve_for_platforms : Solver_env.t list
+    ; solve_for_platforms : Solver_env.t list option
     }
 
   let repr =
@@ -63,7 +63,7 @@ module Lock_dir = struct
           ~get:(fun t -> List.map t.depopts ~f:snd)
       ; Repr.field
           "solve_for_platforms"
-          (Repr.list (Repr.abstract Solver_env.to_dyn))
+          (Repr.option (Repr.list (Repr.abstract Solver_env.to_dyn)))
           ~get:(fun t -> t.solve_for_platforms)
       ]
   ;;
@@ -125,7 +125,10 @@ module Lock_dir = struct
     && List.equal Dune_lang.Package_dependency.equal constraints t.constraints
     && List.equal (Tuple.T2.equal Loc.equal String.equal) pins t.pins
     && List.equal (Tuple.T2.equal Loc.equal Package.Name.equal) depopts t.depopts
-    && List.equal Solver_env.equal solve_for_platforms t.solve_for_platforms
+    && Option.equal
+         (List.equal Solver_env.equal)
+         solve_for_platforms
+         t.solve_for_platforms
   ;;
 
   let decode ~dir =
@@ -154,24 +157,21 @@ module Lock_dir = struct
       and+ depopts = field ~default:[] "depopts" (repeat (located Package.Name.decode))
       and+ pins = field ~default:[] "pins" (repeat (located string))
       and+ solve_for_platforms =
-        let+ loc, solve_for_platforms =
-          located
-          @@ field
-               ~default:Solver_env.popular_platform_envs
-               "solve_for_platforms"
-               (repeat @@ enter Solver_env.decode)
+        let+ loc, value =
+          located @@ field_o "solve_for_platforms" (repeat @@ enter Solver_env.decode)
         in
-        if List.is_empty solve_for_platforms
-        then
-          User_error.raise
-            ~loc
-            [ Pp.text "No platforms were specified for solving dependencies." ]
-            ~hints:
-              [ Pp.text
-                  "Specify at least one platform here, or remove this field to solve for \
-                   the default platforms."
-              ];
-        solve_for_platforms
+        Option.iter value ~f:(fun solve_for_platforms ->
+          if List.is_empty solve_for_platforms
+          then
+            User_error.raise
+              ~loc
+              [ Pp.text "No platforms were specified for solving dependencies." ]
+              ~hints:
+                [ Pp.text
+                    "Specify at least one platform here, or remove this field to solve \
+                     for the current platform."
+                ]);
+        value
       in
       Option.iter solver_env ~f:(fun solver_env ->
         Option.iter

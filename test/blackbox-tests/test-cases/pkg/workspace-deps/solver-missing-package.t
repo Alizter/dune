@@ -18,10 +18,8 @@ the repository nor in the workspace. The solver should reject this.
   Unable to solve dependencies while generating lock directory: dune.lock
   
   The dependency solver failed to find a solution for the requested platforms:
-  - arch = x86_64; os = linux
-  - arch = arm64; os = linux
-  - arch = x86_64; os = macos
-  - arch = arm64; os = macos
+  - arch = x86_64; os = linux; os-distribution = ubuntu; os-family = debian;
+    os-version = 24.11; sys-ocaml-version = 5.4.0+fake
   ...with this error:
   Couldn't solve the package dependency formula.
   The following packages couldn't be found: nonexistent-pkg

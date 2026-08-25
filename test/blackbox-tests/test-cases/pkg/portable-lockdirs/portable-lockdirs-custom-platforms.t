@@ -92,5 +92,5 @@ error case.
        ^^^^^^^^^^^^^^^^^^^^^
   Error: No platforms were specified for solving dependencies.
   Hint: Specify at least one platform here, or remove this field to solve for
-  the default platforms.
+  the current platform.
   [1]

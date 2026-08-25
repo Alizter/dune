@@ -2,6 +2,7 @@ Basic usage of portable lockdirs.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
 Create a package that writes a different value to some files depending on the os and arch.
   $ mkpkg foo <<EOF

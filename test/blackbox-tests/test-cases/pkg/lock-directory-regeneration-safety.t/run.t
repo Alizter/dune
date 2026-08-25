@@ -26,13 +26,11 @@ Create a lock directory that didn't originally exist
   
   (solved_for_platforms
    ((arch x86_64)
-    (os linux))
-   ((arch arm64)
-    (os linux))
-   ((arch x86_64)
-    (os macos))
-   ((arch arm64)
-    (os macos)))
+    (os linux)
+    (os-distribution ubuntu)
+    (os-family debian)
+    (os-version 24.11)
+    (sys-ocaml-version 5.4.0+fake)))
 
 Re-create a lock directory in the newly created lock dir
   $ dune_pkg_lock_normalized
@@ -47,13 +45,11 @@ Re-create a lock directory in the newly created lock dir
   
   (solved_for_platforms
    ((arch x86_64)
-    (os linux))
-   ((arch arm64)
-    (os linux))
-   ((arch x86_64)
-    (os macos))
-   ((arch arm64)
-    (os macos)))
+    (os linux)
+    (os-distribution ubuntu)
+    (os-family debian)
+    (os-version 24.11)
+    (sys-ocaml-version 5.4.0+fake)))
 
 Attempt to create a lock directory inside an existing directory without a lock.dune file
 

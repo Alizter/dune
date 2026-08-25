@@ -167,39 +167,6 @@ let to_env t variable =
     get t variable_name |> Option.map ~f:Variable_value.to_opam_variable_contents
 ;;
 
-let popular_platform_envs =
-  let make ~os ~arch ~os_distribution ~os_family () =
-    let env = empty in
-    let env = set env Package_variable_name.os (Variable_value.string os) in
-    let env =
-      match arch with
-      | Some arch -> set env Package_variable_name.arch (Variable_value.string arch)
-      | None -> env
-    in
-    let env =
-      match os_distribution with
-      | Some os_distribution ->
-        set
-          env
-          Package_variable_name.os_distribution
-          (Variable_value.string os_distribution)
-      | None -> env
-    in
-    let env =
-      match os_family with
-      | Some os_family ->
-        set env Package_variable_name.os_family (Variable_value.string os_family)
-      | None -> env
-    in
-    env
-  in
-  [ make ~os:"linux" ~arch:(Some "x86_64") ~os_distribution:None ~os_family:None ()
-  ; make ~os:"linux" ~arch:(Some "arm64") ~os_distribution:None ~os_family:None ()
-  ; make ~os:"macos" ~arch:(Some "x86_64") ~os_distribution:None ~os_family:None ()
-  ; make ~os:"macos" ~arch:(Some "arm64") ~os_distribution:None ~os_family:None ()
-  ]
-;;
-
 let add_sentinel_values_for_unset_platform_vars solver_env =
   Package_variable_name.Set.fold
     Package_variable_name.platform_specific

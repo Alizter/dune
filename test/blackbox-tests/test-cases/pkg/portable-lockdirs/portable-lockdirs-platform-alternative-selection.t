@@ -4,6 +4,7 @@ directory.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
 Define an implementation for each operating system:
   $ LINUX_FILE=mock-opam-repository/packages/linux-impl/linux-impl.0.0.1/files/platform.txt

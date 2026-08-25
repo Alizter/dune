@@ -4,6 +4,7 @@ constructing the portable lock directory.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
   $ mkpkg linux-impl <<'EOF'
   > available: os = "linux"

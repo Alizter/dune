@@ -2,6 +2,7 @@ Test for a project whose dependencies are different depending on the platform.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
 A package that's only available on linux:
   $ mkpkg linux-only <<EOF

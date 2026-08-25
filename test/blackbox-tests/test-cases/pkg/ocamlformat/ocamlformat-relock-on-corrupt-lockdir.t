@@ -17,7 +17,7 @@ Install ocamlformat once to generate the lockdir.
   - ocamlformat.0.26.0
 
 Delete ocamlformat's lockfile.
-  $ rm "${dev_tool_lock_dir}"/ocamlformat.pkg
+  $ rm "${dev_tool_lock_dir}"/ocamlformat.0.26.0.pkg
 
 Reinstall ocamlformat.
   $ dune tools install ocamlformat

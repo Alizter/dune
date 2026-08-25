@@ -442,6 +442,23 @@ add_mock_repo_if_needed() {
   fi
 }
 
+solve_for_all_popular_platforms() {
+  cat >dune-workspace <<- EOF
+	(lang dune 3.20)
+	(lock_dir
+	 (repositories mock)
+	 (solve_for_platforms
+	  ((arch x86_64) (os linux))
+	  ((arch arm64) (os linux))
+	  ((arch x86_64) (os macos))
+	  ((arch arm64) (os macos))))
+	(repository
+	 (name mock)
+	 (url "file://$(pwd)/mock-opam-repository"))
+	(pkg enabled)
+	EOF
+}
+
 create_mock_repo() {
   # Always create a fresh workspace with mock repository configuration
   local repo="${1:-file://$(pwd)/mock-opam-repository}"

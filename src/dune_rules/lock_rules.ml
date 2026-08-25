@@ -27,6 +27,7 @@ module Spec = struct
     ; packages : Local_package.t Package.Name.Map.t
     ; repos : Opam_repo.t list
     ; solver_env_from_context : Solver_env.t
+    ; solve_for_platforms : Solver_env.t list option
     ; unset_solver_vars : Package_variable_name.Set.t
     ; constraints : Package_dependency.t list
     ; selected_depopts : Package.Name.t list
@@ -35,7 +36,7 @@ module Spec = struct
     }
 
   let name = "lock"
-  let version = 1
+  let version = 2
   let runs_process = false
   let can_run_in_action_runner = false
   let bimap t f g = { t with lock_dir = f t.lock_dir; target = g t.target }
@@ -47,6 +48,7 @@ module Spec = struct
         ; packages
         ; repos
         ; solver_env_from_context
+        ; solve_for_platforms
         ; unset_solver_vars
         ; constraints
         ; selected_depopts
@@ -74,6 +76,15 @@ module Spec = struct
                Solver_env.digest_feed
                solver_env_from_context
              |> Dune_digest.to_string) )
+      ; ( "solve_for_platforms"
+        , match solve_for_platforms with
+          | None -> Sexp.Atom "current platform"
+          | Some solve_for_platforms ->
+            Sexp.List
+              (List.map solve_for_platforms ~f:(fun platform ->
+                 Sexp.Atom
+                   (Dune_digest.Feed.compute_digest Solver_env.digest_feed platform
+                    |> Dune_digest.to_string))) )
       ; ( "unset_solver_vars"
         , List
             (Package_variable_name.Set.to_list unset_solver_vars
@@ -124,6 +135,7 @@ module Spec = struct
         ; packages
         ; repos
         ; solver_env_from_context
+        ; solve_for_platforms
         ; unset_solver_vars
         ; constraints
         ; selected_depopts
@@ -136,11 +148,10 @@ module Spec = struct
     let open Fiber.O in
     let* () = Fiber.return () in
     let local_packages = Package.Name.Map.map packages ~f:Local_package.for_solver in
-    let* solver_env =
-      let open Fiber.O in
-      let+ solver_env_from_current_system =
-        Sys_poll.make ~path:(Env_path.path env) |> Sys_poll.solver_env_from_current_system
-      in
+    let* solver_env_from_current_system =
+      Sys_poll.make ~path:(Env_path.path env) |> Sys_poll.solver_env_from_current_system
+    in
+    let solver_env =
       Solver_env.combine
         ~current_system:(Some solver_env_from_current_system)
         ~context:(Some solver_env_from_context)
@@ -150,7 +161,8 @@ module Spec = struct
       let base_solver_env, platform_overlays =
         Opam_solver.base_solver_env_and_platforms
           solver_env
-          ~solve_for_platforms:Solver_env.popular_platform_envs
+          ~solve_for_platforms:
+            (Option.value solve_for_platforms ~default:[ solver_env_from_current_system ])
           ~portable_lock_dir:true
       in
       Opam_solver.solve_lock_dir
@@ -191,6 +203,7 @@ let lock_action
       ~packages
       ~repos
       ~solver_env_from_context
+      ~solve_for_platforms
       ~unset_solver_vars
       ~constraints
       ~selected_depopts
@@ -203,6 +216,7 @@ let lock_action
     ; packages
     ; repos
     ; solver_env_from_context
+    ; solve_for_platforms
     ; unset_solver_vars
     ; constraints
     ; selected_depopts
@@ -295,6 +309,9 @@ let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
          | Some { version_preference = None; _ } -> Version_preference.default
          | Some { version_preference = Some vp; _ } -> vp
        in
+       let solve_for_platforms =
+         Option.bind lock_dir ~f:(fun lock_dir -> lock_dir.solve_for_platforms)
+       in
        let solver_env_from_context =
          match lock_dir with
          | None -> Solver_env.with_defaults
@@ -314,6 +331,7 @@ let setup_lock_rules ~dir ~lock_dir : Gen_rules.result =
          ~packages
          ~repos
          ~solver_env_from_context
+         ~solve_for_platforms
          ~unset_solver_vars
          ~constraints
          ~selected_depopts

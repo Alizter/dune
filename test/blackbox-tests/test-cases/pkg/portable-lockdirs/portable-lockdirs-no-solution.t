@@ -2,6 +2,7 @@ Demonstrate the case where a project can't be solved at all.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
 Make some packages that can't be coinstalled:
   $ mkpkg a <<EOF

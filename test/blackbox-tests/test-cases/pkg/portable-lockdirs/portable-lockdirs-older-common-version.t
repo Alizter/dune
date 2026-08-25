@@ -4,6 +4,7 @@ is selected for all platforms.
 
   $ mkrepo
   $ add_mock_repo_if_needed
+  $ solve_for_all_popular_platforms
 
 Define 2 versions of the package foo that write their version number to a file
 during their build so we can validate which version was built. The newer

@@ -70,13 +70,11 @@ strongest checksum to the lockfile for this package.
   
   (solved_for_platforms
    ((arch x86_64)
-    (os linux))
-   ((arch arm64)
-    (os linux))
-   ((arch x86_64)
-    (os macos))
-   ((arch arm64)
-    (os macos)))
+    (os linux)
+    (os-distribution ubuntu)
+    (os-family debian)
+    (os-version 24.11)
+    (sys-ocaml-version 5.4.0+fake)))
   (version 0.0.1)
   
   (source

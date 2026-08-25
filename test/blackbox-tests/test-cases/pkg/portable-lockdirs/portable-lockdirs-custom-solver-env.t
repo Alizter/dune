@@ -1,11 +1,11 @@
-Exercise solving with portable lockdirs when there is a custom solver
-environment that affects the solution.
+Exercise solving with a custom non-platform variable in the lock stanza's
+solver environment.
 
   $ mkrepo
   $ add_mock_repo_if_needed
 
-Create a workspace that defines a lockdir with a custom solver environment,
-setting the variable "sys-ocaml-version":
+Create a workspace that enables with-doc without changing the platform selected
+from OS polling:
   $ cat > dune-workspace <<EOF
   > (lang dune 3.20)
   > (pkg enabled)
@@ -16,15 +16,15 @@ setting the variable "sys-ocaml-version":
   >  (path dune.lock)
   >  (repositories mock)
   >  (solver_env
-  >   (sys-ocaml-version 5.4.0+solver-env-version-override)))
+  >   (with-doc true)))
   > EOF
 
-Create a package that creates a file only if "sys-ocaml-version" has a particular value:
+Create a package with a build action guarded by with-doc:
   $ mkpkg foo <<EOF
   > build: [
   >   ["mkdir" "-p" share "%{lib}%/%{name}%"]
   >   ["touch" "%{lib}%/%{name}%/META"] # needed for dune to recognize this as a library
-  >   ["sh" "-c" "echo %{sys-ocaml-version}% > %{share}%/sys-ocaml-version"] { sys-ocaml-version = "5.4.0+solver-env-version-override" }
+  >   ["sh" "-c" "echo enabled > %{share}%/with-doc"] { with-doc }
   > ]
   > EOF
 
@@ -48,16 +48,9 @@ Confirming that the build action creates the conditional file:
       (progn
        (run mkdir -p %{share} %{lib}/%{pkg-self:name})
        (run touch %{lib}/%{pkg-self:name}/META)
-       (run sh -c "echo %{sys_ocaml_version} > %{share}/sys-ocaml-version"))))))
+       (run sh -c "echo enabled > %{share}/with-doc"))))))
 
-Build and print the file that was conditionally added. Note that the value of
-"sys-ocaml-version" at solve-time may be different from "sys-ocaml-version" at
-build-time, since at solve-time variables are taken from the portable lockdir
-platform config and custom solver env, while at build-time variables are taken
-from the current system. For platform variables like sys-ocaml-version, an
-environment variable can be used to override the value that would otherwise be
-read from the current system.
-  $ export DUNE_CONFIG__SYS_OCAML_VERSION=5.4.0+solver-env-version-override
+The selected action remains available when the package is built:
   $ dune build
-  $ cat _build/_private/default/.pkg/$(dune pkg print-digest foo)/target/share/sys-ocaml-version
-  5.4.0+solver-env-version-override
+  $ cat _build/_private/default/.pkg/$(dune pkg print-digest foo)/target/share/with-doc
+  enabled
