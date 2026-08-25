@@ -175,23 +175,38 @@ let expected_file ~rocq_lang_version t m =
 
 let mlg_files ~sctx ~dir ~modules =
   let open Memo.O in
+  let* source_dir =
+    let+ project = Dune_load.find_loaded_project ~dir in
+    Loaded_project.source_path project dir |> Option.value_exn
+  in
   let+ standard =
     (* All .mlg files in the current directory *)
-    let filter_mlg file =
-      if
-        Filename.Extension.Or_empty.check
-          (Path.Source.extension file)
-          Filename.Extension.mlg
-      then
-        Some
-          (Path.Build.append_source
-             (Super_context.context sctx |> Context.build_dir)
-             file)
-      else None
-    in
-    Source_tree.files_of (Path.Build.drop_build_context_exn dir)
-    >>| Path.Source.Set.to_list
-    >>| List.filter_map ~f:filter_mlg
+    match source_dir with
+    | Source_path.Workspace source_dir ->
+      Source_tree.files_of source_dir
+      >>| Path.Source.Set.to_list
+      >>| List.filter_map ~f:(fun source ->
+        if
+          Filename.Extension.Or_empty.check
+            (Path.Source.extension source)
+            Filename.Extension.mlg
+        then
+          Some
+            (Path.Build.append_source
+               (Super_context.context sctx |> Context.build_dir)
+               source)
+        else None)
+    | Build source_dir ->
+      Build_system.files_of ~dir:(Path.build source_dir)
+      >>| Filename_set.filenames
+      >>| Filename.Array.Set.to_list
+      >>| List.filter_map ~f:(fun filename ->
+        if
+          Filename.Extension.Or_empty.check
+            (Filename.extension filename)
+            Filename.Extension.mlg
+        then Some (Path.Build.relative_fname dir filename)
+        else None)
   in
   let parse ~loc:_ file = Path.Build.relative dir (file ^ ".mlg") in
   Ordered_set_lang.eval modules ~standard ~parse ~eq:Path.Build.equal

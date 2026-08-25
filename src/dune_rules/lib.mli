@@ -72,7 +72,7 @@ module L : sig
     -> deps:('a -> 'a list Resolve.Memo.t)
     -> ('a list, 'a list) Result.t Resolve.Memo.t
 
-  val project_root : t list -> Path.Source.t option
+  val scope_dir : t list -> Path.Build.t option
 end
 
 (** {1 Compilation contexts} *)
@@ -138,7 +138,7 @@ module DB : sig
   (** A database allow to resolve library names *)
   type t = db
 
-  val with_parent : t -> parent:t option -> t
+  val with_parent : t -> parent:t -> t
 
   (** Create a library database from a specified list of library paths. A
       library path is a path to a "lib" directory such as those found in the

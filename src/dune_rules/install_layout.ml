@@ -122,6 +122,25 @@ let files context_name packages =
   Path.Build.Map.keys entries |> List.map ~f:Path.build
 ;;
 
+let binaries context_name packages =
+  let open Memo.O in
+  let+ entries = entries context_name packages in
+  Path.Build.Map.foldi
+    entries
+    ~init:Filename.Map.empty
+    ~f:(fun dst (entry : Path.t Install.Entry.Expanded.t) binaries ->
+      match (entry.section : Section.t) with
+      | Bin ->
+        let name =
+          Path.Build.basename dst
+          |> Filename.to_string
+          |> Bin.strip_exe
+          |> Filename.of_string_exn
+        in
+        Filename.Map.set binaries name (Path.build dst)
+      | _ -> binaries)
+;;
+
 let deps context_name packages =
   let open Action_builder.O in
   let* files = Action_builder.of_memo (files context_name packages) in

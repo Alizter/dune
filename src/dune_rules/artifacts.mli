@@ -50,6 +50,10 @@ val local_binary_install_name
 val binary_available : t -> dir:Path.Build.t -> string -> bool Memo.t
 val add_binaries : t -> dir:Path.Build.t -> File_binding.Expanded.t list -> t
 
+(** Add binaries exported by package dependencies while preserving binaries
+    defined by local stanzas. *)
+val with_dependency_binaries : t -> Path.t Filename.Map.t Memo.Lazy.t -> t
+
 val create
   :  Context.t
   -> local_bins:origin Appendable_list.t Filename.Map.t Memo.Lazy.t

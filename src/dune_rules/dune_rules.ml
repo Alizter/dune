@@ -52,6 +52,7 @@ module Pp_spec = Pp_spec
 module Pp_spec_rules = Pp_spec_rules
 module Command = Command
 module Private_context = Private_context
+module Mounted_context = Mounted_context
 module Odoc = Odoc
 module Library = Library
 module Melange = Melange

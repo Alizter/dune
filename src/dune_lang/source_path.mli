@@ -7,6 +7,7 @@ type t =
 val workspace : Path.Source.t -> t
 val build : Path.Build.t -> t
 val to_path : t -> Path.t
+val to_build_dir : workspace_build_dir:Path.Build.t -> t -> Path.Build.t
 val equal : t -> t -> bool
 val compare : t -> t -> Ordering.t
 val hash : t -> int
