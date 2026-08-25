@@ -394,14 +394,16 @@ let compute_promote_in_source ~promote_in_source ~project ~dir ~mode ~output ~sr
            in
            Path.reach ~from:dst_dir into_dir
          | Public_library { lib_dir; output_dir; target_dir = _ } ->
-           let into_dir =
-             let root = Dune_project.root project in
-             let into_dir = Path.Source.append_local root output_dir in
-             let segment = Path.drop_prefix_exn src_dir ~prefix:lib_dir in
-             Path.Source.append_local into_dir segment
-           in
-           let from = Path.drop_build_context_exn dst_dir |> Path.source in
-           Path.reach ~from (Path.source into_dir)
+           (match Dune_project.root project with
+            | Build _ ->
+              User_error.raise
+                [ Pp.text "Promotion is not supported for mounted package sources." ]
+            | Workspace root ->
+              let into_dir = Path.Source.append_local root output_dir in
+              let segment = Path.drop_prefix_exn src_dir ~prefix:lib_dir in
+              let into_dir = Path.Source.append_local into_dir segment in
+              let from = Path.drop_build_context_exn dst_dir |> Path.source in
+              Path.reach ~from (Path.source into_dir))
        in
        let into =
          let loc =

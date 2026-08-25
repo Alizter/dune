@@ -161,9 +161,13 @@ module Common = struct
     match Dune_project.file project with
     | Some _ -> ()
     | None ->
+      let project_root =
+        Dune_project.root project
+        |> Dune_lang.Source_path.as_workspace
+        |> Option.value_exn
+      in
       let fn =
-        Path.Source.relative_fname (Dune_project.root project) Dune_project.filename
-        |> Path.source
+        Path.Source.relative_fname project_root Dune_project.filename |> Path.source
       in
       Console.print [ Pp.textf "Creating %s..." (Path.to_string_maybe_quoted fn) ];
       Io.write_lines
@@ -258,7 +262,12 @@ module V2 = struct
   ;;
 
   let update_project_file todo project =
-    let project_file = Option.value_exn (Dune_project.file project) in
+    let project_file =
+      Dune_project.file project
+      |> Option.value_exn
+      |> Dune_lang.Source_path.as_workspace
+      |> Option.value_exn
+    in
     let sexps, comments = read_and_parse project_file in
     let v = !Dune_project.default_dune_language_version in
     let sexps = sexps |> Ast_tools.bump_lang_version v |> update_formatting in
@@ -324,7 +333,10 @@ language. Use the (foreign_archives ...) field instead.|}
     let lang_version = 2, 0 in
     Dune_project.default_dune_language_version := lang_version;
     let project = Source_tree.Dir.project dir in
-    if Dune_project.root project = Source_tree.Dir.path dir
+    let project_root =
+      Dune_project.root project |> Dune_lang.Source_path.as_workspace |> Option.value_exn
+    in
+    if project_root = Source_tree.Dir.path dir
     then ensure_project_file_exists project ~lang_version;
     update_project_file todo project;
     upgrade_dune_files todo dir

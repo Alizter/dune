@@ -10,6 +10,15 @@ val set_entry_resolver
     the set. *)
 val env : Context_name.t -> Package.Name.Set.t -> Env.t Action_builder.t
 
+(** Dependency on every materialized install entry for the package set. *)
+val deps : Context_name.t -> Package.Name.Set.t -> unit Action_builder.t
+
+(** Root of the materialized install layout for the package set. *)
+val root : Context_name.t -> Package.Name.Set.t -> Path.Build.t
+
+(** Executables installed by the package set, keyed by program name. *)
+val binaries : Context_name.t -> Package.Name.Set.t -> Path.t Filename.Map.t Memo.t
+
 (** Engine dispatch for [_build/install/<context>/.packages/<rest>]. Called
     from [Gen_rules]; the layout dir is owned by this module. Resolves to:
     - no rules for the [.packages/] root itself ([rest = []]),

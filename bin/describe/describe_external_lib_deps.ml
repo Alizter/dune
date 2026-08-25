@@ -165,57 +165,59 @@ let libs db (context : Context.t) =
   let open Memo.O in
   let* dune_files = Context.name context |> Dune_rules.Dune_load.dune_files in
   Memo.parallel_map dune_files ~f:(fun (dune_file : Dune_rules.Dune_file.t) ->
-    Dune_file.stanzas dune_file
-    >>= Memo.parallel_map ~f:(fun stanza ->
-      let dir = Dune_file.dir dune_file in
-      match Stanza.repr stanza with
-      | Dune_rules.Executables.T exes ->
-        let* ocaml = Context.ocaml context in
-        let names, public_names = exe_names exes in
-        resolve_libs
-          db
-          dir
-          exes.buildable.libraries
-          exes.buildable.preprocess.config
-          names
-          public_names
-          exes.package
-          Item.Kind.Executables
-          (exes_extensions ocaml.lib_config exes.modes)
-        >>| List.singleton
-      | Dune_rules.Library.T lib ->
-        let names = [ Lib_name.of_local lib.name |> Lib_name.to_string ] in
-        let public_names =
-          Option.map (Dune_rules.Library.public_name lib) ~f:(fun public_name ->
-            [ Some (Lib_name.to_string public_name) ])
-        in
-        resolve_libs
-          db
-          dir
-          lib.buildable.libraries
-          lib.buildable.preprocess.config
-          names
-          public_names
-          (Dune_rules.Library.package lib)
-          Item.Kind.Library
-          []
-        >>| List.singleton
-      | Dune_rules.Tests.T tests ->
-        let* ocaml = Context.ocaml context in
-        let names, public_names = exe_names tests.exes in
-        resolve_libs
-          db
-          dir
-          tests.exes.buildable.libraries
-          tests.exes.buildable.preprocess.config
-          names
-          public_names
-          (if Option.is_none tests.package then tests.exes.package else tests.package)
-          Item.Kind.Tests
-          (exes_extensions ocaml.lib_config tests.exes.modes)
-        >>| List.singleton
-      | _ -> Memo.return [])
-    >>| List.concat)
+    match Dune_file.dir dune_file |> Dune_lang.Source_path.as_workspace with
+    | None -> Memo.return []
+    | Some dir ->
+      Dune_file.stanzas dune_file
+      >>= Memo.parallel_map ~f:(fun stanza ->
+        match Stanza.repr stanza with
+        | Dune_rules.Executables.T exes ->
+          let* ocaml = Context.ocaml context in
+          let names, public_names = exe_names exes in
+          resolve_libs
+            db
+            dir
+            exes.buildable.libraries
+            exes.buildable.preprocess.config
+            names
+            public_names
+            exes.package
+            Item.Kind.Executables
+            (exes_extensions ocaml.lib_config exes.modes)
+          >>| List.singleton
+        | Dune_rules.Library.T lib ->
+          let names = [ Lib_name.of_local lib.name |> Lib_name.to_string ] in
+          let public_names =
+            Option.map (Dune_rules.Library.public_name lib) ~f:(fun public_name ->
+              [ Some (Lib_name.to_string public_name) ])
+          in
+          resolve_libs
+            db
+            dir
+            lib.buildable.libraries
+            lib.buildable.preprocess.config
+            names
+            public_names
+            (Dune_rules.Library.package lib)
+            Item.Kind.Library
+            []
+          >>| List.singleton
+        | Dune_rules.Tests.T tests ->
+          let* ocaml = Context.ocaml context in
+          let names, public_names = exe_names tests.exes in
+          resolve_libs
+            db
+            dir
+            tests.exes.buildable.libraries
+            tests.exes.buildable.preprocess.config
+            names
+            public_names
+            (if Option.is_none tests.package then tests.exes.package else tests.package)
+            Item.Kind.Tests
+            (exes_extensions ocaml.lib_config tests.exes.modes)
+          >>| List.singleton
+        | _ -> Memo.return [])
+      >>| List.concat)
   >>| List.concat
 ;;
 

@@ -483,7 +483,7 @@ module Runtime_key : sig
     type t = private
       { mode : Js_of_ocaml.Mode.t
       ; lib_names : Lib_name.t list
-      ; project_root : Path.Source.t option
+      ; scope_dir : Path.Build.t option
       }
 
     val of_libs : mode:Js_of_ocaml.Mode.t -> Lib.t list -> t
@@ -498,26 +498,25 @@ end = struct
     type t =
       { mode : Js_of_ocaml.Mode.t
       ; lib_names : Lib_name.t list
-      ; project_root : Path.Source.t option
+      ; scope_dir : Path.Build.t option
       }
 
     let equal x y =
       Js_of_ocaml.Mode.equal x.mode y.mode
       && List.equal Lib_name.equal x.lib_names y.lib_names
-      && Option.equal Path.Source.equal x.project_root y.project_root
+      && Option.equal Path.Build.equal x.scope_dir y.scope_dir
     ;;
 
-    let to_string { mode; lib_names; project_root } =
+    let to_string { mode; lib_names; scope_dir } =
       let s =
         sprintf
           "%s runtime for %s"
           (Js_of_ocaml.Mode.select ~mode ~js:"js" ~wasm:"wasm")
           (String.enumerate_and (List.map lib_names ~f:Lib_name.to_string))
       in
-      match project_root with
+      match scope_dir with
       | None -> s
-      | Some dir ->
-        sprintf "%s (in project: %s)" s (Path.Source.to_string_maybe_quoted dir)
+      | Some dir -> sprintf "%s (in scope: %s)" s (Path.Build.to_string_maybe_quoted dir)
     ;;
 
     let of_libs ~mode libs =
@@ -530,8 +529,8 @@ end = struct
          so reordering (e.g. sorting by name) can change which conflicting
          binding wins. *)
       let lib_names = List.map libs_with_runtime ~f:Lib.name in
-      let project_root = Lib.L.project_root libs_with_runtime in
-      { mode; lib_names; project_root }
+      let scope_dir = Lib.L.scope_dir libs_with_runtime in
+      { mode; lib_names; scope_dir }
     ;;
   end
 
@@ -549,11 +548,11 @@ end = struct
       ]
   ;;
 
-  let encode ({ Decoded.mode; lib_names; project_root } as x) =
+  let encode ({ Decoded.mode; lib_names; scope_dir } as x) =
     let y =
       Digest.repr
-        Repr.(triple mode_repr (list Lib_name.repr) (option Path.Source.repr))
-        (mode, lib_names, project_root)
+        Repr.(triple mode_repr (list Lib_name.repr) (option Path.Build.repr))
+        (mode, lib_names, scope_dir)
     in
     match Table.find reverse_table y with
     | None ->
@@ -892,10 +891,12 @@ let setup_shared_runtime_rule sctx s_config s_digest =
   match Digest.from_hex s_digest with
   | None -> User_error.raise [ Pp.textf "invalid jsoo runtime key: %s" s_digest ]
   | Some digest ->
-    let { Runtime_key.Decoded.mode; lib_names; project_root } =
-      Runtime_key.decode digest
+    let { Runtime_key.Decoded.mode; lib_names; scope_dir } = Runtime_key.decode digest in
+    let* scope =
+      match scope_dir with
+      | None -> Scope.DB.find_by_dir (Context.build_dir ctx)
+      | Some dir -> Scope.DB.find_by_dir dir
     in
-    let* scope = Scope.DB.find_by_project_root ctx project_root in
     let* libs =
       let lib_db = Scope.libs scope in
       Memo.parallel_map lib_names ~f:(fun name ->

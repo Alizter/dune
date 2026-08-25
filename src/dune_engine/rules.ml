@@ -241,6 +241,16 @@ let map_rules t ~f =
     | Rule r -> `Changed (Rule (f r) : Dir_rules.data))
 ;;
 
+let filter_rules t ~f =
+  Path.Build.Map.filter_map t ~f:(fun m ->
+    Id.Map.filter_map
+      (m : Dir_rules.Nonempty.t :> Dir_rules.t)
+      ~f:(function
+        | Alias _ as alias -> Some alias
+        | Rule rule as data -> Option.some_if (f rule) data)
+    |> Dir_rules.Nonempty.create)
+;;
+
 let find t p =
   match Path.as_in_build_dir p with
   | None -> Dir_rules.empty

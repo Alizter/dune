@@ -87,6 +87,7 @@ val of_rules : Rule.t list -> t
 val produce : t -> unit Memo.t
 val is_subset : t -> of_:t -> bool
 val map_rules : t -> f:(Rule.t -> Rule.t) -> t
+val filter_rules : t -> f:(Rule.t -> bool) -> t
 val collect : (unit -> 'a Memo.t) -> ('a * t) Memo.t
 val collect_unit : (unit -> unit Memo.t) -> t Memo.t
 

@@ -61,7 +61,7 @@ val set_workspace_root_to_build_path_prefix_map
   -> t
   -> t
 
-val set_action_project_root : Path.Source.t option -> t -> t
+val set_action_project_root : Path.Local.t option -> t -> t
 val set_should_remove_write_permissions_on_generated_files : bool -> t -> t
 val set_sandbox_actions : bool -> t -> t
 val set_use_sandbox_policy : bool -> t -> t
@@ -78,7 +78,7 @@ val action_stderr_on_success : t -> Action_output_on_success.t
 val action_stdout_limit : t -> Action_output_limit.t
 val action_stderr_limit : t -> Action_output_limit.t
 val workspace_root_to_build_path_prefix_map : t -> Workspace_root_for_build_prefix_map.t
-val action_project_root : t -> Path.Source.t option
+val action_project_root : t -> Path.Local.t option
 val use_sandbox_policy : t -> bool
 
 (** {1 Initialisation} *)

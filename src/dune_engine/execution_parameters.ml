@@ -44,7 +44,7 @@ type t =
   ; action_stderr_limit : Action_output_limit.t
   ; expand_aliases_in_sandbox : bool
   ; workspace_root_to_build_path_prefix_map : Workspace_root_for_build_prefix_map.t
-  ; action_project_root : Path.Source.t option
+  ; action_project_root : Path.Local.t option
   ; should_remove_write_permissions_on_generated_files : bool
   ; sandbox_actions : bool
   ; use_sandbox_policy : bool
@@ -72,7 +72,7 @@ let equal
   && Workspace_root_for_build_prefix_map.equal
        workspace_root_to_build_path_prefix_map
        t.workspace_root_to_build_path_prefix_map
-  && Option.equal Path.Source.equal action_project_root t.action_project_root
+  && Option.equal Path.Local.equal action_project_root t.action_project_root
   && Bool.equal
        should_remove_write_permissions_on_generated_files
        t.should_remove_write_permissions_on_generated_files
@@ -144,7 +144,7 @@ let digest
    | Set root -> Digest.Manual.string d root);
   Digest.Manual.option
     d
-    ~f:(fun d root -> Digest.Manual.string d (Path.Source.to_string root))
+    ~f:(fun d root -> Digest.Manual.string d (Path.Local.to_string root))
     action_project_root;
   Digest.Manual.get d
 ;;
@@ -193,7 +193,7 @@ let repr =
         ~get:(fun t -> t.workspace_root_to_build_path_prefix_map)
     ; Repr.field
         "action_project_root"
-        Repr.(option Path.Source.repr)
+        Repr.(option Path.Local.repr)
         ~get:(fun t -> t.action_project_root)
     ; Repr.field
         "should_remove_write_permissions_on_generated_files"

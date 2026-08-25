@@ -27,6 +27,8 @@ type local_bins = path Filename.Map.t
 
 type t =
   { context : Context.t
+  ; which : Filename.t -> Path.t option Memo.t
+  ; dependency_bins : Path.t Filename.Map.t Memo.Lazy.t
   ; (* Mapping from binary lookup names to their definitions. On Windows, a
        trailing [.exe] is removed from lookup names, while [Origin.dst] retains
        the actual install filename.
@@ -66,10 +68,14 @@ let analyze_binary t ~dir name =
       match lookup_name with
       | None -> Memo.return `None
       | Some lookup_name ->
-        Context.which t.context lookup_name
-        >>| (function
-         | None -> `None
-         | Some path -> `Resolved path)
+        let* dependency_bins = Memo.Lazy.force t.dependency_bins in
+        (match Filename.Map.find dependency_bins lookup_name with
+         | Some path -> Memo.return (`Resolved path)
+         | None ->
+           t.which lookup_name
+           >>| (function
+            | None -> `None
+            | Some path -> `Resolved path))
     in
     (match Option.bind lookup_name ~f:(Filename.Map.find local_bins) with
      | Some (Resolved p) -> Memo.return (`Resolved (Path.build p.path))
@@ -152,6 +158,10 @@ let add_binaries t ~dir l =
   { t with local_bins }
 ;;
 
+let with_dependency_binaries t dependency_bins =
+  { t with dependency_bins; which = Which.which ~path:(Context.path t.context) }
+;;
+
 let create =
   fun (context : Context.t)
     ~(local_bins : origin Appendable_list.t Filename.Map.t Memo.Lazy.t) ->
@@ -163,5 +173,9 @@ let create =
         , Origin (Appendable_list.to_list sources) ))
       |> Filename.Map.of_list_exn)
   in
-  { context; local_bins }
+  { context
+  ; which = Context.which context
+  ; dependency_bins = Memo.Lazy.of_val Filename.Map.empty
+  ; local_bins
+  }
 ;;

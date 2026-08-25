@@ -13,21 +13,32 @@ let find_package ctx pkg =
   match Package.Name.Map.find packages pkg with
   | Some p -> Memo.return (Some (Local p))
   | None ->
-    Pkg_rules.lock_dir_active ctx
+    Pkg_sources.find_mounted ctx pkg
     >>= (function
-     | true ->
-       Pkg_rules.find_package ctx pkg
-       >>| (function
-        | None -> None
-        | Some b -> Some (Build b))
-     | false ->
-       let* findlib = Findlib.create ctx in
-       Findlib.find_root_package findlib pkg
+     | Some mounted ->
+       let package =
+         Pkg_sources.Mounted.projects mounted
+         |> List.find_map ~f:(fun project ->
+           Package.Name.Map.find (Dune_project.including_hidden_packages project) pkg)
+         |> Option.value_exn
+       in
+       Memo.return (Some (Local package))
+     | None ->
+       Pkg_rules.lock_dir_active ctx
        >>= (function
-        | Ok p -> Memo.return @@ Some (Installed p)
-        | Error (Invalid_dune_package user_message) ->
-          User_error.raise [ User_message.pp user_message ]
-        | Error Not_found -> Memo.return None))
+        | true ->
+          Pkg_rules.find_package ctx pkg
+          >>| (function
+           | None -> None
+           | Some b -> Some (Build b))
+        | false ->
+          let* findlib = Findlib.create ctx in
+          Findlib.find_root_package findlib pkg
+          >>= (function
+           | Ok p -> Memo.return @@ Some (Installed p)
+           | Error (Invalid_dune_package user_message) ->
+             User_error.raise [ User_message.pp user_message ]
+           | Error Not_found -> Memo.return None)))
 ;;
 
 let create ctx = Memo.return ctx

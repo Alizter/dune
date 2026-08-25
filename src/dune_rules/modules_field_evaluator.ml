@@ -463,11 +463,7 @@ let eval
   let* modules0 =
     eval0 ~expander ~loc:stanza_loc ~all_modules ~standard:all_modules settings.modules
   in
-  let* is_vendored =
-    match Path.Build.drop_build_context src_dir with
-    | Some src_dir -> Source_tree.is_vendored src_dir
-    | None -> Memo.return false
-  in
+  let* is_vendored = Dune_load.is_vendored ~dir:src_dir in
   eval
     ~expander
     ~modules:all_modules

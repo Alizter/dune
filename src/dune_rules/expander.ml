@@ -49,6 +49,7 @@ let resolve_pkg_install_file = Fdecl.create Dyn.opaque
 
 type t =
   { dir : Path.Build.t
+  ; source_dir : Source_path.t
   ; env : Env.t Memo.t
   ; local_env : string Action_builder.t Env.Var.Map.t
   ; public_libs : Lib.DB.t Memo.t
@@ -64,6 +65,7 @@ type t =
 
 let artifacts t = t.artifacts_host
 let dir t = t.dir
+let source_dir t = t.source_dir
 let project t = t.project
 let context t = Context.name t.context
 
@@ -76,8 +78,8 @@ let set_local_env_var t ~var ~value =
   { t with local_env = Env.Var.Map.set t.local_env var value }
 ;;
 
-let set_scope t ~dir ~project ~scope ~scope_host =
-  { t with dir; project; scope; scope_host }
+let set_scope t ~dir ~source_dir ~project ~scope ~scope_host =
+  { t with dir; source_dir; project; scope; scope_host }
 ;;
 
 let set_artifacts t ~artifacts_host = { t with artifacts_host }
@@ -587,13 +589,8 @@ let expand_pform_var (context : Context.t) ~dir ~source (var : Pform.Var.t) =
     Need_full_expander
       (fun t ->
         Without
-          ([ Value.Dir
-               (Path.Build.append_source
-                  (Context.build_dir t.context)
-                  (Dune_project.root t.project)
-                |> Path.build)
-           ]
-           |> Memo.return))
+          (let+ scope = t.scope in
+           [ Value.Dir (Path.build (Scope.root scope)) ]))
   | Cc -> Need_full_expander (fun t -> With (cc t).c)
   | Cxx -> Need_full_expander (fun t -> With (cc t).cxx)
   | Toolchain ->
@@ -976,6 +973,7 @@ let expand_str_partial t template =
 
 let make_root
       ~project
+      ~source_dir
       ~scope
       ~scope_host
       ~(context : Context.t)
@@ -985,6 +983,7 @@ let make_root
       ~artifacts_host
   =
   { dir = Context.build_dir context
+  ; source_dir
   ; env
   ; local_env = Env.Var.Map.empty
   ; bindings = Pform.Map.empty
@@ -1004,7 +1003,7 @@ let expand_path t sw =
   let+ path =
     expand t ~mode:Single sw >>| Value.to_path ~error_loc:loc ~dir:(Path.build t.dir)
   in
-  let context_root = (Context.build_context t.context).build_dir in
+  let context_root, _ = Path.Build.extract_build_context_dir_exn t.dir in
   (match Path.as_in_build_dir path with
    | Some p when not (Path.Build.is_descendant p ~of_:context_root) ->
      (* TODO consider turning these into external paths, since we already allow

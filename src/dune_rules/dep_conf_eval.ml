@@ -44,11 +44,53 @@ let include_action_env = function
   | Include_result pair -> Some (Action_builder.map pair ~f:snd)
 ;;
 
+module Build_backed_alias_rec = Alias_builder.Alias_rec (struct
+    let traverse dir ~f =
+      let rec traverse source_dir dir =
+        let open Action_builder.O in
+        let* { Alias_builder.Alias_build_info.alias_status; allowed_build_only_subdirs } =
+          f ~path:dir
+        and* source_subdirs =
+          match source_dir with
+          | None -> Action_builder.return Filename.Set.empty
+          | Some source_dir ->
+            Action_builder.of_memo
+              (Build_system.directory_target_contents_opt ~dir:source_dir)
+            >>| (function
+             | None -> Filename.Set.empty
+             | Some (_, subdirs) ->
+               Filename.Array.Set.to_list subdirs |> Filename.Set.of_list)
+        in
+        let subdirs = Filename.Set.union source_subdirs allowed_build_only_subdirs in
+        let+ children =
+          Filename.Set.to_list subdirs
+          |> Action_builder.List.map ~f:(fun subdir ->
+            let source_dir =
+              if Filename.Set.mem source_subdirs subdir
+              then
+                Option.map source_dir ~f:(fun source_dir ->
+                  Path.Build.relative_fname source_dir subdir)
+              else None
+            in
+            traverse source_dir (Path.Build.relative_fname dir subdir))
+        in
+        List.fold_left children ~init:alias_status ~f:Alias_builder.Alias_status.combine
+      in
+      let open Action_builder.O in
+      let* loaded_project = Action_builder.of_memo (Dune_load.find_loaded_project ~dir) in
+      let source_dir =
+        Loaded_project.source_path loaded_project dir
+        |> Option.bind ~f:(function
+          | Source_path.Workspace _ -> None
+          | Source_path.Build dir -> Some dir)
+      in
+      traverse source_dir dir
+    ;;
+  end)
+
 let dep_on_alias_rec alias ~loc =
-  let src_dir = Path.Build.drop_build_context_exn (Alias.dir alias) in
-  Action_builder.of_memo (Source_tree.find_dir src_dir)
-  >>= function
-  | None ->
+  let dir = Alias.dir alias in
+  let fail_unknown_directory source_dir =
     Action_builder.fail
       { fail =
           (fun () ->
@@ -56,25 +98,49 @@ let dep_on_alias_rec alias ~loc =
               ~loc
               [ Pp.textf
                   "Don't know about directory %s!"
-                  (Path.Source.to_string_maybe_quoted src_dir)
+                  (Source_path.to_string_maybe_quoted source_dir)
               ])
       }
-  | Some _ ->
-    let name = Dune_engine.Alias.name alias in
-    Alias_rec.dep_on_alias_rec name (Alias.dir alias)
-    >>| (function
-     | Defined -> ()
-     | Not_defined ->
-       if not (Alias0.is_standard name)
-       then
-         User_error.raise
-           ~loc
-           [ Pp.text "This alias is empty."
-           ; Pp.textf
-               "Alias %S is not defined in %s or any of its descendants."
-               (Alias.Name.to_string name)
-               (Path.Source.to_string_maybe_quoted src_dir)
-           ])
+  in
+  let open Action_builder.O in
+  let* loaded_project = Action_builder.of_memo (Dune_load.find_loaded_project ~dir) in
+  match Loaded_project.source_path loaded_project dir with
+  | None ->
+    Code_error.raise
+      "Alias directory is outside its loaded project"
+      [ "dir", Path.Build.to_dyn dir; "project", Loaded_project.to_dyn loaded_project ]
+  | Some source_dir ->
+    let* exists =
+      match source_dir with
+      | Source_path.Workspace source_dir ->
+        Action_builder.of_memo (Source_tree.find_dir source_dir) >>| Option.is_some
+      | Source_path.Build source_dir ->
+        Action_builder.of_memo
+          (Build_system.directory_target_contents_opt ~dir:source_dir)
+        >>| Option.is_some
+    in
+    if not exists
+    then fail_unknown_directory source_dir
+    else (
+      let name = Dune_engine.Alias.name alias in
+      let+ status =
+        match source_dir with
+        | Source_path.Workspace _ -> Alias_rec.dep_on_alias_rec name dir
+        | Source_path.Build _ -> Build_backed_alias_rec.dep_on_alias_rec name dir
+      in
+      match status with
+      | Defined -> ()
+      | Not_defined ->
+        if not (Alias0.is_standard name)
+        then
+          User_error.raise
+            ~loc
+            [ Pp.text "This alias is empty."
+            ; Pp.textf
+                "Alias %S is not defined in %s or any of its descendants."
+                (Alias.Name.to_string name)
+                (Source_path.to_string_maybe_quoted source_dir)
+            ])
 ;;
 
 let expand_include =
@@ -281,6 +347,7 @@ let rec dep expander : Dep_conf.t -> _ = function
          glob_files
          ~f:(Expander.expand ~mode:Single expander)
          ~base_dir:(Expander.dir expander)
+         ~source_dir:(Expander.source_dir expander)
        >>| Glob_files_expand.Expanded.matches
        >>| List.map ~f:(fun path ->
          if Filename.is_relative path
@@ -314,8 +381,8 @@ let rec dep expander : Dep_conf.t -> _ = function
 
 and combined_package_deps_builder expander pkgs =
   let open Action_builder.O in
-  (* Resolve packages and name the layout dir in the host context, same as
-     [make_bin_env] above. *)
+  (* Evaluate all package dependencies against one layout so root-section
+     collisions are detected across the complete set. *)
   let* host_name =
     Action_builder.of_memo
       (let open Memo.O in
@@ -332,7 +399,7 @@ and combined_package_deps_builder expander pkgs =
   let local_package_names =
     List.filter_map classified ~f:(fun (_, _, found) ->
       match found with
-      | Some (Package_db.Local pkg) -> Some (Package.name pkg)
+      | Some (Package_db.Local package) -> Some (Package.name package)
       | _ -> None)
     |> Package.Name.Set.of_list
   in

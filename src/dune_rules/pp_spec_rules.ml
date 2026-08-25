@@ -52,8 +52,21 @@ let get_rules sctx key =
       User_error.raise
         [ Pp.textf "invalid ppx key for %s" (Path.Build.to_string_maybe_quoted exe) ]
     | Some key ->
-      let { Ppx_exe.Key.Decoded.pps; project_root } = Ppx_exe.Key.decode key in
-      let+ scope = Scope.DB.find_by_project_root ctx project_root in
+      let { Ppx_exe.Key.Decoded.pps; scope = scope_key } = Ppx_exe.Key.decode key in
+      let+ scope =
+        match scope_key with
+        | None -> Scope.DB.find_by_dir (Context.build_dir ctx)
+        | Some { project; dir } ->
+          let* loaded_project =
+            Dune_load.find_loaded_project_by_identity
+              ~context:(Context.name ctx)
+              ~identity:project
+          in
+          let scope_dir =
+            Path.Build.append_local (Loaded_project.output_root loaded_project) dir
+          in
+          Scope.DB.find_by_dir scope_dir
+      in
       pps, scope
   in
   let* pps =

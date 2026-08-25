@@ -32,12 +32,18 @@ let module_source_path_without_extension m =
 ;;
 
 let make ~dir ~expander ~lib_config ~libs ~exes ~melange_emits =
+  let* scope = Scope.DB.find_by_dir dir in
   let+ libraries =
     Memo.List.map libs ~f:(fun ((lib : Library.t), _, _) ->
       let+ lib_config = lib_config in
       let name = Lib_name.of_local lib.name in
       let info =
-        Library.to_lib_info lib ~expander:(Memo.return expander) ~dir ~lib_config
+        Library.to_lib_info
+          lib
+          ~expander:(Memo.return expander)
+          ~dir
+          ~src_dir:(Scope.source_dir scope dir)
+          ~lib_config
       in
       name, info)
     >>| Lib_name.Map.of_list_exn

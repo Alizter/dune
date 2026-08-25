@@ -32,7 +32,7 @@ module T = struct
     | Generated
     | Source_only of Source_tree.Dir.t
     | (* Directory not part of a multi-directory group *)
-      Standalone of Source_tree.Dir.t * Dune_file.t
+      Standalone of Source_tree.Dir.t option * Dune_file.t
     | (* Directory with [(include_subdirs x)] where [x] is not [no] *)
       Group_root of Group_root.t
     | (* Sub-directory of a [Group_root _] *)
@@ -275,16 +275,24 @@ end = struct
     >>| get_include_subdirs
     >>= function
     | Some (loc, Include mode) ->
-      let components =
-        Memo.Lazy.create ~name:"group-components" (fun () -> collect_group st_dir ~dir)
-      in
-      Memo.return
-      @@ T.Group_root
-           { source_dir = st_dir
-           ; qualification = loc, mode
-           ; dune_file = d
-           ; components = Memo.Lazy.force components
-           }
+      (match st_dir with
+       | None ->
+         User_error.raise
+           ~loc
+           [ Pp.text
+               "(include_subdirs ...) is not yet supported for mounted package sources"
+           ]
+       | Some st_dir ->
+         let components =
+           Memo.Lazy.create ~name:"group-components" (fun () -> collect_group st_dir ~dir)
+         in
+         Memo.return
+         @@ T.Group_root
+              { source_dir = st_dir
+              ; qualification = loc, mode
+              ; dune_file = d
+              ; components = Memo.Lazy.force components
+              })
     | Some (_, No) -> Memo.return (Standalone (st_dir, d))
     | None ->
       if build_dir_is_project_root
@@ -309,21 +317,36 @@ end = struct
   ;;
 
   let build_dir_is_project_root st_dir =
-    let project_root = Source_tree.Dir.project st_dir |> Dune_project.root in
-    Source_tree.Dir.path st_dir |> Path.Source.equal project_root
+    match Source_tree.Dir.project st_dir |> Dune_project.root with
+    | Workspace project_root ->
+      Source_tree.Dir.path st_dir |> Path.Source.equal project_root
+    | Build _ -> false
   ;;
 
   let get_impl dir =
     (match Path.Build.extract_build_context dir with
      | None -> Memo.return None
-     | Some (ctx, dir) ->
-       Source_tree.find_dir dir
+     | Some (ctx, source_dir) ->
+       Source_tree.find_dir source_dir
        >>| (function
-        | None -> None
-        | Some src_dir -> Some (ctx, src_dir)))
+        | None -> Some (ctx, None)
+        | Some src_dir -> Some (ctx, Some src_dir)))
     >>= function
     | None -> group_component_or ~dir Generated
-    | Some (ctx, st_dir) ->
+    | Some (_ctx, None) ->
+      Dune_load.stanzas_in_dir dir
+      >>= (function
+       | None -> group_component_or ~dir Generated
+       | Some dune_file ->
+         let loaded_dir = Dune_file.loaded_dir dune_file in
+         let loaded_project = Loaded_dir.project loaded_dir in
+         let build_dir_is_project_root =
+           Source_path.equal
+             (Loaded_dir.source_dir loaded_dir)
+             (Loaded_project.source_root loaded_project)
+         in
+         has_dune_file ~dir None ~build_dir_is_project_root dune_file)
+    | Some (ctx, Some st_dir) ->
       let src_dir = Source_tree.Dir.path st_dir in
       Pkg_rules.lock_dir_path (Context_name.of_string (Filename.to_string ctx))
       >>| (function
@@ -335,7 +358,7 @@ end = struct
          let build_dir_is_project_root = build_dir_is_project_root st_dir in
          Dune_load.stanzas_in_dir dir
          >>= (function
-          | Some d -> has_dune_file ~dir st_dir ~build_dir_is_project_root d
+          | Some d -> has_dune_file ~dir (Some st_dir) ~build_dir_is_project_root d
           | None ->
             if build_dir_is_project_root
             then Memo.return (Source_only st_dir)

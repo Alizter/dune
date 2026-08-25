@@ -28,7 +28,27 @@ let artifacts_host t ~dir =
     | None -> t, dir
     | Some host -> host, set_context host.context dir
   in
-  t.get_node dir >>= Env_node.artifacts
+  let* artifacts = t.get_node dir >>= Env_node.artifacts
+  and* loaded_project = Dune_load.find_loaded_project ~dir in
+  match Build_partition.purpose (Loaded_project.partition loaded_project) with
+  | Workspace -> Memo.return artifacts
+  | Mounted ->
+    let package =
+      match Loaded_project.visible_packages loaded_project with
+      | Some packages ->
+        (match Package.Name.Set.to_list packages with
+         | [ package ] -> package
+         | _ ->
+           Code_error.raise
+             "Mounted loaded project does not have exactly one visible package"
+             [ "project", Loaded_project.to_dyn loaded_project ])
+      | None ->
+        Code_error.raise
+          "Mounted loaded project has no visible package"
+          [ "project", Loaded_project.to_dyn loaded_project ]
+    in
+    let binaries = Pkg_rules.binaries_for_package (Context.name t.context) package in
+    Memo.return (Artifacts.with_dependency_binaries artifacts binaries)
 ;;
 
 let scope_host ~scope (context : Context.t) =
@@ -47,9 +67,11 @@ let expander_for_artifacts t ~dir =
   let external_env = t.get_node dir >>= Env_node.external_env in
   let scope = Scope.DB.find_by_dir dir in
   let scope_host = scope_host ~scope t.context in
-  let+ project = Dune_load.find_project ~dir in
+  let+ loaded_project = Dune_load.find_loaded_project ~dir in
+  let project = Loaded_project.project loaded_project in
+  let source_dir = Loaded_project.source_path loaded_project dir |> Option.value_exn in
   Expander.extend_env t.root_expander ~env:external_env
-  |> Expander.set_scope ~dir ~project ~scope ~scope_host
+  |> Expander.set_scope ~dir ~source_dir ~project ~scope ~scope_host
 ;;
 
 let expander t ~dir = t.get_expander dir
@@ -70,8 +92,9 @@ let get_env_stanza ~dir =
 let get_impl t dir =
   let inherit_from =
     Memo.lazy_ ~name:"inherited-environment-node" (fun () ->
-      let* scope_root = Dune_load.find_project ~dir >>| Dune_project.root in
-      if Path.Source.equal (Path.Build.drop_build_context_exn dir) scope_root
+      let* loaded_project = Dune_load.find_loaded_project ~dir in
+      let project_output_root = Loaded_project.output_root loaded_project in
+      if Path.Build.equal dir project_output_root
       then Memo.Lazy.force t.default_env
       else (
         match Path.Build.parent dir with
@@ -290,9 +313,12 @@ let create ~(context : Context.t) ~(host : t option) ~packages ~stanzas =
     in
     let scope = Scope.DB.find_by_dir (Context.build_dir context) in
     let scope_host = host_build_dir >>= Scope.DB.find_by_dir in
-    let+ project = Dune_load.find_project ~dir:(Context.build_dir context) in
+    let+ loaded_project =
+      Dune_load.find_loaded_project ~dir:(Context.build_dir context)
+    in
     Expander.make_root
-      ~project
+      ~project:(Loaded_project.project loaded_project)
+      ~source_dir:(Loaded_project.source_root loaded_project)
       ~scope
       ~scope_host
       ~context

@@ -191,7 +191,7 @@ let lib_db sctx ~dir =
   | true ->
     let* ocamlpath = Memo.Lazy.force utop_ocamlpath in
     Lib.DB.of_paths (Super_context.context sctx) ~paths:ocamlpath
-    >>| Lib.DB.with_parent ~parent:(Some (Scope.libs scope))
+    >>| Lib.DB.with_parent ~parent:(Scope.libs scope)
 ;;
 
 let setup sctx ~dir =

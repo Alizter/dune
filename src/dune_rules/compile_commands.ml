@@ -90,7 +90,7 @@ let get_lib_requires ~dir ~scope (lib : Library.t) =
   let open Memo.O in
   Lib.DB.get_compile_info
     (Scope.libs scope)
-    (Local (Library.to_lib_id ~src_dir:(Path.Build.drop_build_context_exn dir) lib))
+    (Local (Library.to_lib_id ~src_dir:(Scope.source_dir scope dir) lib))
     ~allow_overlaps:lib.buildable.allow_overlapping_dependencies
   >>| snd
   >>= Lib.Compile.direct_requires ~for_:Ocaml
@@ -102,9 +102,7 @@ let collect_entries sctx =
   let open Memo.O in
   let* dune_files = Dune_load.dune_files (Context.name ctx) in
   Dune_file.fold_static_stanzas dune_files ~init:[] ~f:(fun dune_file stanza acc ->
-    let dir =
-      Path.Build.append_source (Context.build_dir ctx) (Dune_file.dir dune_file)
-    in
+    let dir = Dune_file.output_dir dune_file in
     (let* expander = Super_context.expander sctx ~dir
      and* dir_contents = Dir_contents.get sctx ~dir
      and* scope = Scope.DB.find_by_dir dir in

@@ -47,7 +47,14 @@ let or_invalid ctx = function
 
 let create_by_name ~name f =
   let f = Staged.unstage @@ create_db ~name (fun k _ -> f k) in
-  Staged.stage (fun name -> f name >>= or_invalid name)
+  Staged.stage (fun context ->
+    f context
+    >>= function
+    | Some value -> value
+    | None ->
+      Code_error.raise
+        "invalid context"
+        [ "context", Context_name.to_dyn context; "registry", Dyn.string name ])
 ;;
 
 let profile =

@@ -499,11 +499,12 @@ let setup_rocqproject_for_theory_rule
   in
   let contents : string With_targets.t =
     let open With_targets.O in
-    let dir = Path.build dir in
-    let+ args_bld = Command.expand ~dir (Command.Args.S args) >>| Appendable_list.to_list
+    let build_dir = Path.build dir in
+    let source_dir = Scope.source_dir scope dir |> Source_path.to_path in
+    let+ args_bld =
+      Command.expand ~dir:build_dir (Command.Args.S args) >>| Appendable_list.to_list
     and+ args_src =
-      let dir = Path.source (Path.drop_build_context_exn dir) in
-      Command.expand ~dir (Command.Args.S args) >>| Appendable_list.to_list
+      Command.expand ~dir:source_dir (Command.Args.S args) >>| Appendable_list.to_list
     in
     let contents = Buffer.create 73 in
     let rec add_args args_bld args_src =

@@ -755,18 +755,22 @@ module Crawl = struct
       Some (Descr.Item.Library lib_descr)
   ;;
 
-  (* [source_path_is_in_dirs dirs p] tests whether the source path [p] is a
-     descendant of some of the provided directory [dirs]. If [dirs = None],
-     then it always succeeds, unless [options.no_recursive] is set in which
-     case it only matches the workspace root. If [dirs = Some l], then a
-     matching directory is search in the list [l]. *)
-  let source_path_is_in_dirs ~no_recursive dirs (p : Path.Source.t) =
-    match dirs with
-    | None -> if no_recursive then Path.Source.equal p Path.Source.root else true
-    | Some dirs ->
-      if no_recursive
-      then List.exists ~f:(fun dir -> Path.Source.equal p dir) dirs
-      else List.exists ~f:(fun dir -> Path.Source.is_descendant p ~of_:dir) dirs
+  (* [source_path_is_in_dirs dirs p] tests whether the workspace source path
+     [p] is a descendant of some of the provided directory [dirs]. Mounted
+     build paths are outside the workspace and never match. If [dirs = None],
+     then workspace paths always match, unless [options.no_recursive] is set,
+     in which case only the workspace root matches. If [dirs = Some l], then a
+     matching directory is searched for in the list [l]. *)
+  let source_path_is_in_dirs ~no_recursive dirs (p : Dune_lang.Source_path.t) =
+    match Dune_lang.Source_path.as_workspace p with
+    | None -> false
+    | Some p ->
+      (match dirs with
+       | None -> if no_recursive then Path.Source.equal p Path.Source.root else true
+       | Some dirs ->
+         if no_recursive
+         then List.exists ~f:(fun dir -> Path.Source.equal p dir) dirs
+         else List.exists ~f:(fun dir -> Path.Source.is_descendant p ~of_:dir) dirs)
   ;;
 
   (* Tests whether a dune file is located in a path that is a descendant of
@@ -778,10 +782,10 @@ module Crawl = struct
   (* Tests whether a library is located in a path that is a descendant of some
      directory *)
   let lib_is_in_dirs ~no_recursive dirs (lib : Lib.t) =
-    source_path_is_in_dirs
-      ~no_recursive
-      dirs
-      (Path.drop_build_context_exn @@ Lib_info.best_src_dir @@ Lib.info lib)
+    match Lib_info.lib_id (Lib.info lib) with
+    | Local local ->
+      Lib_id.Local.src_dir local |> source_path_is_in_dirs ~no_recursive dirs
+    | External _ -> false
   ;;
 
   (* Builds a workspace item for the root path *)
@@ -817,8 +821,8 @@ module Crawl = struct
           match Stanza.repr stanza with
           | Executables.T exes ->
             let dir =
-              Path.Build.append_source
-                (Context.build_dir context)
+              Dune_lang.Source_path.to_build_dir
+                ~workspace_build_dir:(Context.build_dir context)
                 (Dune_file.dir dune_file)
             in
             let project = Dune_file.project dune_file in
@@ -836,9 +840,12 @@ module Crawl = struct
       (* the list of libraries declared in the project *)
       Dune_load.projects ()
       >>= Memo.parallel_map ~f:(fun project ->
-        Scope.DB.find_by_project (Context.name context) project
-        >>| Scope.libs
-        >>= Lib.DB.all)
+        match Dune_lang.Source_path.as_workspace (Dune_project.root project) with
+        | None -> Memo.return Lib.Set.empty
+        | Some _ ->
+          Scope.DB.find_by_project (Context.name context) project
+          >>| Scope.libs
+          >>= Lib.DB.all)
       >>| Lib.Set.union_all
       >>| Lib.Set.filter ~f:(lib_is_in_dirs ~no_recursive dirs)
     in

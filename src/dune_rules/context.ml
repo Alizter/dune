@@ -474,7 +474,21 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
          let findlib_toolchain =
            Option.map builder.findlib_toolchain ~f:Context_name.to_string
          in
-         Findlib_config.discover_from_env ~env ~which ~ocamlpath ~findlib_toolchain)
+         let findlib_which =
+           match kind with
+           | Default | Opam _ -> which
+           | Lock _ ->
+             (* Package binaries are build targets. Consulting all of them while
+                configuring the compiler can make a package depend on itself. An
+                explicitly locked OCaml toolchain is handled below; otherwise
+                findlib's compiler programs come from the base environment. *)
+             which_outside_lockdir
+         in
+         Findlib_config.discover_from_env
+           ~env
+           ~which:findlib_which
+           ~ocamlpath
+           ~findlib_toolchain)
   in
   let ocaml_and_build_env_kind =
     Memo.Lazy.create
@@ -744,7 +758,7 @@ module DB = struct
   let by_dir dir =
     let context =
       match Install.Context.of_path dir with
-      | Some name -> name
+      | Some name -> Option.value (Mounted_context.resolver name) ~default:name
       | None ->
         Code_error.raise
           "directory does not have an associated context"

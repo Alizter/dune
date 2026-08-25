@@ -26,6 +26,7 @@ module Build_system = Build_system
 module Run_id = Run_id
 module Build_system_error = Build_system_error
 module Load_rules = Load_rules
+module Source_selection = Source_selection
 module Response_file = Response_file
 module File_selector = File_selector
 module Print_diff = Print_diff

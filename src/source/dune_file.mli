@@ -23,6 +23,7 @@ val kind : t -> kind
     returns [Some p] where [p] is path to the script *)
 val path : t -> Path.Source.t option
 
+val source_path : t -> Source_path.t option
 val sub_dir_status : t -> Source_dir_status.Spec.t
 
 (** The location of the (dirs ...) stanza if present *)
@@ -42,6 +43,14 @@ val sub_dirnames : t -> Filename.Array.Set.t
 
 val load
   :  dir:Path.Source.t
+  -> Source_dir_status.t
+  -> Dune_project.t
+  -> files:Filename.Array.Set.t
+  -> parent:t option
+  -> t option Memo.t
+
+val load_build
+  :  dir:Path.Build.t
   -> Source_dir_status.t
   -> Dune_project.t
   -> files:Filename.Array.Set.t

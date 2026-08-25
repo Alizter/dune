@@ -11,6 +11,8 @@ module Identity : sig
     -> project_root:Path.Local.t
     -> t
 
+  val equal : t -> t -> bool
+  val repr : t Repr.t
   val to_dyn : t -> Dyn.t
 end
 
@@ -22,6 +24,7 @@ val create
   -> source_root:Source_path.t
   -> partition:Build_partition.t
   -> output_root:Path.Build.t
+  -> visible_packages:Package.Name.Set.t option
   -> t
 
 val project : t -> Dune_project.t
@@ -29,4 +32,7 @@ val identity : t -> Identity.t
 val source_root : t -> Source_path.t
 val partition : t -> Build_partition.t
 val output_root : t -> Path.Build.t
+val visible_packages : t -> Package.Name.Set.t option
+val output_path : t -> Source_path.t -> Path.Build.t option
+val source_path : t -> Path.Build.t -> Source_path.t option
 val to_dyn : t -> Dyn.t

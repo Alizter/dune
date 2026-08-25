@@ -61,6 +61,7 @@ module File = struct
 
     let csts_conflict project ~dir (a : Cst.t) (b : Cst.t) =
       let of_ast sexp =
+        let dir = Dune_lang.Source_path.Workspace dir in
         let parser = Dune_project.stanza_parser project ~dir in
         Dune_lang.Decoder.parse parser Univ_map.empty sexp
       in
@@ -195,7 +196,7 @@ module Init_context = struct
       | Some p -> p
       | None ->
         Dune_project.anonymous
-          ~dir:Path.Source.root
+          ~dir:(Dune_lang.Source_path.Workspace Path.Source.root)
           Package_info.empty
           Package.Name.Map.empty
     in
@@ -416,6 +417,7 @@ module Component = struct
           dir
           (common : Options.Common.t)
       =
+      let dir = Dune_lang.Source_path.Workspace dir in
       let package =
         Package.create
           ~name:(Options.Common.package_name common)

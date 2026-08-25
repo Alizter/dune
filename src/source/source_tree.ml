@@ -283,7 +283,11 @@ let root =
       ~load_opam_file_with_contents:Dune_pkg.Opam_file.load_opam_file_with_contents
     >>| (function
      | Some p -> p
-     | None -> Dune_project.anonymous ~dir:path Package_info.empty Package.Name.Map.empty)
+     | None ->
+       Dune_project.anonymous
+         ~dir:(Source_path.workspace path)
+         Package_info.empty
+         Package.Name.Map.empty)
     >>| Only_packages.filter_packages_in_project ~vendored:(dir_status = Vendored)
   in
   let* dirs_visited =

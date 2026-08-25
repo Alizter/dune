@@ -154,10 +154,7 @@ let context_indexes =
            |> Dune_load.dune_files
            >>| Dune_file.fold_static_stanzas ~init:[] ~f:(fun dune_file stanza acc ->
              let obj =
-               let dir =
-                 let build_dir = Context.build_dir ctx in
-                 Path.Build.append_source build_dir (Dune_file.dir dune_file)
-               in
+               let dir = Dune_file.output_dir dune_file in
                match Stanza.repr stanza with
                | Executables.T exes | Tests.T { exes; _ } ->
                  Some (Executables.obj_dir ~dir exes)
@@ -181,15 +178,16 @@ let context_indexes =
 
 let project_rule sctx project =
   let ctx = Super_context.context sctx in
-  Memo.when_ (Context.merlin ctx) (fun () ->
-    let ocaml_index_alias =
-      let dir =
-        Path.Build.append_source (Context.build_dir ctx) @@ Dune_project.root project
+  match Dune_project.root project with
+  | Build _ -> Memo.return ()
+  | Workspace project_root ->
+    Memo.when_ (Context.merlin ctx) (fun () ->
+      let ocaml_index_alias =
+        let dir = Path.Build.append_source (Context.build_dir ctx) project_root in
+        Alias.make Alias0.ocaml_index ~dir
       in
-      Alias.make Alias0.ocaml_index ~dir
-    in
-    Rules.Produce.Alias.add_deps
-      ocaml_index_alias
-      (let open Action_builder.O in
-       context_indexes ctx ~for_:Ocaml >>= Action_builder.paths_existing))
+      Rules.Produce.Alias.add_deps
+        ocaml_index_alias
+        (let open Action_builder.O in
+         context_indexes ctx ~for_:Ocaml >>= Action_builder.paths_existing))
 ;;
