@@ -38,9 +38,10 @@ Create a project that depends on foo:
   >  (libraries foo))
   > EOF
 
-Build with auto-locking:
-  $ dune exec --display short bar 2>&1 | grep "Building"
-      Building foo.0.0.1
+Build with auto-locking. The Dune recipe is dispatched to the mounted build in
+the same invocation:
+  $ dune exec --display short bar >/dev/null 2>&1
+  $ test -d _build/_default+lockfile/pkg/foo.0.0.1-*
 
   $ dune exec bar
   Hello from foo version 0.0.1!
@@ -84,10 +85,8 @@ Now add a newer version of foo to the repository:
 
 Build again - auto-locking should detect the new version and rebuild:
 
-CR-someday Sudha247: update this to use process events in the trace and remove
---display short
-  $ dune exec --display short bar 2>&1 | grep "Building"
-      Building foo.0.0.2
+  $ dune exec --display short bar >/dev/null 2>&1
+  $ test -d _build/_default+lockfile/pkg/foo.0.0.2-*
 
   $ dune exec bar
   Hello from foo 0.0.2!

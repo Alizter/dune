@@ -80,7 +80,7 @@ Neither package enters the legacy package rules.
   >  (fetch
   >   (url file://$PWD/tool.tar)
   >   (checksum md5=$(md5sum tool.tar | cut -f1 -d' '))))
-  > (build (run dune build @install))
+  > (dune)
   > EOF
   $ make_lockpkg foo <<EOF
   > (version 1.0)
@@ -97,9 +97,10 @@ Neither package enters the legacy package rules.
   $ ./_build/default/main.exe
   from-mounted-tool:from-user-path
 
-Both tools and generated files belong to their explicit mounted artifact roots.
-Looking up the mounted executable must not instantiate either package's old
-rules.
+The lock's implicit Dune marker dispatches [tool] natively, while [foo] uses a
+translated [dune build] action. Both tools and generated files belong to their
+explicit mounted artifact roots. Looking up the executable must not instantiate
+either package's old rules.
 
   $ tool_root=$(echo _build/_default+lockfile/pkg/tool.1.0-*)
   $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
