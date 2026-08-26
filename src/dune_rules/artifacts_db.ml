@@ -33,6 +33,15 @@ let get_installed_binaries stanzas =
   Memo.List.map stanzas ~f:(fun d ->
     let dir = Dune_file.output_dir d in
     let source_dir = Dune_file.source_dir d in
+    let* loaded_project = Dune_load.find_loaded_project ~dir in
+    let partition = Loaded_project.partition loaded_project in
+    let install_bin_dir =
+      match Build_partition.purpose partition with
+      | Workspace ->
+        let context = Build_partition.resolver partition |> Context.name in
+        Some (Install.Context.bin_dir ~context)
+      | Mounted -> None
+    in
     let* expander = Expander0.get ~dir in
     let expand_value sw =
       Expander0.expand expander ~mode:Single sw
@@ -69,7 +78,12 @@ let get_installed_binaries stanzas =
         let dst = Install.Entry.Dst.local p in
         if Path.Local.is_root (Path.Local.parent_exn dst)
         then (
-          let origin = { Artifacts.binding = fb; dir; dst; enabled_if; package } in
+          let install_path =
+            Option.map install_bin_dir ~f:(fun dir -> Path.Build.append_local dir dst)
+          in
+          let origin =
+            { Artifacts.binding = fb; dir; dst; enabled_if; package; install_path }
+          in
           Some (Path.Local.basename dst, origin))
         else None)
       >>| List.filter_opt

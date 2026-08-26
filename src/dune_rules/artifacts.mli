@@ -8,6 +8,7 @@ type origin =
   ; dst : Path.Local.t
   ; enabled_if : bool Memo.t
   ; package : Package.Name.t option
+  ; install_path : Path.Build.t option
   }
 
 type where =
