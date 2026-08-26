@@ -1,5 +1,6 @@
 A mounted package may define a PPX driver and use it to preprocess its own
-library. A workspace consumer uses the same driver, resolving its libraries from
+library. Its plain and OCaml-syntax Dune files may both use source include
+stanzas. A workspace consumer uses the same driver, resolving its libraries from
 the mounted package without creating a second semantic workspace context.
 
   $ cat > dune-workspace <<'EOF'
@@ -22,12 +23,19 @@ the mounted package without creating a second semantic workspace context.
   > let () = print_endline Foo.message
   > EOF
 
-  $ mkdir foo
+  $ mkdir -p foo/generator
   $ cat > foo/dune-project <<'EOF'
-  > (lang dune 3.20)
+  > (lang dune 3.24)
   > (package (name foo))
   > EOF
   $ cat > foo/dune <<'EOF'
+  > (include libraries.inc)
+  > (rule
+  >  (target foo.ml)
+  >  (deps generator/proof.ml)
+  >  (action (copy generator/proof.ml %{target})))
+  > EOF
+  $ cat > foo/libraries.inc <<'EOF'
   > (library
   >  (name foo)
   >  (public_name foo)
@@ -44,9 +52,6 @@ the mounted package without creating a second semantic workspace context.
   >  (kind ppx_rewriter)
   >  (libraries foo_ppx_support)
   >  (ppx.driver (main Foo_ppx.main)))
-  > EOF
-  $ cat > foo/foo.ml <<'EOF'
-  > let message = "mounted ppx"
   > EOF
   $ cat > foo/foo_ppx_support.ml <<'EOF'
   > let touch () = ()
@@ -66,6 +71,23 @@ the mounted package without creating a second semantic workspace context.
   >   else
   >     exit 2
   > EOF
+  $ cat > foo/generator/dune <<EOF
+  > (* -*- tuareg -*- *)
+  > let () =
+  >   let count = open_out_gen [ Open_creat; Open_text; Open_append ] 0o666 "$PWD/eval-count" in
+  >   output_string count "eval\n";
+  >   close_out count
+  > let () = Jbuild_plugin.V1.send {|
+  > (include dune.inc)
+  > |}
+  > EOF
+  $ cat > foo/generator/dune.inc <<'EOF'
+  > (rule
+  >  (target proof.ml)
+  >  (action
+  >   (with-stdout-to %{target}
+  >    (echo "let message = \"mounted include ppx\""))))
+  > EOF
   $ tar cf foo.tar foo
   $ rm -rf foo
 
@@ -81,7 +103,18 @@ the mounted package without creating a second semantic workspace context.
 
   $ dune build ./main.exe --display quiet
   $ ./_build/default/main.exe
-  mounted ppx
+  mounted include ppx
+  $ wc -l < eval-count
+  1
+
+A second process re-evaluates the mounted OCaml-syntax file once, while both
+include paths retain snapshot ownership.
+
+  $ dune build ./main.exe --display quiet
+  $ ./_build/default/main.exe
+  mounted include ppx
+  $ wc -l < eval-count
+  2
 
 The package objects use the mounted artifact root. The synthesized PPX executable
 is a tool of the workspace resolver and uses its ordinary [.ppx] directory.
