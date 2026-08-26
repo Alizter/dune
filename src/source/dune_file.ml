@@ -461,7 +461,7 @@ let rec to_dir_map ast ~dune_version =
   Dir_map.merge_all (node :: subdirs)
 ;;
 
-let decode ~(file : Source_path.t) ~loaded_source project sexps =
+let decode ~file project sexps =
   let decoder =
     { decode =
         (fun ast d ->
@@ -469,38 +469,30 @@ let decode ~(file : Source_path.t) ~loaded_source project sexps =
           Dune_lang.Decoder.parse d Univ_map.empty (Dune_lang.Ast.List (Loc.none, ast)))
     }
   in
-  let decode_with_context context =
-    let inside_include = false in
-    let inside_subdir = false in
-    Ast.decode ~inside_include ~inside_subdir
-    |> decoder.decode sexps
-    |> evaluate_includes
-         ~decoder
-         ~context
-         ~inside_subdir
-         ~inside_include
-         Filename.current_dir_name
-    >>| to_dir_map ~dune_version:(Dune_project.dune_version project)
-  in
-  match file, loaded_source with
-  | Workspace file, None -> decode_with_context (Include_stanza.in_src_file file)
-  | Build _, None -> Code_error.raise "A build-backed Dune file has no loaded source" []
-  | Build file, Some source ->
-    decode_with_context (Include_stanza.in_loaded_file source file)
-  | Workspace _, Some _ -> Code_error.raise "A workspace Dune file has a loaded source" []
+  let inside_include = false in
+  let inside_subdir = false in
+  Ast.decode ~inside_include ~inside_subdir
+  |> decoder.decode sexps
+  |> evaluate_includes
+       ~decoder
+       ~context:(Include_stanza.in_source_file file)
+       ~inside_subdir
+       ~inside_include
+       Filename.current_dir_name
+  >>| to_dir_map ~dune_version:(Dune_project.dune_version project)
 ;;
 
 type t =
-  { path : Source_path.t option
+  { file : Source_tree_file.File.t option
   ; kind : kind
   ; (* for [kind = Ocaml_script], this is the part inserted with subdir *)
     plain : Dir_map.t
   }
 
-let to_dyn { path; kind; plain } =
+let to_dyn { file; kind; plain } =
   let open Dyn in
   record
-    [ "path", option Source_path.to_dyn path
+    [ "file", option Source_tree_file.File.to_dyn file
     ; "kind", dyn_of_kind kind
     ; "plain", Dir_map.to_dyn plain
     ]
@@ -517,11 +509,11 @@ let dirs_stanza_loc t =
 
 let files t = (Dir_map.root t.plain).files
 
-let load_plain sexps ~file ~loaded_source ~from_parent ~project =
+let load_plain sexps ~file ~from_parent ~project =
   let+ parsed =
     match file with
     | None -> Memo.return Dir_map.empty
-    | Some file -> decode ~file ~loaded_source project sexps
+    | Some file -> decode ~file project sexps
   in
   match from_parent with
   | None -> parsed
@@ -530,28 +522,18 @@ let load_plain sexps ~file ~loaded_source ~from_parent ~project =
 
 let sub_dirnames t = Dir_map.sub_dirs t.plain
 
-let load_file file ~loaded_source ~from_parent ~project =
+let load_file file ~from_parent ~project =
   let+ kind, plain =
-    let load_plain = load_plain ~file ~loaded_source ~from_parent ~project in
+    let load_plain = load_plain ~file ~from_parent ~project in
     match file with
     | None ->
       let+ plain = load_plain [] in
       Plain, plain
     | Some file ->
-      let* contents =
-        match file, loaded_source with
-        | Workspace file, None ->
-          Fs_memo.file_contents (Path.Outside_build_dir.In_source_dir file)
-        | Build _, None ->
-          Code_error.raise "A build-backed Dune file has no loaded source" []
-        | Build file, Some source ->
-          Loaded_source.local_path source file
-          |> Option.value_exn
-          |> Loaded_source.read_file source
-        | Workspace _, Some _ ->
-          Code_error.raise "A workspace Dune file has a loaded source" []
+      let* contents = Source_tree_file.File.read file >>| Option.value_exn in
+      let lexbuf =
+        Lexbuf.from_string contents ~fname:(Source_tree_file.File.diagnostic_name file)
       in
-      let lexbuf = Lexbuf.from_string contents ~fname:(Source_path.to_string file) in
       let kind, ast =
         if Dune_lang.Dune_file_script.is_script lexbuf
         then Ocaml_script contents, []
@@ -560,11 +542,16 @@ let load_file file ~loaded_source ~from_parent ~project =
       let+ ast = load_plain ast in
       kind, ast
   in
-  { path = file; kind; plain }
+  { file; kind; plain }
 ;;
 
-let path t = Option.bind t.path ~f:Source_path.as_workspace
-let source_path t = t.path
+let path t = Option.bind t.file ~f:Source_tree_file.File.as_workspace
+let source_path t = Option.map t.file ~f:Source_tree_file.File.source_path
+
+let filename t =
+  Option.map t.file ~f:(fun file ->
+    Source_tree_file.File.source_path file |> Source_path.basename)
+;;
 
 let ensure_dune_project_file_exists =
   let impl ~is_error project =
@@ -605,7 +592,7 @@ let ensure_dune_project_file_exists =
     | Error -> impl ~is_error:true project
 ;;
 
-let load_at ~dir ~loaded_source (status : Source_dir_status.t) project ~files ~parent =
+let load ~dir (status : Source_dir_status.t) project ~files ~parent =
   let file =
     if status = Data_only
     then None
@@ -619,7 +606,7 @@ let load_at ~dir ~loaded_source (status : Source_dir_status.t) project ~files ~p
   in
   let parent =
     Option.bind parent ~f:(fun parent ->
-      Dir_map.descend parent.plain (Source_path.basename dir))
+      Dir_map.descend parent.plain (Source_tree_file.Dir.basename dir))
   in
   match parent, file with
   | None, None -> Memo.return None
@@ -629,26 +616,6 @@ let load_at ~dir ~loaded_source (status : Source_dir_status.t) project ~files ~p
       | None -> Memo.return ()
       | Some _ -> ensure_dune_project_file_exists project
     in
-    let file = Option.map file ~f:(Source_path.relative_fname dir) in
-    load_file file ~loaded_source ~from_parent:parent ~project >>| Option.some
-;;
-
-let load ~dir status project ~files ~parent =
-  load_at
-    ~dir:(Source_path.workspace dir)
-    ~loaded_source:None
-    status
-    project
-    ~files
-    ~parent
-;;
-
-let load_loaded ~source ~dir status project ~files ~parent =
-  load_at
-    ~dir:(Source_path.build dir)
-    ~loaded_source:(Some source)
-    status
-    project
-    ~files
-    ~parent
+    let file = Option.map file ~f:(Source_tree_file.Dir.file dir) in
+    load_file file ~from_parent:parent ~project >>| Option.some
 ;;

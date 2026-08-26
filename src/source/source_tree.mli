@@ -39,14 +39,25 @@ end
 val root : unit -> Dir.t Memo.t
 
 module Rules : sig
+  module File : sig
+    type t
+
+    val source_path : t -> Source_path.t
+    val relative : t -> Loc.t -> string -> t
+    val read : t -> string option Memo.t
+    val equal : t -> t -> bool
+    val diagnostic_name : t -> string
+    val include_context : t -> t Include_stanza.context
+  end
+
   module Dir : sig
     type t
     type sub_dir
 
     val source : Dir.t -> t
     val source_path : t -> Source_path.t
+    val file : t -> Filename.t -> File.t
     val relative_dir : t -> Path.Local.t
-    val loaded_source : t -> Loaded_source.t option
     val filenames : t -> Filename.Array.Set.t
     val sub_dirs : t -> sub_dir Filename.Array.Map.t
     val sub_dir_names : t -> Filename.Array.Set.t
