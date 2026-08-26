@@ -38,6 +38,44 @@ end
 
 val root : unit -> Dir.t Memo.t
 
+module Rules : sig
+  module Dir : sig
+    type t
+    type sub_dir
+
+    val source : Dir.t -> t
+    val source_path : t -> Source_path.t
+    val relative_dir : t -> Path.Local.t
+    val loaded_source : t -> Loaded_source.t option
+    val filenames : t -> Filename.Array.Set.t
+    val sub_dirs : t -> sub_dir Filename.Array.Map.t
+    val sub_dir_names : t -> Filename.Array.Set.t
+    val sub_dir_as_t : sub_dir -> t Memo.t
+    val status : t -> Source_dir_status.t
+    val dune_file : t -> Dune_file.t option
+    val project : t -> Dune_project.t
+    val to_dyn : t -> Dyn.t
+
+    module Make_map_reduce (M : Memo.S) (Outcome : Monoid) : sig
+      val map_reduce
+        :  t
+        -> traverse:Source_dir_status.Set.t
+        -> trace_event_name:string
+        -> f:(t -> Outcome.t M.t)
+        -> Outcome.t M.t
+    end
+  end
+
+  module Loaded : sig
+    type t
+
+    val load : Loaded_source.t -> t Memo.t
+    val source : t -> Loaded_source.t
+    val root : t -> Dir.t
+    val projects : t -> Dune_project.t list
+  end
+end
+
 module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) : sig
   (** Traverse starting from the root and report progress in the status line *)
   val map_reduce

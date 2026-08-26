@@ -32,6 +32,29 @@ module Build = struct
   ;;
 end
 
+module Loaded = struct
+  type t = Loaded_source.t * Path.Local.t
+
+  let parent_exn (source, path) = source, Path.Local.parent_exn path
+
+  let to_string_maybe_quoted (source, path) =
+    Loaded_source.diagnostic_name source path |> String.maybe_quoted
+  ;;
+
+  let relative (source, dir) _loc path = source, Path.Local.relative dir path
+
+  let equal (source, path) (source', path') =
+    Loaded_source.equal source source' && Path.Local.equal path path'
+  ;;
+
+  let file_exists (source, path) = Loaded_source.file_exists source path
+
+  let with_lexbuf_from_file (source, path) ~f =
+    let+ contents = Loaded_source.read_file source path in
+    Lexbuf.from_string contents ~fname:(Loaded_source.diagnostic_name source path) |> f
+  ;;
+end
+
 type 'a context =
   { current_file : 'a
   ; include_stack : (Loc.t * 'a) list
@@ -41,6 +64,11 @@ type 'a context =
 let in_file file path = { current_file = file; include_stack = []; path }
 let in_src_file file = in_file file (module Source)
 let in_build_file file = in_file file (module Build)
+
+let in_loaded_file source file =
+  let path = Loaded_source.local_path source file |> Option.value_exn in
+  in_file (source, path) (module Loaded)
+;;
 
 let file_path (type a) { path; current_file; _ } loc fn =
   let module Path = (val path : Path with type t = a) in

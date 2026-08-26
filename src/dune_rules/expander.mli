@@ -6,12 +6,14 @@ type t
 
 val dir : t -> Path.Build.t
 val source_dir : t -> Source_path.t
+val loaded_source : t -> Loaded_source.t option
 val context : t -> Context_name.t
 val project : t -> Dune_project.t
 
 val make_root
   :  project:Dune_project.t
   -> source_dir:Source_path.t
+  -> loaded_source:Loaded_source.t option
   -> scope:Scope.t Memo.t
   -> scope_host:Scope.t Memo.t
   -> context:Context.t
@@ -33,6 +35,7 @@ val set_scope
   :  t
   -> dir:Path.Build.t
   -> source_dir:Source_path.t
+  -> loaded_source:Loaded_source.t option
   -> project:Dune_project.t
   -> scope:Scope.t Memo.t
   -> scope_host:Scope.t Memo.t

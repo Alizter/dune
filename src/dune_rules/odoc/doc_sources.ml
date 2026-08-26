@@ -79,6 +79,10 @@ let build_mlds_map stanzas ~dir ~files expander =
         ~expand
         ~dir
         ~source_dir:(Dune_file.source_dir stanzas)
+        ~loaded_source:
+          (Dune_file.loaded_dir stanzas
+           |> Loaded_dir.project
+           |> Loaded_project.loaded_source)
       >>| of_file_bindings
     in
     let mlds = from_mld_files @ from_files in

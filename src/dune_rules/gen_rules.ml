@@ -18,6 +18,7 @@ let install_stanza_rules ~ctx_dir ~expander (install_conf : Install_conf.t) =
             ~expand
             ~dir:ctx_dir
             ~source_dir:(Expander.source_dir expander)
+            ~loaded_source:(Expander.loaded_source expander)
         and+ dirs_expanded =
           Install_entry.Dir.to_file_bindings_expanded
             install_conf.dirs
@@ -198,7 +199,14 @@ end = struct
       let+ () = Plugin_rules.setup_rules ~sctx ~dir p in
       empty_none
     | Cinaps.T cinaps ->
-      let+ () = Cinaps.gen_rules sctx cinaps ~dir ~scope in
+      let+ () =
+        Cinaps.gen_rules
+          sctx
+          cinaps
+          ~dir
+          ~scope
+          ~loaded_source:(Expander.loaded_source expander)
+      in
       empty_none
     | Mdx.T mdx ->
       Expander.eval_blang expander (Mdx.enabled_if mdx)
@@ -615,10 +623,18 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
             match src_dir with
             | Workspace _ -> Memo.return Filename.Set.empty
             | Build source_dir ->
-              Build_system.directory_target_contents_opt ~dir:source_dir
-              >>| Option.map ~f:(fun (_, subdirs) ->
-                Filename.Array.Set.to_list subdirs |> Filename.Set.of_list)
-              >>| Option.value ~default:Filename.Set.empty
+              let source =
+                Loaded_project.loaded_source loaded_project |> Option.value_exn
+              in
+              Loaded_source.local_path source source_dir
+              |> Option.value_exn
+              |> Loaded_source.readdir source
+              >>| Filename.Map.to_list
+              >>| List.filter_map ~f:(fun (name, kind) ->
+                match kind with
+                | `Dir -> Some name
+                | `File -> None)
+              >>| Filename.Set.of_list
           in
           let allowed_subdirs =
             let automatic = Automatic_subdir.subdirs components in
@@ -703,7 +719,9 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
       in
       match src_dir with
       | Source_path.Build source_dir ->
-        Pkg_sources.add_artifact_source_rules ~dir ~source_dir rules
+        let source = Loaded_project.loaded_source loaded_project |> Option.value_exn in
+        let source_dir = Loaded_source.local_path source source_dir |> Option.value_exn in
+        Pkg_sources.add_artifact_source_rules ~dir ~source ~source_dir rules
       | Workspace src_dir ->
         (match Opam_create.gen_rules sctx ~dir ~nearest_src_dir ~src_dir with
          | None -> rules

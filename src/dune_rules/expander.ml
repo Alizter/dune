@@ -50,6 +50,7 @@ let resolve_pkg_install_file = Fdecl.create Dyn.opaque
 type t =
   { dir : Path.Build.t
   ; source_dir : Source_path.t
+  ; loaded_source : Loaded_source.t option
   ; env : Env.t Memo.t
   ; local_env : string Action_builder.t Env.Var.Map.t
   ; public_libs : Lib.DB.t Memo.t
@@ -66,6 +67,7 @@ type t =
 let artifacts t = t.artifacts_host
 let dir t = t.dir
 let source_dir t = t.source_dir
+let loaded_source t = t.loaded_source
 let project t = t.project
 let context t = Context.name t.context
 
@@ -78,8 +80,8 @@ let set_local_env_var t ~var ~value =
   { t with local_env = Env.Var.Map.set t.local_env var value }
 ;;
 
-let set_scope t ~dir ~source_dir ~project ~scope ~scope_host =
-  { t with dir; source_dir; project; scope; scope_host }
+let set_scope t ~dir ~source_dir ~loaded_source ~project ~scope ~scope_host =
+  { t with dir; source_dir; loaded_source; project; scope; scope_host }
 ;;
 
 let set_artifacts t ~artifacts_host = { t with artifacts_host }
@@ -974,6 +976,7 @@ let expand_str_partial t template =
 let make_root
       ~project
       ~source_dir
+      ~loaded_source
       ~scope
       ~scope_host
       ~(context : Context.t)
@@ -984,6 +987,7 @@ let make_root
   =
   { dir = Context.build_dir context
   ; source_dir
+  ; loaded_source
   ; env
   ; local_env = Env.Var.Map.empty
   ; bindings = Pform.Map.empty

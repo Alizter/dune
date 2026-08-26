@@ -66,6 +66,7 @@ let get_installed_binaries stanzas =
           ~expand:expand_value
           ~dir
           ~source_dir
+          ~loaded_source:(Loaded_project.loaded_source loaded_project)
       in
       Memo.List.map unexpanded_file_bindings ~f:(fun fb ->
         let+ p =

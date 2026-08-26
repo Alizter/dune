@@ -208,30 +208,32 @@ let include_dir_flags ~expander ~dir ~include_dirs =
                       in
                       Command.Args.S (Appendable_list.to_list l))
                  | Some (Source_path.Build source_dir) ->
-                   let rec collect contents_dir output_dir =
-                     let* contents =
-                       Action_builder.of_memo
-                         (Build_system.directory_target_contents_opt ~dir:contents_dir)
+                   let source =
+                     Loaded_project.loaded_source loaded_project |> Option.value_exn
+                   in
+                   let rec collect source_dir output_dir =
+                     let* entries =
+                       Action_builder.of_memo (Loaded_source.readdir source source_dir)
                      in
-                     match contents with
-                     | None -> include_dir_does_not_exist ()
-                     | Some (_, subdirs) ->
-                       let+ children =
-                         Filename.Array.Set.to_list subdirs
-                         |> Action_builder.List.map ~f:(fun subdir ->
-                           collect
-                             (Path.Build.relative_fname contents_dir subdir)
-                             (Path.Build.relative_fname output_dir subdir))
-                       in
-                       hidden_deps (Path.build output_dir) :: List.concat children
+                     let+ children =
+                       Filename.Map.to_list entries
+                       |> Action_builder.List.filter_map ~f:(fun (name, kind) ->
+                         match kind with
+                         | `File -> Action_builder.return None
+                         | `Dir ->
+                           let+ deps =
+                             collect
+                               (Path.Local.relative_fname source_dir name)
+                               (Path.Build.relative_fname output_dir name)
+                           in
+                           Some deps)
+                     in
+                     hidden_deps (Path.build output_dir) :: List.concat children
                    in
-                   let* source_exists =
-                     Action_builder.of_memo
-                       (Build_system.directory_target_contents_opt ~dir:source_dir)
-                     >>| Option.is_some
+                   let source_dir =
+                     Loaded_source.local_path source source_dir |> Option.value_exn
                    in
-                   let contents_dir = if source_exists then source_dir else output_dir in
-                   let+ deps = collect contents_dir output_dir in
+                   let+ deps = collect source_dir output_dir in
                    Command.Args.S deps)
        in
        Command.Args.S [ A "-I"; Path include_dir; dep_args ])

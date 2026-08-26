@@ -32,11 +32,11 @@ let alternative_fname = Filename.dune_file
 
 type kind =
   | Plain
-  | Ocaml_script
+  | Ocaml_script of string
 
 let dyn_of_kind = function
   | Plain -> Dyn.variant "Plain" []
-  | Ocaml_script -> Dyn.variant "Ocaml_script" []
+  | Ocaml_script _ -> Dyn.variant "Ocaml_script" []
 ;;
 
 module Dir_map = struct
@@ -461,7 +461,7 @@ let rec to_dir_map ast ~dune_version =
   Dir_map.merge_all (node :: subdirs)
 ;;
 
-let decode ~(file : Source_path.t) project sexps =
+let decode ~(file : Source_path.t) ~loaded_source project sexps =
   let decoder =
     { decode =
         (fun ast d ->
@@ -482,9 +482,12 @@ let decode ~(file : Source_path.t) project sexps =
          Filename.current_dir_name
     >>| to_dir_map ~dune_version:(Dune_project.dune_version project)
   in
-  match file with
-  | Workspace file -> decode_with_context (Include_stanza.in_src_file file)
-  | Build file -> decode_with_context (Include_stanza.in_build_file file)
+  match file, loaded_source with
+  | Workspace file, None -> decode_with_context (Include_stanza.in_src_file file)
+  | Build _, None -> Code_error.raise "A build-backed Dune file has no loaded source" []
+  | Build file, Some source ->
+    decode_with_context (Include_stanza.in_loaded_file source file)
+  | Workspace _, Some _ -> Code_error.raise "A workspace Dune file has a loaded source" []
 ;;
 
 type t =
@@ -514,11 +517,11 @@ let dirs_stanza_loc t =
 
 let files t = (Dir_map.root t.plain).files
 
-let load_plain sexps ~file ~from_parent ~project =
+let load_plain sexps ~file ~loaded_source ~from_parent ~project =
   let+ parsed =
     match file with
     | None -> Memo.return Dir_map.empty
-    | Some file -> decode ~file project sexps
+    | Some file -> decode ~file ~loaded_source project sexps
   in
   match from_parent with
   | None -> parsed
@@ -527,24 +530,31 @@ let load_plain sexps ~file ~from_parent ~project =
 
 let sub_dirnames t = Dir_map.sub_dirs t.plain
 
-let load_file file ~from_parent ~project =
+let load_file file ~loaded_source ~from_parent ~project =
   let+ kind, plain =
-    let load_plain = load_plain ~file ~from_parent ~project in
+    let load_plain = load_plain ~file ~loaded_source ~from_parent ~project in
     match file with
     | None ->
       let+ plain = load_plain [] in
       Plain, plain
     | Some file ->
       let* contents =
-        match file with
-        | Workspace file ->
+        match file, loaded_source with
+        | Workspace file, None ->
           Fs_memo.file_contents (Path.Outside_build_dir.In_source_dir file)
-        | Build file -> Build_system.read_file (Path.build file)
+        | Build _, None ->
+          Code_error.raise "A build-backed Dune file has no loaded source" []
+        | Build file, Some source ->
+          Loaded_source.local_path source file
+          |> Option.value_exn
+          |> Loaded_source.read_file source
+        | Workspace _, Some _ ->
+          Code_error.raise "A workspace Dune file has a loaded source" []
       in
       let lexbuf = Lexbuf.from_string contents ~fname:(Source_path.to_string file) in
       let kind, ast =
         if Dune_lang.Dune_file_script.is_script lexbuf
-        then Ocaml_script, []
+        then Ocaml_script contents, []
         else Plain, Dune_lang.Parser.parse lexbuf ~mode:Many
       in
       let+ ast = load_plain ast in
@@ -595,7 +605,7 @@ let ensure_dune_project_file_exists =
     | Error -> impl ~is_error:true project
 ;;
 
-let load_at ~dir (status : Source_dir_status.t) project ~files ~parent =
+let load_at ~dir ~loaded_source (status : Source_dir_status.t) project ~files ~parent =
   let file =
     if status = Data_only
     then None
@@ -620,13 +630,25 @@ let load_at ~dir (status : Source_dir_status.t) project ~files ~parent =
       | Some _ -> ensure_dune_project_file_exists project
     in
     let file = Option.map file ~f:(Source_path.relative_fname dir) in
-    load_file file ~from_parent:parent ~project >>| Option.some
+    load_file file ~loaded_source ~from_parent:parent ~project >>| Option.some
 ;;
 
 let load ~dir status project ~files ~parent =
-  load_at ~dir:(Source_path.workspace dir) status project ~files ~parent
+  load_at
+    ~dir:(Source_path.workspace dir)
+    ~loaded_source:None
+    status
+    project
+    ~files
+    ~parent
 ;;
 
-let load_build ~dir status project ~files ~parent =
-  load_at ~dir:(Source_path.build dir) status project ~files ~parent
+let load_loaded ~source ~dir status project ~files ~parent =
+  load_at
+    ~dir:(Source_path.build dir)
+    ~loaded_source:(Some source)
+    status
+    project
+    ~files
+    ~parent
 ;;

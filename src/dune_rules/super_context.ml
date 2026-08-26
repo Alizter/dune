@@ -71,7 +71,13 @@ let expander_for_artifacts t ~dir =
   let project = Loaded_project.project loaded_project in
   let source_dir = Loaded_project.source_path loaded_project dir |> Option.value_exn in
   Expander.extend_env t.root_expander ~env:external_env
-  |> Expander.set_scope ~dir ~source_dir ~project ~scope ~scope_host
+  |> Expander.set_scope
+       ~dir
+       ~source_dir
+       ~loaded_source:(Loaded_project.loaded_source loaded_project)
+       ~project
+       ~scope
+       ~scope_host
 ;;
 
 let expander t ~dir = t.get_expander dir
@@ -319,6 +325,7 @@ let create ~(context : Context.t) ~(host : t option) ~packages ~stanzas =
     Expander.make_root
       ~project:(Loaded_project.project loaded_project)
       ~source_dir:(Loaded_project.source_root loaded_project)
+      ~loaded_source:(Loaded_project.loaded_source loaded_project)
       ~scope
       ~scope_host
       ~context

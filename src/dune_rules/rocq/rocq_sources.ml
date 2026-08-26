@@ -175,10 +175,8 @@ let expected_file ~rocq_lang_version t m =
 
 let mlg_files ~sctx ~dir ~modules =
   let open Memo.O in
-  let* source_dir =
-    let+ project = Dune_load.find_loaded_project ~dir in
-    Loaded_project.source_path project dir |> Option.value_exn
-  in
+  let* project = Dune_load.find_loaded_project ~dir in
+  let source_dir = Loaded_project.source_path project dir |> Option.value_exn in
   let+ standard =
     (* All .mlg files in the current directory *)
     match source_dir with
@@ -197,10 +195,20 @@ let mlg_files ~sctx ~dir ~modules =
                source)
         else None)
     | Build source_dir ->
-      Build_system.files_of ~dir:(Path.build source_dir)
-      >>| Filename_set.filenames
-      >>| Filename.Array.Set.to_list
-      >>| List.filter_map ~f:(fun filename ->
+      let source = Loaded_project.loaded_source project |> Option.value_exn in
+      let+ filenames =
+        Loaded_source.local_path source source_dir
+        |> Option.value_exn
+        |> Loaded_source.readdir source
+        >>| Filename.Map.to_list
+        >>| List.filter_map ~f:(fun (filename, kind) ->
+          match kind with
+          | `Dir -> None
+          | `File -> Some filename)
+        >>| Filename.Array.Set.of_list
+      in
+      Filename.Array.Set.to_list filenames
+      |> List.filter_map ~f:(fun filename ->
         if
           Filename.Extension.Or_empty.check
             (Filename.extension filename)

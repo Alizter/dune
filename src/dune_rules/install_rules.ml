@@ -600,6 +600,7 @@ end = struct
         ~expand
         ~dir
         ~source_dir
+        ~loaded_source:(Expander.loaded_source expander)
       >>= Memo.List.map ~f:(fun fb ->
         let+ entry = make_entry ~kind:File fb in
         let loc = File_binding.Expanded.src_loc fb in
