@@ -64,12 +64,7 @@ end
 let lock_dir_encode_decode_round_trip_test ?commit ~lock_dir_path ~lock_dir () =
   let lock_dir_path = Path.of_string lock_dir_path in
   Lock_dir.Write_disk.(
-    prepare
-      ~lock_dir_path
-      ~files:Package_name.Map.empty
-      ~portable_lock_dir:true
-      lock_dir
-    |> commit);
+    prepare ~lock_dir_path ~files:Package_name.Map.empty lock_dir |> commit);
   let lock_dir_round_tripped =
     try Lock_dir.read_disk_exn lock_dir_path with
     | User_error.E _ as exn ->
@@ -114,7 +109,6 @@ let%expect_test "encode/decode round trip test for lockdir with no deps" =
       ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
       ~solved_for_platforms:[]
       ~package_paths:Lock_dir.Package_paths.Versioned
-      ~portable_lock_dir:true
   in
   printfn "uses versioned paths: %b" (Lock_dir.uses_versioned_paths lock_dir);
   lock_dir_encode_decode_round_trip_test ~lock_dir_path:"empty_lock_dir" ~lock_dir ();
@@ -172,7 +166,6 @@ let%expect_test "encode/decode round trip test for lockdir with simple deps" =
            }
          ~solved_for_platforms:[]
          ~package_paths:Lock_dir.Package_paths.Versioned
-         ~portable_lock_dir:true
          (Package_name.Map.of_list_exn
             [ mk_pkg_basic ~name:"foo" ~version:(Package_version.of_string "0.1.0")
             ; mk_pkg_basic ~name:"bar" ~version:(Package_version.of_string "0.2.0")
@@ -334,7 +327,6 @@ let%expect_test "encode/decode round trip test for lockdir with complex deps" =
       ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
       ~solved_for_platforms:[]
       ~package_paths:Lock_dir.Package_paths.Versioned
-      ~portable_lock_dir:true
       (Package_name.Map.of_list_exn [ pkg_a; pkg_b; pkg_c ])
   in
   lock_dir_encode_decode_round_trip_test ~lock_dir_path:"complex_lock_dir" ~lock_dir ();
@@ -490,7 +482,6 @@ let%expect_test "encode/decode round trip test with locked repo revision" =
         ~expanded_solver_variable_bindings:Expanded_variable_bindings.empty
         ~solved_for_platforms:[]
         ~package_paths:Lock_dir.Package_paths.Versioned
-        ~portable_lock_dir:true
         (Package_name.Map.of_list_exn [ pkg_a; pkg_b; pkg_c ])
     in
     lock_dir_encode_decode_round_trip_test

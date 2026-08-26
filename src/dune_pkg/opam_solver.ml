@@ -2273,12 +2273,9 @@ let deduplicate_platform_overlays platform_overlays =
 
 (* Split [solver_env] into a portable base env (with platform-specific
    variables unset) and the distinct platform overlays to solve for. *)
-let base_solver_env_and_platforms solver_env ~solve_for_platforms ~portable_lock_dir =
-  if portable_lock_dir
-  then
-    ( Solver_env.unset_multi solver_env Dune_lang.Package_variable_name.platform_specific
-    , deduplicate_platform_overlays solve_for_platforms )
-  else solver_env, [ Solver_env.empty ]
+let base_solver_env_and_platforms solver_env ~solve_for_platforms =
+  ( Solver_env.unset_multi solver_env Dune_lang.Package_variable_name.platform_specific
+  , deduplicate_platform_overlays solve_for_platforms )
 ;;
 
 let solve_lock_dir
@@ -2290,7 +2287,6 @@ let solve_lock_dir
       ~pins:pinned_packages
       ~constraints
       ~selected_depopts
-      ~portable_lock_dir
       ~package_paths
   =
   match platform_overlays with
@@ -2396,7 +2392,6 @@ let solve_lock_dir
                   opam_package
                   ~pinned:(Package_name.Set.mem pinned_package_names name)
                   resolved_package
-                  ~portable_lock_dir
                 |> Result.map ~f:(fun branches -> name, branches))
               |> Result.List.all
             in
@@ -2550,7 +2545,6 @@ let solve_lock_dir
               ~expanded_solver_variable_bindings
               ~solved_for_platforms:full_solver_envs
               ~package_paths
-              ~portable_lock_dir
           in
           let+ files =
             match pkgs_by_name with

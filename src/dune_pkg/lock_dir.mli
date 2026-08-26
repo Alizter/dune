@@ -117,9 +117,9 @@ module Package_paths : sig
     | Unversioned
 
   (** Choose the package path layout for a newly generated lock directory.
-      [DUNE_PKG_VERSIONED_LOCK_DIR_PATHS=enabled|disabled] overrides the
-      existing default selected by [portable_lock_dir]. *)
-  val for_writing : portable_lock_dir:bool -> t
+      [DUNE_PKG_VERSIONED_LOCK_DIR_PATHS=disabled] selects unversioned paths;
+      versioned paths are the default. *)
+  val for_writing : unit -> t
 end
 
 type t = private
@@ -161,7 +161,6 @@ val create_latest_version
   -> expanded_solver_variable_bindings:Solver_stats.Expanded_variable_bindings.t
   -> solved_for_platforms:Solver_env.t list
   -> package_paths:Package_paths.t
-  -> portable_lock_dir:bool
   -> t
 
 module Metadata : Dune_sexp.Versioned_file.S with type data := unit
@@ -175,7 +174,6 @@ module Write_disk : sig
   val prepare
     :  lock_dir_path:Path.t
     -> files:File_entry.t Package_version.Map.Multi.t Package_name.Map.t
-    -> portable_lock_dir:bool
     -> lock_dir
     -> t
 

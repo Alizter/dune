@@ -163,7 +163,6 @@ module Spec = struct
           solver_env
           ~solve_for_platforms:
             (Option.value solve_for_platforms ~default:[ solver_env_from_current_system ])
-          ~portable_lock_dir:true
       in
       Opam_solver.solve_lock_dir
         base_solver_env
@@ -174,9 +173,7 @@ module Spec = struct
         ~local_packages
         ~constraints
         ~selected_depopts
-        ~package_paths:
-          (Dune_pkg.Lock_dir.Package_paths.for_writing ~portable_lock_dir:true)
-        ~portable_lock_dir:true
+        ~package_paths:(Dune_pkg.Lock_dir.Package_paths.for_writing ())
     in
     match solver_result with
     | Error (`Manifest_error diagnostic) -> raise (User_error.E diagnostic)
@@ -186,11 +183,7 @@ module Spec = struct
       let+ lock_dir =
         Dune_pkg.Lock_dir.compute_missing_checksums ~pinned_packages lock_dir
       in
-      Dune_pkg.Lock_dir.Write_disk.prepare
-        ~portable_lock_dir:true
-        ~lock_dir_path
-        ~files
-        lock_dir
+      Dune_pkg.Lock_dir.Write_disk.prepare ~lock_dir_path ~files lock_dir
       |> Dune_pkg.Lock_dir.Write_disk.commit
   ;;
 end

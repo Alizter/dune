@@ -1052,9 +1052,9 @@ module Package_paths = struct
 
   let env_var = Env.Var.of_string "DUNE_PKG_VERSIONED_LOCK_DIR_PATHS"
 
-  let for_writing ~portable_lock_dir =
+  let for_writing () =
     match Env.get Env.initial env_var with
-    | None -> if portable_lock_dir then Versioned else Unversioned
+    | None -> Versioned
     | Some "enabled" -> Versioned
     | Some "disabled" -> Unversioned
     | Some value ->
@@ -1197,7 +1197,6 @@ let create_latest_version
       ~expanded_solver_variable_bindings
       ~solved_for_platforms
       ~package_paths
-      ~portable_lock_dir
   =
   let packages =
     Package_name.Map.map packages ~f:(fun (pkg : Pkg.t) ->
@@ -1229,23 +1228,18 @@ let create_latest_version
       complete, Some used
   in
   let solved_for_platforms_platform_specific_only =
-    if portable_lock_dir
-    then (
-      match
-        List.map
-          solved_for_platforms
-          ~f:Solver_env.remove_all_except_platform_specific
-      with
-      | [] -> [ Solver_env.empty ]
-      | platforms -> platforms)
-    else []
+    List.map solved_for_platforms ~f:Solver_env.remove_all_except_platform_specific
   in
+  let solved_for_platforms_platform_specific_only =
+    match solved_for_platforms_platform_specific_only with
+    | [] -> [ Solver_env.empty ]
+    | platforms -> platforms
+  in
+  (* Only include solver variables which are not platform-specific, so that
+     the lockdir is portable across different platforms. *)
   let expanded_solver_variable_bindings =
-    if portable_lock_dir
-    then
-      Solver_stats.Expanded_variable_bindings.remove_platform_specific
-        expanded_solver_variable_bindings
-    else expanded_solver_variable_bindings
+    Solver_stats.Expanded_variable_bindings.remove_platform_specific
+      expanded_solver_variable_bindings
   in
   { version
   ; dependency_hash
@@ -1503,7 +1497,6 @@ module Write_disk = struct
   let prepare
         ~lock_dir_path:lock_dir_path_external
         ~(files : File_entry.t Package_version.Map.Multi.t Package_name.Map.t)
-        ~portable_lock_dir:_
         lock_dir
     =
     let lock_dir_hidden =

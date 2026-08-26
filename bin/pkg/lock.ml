@@ -83,8 +83,7 @@ let summary_message ~lock_dir_path ~(lock_dir : Lock_dir.t) ~maybe_perf_stats =
   let common_packages =
     Solver_env.Map.values opam_package_sets_by_platform
     |> List.reduce ~f:OpamPackage.Set.inter
-    |> Option.value ~default:
-         (OpamPackage.Map.keys pkgs_by_opam_package |> OpamPackage.Set.of_list)
+    |> Option.value ~default:OpamPackage.Set.empty
   in
   let pp_package_set package_set =
     if OpamPackage.Set.is_empty package_set
@@ -93,7 +92,7 @@ let summary_message ~lock_dir_path ~(lock_dir : Lock_dir.t) ~maybe_perf_stats =
       let pkgs =
         OpamPackage.Set.elements package_set |> List.map ~f:opam_package_to_pkg
       in
-      pp_packages pkgs)
+      Pkg_common.pp_packages pkgs)
   in
   let uncommon_packages_by_platform =
     Solver_env.Map.map opam_package_sets_by_platform ~f:(fun package_set ->
@@ -147,7 +146,6 @@ let solve_lock_dir
       ~local_packages
       ~project_pins
       ~print_perf_stats
-      ~portable_lock_dir
       version_preference
       solver_env_from_current_system
       lock_dir_path
@@ -173,9 +171,11 @@ let solve_lock_dir
   in
   let solve_for_platforms =
     match solve_for_platforms with
-    | Some solve_for_platforms -> solve_for_platforms
-    | None ->
-      [ Option.value solver_env_from_current_system ~default:Solver_env.empty ]
+    | Some solve_for_platforms ->
+      (* Explicit platform entries are authoritative: neither [solver_env] nor
+         [unset_solver_vars] rewrites them. *)
+      solve_for_platforms
+    | None -> [ Option.value solver_env_from_current_system ~default:Solver_env.empty ]
   in
   let solver_env =
     solver_env
@@ -200,10 +200,7 @@ let solve_lock_dir
   let time_solve_start = Time.now () in
   progress_state := Some Progress_indicator.Per_lockdir.State.Solving;
   let solver_env, platform_overlays =
-    Dune_pkg.Opam_solver.base_solver_env_and_platforms
-      solver_env
-      ~solve_for_platforms
-      ~portable_lock_dir
+    Dune_pkg.Opam_solver.base_solver_env_and_platforms solver_env ~solve_for_platforms
   in
   let* result =
     Dune_pkg.Opam_solver.solve_lock_dir
@@ -219,8 +216,7 @@ let solve_lock_dir
         (Package_name.Map.map local_packages ~f:Dune_pkg.Local_package.for_solver)
       ~constraints:(constraints_of_workspace workspace ~lock_dir_path)
       ~selected_depopts:(depopts_of_workspace workspace ~lock_dir_path)
-      ~package_paths:(Lock_dir.Package_paths.for_writing ~portable_lock_dir)
-      ~portable_lock_dir
+      ~package_paths:(Lock_dir.Package_paths.for_writing ())
   in
   match result with
   | Error message ->
@@ -253,14 +249,11 @@ let solve_lock_dir
       else []
     in
     let summary_message =
-      User_message.make
-        (summary_message ~lock_dir_path ~lock_dir ~maybe_perf_stats)
+      User_message.make (summary_message ~lock_dir_path ~lock_dir ~maybe_perf_stats)
     in
     progress_state := None;
     let+ lock_dir = Lock_dir.compute_missing_checksums ~pinned_packages lock_dir in
-    Ok
-      ( Lock_dir.Write_disk.prepare ~portable_lock_dir ~lock_dir_path ~files lock_dir
-      , summary_message )
+    Ok (Lock_dir.Write_disk.prepare ~lock_dir_path ~files lock_dir, summary_message)
 ;;
 
 let solve
@@ -271,7 +264,6 @@ let solve
       ~version_preference
       ~lock_dirs
       ~print_perf_stats
-      ~portable_lock_dir
   =
   let open Fiber.O in
   (* a list of thunks that will perform all the file IO side
@@ -294,7 +286,6 @@ let solve
                 ~local_packages
                 ~project_pins
                 ~print_perf_stats
-                ~portable_lock_dir
                 version_preference
                 solver_env_from_current_system
                 lockdir_path
@@ -307,32 +298,17 @@ let solve
    | _ -> Error errors)
   >>| function
   | Error errors ->
-    let solver_errors =
-      List.concat_map errors ~f:(fun (path, (error, platforms)) ->
-        match error with
-        | `Manifest_error message -> raise (User_error.E message)
-        | `Solve_error error ->
-          if portable_lock_dir
-          then
-            [ Pp.box
-              @@ Pp.textf
-                   "Unable to solve dependencies while generating lock directory: %s"
-                   (Path.to_string_maybe_quoted path)
-            ; Pp.vbox (pp_solve_error (error, platforms))
-            ]
-          else
-            [ Pp.textf
-                "Lock directory %s:"
-                (Path.to_string_maybe_quoted (user_lock_dir_path path))
-            ; Pp.vbox error
-            ])
-    in
     User_error.raise
-      (if portable_lock_dir
-       then solver_errors
-       else
-         Pp.text "Unable to solve dependencies for the following lock directories:"
-         :: solver_errors)
+      (List.concat_map errors ~f:(fun (path, (error, platforms)) ->
+         match error with
+         | `Manifest_error message -> raise (User_error.E message)
+         | `Solve_error error ->
+           [ Pp.box
+             @@ Pp.textf
+                  "Unable to solve dependencies while generating lock directory: %s"
+                  (Path.to_string_maybe_quoted path)
+           ; Pp.vbox (pp_solve_error (error, platforms))
+           ]))
   | Ok write_disks_with_summaries ->
     let write_disk_list, summary_messages = List.split write_disks_with_summaries in
     List.iter summary_messages ~f:Console.print_user_message;
@@ -369,7 +345,6 @@ let lock ~version_preference ~lock_dirs_arg ~print_perf_stats =
     ~version_preference
     ~lock_dirs
     ~print_perf_stats
-    ~portable_lock_dir:true
 ;;
 
 let term =
