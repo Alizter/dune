@@ -9,6 +9,10 @@ Clarify the behavior when the `dune` in PATH is not the one used to start the bu
   >  (name $1)
   >  (allow_empty))
   > EOF
+  > cat > dune <<EOF
+  > (library (public_name $1))
+  > EOF
+  > echo 'let value = ()' > $1.ml
   > cd ..
   > tar cf $1.tar tmp
   > rm -rf tmp
@@ -26,6 +30,10 @@ Make a project that depends on the test packages:
   >  (allow_empty)
   >  (depends foo bar))
   > EOF
+  $ cat > dune <<'EOF'
+  > (executable (name x) (libraries foo))
+  > EOF
+  $ echo 'let () = ignore Foo.value' > x.ml
 
 Make lockfiles for the packages.
   $ make_lockdir
@@ -60,8 +68,11 @@ Make lockfiles for the packages.
   > (dev)
   > EOF
 
-Test that the project can be built normally.
-  $ build_pkg foo
+Test that the direct Dune recipe is dispatched to the mounted build, while the
+shell-wrapped recipe retains its package target.
+  $ dune build x.exe
+  $ test -f _build/_default+lockfile/pkg/foo.0.0.1-*/foo.cmxa
+  $ test ! -e _build/_private/default/.pkg/foo.0.0.1-*
 
 Make a fake dune exe:
 
@@ -82,14 +93,14 @@ Dune and add our fake `dune` to the PATH.
   $ DUNE=$(which dune)
   $ fakepath=$PWD/.bin:$PATH
 
-Remember the digests, to not to have to call nested Dunes:
+Remember the legacy package digest, to not have to call nested Dunes:
 
-  $ foo_digest="$(dune pkg print-digest foo)"
   $ bar_digest="$(dune pkg print-digest bar)"
 
-Call Dune with an absolute PATH as argv[0]:
+Call Dune with an absolute PATH as argv[0]. The mounted build does not launch the
+fake Dune; the shell-wrapped legacy recipe locates the Dune under test:
 
-  $ PATH=$fakepath $DUNE build "$pkg_root/$foo_digest/target/"
+  $ PATH=$fakepath $DUNE build x.exe
   $ PATH=$fakepath $DUNE build "$pkg_root/$bar_digest/target/"
 
 argv[0] is set by the calling program (like a shell or cram test runner) and
@@ -103,4 +114,4 @@ namely argv[0] = "dune". This is exactly what happens if `dune` is in the PATH
 and the user launches `dune` in a shell.
 
   $ dune clean
-  $ PATH=$fakepath dune_cmd exec-a "dune" $DUNE build "$pkg_root/$foo_digest/target/"
+  $ PATH=$fakepath dune_cmd exec-a "dune" $DUNE build "$pkg_root/$bar_digest/target/"

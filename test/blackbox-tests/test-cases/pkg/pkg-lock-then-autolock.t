@@ -45,8 +45,8 @@ Lock and build with explicit dune pkg lock:
   Dependencies common to all supported platforms:
   - foo.0.0.1
 
-  $ dune exec --display short bar 2>&1 | grep "Building"
-      Building foo.0.0.1
+  $ dune exec --display short bar >/dev/null 2>&1
+  $ test -d _build/_default+lockfile/pkg/foo.0.0.1-*
 
   $ dune exec bar
   Hello from foo 0.0.1!
