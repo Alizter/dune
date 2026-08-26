@@ -128,14 +128,17 @@ let parse_stanzas ~file ~(eval : eval) sexps =
       Dune_project.stanza_parser ~dir:eval.dir eval.project
       |> Warning_emit.Bag.set warnings
     in
-    match file with
-    | Workspace file ->
+    match file, Loaded_project.loaded_source eval.loaded_project with
+    | Workspace file, None ->
       parse_file_includes ~stanza_parser ~context:(Include_stanza.in_src_file file) sexps
-    | Build file ->
+    | Build _, None -> Code_error.raise "A build-backed Dune file has no loaded source" []
+    | Build file, Some source ->
       parse_file_includes
         ~stanza_parser
-        ~context:(Include_stanza.in_build_file file)
+        ~context:(Include_stanza.in_loaded_file source file)
         sexps
+    | Workspace _, Some _ ->
+      Code_error.raise "A workspace Dune file has a loaded source" []
   in
   let rec loop stanzas dynamic_includes env = function
     | [] -> List.rev stanzas, dynamic_includes
@@ -205,7 +208,8 @@ module Jbuild_plugin : sig
     :  Context_name.t
     -> Ocaml_config.t
     -> exec_dir:Path.t
-    -> plugin:Path.Outside_build_dir.t
+    -> plugin:Path.t
+    -> plugin_contents:string
     -> wrapper:Path.Build.t
     -> target:Path.Build.t
     -> unit Memo.t
@@ -281,7 +285,7 @@ end = struct
       "module Jbuild_plugin : sig\n%s\nend = struct\n%s\nend\n# 1 %S\n%s"
       Assets.jbuild_plugin_mli
       (replace_in_template vars)
-      (Path.Outside_build_dir.to_string plugin)
+      (Path.to_string plugin)
       plugin_contents
   ;;
 
@@ -306,11 +310,19 @@ end = struct
           ])
   ;;
 
-  let create_plugin_wrapper context ocaml_config ~exec_dir ~plugin ~wrapper ~target =
-    let+ plugin_contents = Fs_memo.file_contents plugin in
+  let create_plugin_wrapper
+        context
+        ocaml_config
+        ~exec_dir
+        ~plugin
+        ~plugin_contents
+        ~wrapper
+        ~target
+    =
     Io.with_file_out (Path.build wrapper) ~f:(fun oc ->
       write oc ~context ~ocaml_config ~target ~exec_dir ~plugin ~plugin_contents);
-    check_no_requires (Path.outside_build_dir plugin) plugin_contents
+    check_no_requires plugin plugin_contents;
+    Memo.return ()
   ;;
 end
 
@@ -318,7 +330,8 @@ module Script = struct
   open Memo.O
 
   type t =
-    { file : Path.Source.t
+    { file : Source_path.t
+    ; contents : string
     ; eval : eval
     ; from_parent : Dune_lang.Ast.t list
     }
@@ -327,11 +340,32 @@ module Script = struct
      directory *)
   let generated_dune_files_dir = Path.Build.relative Path.Build.root ".dune"
 
-  let eval_one ~context { file; from_parent; eval } =
+  let eval_one ~context { file; contents; from_parent; eval } =
     let generated_dune_file =
-      Path.Build.append_source
-        (Path.Build.relative generated_dune_files_dir (Context_name.to_string context))
-        file
+      match file with
+      | Source_path.Workspace file ->
+        Path.Build.append_source
+          (Path.Build.relative generated_dune_files_dir (Context_name.to_string context))
+          file
+      | Build file ->
+        (match Loaded_project.loaded_source eval.loaded_project with
+         | Some source ->
+           let identity =
+             Loaded_project.identity eval.loaded_project
+             |> Loaded_project.Identity.digest
+             |> Dune_digest.to_string
+           in
+           let local = Loaded_source.local_path source file |> Option.value_exn in
+           Path.Build.L.relative
+             (Path.Build.relative
+                generated_dune_files_dir
+                (Context_name.to_string context))
+             [ "loaded"; identity ]
+           |> fun root -> Path.Build.append_local root local
+         | None ->
+           Loaded_project.output_path eval.loaded_project (Source_path.build file)
+           |> Option.value_exn
+           |> Path.Build.extend_basename ~suffix:(Filename.of_string_exn ".generated"))
     in
     let wrapper =
       Path.Build.extend_basename
@@ -339,14 +373,29 @@ module Script = struct
         ~suffix:(Filename.Extension.to_filename Filename.Extension.ml)
     in
     generated_dune_file |> Path.build |> Path.parent |> Option.iter ~f:Path.mkdir_p;
+    let plugin, exec_dir =
+      match Loaded_project.loaded_source eval.loaded_project with
+      | None -> Source_path.to_path file, Source_path.to_path eval.dir
+      | Some source ->
+        let physical path =
+          match path with
+          | Source_path.Build path ->
+            Loaded_source.local_path source path
+            |> Option.value_exn
+            |> Loaded_source.file_path source
+          | Workspace _ -> Code_error.raise "A loaded source contains a workspace path" []
+        in
+        physical file, physical eval.dir
+    in
     let* context = Context.DB.get context in
     let* ocaml = Context.ocaml context in
     let* () =
       Jbuild_plugin.create_plugin_wrapper
         (Context.name context)
         ocaml.ocaml_config
-        ~exec_dir:(Source_path.to_path eval.dir)
-        ~plugin:(In_source_dir file)
+        ~exec_dir
+        ~plugin
+        ~plugin_contents:contents
         ~wrapper
         ~target:generated_dune_file
     in
@@ -356,28 +405,22 @@ module Script = struct
       let args =
         [ "-I"; "+compiler-libs"; Path.to_absolute_filename (Path.build wrapper) ]
       in
-      Process.run
-        Strict
-        ~display:Quiet
-        ~dir:(Source_path.to_path eval.dir)
-        ~env
-        ocaml
-        args
+      Process.run Strict ~display:Quiet ~dir:exec_dir ~env ocaml args
       |> Memo.of_reproducible_fiber
     in
     if not (Fpath.exists (Path.to_string (Path.build generated_dune_file)))
     then
       User_error.raise
-        ~loc:(Loc.in_file (Path.source file))
+        ~loc:(Loc.in_file plugin)
         [ Pp.textf
             "%s failed to produce a valid dune file."
-            (Path.Source.to_string_maybe_quoted file)
+            (Source_path.to_string_maybe_quoted file)
         ; Pp.textf "Did you forgot to call [Jbuild_plugin.V*.send]?"
         ];
     Path.build generated_dune_file
     |> Io.Untracked.with_lexbuf_from_file ~f:(Dune_lang.Parser.parse ~mode:Many)
     |> List.rev_append from_parent
-    |> parse ~file:(Some (Source_path.workspace file)) ~eval
+    |> parse ~file:(Some file) ~eval
   ;;
 end
 
@@ -413,13 +456,9 @@ module Eval = struct
     | Plain ->
       let+ dune_file, dynamic_includes = parse static ~file ~eval in
       Literal (eval, dune_file, dynamic_includes)
-    | Ocaml_script ->
-      (match Option.value_exn file with
-       | Build file ->
-         User_error.raise
-           ~loc:(Loc.in_file (Path.build file))
-           [ Pp.text "OCaml-syntax dune files are not supported in mounted packages." ]
-       | Workspace file -> Memo.return (Script { eval; file; from_parent = static }))
+    | Ocaml_script contents ->
+      Memo.return
+        (Script { eval; file = Option.value_exn file; contents; from_parent = static })
   ;;
 
   let rec collect_dynamic_includes (eval : eval) include_context origin dynamic_includes =
@@ -504,7 +543,7 @@ module Eval = struct
               ~human_readable_description:(fun () ->
                 Pp.textf
                   "- evaluating dune file %S in OCaml syntax"
-                  (Path.Source.to_string script.file))
+                  (Source_path.to_string script.file))
               (fun () -> Script.eval_one ~context:context_name script)
           in
           set_dynamic_stanzas dune_file ~eval:script.eval ~dynamic_includes)

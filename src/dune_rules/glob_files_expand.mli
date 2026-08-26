@@ -24,6 +24,7 @@ val memo
   -> f:(String_with_vars.t -> Value.t Memo.t)
   -> base_dir:Path.Build.t
   -> source_dir:Source_path.t
+  -> loaded_source:Loaded_source.t option
   -> Expanded.t Memo.t
 
 (** Expand a glob inside the [Action_builder] context. The result of calling
@@ -35,4 +36,5 @@ val action_builder
   -> f:(String_with_vars.t -> Value.t Action_builder.t)
   -> base_dir:Path.Build.t
   -> source_dir:Source_path.t
+  -> loaded_source:Loaded_source.t option
   -> Expanded.t Action_builder.t

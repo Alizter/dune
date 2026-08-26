@@ -160,8 +160,25 @@ end = struct
       match source_dir with
       | Some source_dir -> Memo.return (Source_tree.Dir.filenames source_dir)
       | None ->
-        Build_system.files_of ~dir:(Source_path.to_path src_dir)
-        >>| Filename_set.filenames
+        let* expander = Super_context.expander sctx ~dir in
+        (match Expander.loaded_source expander with
+         | None ->
+           Build_system.files_of ~dir:(Source_path.to_path src_dir)
+           >>| Filename_set.filenames
+         | Some source ->
+           (match src_dir with
+            | Source_path.Build source_dir ->
+              Loaded_source.local_path source source_dir
+              |> Option.value_exn
+              |> Loaded_source.readdir source
+              >>| Filename.Map.to_list
+              >>| List.filter_map ~f:(fun (filename, kind) ->
+                match kind with
+                | `Dir -> None
+                | `File -> Some filename)
+              >>| Filename.Array.Set.of_list
+            | Workspace _ ->
+              Code_error.raise "A loaded source contains a workspace path" []))
     in
     match stanzas with
     | [] -> Memo.return from_source

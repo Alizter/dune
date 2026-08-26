@@ -53,13 +53,14 @@ module Build_backed_alias_rec = Alias_builder.Alias_rec (struct
         and* source_subdirs =
           match source_dir with
           | None -> Action_builder.return Filename.Set.empty
-          | Some source_dir ->
-            Action_builder.of_memo
-              (Build_system.directory_target_contents_opt ~dir:source_dir)
-            >>| (function
-             | None -> Filename.Set.empty
-             | Some (_, subdirs) ->
-               Filename.Array.Set.to_list subdirs |> Filename.Set.of_list)
+          | Some (source, source_dir) ->
+            Action_builder.of_memo (Loaded_source.readdir source source_dir)
+            >>| Filename.Map.to_list
+            >>| List.filter_map ~f:(fun (name, kind) ->
+              match kind with
+              | `Dir -> Some name
+              | `File -> None)
+            >>| Filename.Set.of_list
         in
         let subdirs = Filename.Set.union source_subdirs allowed_build_only_subdirs in
         let+ children =
@@ -68,8 +69,8 @@ module Build_backed_alias_rec = Alias_builder.Alias_rec (struct
             let source_dir =
               if Filename.Set.mem source_subdirs subdir
               then
-                Option.map source_dir ~f:(fun source_dir ->
-                  Path.Build.relative_fname source_dir subdir)
+                Option.map source_dir ~f:(fun (source, source_dir) ->
+                  source, Path.Local.relative_fname source_dir subdir)
               else None
             in
             traverse source_dir (Path.Build.relative_fname dir subdir))
@@ -82,7 +83,11 @@ module Build_backed_alias_rec = Alias_builder.Alias_rec (struct
         Loaded_project.source_path loaded_project dir
         |> Option.bind ~f:(function
           | Source_path.Workspace _ -> None
-          | Source_path.Build dir -> Some dir)
+          | Source_path.Build dir ->
+            let source =
+              Loaded_project.loaded_source loaded_project |> Option.value_exn
+            in
+            Loaded_source.local_path source dir |> Option.map ~f:(fun dir -> source, dir))
       in
       traverse source_dir dir
     ;;
@@ -115,9 +120,11 @@ let dep_on_alias_rec alias ~loc =
       | Source_path.Workspace source_dir ->
         Action_builder.of_memo (Source_tree.find_dir source_dir) >>| Option.is_some
       | Source_path.Build source_dir ->
-        Action_builder.of_memo
-          (Build_system.directory_target_contents_opt ~dir:source_dir)
-        >>| Option.is_some
+        let source = Loaded_project.loaded_source loaded_project |> Option.value_exn in
+        Loaded_source.local_path source source_dir
+        |> Option.value_exn
+        |> Loaded_source.file_exists source
+        |> Action_builder.of_memo
     in
     if not exists
     then fail_unknown_directory source_dir
@@ -348,6 +355,7 @@ let rec dep expander : Dep_conf.t -> _ = function
          ~f:(Expander.expand ~mode:Single expander)
          ~base_dir:(Expander.dir expander)
          ~source_dir:(Expander.source_dir expander)
+         ~loaded_source:(Expander.loaded_source expander)
        >>| Glob_files_expand.Expanded.matches
        >>| List.map ~f:(fun path ->
          if Filename.is_relative path

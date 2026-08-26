@@ -9,6 +9,7 @@ open Memo.O
    subdirectories, and each of of their subdirectories, and so on ad infinitum. *)
 let get_descendants_of_relative_dir_relative_to_base_dir_local
       ~source_dir
+      ~loaded_source
       ~relative_dir
       ~prefix
   =
@@ -25,10 +26,15 @@ let get_descendants_of_relative_dir_relative_to_base_dir_local
            |> Filename.Array.Map.keys
            |> Filename.Array.Set.to_list)
       | Build source_dir ->
-        Build_system.directory_target_contents_opt ~dir:source_dir
-        >>| (function
-         | None -> []
-         | Some (_, subdirs) -> Filename.Array.Set.to_list subdirs)
+        let source = Option.value_exn loaded_source in
+        Loaded_source.local_path source source_dir
+        |> Option.value_exn
+        |> Loaded_source.readdir source
+        >>| Filename.Map.to_list
+        >>| List.filter_map ~f:(fun (name, kind) ->
+          match kind with
+          | `Dir -> Some name
+          | `File -> None)
     in
     let+ rest =
       Memo.List.concat_map children ~f:(fun child ->
@@ -95,7 +101,12 @@ module Without_vars = struct
      prefixes are the paths to each directory relative to [base_dir] exactly as written in
      the glob. The relative paths are required to construct relative paths to the files
      found by expanding the glob. *)
-  let file_selectors_with_prefixes { glob; dir; prefix; recursive } ~loc ~source_dir =
+  let file_selectors_with_prefixes
+        { glob; dir; prefix; recursive }
+        ~loc
+        ~source_dir
+        ~loaded_source
+    =
     match (dir : Glob_dir.t) with
     | Relative { relative_dir; base_dir } ->
       let make_file_selector relative_dir =
@@ -106,6 +117,7 @@ module Without_vars = struct
       then
         get_descendants_of_relative_dir_relative_to_base_dir_local
           ~source_dir
+          ~loaded_source
           ~relative_dir
           ~prefix
         |> Memo.map
@@ -159,12 +171,16 @@ struct
     { Without_vars.glob; dir; prefix; recursive }
   ;;
 
-  let expand (t : Dep_conf.Glob_files.t) ~f ~base_dir ~source_dir =
+  let expand (t : Dep_conf.Glob_files.t) ~f ~base_dir ~source_dir ~loaded_source =
     let open M.O in
     let loc = String_with_vars.loc t.glob in
     let* without_vars = expand_vars t ~f ~base_dir in
     let+ matches =
-      Without_vars.file_selectors_with_prefixes without_vars ~loc ~source_dir
+      Without_vars.file_selectors_with_prefixes
+        without_vars
+        ~loc
+        ~source_dir
+        ~loaded_source
       |> M.of_memo
       >>= M.List.concat_map ~f:(fun (file_selector, prefix) ->
         C.collect_files ~loc file_selector

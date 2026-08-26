@@ -4,6 +4,12 @@ type 'a context
 
 val in_src_file : Path.Source.t -> Path.Source.t context
 val in_build_file : Path.Build.t -> Path.Build.t context
+
+val in_loaded_file
+  :  Loaded_source.t
+  -> Path.Build.t
+  -> (Loaded_source.t * Path.Local.t) context
+
 val file_path : 'a context -> Loc.t -> string -> 'a
 
 val load_sexps

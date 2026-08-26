@@ -408,6 +408,264 @@ module Dir = struct
   end
 end
 
+module Workspace_dir = Dir
+
+module Rules = struct
+  module Dir = struct
+    type loaded =
+      { source : Loaded_source.t
+      ; relative_dir : Path.Local.t
+      ; status : Source_dir_status.t
+      ; files : Filename.Array.Set.t
+      ; sub_dirs : loaded_sub_dir Filename.Array.Map.t
+      ; dune_file : Dune_file.t option
+      ; project : Dune_project.t
+      }
+
+    and loaded_sub_dir = { dir : loaded Memo.t }
+
+    type t =
+      | Source of Workspace_dir.t
+      | Loaded of loaded
+
+    type sub_dir =
+      | Source_sub_dir of Workspace_dir.sub_dir
+      | Loaded_sub_dir of loaded_sub_dir
+
+    let source dir = Source dir
+
+    let make_loaded ~source ~relative_dir ~status ~files ~sub_dirs ~dune_file ~project =
+      { source; relative_dir; status; files; sub_dirs; dune_file; project }
+    ;;
+
+    let source_path = function
+      | Source dir -> Source_path.workspace (Workspace_dir.path dir)
+      | Loaded { source; relative_dir; _ } ->
+        Loaded_source.source_path source relative_dir |> Source_path.build
+    ;;
+
+    let relative_dir = function
+      | Source dir -> Workspace_dir.path dir |> Path.Source.to_local
+      | Loaded { relative_dir; _ } -> relative_dir
+    ;;
+
+    let loaded_source = function
+      | Source _ -> None
+      | Loaded { source; _ } -> Some source
+    ;;
+
+    let filenames = function
+      | Source dir -> Workspace_dir.filenames dir
+      | Loaded { files; _ } -> files
+    ;;
+
+    let sub_dirs = function
+      | Source dir ->
+        Workspace_dir.sub_dirs dir
+        |> Filename.Array.Map.mapi ~f:(fun _ dir -> Source_sub_dir dir)
+      | Loaded { sub_dirs; _ } ->
+        Filename.Array.Map.mapi sub_dirs ~f:(fun _ dir -> Loaded_sub_dir dir)
+    ;;
+
+    let sub_dir_names t = sub_dirs t |> Filename.Array.Map.keys
+
+    let sub_dir_as_t = function
+      | Source_sub_dir dir -> Workspace_dir.sub_dir_as_t dir >>| source
+      | Loaded_sub_dir { dir; _ } -> dir >>| fun dir -> Loaded dir
+    ;;
+
+    let status = function
+      | Source dir -> Workspace_dir.status dir
+      | Loaded { status; _ } -> status
+    ;;
+
+    let dune_file = function
+      | Source dir -> Workspace_dir.dune_file dir
+      | Loaded { dune_file; _ } -> dune_file
+    ;;
+
+    let project = function
+      | Source dir -> Workspace_dir.project dir
+      | Loaded { project; _ } -> project
+    ;;
+
+    let to_dyn t =
+      Dyn.record
+        [ "source_path", Source_path.to_dyn (source_path t)
+        ; "status", Source_dir_status.to_dyn (status t)
+        ; ( "files"
+          , Dyn.Set (Filename.Array.Set.to_list_map (filenames t) ~f:Filename.to_dyn) )
+        ]
+    ;;
+
+    module Make_map_reduce (M : Memo.S) (Outcome : Monoid) = struct
+      open M.O
+
+      let rec map_reduce t ~traverse ~trace_event_name:_ ~f =
+        if not (Source_dir_status.Map.find traverse (status t))
+        then M.return Outcome.empty
+        else
+          let+ here = f t
+          and+ children =
+            Filename.Array.Map.values (sub_dirs t)
+            |> M.List.map ~f:(fun child ->
+              let* child = M.of_memo (sub_dir_as_t child) in
+              map_reduce child ~traverse ~trace_event_name:"" ~f)
+          in
+          List.fold_left children ~init:here ~f:Outcome.combine
+      ;;
+    end
+  end
+
+  module Loaded = struct
+    type t =
+      { source : Loaded_source.t
+      ; root : Dir.t
+      ; projects : Dune_project.t list
+      }
+
+    let source t = t.source
+    let root t = t.root
+    let projects t = t.projects
+
+    let load source =
+      let rec traverse ~relative_dir ~status ~parent_dune_file ~parent_project ~physical =
+        let* files, physical_subdirs =
+          if not physical
+          then Memo.return (Filename.Array.Set.empty, Filename.Array.Set.empty)
+          else
+            let+ entries = Loaded_source.readdir source relative_dir in
+            Filename.Map.foldi entries ~init:([], []) ~f:(fun name kind (files, dirs) ->
+              match kind with
+              | `File -> name :: files, dirs
+              | `Dir -> files, name :: dirs)
+            |> fun (files, dirs) ->
+            Filename.Array.Set.of_list files, Filename.Array.Set.of_list dirs
+        in
+        let source_dir = Loaded_source.source_path source relative_dir in
+        let source_path = Source_path.build source_dir in
+        let* loaded_project =
+          match status, physical with
+          | Source_dir_status.Data_only, _ | _, false -> Memo.return None
+          | (Source_dir_status.Normal | Source_dir_status.Vendored), true ->
+            Dune_project.gen_load_source
+              ~read:(fun path ->
+                match path with
+                | Source_path.Build path ->
+                  Loaded_source.local_path source path
+                  |> Option.value_exn
+                  |> Loaded_source.read_file source
+                | Workspace _ ->
+                  Code_error.raise "Loaded project requested a workspace source" [])
+              ~dir:source_path
+              ~files
+              ~infer_from_opam_files:false
+              ~load_opam_file_with_contents:
+                Dune_pkg.Opam_file.load_opam_file_with_contents
+        in
+        let project, projects =
+          match loaded_project, parent_project with
+          | Some project, _ -> project, [ project ]
+          | None, Some project -> project, []
+          | None, None ->
+            let project =
+              Dune_project.anonymous
+                ~dir:source_path
+                Package_info.empty
+                Package.Name.Map.empty
+            in
+            project, [ project ]
+        in
+        let* dune_file =
+          Dune_file.load_loaded
+            ~source
+            ~dir:source_dir
+            status
+            project
+            ~files
+            ~parent:parent_dune_file
+        in
+        let visible_files =
+          let predicate =
+            match dune_file with
+            | None -> Dune_file.Files.default
+            | Some dune_file -> Dune_file.files dune_file
+          in
+          Dune_file.Files.eval predicate ~files
+        in
+        let sub_dirs_spec =
+          match dune_file with
+          | None -> Source_dir_status.Spec.default
+          | Some dune_file -> Dune_file.sub_dir_status dune_file
+        in
+        let all_subdirs =
+          match dune_file with
+          | None -> physical_subdirs
+          | Some dune_file ->
+            Filename.Array.Set.union physical_subdirs (Dune_file.sub_dirnames dune_file)
+        in
+        let status_map = Source_dir_status.Spec.eval sub_dirs_spec ~dirs:all_subdirs in
+        let* children =
+          Filename.Array.Set.to_list all_subdirs
+          |> Memo.List.filter_map ~f:(fun basename ->
+            let open Source_dir_status.Or_ignored in
+            match Source_dir_status.Per_dir.status status_map ~dir:basename with
+            | Ignored -> Memo.return None
+            | Status child_status ->
+              let child_status =
+                if Dune_project.cram project && Cram_test.is_cram_suffix basename
+                then Source_dir_status.Data_only
+                else (
+                  match status, child_status with
+                  | Source_dir_status.Data_only, _ -> Source_dir_status.Data_only
+                  | Source_dir_status.Vendored, Source_dir_status.Normal ->
+                    Source_dir_status.Vendored
+                  | _, child_status -> child_status)
+              in
+              let+ child, child_projects =
+                traverse
+                  ~relative_dir:(Path.Local.relative_fname relative_dir basename)
+                  ~status:child_status
+                  ~parent_dune_file:dune_file
+                  ~parent_project:(Some project)
+                  ~physical:(Filename.Array.Set.mem physical_subdirs basename)
+              in
+              Some (basename, child, child_projects))
+        in
+        let sub_dirs =
+          List.map children ~f:(fun (name, child, _) ->
+            name, { Dir.dir = Memo.return child })
+          |> Filename.Array.Map.of_list_exn
+        in
+        let projects =
+          List.fold_left children ~init:projects ~f:(fun projects (_, _, children) ->
+            projects @ children)
+        in
+        let dir =
+          Dir.make_loaded
+            ~source
+            ~relative_dir
+            ~status
+            ~files:visible_files
+            ~sub_dirs
+            ~dune_file
+            ~project
+        in
+        Memo.return (dir, projects)
+      in
+      let+ root, projects =
+        traverse
+          ~relative_dir:Path.Local.root
+          ~status:Source_dir_status.Vendored
+          ~parent_dune_file:None
+          ~parent_project:None
+          ~physical:true
+      in
+      { source; root = Dir.Loaded root; projects }
+    ;;
+  end
+end
+
 module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) = struct
   open M.O
   include Dir.Make_map_reduce (M) (Outcome)

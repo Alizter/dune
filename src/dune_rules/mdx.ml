@@ -271,7 +271,7 @@ let () =
 
 (** Returns the list of files (in _build) to be passed to mdx for the given
     stanza and context *)
-let files_to_mdx t ~sctx ~dir ~source_dir =
+let files_to_mdx t ~sctx ~dir ~source_dir ~loaded_source =
   let standard = default_files_of_version t.version in
   let must_mdx filename =
     Predicate_lang.Glob.test t.files ~standard (Filename.to_string filename)
@@ -289,10 +289,20 @@ let files_to_mdx t ~sctx ~dir ~source_dir =
              source)
       else None)
   | Build source_dir ->
-    Build_system.files_of ~dir:(Path.build source_dir)
-    >>| Filename_set.filenames
-    >>| Filename.Array.Set.to_list
-    >>| List.filter_map ~f:(fun filename ->
+    let source = Option.value_exn loaded_source in
+    let+ files =
+      Loaded_source.local_path source source_dir
+      |> Option.value_exn
+      |> Loaded_source.readdir source
+      >>| Filename.Map.to_list
+      >>| List.filter_map ~f:(fun (filename, kind) ->
+        match kind with
+        | `Dir -> None
+        | `File -> Some filename)
+      >>| Filename.Array.Set.of_list
+    in
+    Filename.Array.Set.to_list files
+    |> List.filter_map ~f:(fun filename ->
       if must_mdx filename then Some (Path.Build.relative_fname dir filename) else None)
 ;;
 
@@ -531,7 +541,14 @@ let mdx_prog_gen t ~sctx ~dir ~scope ~mdx_prog =
 let gen_rules t ~sctx ~dir ~scope ~expander =
   let register_rules () =
     let source_dir = Scope.source_dir scope dir in
-    let* files_to_mdx = files_to_mdx t ~sctx ~dir ~source_dir in
+    let* files_to_mdx =
+      files_to_mdx
+        t
+        ~sctx
+        ~dir
+        ~source_dir
+        ~loaded_source:(Expander.loaded_source expander)
+    in
     let mdx_prog =
       Super_context.resolve_program
         sctx
