@@ -8,7 +8,7 @@ val fname : Filename.t
 
 type kind =
   | Plain
-  | Ocaml_script
+  | Ocaml_script of string
 
 type t
 
@@ -49,8 +49,9 @@ val load
   -> parent:t option
   -> t option Memo.t
 
-val load_build
-  :  dir:Path.Build.t
+val load_loaded
+  :  source:Loaded_source.t
+  -> dir:Path.Build.t
   -> Source_dir_status.t
   -> Dune_project.t
   -> files:Filename.Array.Set.t

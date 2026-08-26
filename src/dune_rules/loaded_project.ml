@@ -38,6 +38,8 @@ module Identity = struct
       ]
   ;;
 
+  let digest t = Dune_digest.repr repr t
+
   let to_dyn = function
     | Workspace root -> Dyn.variant "Workspace" [ Path.Source.to_dyn root ]
     | Mounted { lock; package; project_root } ->
@@ -56,12 +58,29 @@ type t =
   { project : Dune_project.t
   ; identity : Identity.t
   ; source_root : Source_path.t
+  ; loaded_source : Loaded_source.t option
   ; partition : Build_partition.t
   ; output_root : Path.Build.t
   ; visible_packages : Package.Name.Set.t option
   }
 
-let create ~project ~identity ~source_root ~partition ~output_root ~visible_packages =
+let create
+      ~project
+      ~identity
+      ~source_root
+      ~loaded_source
+      ~partition
+      ~output_root
+      ~visible_packages
+  =
+  (match source_root, loaded_source with
+   | Source_path.Workspace _, None | Build _, Some _ -> ()
+   | Workspace _, Some _ | Build _, None ->
+     Code_error.raise
+       "Loaded project source root and backing source disagree"
+       [ "source_root", Source_path.to_dyn source_root
+       ; "loaded_source", Dyn.option Loaded_source.to_dyn loaded_source
+       ]);
   if
     not
       (Path.is_descendant
@@ -73,12 +92,20 @@ let create ~project ~identity ~source_root ~partition ~output_root ~visible_pack
       [ "output_root", Path.Build.to_dyn output_root
       ; "partition", Build_partition.to_dyn partition
       ];
-  { project; identity; source_root; partition; output_root; visible_packages }
+  { project
+  ; identity
+  ; source_root
+  ; loaded_source
+  ; partition
+  ; output_root
+  ; visible_packages
+  }
 ;;
 
 let project t = t.project
 let identity t = t.identity
 let source_root t = t.source_root
+let loaded_source t = t.loaded_source
 let partition t = t.partition
 let output_root t = t.output_root
 let visible_packages t = t.visible_packages
@@ -97,6 +124,7 @@ let to_dyn t =
   Dyn.record
     [ "identity", Identity.to_dyn t.identity
     ; "source_root", Source_path.to_dyn t.source_root
+    ; "loaded_source", Dyn.option Loaded_source.to_dyn t.loaded_source
     ; "partition", Build_partition.to_dyn t.partition
     ; "output_root", Path.Build.to_dyn t.output_root
     ; "visible_packages", Dyn.option Package.Name.Set.to_dyn t.visible_packages

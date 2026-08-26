@@ -78,12 +78,18 @@ module File = struct
       file_binding_decode <|> glob_files_decode
     ;;
 
-    let to_file_bindings_unexpanded t ~expand ~dir ~source_dir ~dune_syntax =
+    let to_file_bindings_unexpanded t ~expand ~dir ~source_dir ~loaded_source ~dune_syntax
+      =
       match t with
       | File_binding file_binding -> Memo.return [ file_binding ]
       | Glob_files { glob_files; prefix } ->
         let* glob_expanded =
-          Glob_files_expand.memo glob_files ~f:expand ~base_dir:dir ~source_dir
+          Glob_files_expand.memo
+            glob_files
+            ~f:expand
+            ~base_dir:dir
+            ~source_dir
+            ~loaded_source
         in
         let glob_loc = String_with_vars.loc glob_files.glob in
         let glob_prefix = Glob_files_expand.Expanded.prefix glob_expanded in
@@ -119,8 +125,8 @@ module File = struct
             ~dir:(Some (Path.Build.drop_build_context_exn dir)))
     ;;
 
-    let to_file_bindings_expanded t ~expand ~dir ~source_dir ~dune_syntax =
-      to_file_bindings_unexpanded t ~expand ~dir ~source_dir ~dune_syntax
+    let to_file_bindings_expanded t ~expand ~dir ~source_dir ~loaded_source ~dune_syntax =
+      to_file_bindings_unexpanded t ~expand ~dir ~source_dir ~loaded_source ~dune_syntax
       |> Memo.bind
            ~f:
              (Memo.List.map
@@ -156,7 +162,7 @@ module File = struct
     { entry; dune_syntax }
   ;;
 
-  let to_file_bindings_unexpanded ts ~expand ~dir ~source_dir =
+  let to_file_bindings_unexpanded ts ~expand ~dir ~source_dir ~loaded_source =
     Memo.List.concat_map ts ~f:(fun { entry; dune_syntax } ->
       let+ with_include_expanded =
         Recursive_include.expand_include entry ~expand ~dir:(Path.build dir)
@@ -169,11 +175,12 @@ module File = struct
                 ~expand
                 ~dir
                 ~source_dir
+                ~loaded_source
                 ~dune_syntax
                 entry))
   ;;
 
-  let to_file_bindings_expanded ts ~expand ~dir ~source_dir =
+  let to_file_bindings_expanded ts ~expand ~dir ~source_dir ~loaded_source =
     let* file_bindings_expanded =
       Memo.List.concat_map ts ~f:(fun { entry; dune_syntax } ->
         let+ with_include_expanded =
@@ -187,6 +194,7 @@ module File = struct
                   ~expand
                   ~dir
                   ~source_dir
+                  ~loaded_source
                   ~dune_syntax
                   entry))
     in
