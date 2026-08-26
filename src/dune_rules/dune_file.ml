@@ -112,9 +112,11 @@ let rec parse_file_includes ~stanza_parser ~context sexps =
 type eval =
   { loaded_project : Loaded_project.t
   ; project : Dune_project.t
-  ; dir : Source_path.t
+  ; source_dir : Source_tree.Rules.Dir.t
   ; mask : Stanza.t Mask.t
   }
+
+let eval_source_path eval = Source_tree.Rules.Dir.source_path eval.source_dir
 
 let parse_stanzas ~file ~(eval : eval) sexps =
   let warnings = Warning_emit.Bag.create () in
@@ -122,23 +124,16 @@ let parse_stanzas ~file ~(eval : eval) sexps =
     let file =
       Option.value
         file
-        ~default:(Source_path.relative_fname eval.dir Source.Dune_file.fname)
+        ~default:(Source_tree.Rules.Dir.file eval.source_dir Source.Dune_file.fname)
     in
     let stanza_parser =
-      Dune_project.stanza_parser ~dir:eval.dir eval.project
+      Dune_project.stanza_parser ~dir:(eval_source_path eval) eval.project
       |> Warning_emit.Bag.set warnings
     in
-    match file, Loaded_project.loaded_source eval.loaded_project with
-    | Workspace file, None ->
-      parse_file_includes ~stanza_parser ~context:(Include_stanza.in_src_file file) sexps
-    | Build _, None -> Code_error.raise "A build-backed Dune file has no loaded source" []
-    | Build file, Some source ->
-      parse_file_includes
-        ~stanza_parser
-        ~context:(Include_stanza.in_loaded_file source file)
-        sexps
-    | Workspace _, Some _ ->
-      Code_error.raise "A workspace Dune file has a loaded source" []
+    parse_file_includes
+      ~stanza_parser
+      ~context:(Source_tree.Rules.File.include_context file)
+      sexps
   in
   let rec loop stanzas dynamic_includes env = function
     | [] -> List.rev stanzas, dynamic_includes
@@ -171,7 +166,7 @@ type parsed =
 
 let parse sexps ~file ~(eval : eval) =
   let+ stanzas, dynamic_includes = parse_stanzas sexps ~file ~eval in
-  { source_dir = eval.dir; static_stanzas = stanzas }, dynamic_includes
+  { source_dir = eval_source_path eval; static_stanzas = stanzas }, dynamic_includes
 ;;
 
 module Make_fold (M : Monad.S) = struct
@@ -330,7 +325,7 @@ module Script = struct
   open Memo.O
 
   type t =
-    { file : Source_path.t
+    { file : Source_tree.Rules.File.t
     ; contents : string
     ; eval : eval
     ; from_parent : Dune_lang.Ast.t list
@@ -341,8 +336,9 @@ module Script = struct
   let generated_dune_files_dir = Path.Build.relative Path.Build.root ".dune"
 
   let eval_one ~context { file; contents; from_parent; eval } =
+    let source_path = Source_tree.Rules.File.source_path file in
     let generated_dune_file =
-      match file with
+      match source_path with
       | Source_path.Workspace file ->
         Path.Build.append_source
           (Path.Build.relative generated_dune_files_dir (Context_name.to_string context))
@@ -375,7 +371,8 @@ module Script = struct
     generated_dune_file |> Path.build |> Path.parent |> Option.iter ~f:Path.mkdir_p;
     let plugin, exec_dir =
       match Loaded_project.loaded_source eval.loaded_project with
-      | None -> Source_path.to_path file, Source_path.to_path eval.dir
+      | None ->
+        Source_path.to_path source_path, Source_path.to_path (eval_source_path eval)
       | Some source ->
         let physical path =
           match path with
@@ -385,7 +382,7 @@ module Script = struct
             |> Loaded_source.file_path source
           | Workspace _ -> Code_error.raise "A loaded source contains a workspace path" []
         in
-        physical file, physical eval.dir
+        physical source_path, physical (eval_source_path eval)
     in
     let* context = Context.DB.get context in
     let* ocaml = Context.ocaml context in
@@ -414,7 +411,7 @@ module Script = struct
         ~loc:(Loc.in_file plugin)
         [ Pp.textf
             "%s failed to produce a valid dune file."
-            (Source_path.to_string_maybe_quoted file)
+            (Source_tree.Rules.File.diagnostic_name file |> String.maybe_quoted)
         ; Pp.textf "Did you forgot to call [Jbuild_plugin.V*.send]?"
         ];
     Path.build generated_dune_file
@@ -449,8 +446,11 @@ module Eval = struct
 
   open Memo.O
 
-  let context_independent ~eval dune_file =
-    let file = Source.Dune_file.source_path dune_file in
+  let context_independent ~(eval : eval) dune_file =
+    let file =
+      Source.Dune_file.filename dune_file
+      |> Option.map ~f:(Source_tree.Rules.Dir.file eval.source_dir)
+    in
     let static = Source.Dune_file.get_static_sexp dune_file in
     match Source.Dune_file.kind dune_file with
     | Plain ->
@@ -471,7 +471,7 @@ module Eval = struct
              |> Path.build
              |> Path.drop_optional_build_context
              |> Path.to_string_maybe_quoted)
-            (Source_path.to_string_maybe_quoted eval.dir))
+            (Source_path.to_string_maybe_quoted (eval_source_path eval)))
         (fun () ->
            let* ast, include_context =
              Include_stanza.load_sexps ~context:include_context (loc, include_file)
@@ -491,7 +491,9 @@ module Eval = struct
         Memo.lazy_ ~name:"dynamic-includes"
         @@ fun () ->
         let+ stanzas =
-          let source_file = Source_path.relative_fname eval.dir Source.Dune_file.fname in
+          let source_file =
+            Source_path.relative_fname (eval_source_path eval) Source.Dune_file.fname
+          in
           let origin =
             Loaded_project.output_path eval.loaded_project source_file |> Option.value_exn
           in
@@ -526,7 +528,7 @@ module Eval = struct
             mask
             (Mask.of_visible_packages (Loaded_project.visible_packages loaded_project))
         in
-        let eval = { loaded_project; dir; project; mask } in
+        let eval = { loaded_project; source_dir = dir; project; mask } in
         context_independent ~eval dune_file)
       >>| List.partition_map ~f:(function
         | Literal (eval, t, dynamic_includes) -> Left (eval, t, dynamic_includes)
@@ -543,7 +545,7 @@ module Eval = struct
               ~human_readable_description:(fun () ->
                 Pp.textf
                   "- evaluating dune file %S in OCaml syntax"
-                  (Source_path.to_string script.file))
+                  (Source_tree.Rules.File.diagnostic_name script.file))
               (fun () -> Script.eval_one ~context:context_name script)
           in
           set_dynamic_stanzas dune_file ~eval:script.eval ~dynamic_includes)

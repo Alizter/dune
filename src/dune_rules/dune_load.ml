@@ -11,7 +11,8 @@ module Dune_file_db = struct
 end
 
 type t =
-  { dune_files : (Source_path.t * Dune_project.t * Source.Dune_file.t) Appendable_list.t
+  { dune_files :
+      (Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t) Appendable_list.t
   ; packages : Package.t Package.Name.Map.t
   ; projects : Dune_project.t list
   ; projects_by_root : Dune_project.t Source_path.Map.t
@@ -29,14 +30,14 @@ module Projects_and_dune_files =
       type t = status * Dune_project.t
     end))
     (Monoid.Appendable_list (struct
-         type t = Source_path.t * Dune_project.t * Source.Dune_file.t
+         type t = Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t
        end))
 
 module Rules_source_tree_map_reduce =
   Source_tree.Rules.Dir.Make_map_reduce (Memo) (Projects_and_dune_files)
 
 module Loaded_dune_files = Monoid.Appendable_list (struct
-    type t = Loaded_project.t * Source_path.t * Source.Dune_file.t
+    type t = Loaded_project.t * Source_tree.Rules.Dir.t * Source.Dune_file.t
   end)
 
 module Loaded_source_tree_map_reduce =
@@ -60,7 +61,7 @@ let load () =
       let dune_files =
         match Source_tree.Rules.Dir.dune_file dir with
         | None -> Appendable_list.empty
-        | Some d -> Appendable_list.singleton (path, project, d)
+        | Some d -> Appendable_list.singleton (dir, project, d)
       in
       Memo.return (projects, dune_files)
     in
@@ -216,13 +217,15 @@ let loaded =
             Loaded_project.output_root project, project)
         in
         let workspace_dune_files =
-          Appendable_list.map workspace.dune_files ~f:(fun (dir, project, dune_file) ->
-            let loaded_project =
-              Source_path.Map.find_exn
-                workspace_projects_by_root
-                (Dune_project.root project)
-            in
-            loaded_project, dir, dune_file)
+          Appendable_list.map
+            workspace.dune_files
+            ~f:(fun (source_dir, project, dune_file) ->
+              let loaded_project =
+                Source_path.Map.find_exn
+                  workspace_projects_by_root
+                  (Dune_project.root project)
+              in
+              loaded_project, source_dir, dune_file)
         in
         let* mounted_dune_files =
           Memo.List.map mounted ~f:(fun (mounted, _, projects_by_root) ->
@@ -235,8 +238,7 @@ let loaded =
                 match Source_tree.Rules.Dir.dune_file dir with
                 | None -> Appendable_list.empty
                 | Some dune_file ->
-                  Appendable_list.singleton
-                    (loaded_project, Source_tree.Rules.Dir.source_path dir, dune_file)
+                  Appendable_list.singleton (loaded_project, dir, dune_file)
               in
               Memo.return dune_files
             in

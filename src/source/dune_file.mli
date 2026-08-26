@@ -24,6 +24,7 @@ val kind : t -> kind
 val path : t -> Path.Source.t option
 
 val source_path : t -> Source_path.t option
+val filename : t -> Filename.t option
 val sub_dir_status : t -> Source_dir_status.Spec.t
 
 (** The location of the (dirs ...) stanza if present *)
@@ -42,16 +43,7 @@ val files : t -> Files.t
 val sub_dirnames : t -> Filename.Array.Set.t
 
 val load
-  :  dir:Path.Source.t
-  -> Source_dir_status.t
-  -> Dune_project.t
-  -> files:Filename.Array.Set.t
-  -> parent:t option
-  -> t option Memo.t
-
-val load_loaded
-  :  source:Loaded_source.t
-  -> dir:Path.Build.t
+  :  dir:Source_tree_file.Dir.t
   -> Source_dir_status.t
   -> Dune_project.t
   -> files:Filename.Array.Set.t
