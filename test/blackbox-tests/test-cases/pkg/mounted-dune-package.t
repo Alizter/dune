@@ -2,6 +2,7 @@ A locked Dune project is loaded into the current process. Its fetched source and
 compiled artifacts have distinct owners, source precedence is preserved, and no
 nested Dune command is run.
 
+  $ export DUNE_CACHE_ROOT="$PWD/.cache"
   $ cat > dune-workspace <<'EOF'
   > (lang dune 3.20)
   > (pkg enabled)
@@ -83,6 +84,7 @@ nested Dune command is run.
   $ cat > foo/fallback.ml <<'EOF'
   > let message = "source-fallback"
   > EOF
+  $ echo snapshot-only > foo/unused.txt
   $ tar cf foo.tar foo
   $ rm -rf foo
 
@@ -124,15 +126,30 @@ beforehand, so a nested package command would fail the build and leave a marker.
   $ "$real_dune" trace cat --trace-file trace.csexp | grep -c '_private/default/\.pkg/foo' || true
   0
 
-The fetch target is private source state. Dune files publish selected source
-files into the package output root, where all generated artifacts remain.
+Mounted source transport must not introduce an opaque directory target into the
+workspace executable's recursive rule graph.
 
-  $ source_root=$(echo _build/_private/default/.pkg-source/*)
+  $ "$real_dune" rules --recursive --format=json ./main.exe |
+  > jq_dune '[.[] | .targets.directories[] | select(contains("/.pkg-source/"))] | length'
+  0
+
+Dune language files are read from the immutable source snapshot. Selected
+compilation inputs are materialized as ordinary file targets in the package
+output root alongside generated artifacts; no unpacked source tree is a build
+directory target.
+
   $ artifact_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
-  $ test -f "$source_root/foo.ml" && echo fetched-source-root
-  fetched-source-root
+  $ test -f "$artifact_root/foo.ml" && echo materialized-source-file
+  materialized-source-file
+  $ "$real_dune" rules --format=json "$artifact_root/foo.ml" |
+  > jq_dune -c '[.[] | .targets | {files: (.files | length), directories: (.directories | length)}]'
+  [{"files":1,"directories":0}]
+  $ test ! -e "$artifact_root/unused.txt" && test ! -e "$artifact_root/dune-project" && echo selective-materialization
+  selective-materialization
   $ test -f "$artifact_root/foo.cmxa" && echo artifact-root
   artifact-root
+  $ test ! -e _build/_private/default/.pkg-source && echo no-directory-source-target
+  no-directory-source-target
   $ test ! -d _build/_private/default/.pkg && echo no-old-package-rules
   no-old-package-rules
   $ "$real_dune" build @pkg-install --display quiet
@@ -141,8 +158,9 @@ files into the package output root, where all generated artifacts remain.
   $ grep '^version' "$artifact_root/META.foo"
   version = "1.0"
   $ "$real_dune" runtest --display quiet
-  $ test "$(cat "$source_root/generated.ml")" = 'let message = "source-generated"' && echo source-unchanged
-  source-unchanged
+  $ snapshot_root=$(find "$DUNE_CACHE_ROOT/pkg-sources/v1" -type d -name root)
+  $ test "$(cat "$snapshot_root/generated.ml")" = 'let message = "source-generated"' && echo snapshot-unchanged
+  snapshot-unchanged
   $ test "$(cat "$artifact_root/generated.ml")" = 'let message = "generated"' && echo promotion-contained
   promotion-contained
   $ "$real_dune" trace commands --trace-file trace.csexp | grep 'foo.ml' | grep -- '-w -a' >/dev/null && echo vendored-flags
@@ -227,7 +245,6 @@ legacy package route. It remains usable alongside the mounted package.
   $ "$real_dune" clean
   $ "$real_dune" build @pkg-install --display quiet
   legacy-route
-  $ foo_source_root=$(echo _build/_private/default/.pkg-source/*)
   $ foo_artifact_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
   $ foo_layout=$(echo _build/install/default/.packages/*/lib/foo)
   $ test -f "$foo_artifact_root/META.foo" && test -f "$foo_artifact_root/foo.dune-package" && echo artifact-metadata
@@ -236,8 +253,8 @@ legacy package route. It remains usable alongside the mounted package.
   layout-metadata
   $ test -L "$foo_layout/META" && test -L "$foo_layout/dune-package" && test "$(realpath "$foo_layout/META")" = "$(realpath "$foo_artifact_root/META.foo")" && test "$(realpath "$foo_layout/dune-package")" = "$(realpath "$foo_artifact_root/foo.dune-package")" && echo metadata-from-artifact-root
   metadata-from-artifact-root
-  $ test ! -e "$foo_source_root/META.foo" && test ! -e "$foo_source_root/foo.dune-package" && echo source-metadata-untouched
-  source-metadata-untouched
+  $ test ! -e _build/_private/default/.pkg-source && echo snapshot-not-build-output
+  snapshot-not-build-output
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   symlink-source/generated/source-fallback/legacy-symlink-source
