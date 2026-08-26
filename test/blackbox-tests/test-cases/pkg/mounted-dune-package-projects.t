@@ -2,6 +2,7 @@ Lock packages that share one source archive are loaded once, while nested Dune
 projects retain their own package identity and contribute libraries to the same
 workspace build.
 
+  $ export DUNE_CACHE_ROOT="$PWD/.cache"
   $ cat > dune-workspace <<'EOF'
   > (lang dune 3.20)
   > (pkg enabled)
@@ -21,7 +22,7 @@ workspace build.
   > let () = Printf.printf "%s/%s\n" Foo.message Bar.message
   > EOF
 
-  $ mkdir -p shared/sub
+  $ mkdir -p shared/sub shared/invalid.t
   $ cat > shared/dune-project <<'EOF'
   > (lang dune 3.20)
   > (package (name foo))
@@ -30,9 +31,19 @@ workspace build.
   > (library
   >  (name foo)
   >  (public_name foo))
+  > (cram
+  >  (applies_to :whole_subtree))
   > EOF
   $ cat > shared/foo.ml <<'EOF'
   > let message = "root-project"
+  > EOF
+
+A Cram test directory may contain intentionally invalid Dune projects. It is test
+data and must be masked before mounted project discovery attempts to decode it.
+
+  $ cat > shared/invalid.t/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (lang dune 3.20)
   > EOF
   $ cat > shared/sub/dune-project <<'EOF'
   > (lang dune 3.20)
@@ -86,12 +97,15 @@ workspace build.
   $ test ! -d _build/_private/default/.pkg && echo no-old-package-rules
   no-old-package-rules
 
-The shared transport has one source target and two lock identities with distinct
-output roots. Package masking selects the relevant package from each mounted
-view, while the nested library retains its project-relative output directory.
+The shared transport has one immutable source snapshot and two lock identities
+with distinct output roots. Package masking selects the relevant package from
+each mounted view, while the nested library retains its project-relative output
+directory.
 
-  $ test "$(find _build/_private/default/.pkg-source -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 && echo one-source-root
-  one-source-root
+  $ test "$(find "$DUNE_CACHE_ROOT/pkg-sources/v1" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 && echo one-source-snapshot
+  one-source-snapshot
+  $ test ! -e _build/_private/default/.pkg-source && echo no-directory-source-target
+  no-directory-source-target
   $ test "$(find _build/_default+lockfile/pkg -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 2 && echo two-artifact-roots
   two-artifact-roots
   $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
