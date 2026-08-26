@@ -1,6 +1,7 @@
 A mounted package may define a PPX driver and use it to preprocess its own
 library. Its plain and OCaml-syntax Dune files may both use source include
-stanzas. A workspace consumer uses the same driver, resolving its libraries from
+stanzas, including a source include reached from a generated dynamic include. A
+workspace consumer uses the same driver, resolving its libraries from
 the mounted package without creating a second semantic workspace context.
 
   $ cat > dune-workspace <<'EOF'
@@ -23,23 +24,24 @@ the mounted package without creating a second semantic workspace context.
   > let () = print_endline Foo.message
   > EOF
 
-  $ mkdir -p foo/generator
+  $ mkdir -p foo/lib foo/generator
   $ cat > foo/dune-project <<'EOF'
   > (lang dune 3.24)
   > (package (name foo))
   > EOF
-  $ cat > foo/dune <<'EOF'
+  $ cat > foo/lib/dune <<'EOF'
   > (include libraries.inc)
   > (rule
   >  (target foo.ml)
-  >  (deps generator/proof.ml)
-  >  (action (copy generator/proof.ml %{target})))
+  >  (deps ../generator/proof.ml)
+  >  (action (copy ../generator/proof.ml %{target})))
+  > (dynamic_include ../generator/dynamic.inc)
   > EOF
-  $ cat > foo/libraries.inc <<'EOF'
+  $ cat > foo/lib/libraries.inc <<'EOF'
   > (library
   >  (name foo)
   >  (public_name foo)
-  >  (modules foo)
+  >  (modules foo dynamic)
   >  (preprocess (staged_pps foo.ppx)))
   > (library
   >  (name foo_ppx_support)
@@ -53,10 +55,17 @@ the mounted package without creating a second semantic workspace context.
   >  (libraries foo_ppx_support)
   >  (ppx.driver (main Foo_ppx.main)))
   > EOF
-  $ cat > foo/foo_ppx_support.ml <<'EOF'
+  $ cat > foo/lib/dynamic-source.inc <<'EOF'
+  > (rule
+  >  (target dynamic.ml)
+  >  (action
+  >   (with-stdout-to %{target}
+  >    (echo "let value = \"include ppx\""))))
+  > EOF
+  $ cat > foo/lib/foo_ppx_support.ml <<'EOF'
   > let touch () = ()
   > EOF
-  $ cat > foo/foo_ppx.ml <<'EOF'
+  $ cat > foo/lib/foo_ppx.ml <<'EOF'
   > let main () =
   >   Foo_ppx_support.touch ();
   >   if Array.length Sys.argv >= 3 then (
@@ -71,6 +80,9 @@ the mounted package without creating a second semantic workspace context.
   >   else
   >     exit 2
   > EOF
+  $ cat > foo/generator/dune-project <<'EOF'
+  > (lang dune 3.24)
+  > EOF
   $ cat > foo/generator/dune <<EOF
   > (* -*- tuareg -*- *)
   > let () =
@@ -79,6 +91,9 @@ the mounted package without creating a second semantic workspace context.
   >   close_out count
   > let () = Jbuild_plugin.V1.send {|
   > (include dune.inc)
+  > (rule
+  >  (with-stdout-to dynamic.inc
+  >   (echo "(include dynamic-source.inc)")))
   > |}
   > EOF
   $ cat > foo/generator/dune.inc <<'EOF'
@@ -86,7 +101,7 @@ the mounted package without creating a second semantic workspace context.
   >  (target proof.ml)
   >  (action
   >   (with-stdout-to %{target}
-  >    (echo "let message = \"mounted include ppx\""))))
+  >    (echo "let message = \"mounted \" ^ Dynamic.value"))))
   > EOF
   $ tar cf foo.tar foo
   $ rm -rf foo
@@ -116,12 +131,21 @@ include paths retain snapshot ownership.
   $ wc -l < eval-count
   2
 
+Static source metadata, including the source include reached from the generated
+include, is read directly from the loaded source.
+
+  $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
+  $ test ! -e "$foo_root/lib/libraries.inc" && echo static-include-not-materialized
+  static-include-not-materialized
+  $ test ! -e "$foo_root/lib/dynamic-source.inc" && echo dynamic-source-not-materialized
+  dynamic-source-not-materialized
+
 The package objects use the mounted artifact root. The synthesized PPX executable
 is a tool of the workspace resolver and uses its ordinary [.ppx] directory.
 Loading the driver does not instantiate the old package pipeline.
 
   $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
-  $ test -f "$foo_root/.foo.objs/native/foo.cmx" && echo mounted-library-artifact
+  $ test -f "$foo_root/lib/.foo.objs/native/foo.cmx" && echo mounted-library-artifact
   mounted-library-artifact
   $ test -n "$(find _build/default/.ppx -name ppx.exe -print -quit)" && echo workspace-resolver-ppx
   workspace-resolver-ppx
