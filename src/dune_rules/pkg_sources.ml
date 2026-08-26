@@ -96,25 +96,43 @@ let literal = function
   | _ -> None
 ;;
 
+(* Arguments may contain package variables and filtered targets. Replacing the
+   action is safe when its literal target includes the package install alias. *)
 let is_dune_build = function
   | program :: command :: args ->
     Option.equal String.equal (literal program) (Some "dune")
     && Option.equal String.equal (literal command) (Some "build")
-    && List.for_all args ~f:(fun arg -> Option.is_some (literal arg))
+    && List.exists args ~f:(fun arg ->
+      Option.equal String.equal (literal arg) (Some "@install"))
   | [] | [ _ ] -> false
 ;;
 
-let rec action_is_dune_only (action : Dune_lang.Action.t) =
+(* Condition-guarded steps such as [dune subst] for development packages do not
+   veto mounting. At least one unconditional [dune build] is still required. *)
+type action_kind =
+  | No_unconditional_action
+  | Dune_only
+  | Other
+
+let combine_action_kinds actions =
+  List.fold_left actions ~init:No_unconditional_action ~f:(fun kind action ->
+    match kind, action with
+    | Other, _ | _, Other -> Other
+    | Dune_only, _ | _, Dune_only -> Dune_only
+    | No_unconditional_action, No_unconditional_action -> No_unconditional_action)
+;;
+
+let rec action_kind (action : Dune_lang.Action.t) =
   match action with
-  | Run args -> is_dune_build args
+  | Run args | Runexec args -> if is_dune_build args then Dune_only else Other
   | Chdir (_, action)
   | No_infer action
   | Setenv (_, _, action)
   | Withenv (_, action)
-  | With_accepted_exit_codes (_, action) -> action_is_dune_only action
+  | With_accepted_exit_codes (_, action) -> action_kind action
   | Progn actions | Concurrent actions ->
-    (not (List.is_empty actions)) && List.for_all actions ~f:action_is_dune_only
-  | Runexec _
+    List.map actions ~f:action_kind |> combine_action_kinds
+  | When _ -> No_unconditional_action
   | Dynamic_run _
   | Redirect_out _
   | Redirect_in _
@@ -133,8 +151,15 @@ let rec action_is_dune_only (action : Dune_lang.Action.t) =
   | Cram _
   | Patch _
   | Substitute _
-  | When _
-  | Format_dune_file _ -> false
+  | Format_dune_file _ -> Other
+;;
+
+let build_command_is_dune_only = function
+  | Build_command.Dune -> true
+  | Build_command.Action action ->
+    (match action_kind action with
+     | Dune_only -> true
+     | No_unconditional_action | Other -> false)
 ;;
 
 let selected_action candidate =
@@ -314,8 +339,8 @@ let mount candidate ({ Loaded_source.projects; dune_files } : Loaded_source.t) =
 let prepare candidate =
   let* build, install = selected_action candidate in
   match build, install, Candidate.source candidate with
-  | Some (Build_command.Action action), None, Some source
-    when action_is_dune_only action
+  | Some build, None, Some source
+    when build_command_is_dune_only build
          && List.is_empty candidate.lock_pkg.depexts
          && List.is_empty candidate.lock_pkg.info.extra_sources ->
     Lock_dir.source_kind source
@@ -324,11 +349,8 @@ let prepare candidate =
        let* source = load_source candidate in
        mount candidate source
      | `Local (`Directory, _) -> Memo.return None)
-  | Some (Build_command.Action _), None, Some _ -> Memo.return None
-  | Some Build_command.Dune, _, _
-  | None, _, _
-  | Some (Build_command.Action _), Some _, _
-  | Some (Build_command.Action _), None, None -> Memo.return None
+  | Some _, None, Some _ | Some _, Some _, _ | Some _, None, None | None, _, _ ->
+    Memo.return None
 ;;
 
 let mounted =

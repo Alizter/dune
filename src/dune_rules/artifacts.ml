@@ -10,6 +10,7 @@ type origin =
   ; dst : Path.Local.t
   ; enabled_if : bool Memo.t
   ; package : Package.Name.t option
+  ; install_path : Path.Build.t option
   }
 
 type where =
@@ -116,12 +117,10 @@ let binary t ?hint ?(where = Original_path) ~dir ~loc name =
             ~context
             ~loc
             ())
-  | `Origin { dir; binding; dst; enabled_if = _; package = _ } ->
-    (match where with
-     | Install_dir ->
-       let install_dir = Install.Context.bin_dir ~context:(Context.name t.context) in
-       Memo.return @@ Ok (Path.build @@ Path.Build.append_local install_dir dst)
-     | Original_path ->
+  | `Origin { dir; binding; dst = _; enabled_if = _; package = _; install_path } ->
+    (match where, install_path with
+     | Install_dir, Some path -> Memo.return (Ok (Path.build path))
+     | Install_dir, None | Original_path, _ ->
        let+ expanded =
          let* expander = Expander0.get ~dir in
          File_binding_expand.expand
