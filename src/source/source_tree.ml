@@ -191,7 +191,14 @@ and contents
       ~(dir_status : Source_dir_status.t)
   =
   let files = Dir_contents.files readdir in
-  let+ dune_file = Dune_file.load ~dir:path dir_status project ~files ~parent:dune_file in
+  let+ dune_file =
+    Dune_file.load
+      ~dir:(Source_tree_file.Dir.workspace path)
+      dir_status
+      project
+      ~files
+      ~parent:dune_file
+  in
   let files =
     let predicate =
       match dune_file with
@@ -411,6 +418,12 @@ end
 module Workspace_dir = Dir
 
 module Rules = struct
+  module File = struct
+    include Source_tree_file.File
+
+    let include_context = Include_stanza.in_source_file
+  end
+
   module Dir = struct
     type loaded =
       { source : Loaded_source.t
@@ -444,14 +457,17 @@ module Rules = struct
         Loaded_source.source_path source relative_dir |> Source_path.build
     ;;
 
+    let file t filename =
+      match t with
+      | Source dir ->
+        Path.Source.relative_fname (Workspace_dir.path dir) filename |> File.workspace
+      | Loaded { source; relative_dir; _ } ->
+        Path.Local.relative_fname relative_dir filename |> File.loaded source
+    ;;
+
     let relative_dir = function
       | Source dir -> Workspace_dir.path dir |> Path.Source.to_local
       | Loaded { relative_dir; _ } -> relative_dir
-    ;;
-
-    let loaded_source = function
-      | Source _ -> None
-      | Loaded { source; _ } -> Some source
     ;;
 
     let filenames = function
@@ -577,9 +593,8 @@ module Rules = struct
             project, [ project ]
         in
         let* dune_file =
-          Dune_file.load_loaded
-            ~source
-            ~dir:source_dir
+          Dune_file.load
+            ~dir:(Source_tree_file.Dir.loaded source relative_dir)
             status
             project
             ~files
