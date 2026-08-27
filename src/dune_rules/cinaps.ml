@@ -73,7 +73,7 @@ let () =
 let flags = Ocaml_flags.of_list [ "-w"; "-24" ]
 let for_ = Compilation_mode.Ocaml
 
-let gen_rules sctx t ~dir ~scope ~loaded_source =
+let gen_rules sctx t ~dir ~scope ~source_tree_dir =
   let digest_input_repr =
     Repr.variant
       "cinaps-digest-input"
@@ -105,8 +105,21 @@ let gen_rules sctx t ~dir ~scope ~loaded_source =
   let source_dir = Scope.source_dir scope dir in
   (* Files checked by cinaps *)
   let* cinapsed_files =
-    match source_dir with
-    | Workspace source_dir ->
+    match source_tree_dir with
+    | Some source_dir ->
+      Source_tree.Rules.Dir.filenames source_dir
+      |> Filename.Array.Set.to_list
+      |> List.filter_map ~f:(fun filename ->
+        if
+          Predicate_lang.Glob.test
+            t.files
+            (Filename.to_string filename)
+            ~standard:Predicate_lang.true_
+        then Some (Path.Build.relative_fname dir filename)
+        else None)
+      |> Memo.return
+    | None ->
+      let source_dir = Source_path.as_workspace source_dir |> Option.value_exn in
       Source_tree.files_of source_dir
       >>| Path.Source.Set.to_list
       >>| List.filter_map ~f:(fun source ->
@@ -120,28 +133,6 @@ let gen_rules sctx t ~dir ~scope ~loaded_source =
             (Path.Build.append_source
                (Super_context.context sctx |> Context.build_dir)
                source)
-        else None)
-    | Build source_dir ->
-      let source = Option.value_exn loaded_source in
-      let+ filenames =
-        Loaded_source.local_path source source_dir
-        |> Option.value_exn
-        |> Loaded_source.readdir source
-        >>| Filename.Map.to_list
-        >>| List.filter_map ~f:(fun (filename, kind) ->
-          match kind with
-          | `Dir -> None
-          | `File -> Some filename)
-        >>| Filename.Array.Set.of_list
-      in
-      Filename.Array.Set.to_list filenames
-      |> List.filter_map ~f:(fun filename ->
-        if
-          Predicate_lang.Glob.test
-            t.files
-            (Filename.to_string filename)
-            ~standard:Predicate_lang.true_
-        then Some (Path.Build.relative_fname dir filename)
         else None)
   in
   let cinaps_dir =

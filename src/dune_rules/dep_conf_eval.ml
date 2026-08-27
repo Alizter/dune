@@ -53,25 +53,26 @@ module Build_backed_alias_rec = Alias_builder.Alias_rec (struct
         and* source_subdirs =
           match source_dir with
           | None -> Action_builder.return Filename.Set.empty
-          | Some (source, source_dir) ->
-            Action_builder.of_memo (Loaded_source.readdir source source_dir)
-            >>| Filename.Map.to_list
-            >>| List.filter_map ~f:(fun (name, kind) ->
-              match kind with
-              | `Dir -> Some name
-              | `File -> None)
-            >>| Filename.Set.of_list
+          | Some source_dir ->
+            Source_tree.Rules.Dir.sub_dir_names source_dir
+            |> Filename.Array.Set.to_list
+            |> Filename.Set.of_list
+            |> Action_builder.return
         in
         let subdirs = Filename.Set.union source_subdirs allowed_build_only_subdirs in
         let+ children =
           Filename.Set.to_list subdirs
           |> Action_builder.List.map ~f:(fun subdir ->
-            let source_dir =
+            let* source_dir =
               if Filename.Set.mem source_subdirs subdir
-              then
-                Option.map source_dir ~f:(fun (source, source_dir) ->
-                  source, Path.Local.relative_fname source_dir subdir)
-              else None
+              then (
+                let source_dir = Option.value_exn source_dir in
+                Filename.Array.Map.find (Source_tree.Rules.Dir.sub_dirs source_dir) subdir
+                |> Option.value_exn
+                |> Source_tree.Rules.Dir.sub_dir_as_t
+                |> Action_builder.of_memo
+                >>| Option.some)
+              else Action_builder.return None
             in
             traverse source_dir (Path.Build.relative_fname dir subdir))
         in
@@ -79,15 +80,8 @@ module Build_backed_alias_rec = Alias_builder.Alias_rec (struct
       in
       let open Action_builder.O in
       let* loaded_project = Action_builder.of_memo (Dune_load.find_loaded_project ~dir) in
-      let source_dir =
-        Loaded_project.source_path loaded_project dir
-        |> Option.bind ~f:(function
-          | Source_path.Workspace _ -> None
-          | Source_path.Build dir ->
-            let source =
-              Loaded_project.loaded_source loaded_project |> Option.value_exn
-            in
-            Loaded_source.local_path source dir |> Option.map ~f:(fun dir -> source, dir))
+      let* source_dir =
+        Loaded_project.source_tree_dir loaded_project dir |> Action_builder.of_memo
       in
       traverse source_dir dir
     ;;
@@ -115,25 +109,27 @@ let dep_on_alias_rec alias ~loc =
       "Alias directory is outside its loaded project"
       [ "dir", Path.Build.to_dyn dir; "project", Loaded_project.to_dyn loaded_project ]
   | Some source_dir ->
+    let* source_tree_dir =
+      Loaded_project.source_tree_dir loaded_project dir |> Action_builder.of_memo
+    in
     let* exists =
-      match source_dir with
-      | Source_path.Workspace source_dir ->
-        Action_builder.of_memo (Source_tree.find_dir source_dir) >>| Option.is_some
-      | Source_path.Build source_dir ->
-        let source = Loaded_project.loaded_source loaded_project |> Option.value_exn in
-        Loaded_source.local_path source source_dir
+      match source_tree_dir with
+      | Some _ -> Action_builder.return true
+      | None ->
+        Source_path.as_workspace source_dir
         |> Option.value_exn
-        |> Loaded_source.file_exists source
+        |> Source_tree.find_dir
         |> Action_builder.of_memo
+        >>| Option.is_some
     in
     if not exists
     then fail_unknown_directory source_dir
     else (
       let name = Dune_engine.Alias.name alias in
       let+ status =
-        match source_dir with
-        | Source_path.Workspace _ -> Alias_rec.dep_on_alias_rec name dir
-        | Source_path.Build _ -> Build_backed_alias_rec.dep_on_alias_rec name dir
+        match source_tree_dir with
+        | None -> Alias_rec.dep_on_alias_rec name dir
+        | Some _ -> Build_backed_alias_rec.dep_on_alias_rec name dir
       in
       match status with
       | Defined -> ()
@@ -355,7 +351,7 @@ let rec dep expander : Dep_conf.t -> _ = function
          ~f:(Expander.expand ~mode:Single expander)
          ~base_dir:(Expander.dir expander)
          ~source_dir:(Expander.source_dir expander)
-         ~loaded_source:(Expander.loaded_source expander)
+         ~source_tree_dir:(Expander.source_tree_dir expander)
        >>| Glob_files_expand.Expanded.matches
        >>| List.map ~f:(fun path ->
          if Filename.is_relative path

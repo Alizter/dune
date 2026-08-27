@@ -15,6 +15,7 @@ type t =
       (Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t) Appendable_list.t
   ; packages : Package.t Package.Name.Map.t
   ; projects : Dune_project.t list
+  ; project_dirs : Source_tree.Rules.Dir.t Source_path.Map.t
   ; projects_by_root : Dune_project.t Source_path.Map.t
   ; mask : Only_packages.t
   }
@@ -27,7 +28,7 @@ type status =
 module Projects_and_dune_files =
   Monoid.Product
     (Monoid.Appendable_list (struct
-      type t = status * Dune_project.t
+      type t = status * Dune_project.t * Source_tree.Rules.Dir.t
     end))
     (Monoid.Appendable_list (struct
          type t = Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t
@@ -40,7 +41,7 @@ module Loaded_dune_files = Monoid.Appendable_list (struct
     type t = Loaded_project.t * Source_tree.Rules.Dir.t * Source.Dune_file.t
   end)
 
-module Loaded_source_tree_map_reduce =
+module Build_source_tree_map_reduce =
   Source_tree.Rules.Dir.Make_map_reduce (Memo) (Loaded_dune_files)
 
 let load () =
@@ -55,7 +56,7 @@ let load () =
       let project = Source_tree.Rules.Dir.project dir in
       let projects =
         if Source_path.equal path (Dune_project.root project)
-        then Appendable_list.singleton (status dir, project)
+        then Appendable_list.singleton (status dir, project, dir)
         else Appendable_list.empty
       in
       let dune_files =
@@ -77,7 +78,7 @@ let load () =
     Memo.List.fold_left
       projects
       ~init:(Package.Name.Map.empty, Package.Name.Set.empty)
-      ~f:(fun (acc_packages, vendored) (status, (project : Dune_project.t)) ->
+      ~f:(fun (acc_packages, vendored) (status, (project : Dune_project.t), _) ->
         let+ packages =
           let packages = Dune_project.including_hidden_packages project in
           let+ disabled =
@@ -115,12 +116,16 @@ let load () =
   let packages =
     Package.Name.Map.map ~f:fst all_packages |> Only_packages.filter_packages mask
   in
-  let projects = List.rev_map projects ~f:snd in
+  let project_dirs =
+    Source_path.Map.of_list_map_exn projects ~f:(fun (_, project, dir) ->
+      Dune_project.root project, dir)
+  in
+  let projects = List.rev_map projects ~f:(fun (_, project, _) -> project) in
   let projects_by_root =
     Source_path.Map.of_list_map_exn projects ~f:(fun project ->
       Dune_project.root project, project)
   in
-  { dune_files; mask; packages; projects; projects_by_root }
+  { dune_files; mask; packages; projects; project_dirs; projects_by_root }
 ;;
 
 let load =
@@ -135,7 +140,7 @@ type loaded =
   ; dune_file_by_dir : Dune_file_db.t
   }
 
-let workspace_loaded_project context project =
+let workspace_loaded_project context project source_tree_root =
   let source_root =
     Dune_project.root project |> Source_path.as_workspace |> Option.value_exn
   in
@@ -144,16 +149,17 @@ let workspace_loaded_project context project =
     ~project
     ~identity:(Loaded_project.Identity.workspace source_root)
     ~source_root:(Source_path.workspace source_root)
-    ~loaded_source:None
+    ~source_tree_root
     ~partition
     ~output_root:(Path.Build.append_source (Context.build_dir context) source_root)
     ~visible_packages:None
 ;;
 
-let mounted_loaded_project context mounted project =
+let mounted_loaded_project context mounted (project, source_tree_root) =
   let candidate = Pkg_sources.Mounted.candidate mounted in
-  let source = Pkg_sources.Mounted.source mounted in
-  let package_source_root = Loaded_source.root source |> Source_path.build in
+  let package_source_root =
+    Pkg_sources.Mounted.source_root mounted |> Source_path.build
+  in
   let source_root = Dune_project.root project in
   let project_root =
     Source_path.descendant source_root ~of_:package_source_root |> Option.value_exn
@@ -171,7 +177,7 @@ let mounted_loaded_project context mounted project =
          ~package:(Pkg_sources.Candidate.name candidate)
          ~project_root)
     ~source_root
-    ~loaded_source:(Some source)
+    ~source_tree_root
     ~partition
     ~output_root:
       (Path.Build.append_local
@@ -189,7 +195,11 @@ let loaded =
         and* context = Context.DB.get context_name
         and* mounted = Pkg_sources.mounted context_name in
         let workspace_loaded_projects =
-          List.map workspace.projects ~f:(workspace_loaded_project context)
+          List.map workspace.projects ~f:(fun project ->
+            let source_tree_root =
+              Source_path.Map.find_exn workspace.project_dirs (Dune_project.root project)
+            in
+            workspace_loaded_project context project source_tree_root)
         in
         let workspace_projects_by_root =
           Source_path.Map.of_list_map_exn workspace_loaded_projects ~f:(fun project ->
@@ -242,8 +252,8 @@ let loaded =
               in
               Memo.return dune_files
             in
-            Loaded_source_tree_map_reduce.map_reduce
-              (Pkg_sources.Mounted.tree mounted |> Source_tree.Rules.Loaded.root)
+            Build_source_tree_map_reduce.map_reduce
+              (Pkg_sources.Mounted.tree mounted |> Source_tree.Rules.Build.root)
               ~traverse:Source_dir_status.Set.all
               ~trace_event_name:"Loaded source tree"
               ~f)

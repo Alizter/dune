@@ -18,7 +18,7 @@ let install_stanza_rules ~ctx_dir ~expander (install_conf : Install_conf.t) =
             ~expand
             ~dir:ctx_dir
             ~source_dir:(Expander.source_dir expander)
-            ~loaded_source:(Expander.loaded_source expander)
+            ~source_tree_dir:(Expander.source_tree_dir expander)
         and+ dirs_expanded =
           Install_entry.Dir.to_file_bindings_expanded
             install_conf.dirs
@@ -205,7 +205,7 @@ end = struct
           cinaps
           ~dir
           ~scope
-          ~loaded_source:(Expander.loaded_source expander)
+          ~source_tree_dir:(Expander.source_tree_dir expander)
       in
       empty_none
     | Mdx.T mdx ->
@@ -597,6 +597,12 @@ let gen_automatic_subdir_rules sctx ~dir ~nearest_src_dir ~src_dir =
 let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~components ~dir =
   let* dir_status = Dir_status.DB.get ~dir
   and* loaded_project = Dune_load.find_loaded_project ~dir in
+  let* source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
+  let mounted =
+    match Build_partition.purpose (Loaded_project.partition loaded_project) with
+    | Mounted -> true
+    | Workspace -> false
+  in
   match dir_status with
   | Lock_dir _ -> Memo.return Gen_rules.no_rules
   | dir_status ->
@@ -620,21 +626,13 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
               ~jsoo_enabled:Jsoo_rules.jsoo_enabled
               ~dir
           and+ mounted_source_subdirs =
-            match src_dir with
-            | Workspace _ -> Memo.return Filename.Set.empty
-            | Build source_dir ->
-              let source =
-                Loaded_project.loaded_source loaded_project |> Option.value_exn
-              in
-              Loaded_source.local_path source source_dir
-              |> Option.value_exn
-              |> Loaded_source.readdir source
-              >>| Filename.Map.to_list
-              >>| List.filter_map ~f:(fun (name, kind) ->
-                match kind with
-                | `Dir -> Some name
-                | `File -> None)
-              >>| Filename.Set.of_list
+            (match mounted, source_tree_dir with
+             | false, _ | _, None -> Filename.Set.empty
+             | true, Some source_dir ->
+               Source_tree.Rules.Dir.sub_dir_names source_dir
+               |> Filename.Array.Set.to_list
+               |> Filename.Set.of_list)
+            |> Memo.return
           in
           let allowed_subdirs =
             let automatic = Automatic_subdir.subdirs components in
@@ -717,16 +715,18 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
           |> make_rules
           |> Gen_rules.rules_here
       in
-      match src_dir with
-      | Source_path.Build source_dir ->
-        let source = Loaded_project.loaded_source loaded_project |> Option.value_exn in
-        let source_dir = Loaded_source.local_path source source_dir |> Option.value_exn in
-        Pkg_sources.add_artifact_source_rules ~dir ~source ~source_dir rules
-      | Workspace src_dir ->
-        (match Opam_create.gen_rules sctx ~dir ~nearest_src_dir ~src_dir with
+      match mounted, source_tree_dir with
+      | true, Some source_dir ->
+        Pkg_sources.add_artifact_source_rules ~dir ~source_dir rules
+      | true, None -> rules
+      | false, _ ->
+        (match Source_path.as_workspace src_dir with
          | None -> rules
-         | Some opam_rules ->
-           Gen_rules.map_rules rules ~f:(Gen_rules.Rules.combine_exn opam_rules))
+         | Some src_dir ->
+           (match Opam_create.gen_rules sctx ~dir ~nearest_src_dir ~src_dir with
+            | None -> rules
+            | Some opam_rules ->
+              Gen_rules.map_rules rules ~f:(Gen_rules.Rules.combine_exn opam_rules)))
     and+ melange_rules = Melange_rules.setup_emit_js_rules sctx ~dir in
     Gen_rules.combine melange_rules rules
 ;;
@@ -828,9 +828,8 @@ let private_context ~dir components _ctx =
   | `Invalid_context -> Memo.return Gen_rules.unknown_context
   | `Valid (ctx, components) ->
     let+ lock_rules = Lock_rules.setup_rules ~dir ~components
-    and+ pkg_rules = Pkg_rules.setup_rules ctx ~dir ~components
-    and+ source_rules = Pkg_sources.setup_rules ~context:ctx ~dir ~components in
-    Gen_rules.combine lock_rules (Gen_rules.combine pkg_rules source_rules)
+    and+ pkg_rules = Pkg_rules.setup_rules ctx ~dir ~components in
+    Gen_rules.combine lock_rules pkg_rules
   | `Root ->
     let+ contexts = Per_context.list () in
     let build_dir_only_sub_dirs =

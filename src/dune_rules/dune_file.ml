@@ -344,24 +344,21 @@ module Script = struct
           (Path.Build.relative generated_dune_files_dir (Context_name.to_string context))
           file
       | Build file ->
-        (match Loaded_project.loaded_source eval.loaded_project with
-         | Some source ->
-           let identity =
-             Loaded_project.identity eval.loaded_project
-             |> Loaded_project.Identity.digest
-             |> Dune_digest.to_string
-           in
-           let local = Loaded_source.local_path source file |> Option.value_exn in
-           Path.Build.L.relative
-             (Path.Build.relative
-                generated_dune_files_dir
-                (Context_name.to_string context))
-             [ "loaded"; identity ]
-           |> fun root -> Path.Build.append_local root local
-         | None ->
-           Loaded_project.output_path eval.loaded_project (Source_path.build file)
-           |> Option.value_exn
-           |> Path.Build.extend_basename ~suffix:(Filename.of_string_exn ".generated"))
+        let identity =
+          Loaded_project.identity eval.loaded_project
+          |> Loaded_project.Identity.digest
+          |> Dune_digest.to_string
+        in
+        let local =
+          Source_path.descendant
+            (Source_path.build file)
+            ~of_:(Loaded_project.source_root eval.loaded_project)
+          |> Option.value_exn
+        in
+        Path.Build.L.relative
+          (Path.Build.relative generated_dune_files_dir (Context_name.to_string context))
+          [ "loaded"; identity ]
+        |> fun root -> Path.Build.append_local root local
     in
     let wrapper =
       Path.Build.extend_basename
@@ -369,21 +366,8 @@ module Script = struct
         ~suffix:(Filename.Extension.to_filename Filename.Extension.ml)
     in
     generated_dune_file |> Path.build |> Path.parent |> Option.iter ~f:Path.mkdir_p;
-    let plugin, exec_dir =
-      match Loaded_project.loaded_source eval.loaded_project with
-      | None ->
-        Source_path.to_path source_path, Source_path.to_path (eval_source_path eval)
-      | Some source ->
-        let physical path =
-          match path with
-          | Source_path.Build path ->
-            Loaded_source.local_path source path
-            |> Option.value_exn
-            |> Loaded_source.file_path source
-          | Workspace _ -> Code_error.raise "A loaded source contains a workspace path" []
-        in
-        physical source_path, physical (eval_source_path eval)
-    in
+    let plugin = Source_tree.Rules.File.path file in
+    let exec_dir = Source_tree.Rules.Dir.path eval.source_dir in
     let* context = Context.DB.get context in
     let* ocaml = Context.ocaml context in
     let* () =

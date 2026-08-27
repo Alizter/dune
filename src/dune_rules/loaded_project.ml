@@ -58,7 +58,7 @@ type t =
   { project : Dune_project.t
   ; identity : Identity.t
   ; source_root : Source_path.t
-  ; loaded_source : Loaded_source.t option
+  ; source_tree_root : Source_tree.Rules.Dir.t
   ; partition : Build_partition.t
   ; output_root : Path.Build.t
   ; visible_packages : Package.Name.Set.t option
@@ -68,19 +68,20 @@ let create
       ~project
       ~identity
       ~source_root
-      ~loaded_source
+      ~source_tree_root
       ~partition
       ~output_root
       ~visible_packages
   =
-  (match source_root, loaded_source with
-   | Source_path.Workspace _, None | Build _, Some _ -> ()
-   | Workspace _, Some _ | Build _, None ->
-     Code_error.raise
-       "Loaded project source root and backing source disagree"
-       [ "source_root", Source_path.to_dyn source_root
-       ; "loaded_source", Dyn.option Loaded_source.to_dyn loaded_source
-       ]);
+  if
+    not
+      (Source_path.equal source_root (Source_tree.Rules.Dir.source_path source_tree_root))
+  then
+    Code_error.raise
+      "Loaded project source root and source-tree root disagree"
+      [ "source_root", Source_path.to_dyn source_root
+      ; "source_tree_root", Source_tree.Rules.Dir.to_dyn source_tree_root
+      ];
   if
     not
       (Path.is_descendant
@@ -95,7 +96,7 @@ let create
   { project
   ; identity
   ; source_root
-  ; loaded_source
+  ; source_tree_root
   ; partition
   ; output_root
   ; visible_packages
@@ -105,7 +106,7 @@ let create
 let project t = t.project
 let identity t = t.identity
 let source_root t = t.source_root
-let loaded_source t = t.loaded_source
+let source_tree_root t = t.source_tree_root
 let partition t = t.partition
 let output_root t = t.output_root
 let visible_packages t = t.visible_packages
@@ -120,11 +121,17 @@ let source_path t output_path =
   |> Option.map ~f:(Source_path.append_local t.source_root)
 ;;
 
+let source_tree_dir t output_path =
+  match Path.drop_prefix (Path.build output_path) ~prefix:(Path.build t.output_root) with
+  | None -> Memo.return None
+  | Some local -> Source_tree.Rules.Dir.find_dir t.source_tree_root local
+;;
+
 let to_dyn t =
   Dyn.record
     [ "identity", Identity.to_dyn t.identity
     ; "source_root", Source_path.to_dyn t.source_root
-    ; "loaded_source", Dyn.option Loaded_source.to_dyn t.loaded_source
+    ; "source_tree_root", Source_tree.Rules.Dir.to_dyn t.source_tree_root
     ; "partition", Build_partition.to_dyn t.partition
     ; "output_root", Path.Build.to_dyn t.output_root
     ; "visible_packages", Dyn.option Package.Name.Set.to_dyn t.visible_packages

@@ -183,58 +183,53 @@ let include_dir_flags ~expander ~dir ~include_dirs =
                 (let* loaded_project =
                    Action_builder.of_memo (Dune_load.find_loaded_project ~dir:output_dir)
                  in
-                 match Loaded_project.source_path loaded_project output_dir with
-                 | None -> include_dir_does_not_exist ()
-                 | Some (Source_path.Workspace source_dir) ->
-                   Action_builder.of_memo (Source_tree.find_dir source_dir)
-                   >>= (function
-                    | None -> include_dir_does_not_exist ()
-                    | Some source_dir ->
-                      let+ l =
-                        Source_tree_map_reduce.map_reduce
-                          source_dir
-                          ~traverse:Source_dir_status.Set.all
-                          ~trace_event_name:"Foreign rules"
-                          ~f:(fun source_dir ->
-                            let output_dir =
-                              Loaded_project.output_path
-                                loaded_project
-                                (Source_path.Workspace (Source_tree.Dir.path source_dir))
-                              |> Option.value_exn
-                            in
-                            hidden_deps (Path.build output_dir)
-                            |> Appendable_list.singleton
-                            |> Action_builder.return)
-                      in
-                      Command.Args.S (Appendable_list.to_list l))
-                 | Some (Source_path.Build source_dir) ->
-                   let source =
-                     Loaded_project.loaded_source loaded_project |> Option.value_exn
-                   in
+                 let* source_tree_dir =
+                   Loaded_project.source_tree_dir loaded_project output_dir
+                   |> Action_builder.of_memo
+                 in
+                 match source_tree_dir with
+                 | Some source_dir ->
                    let rec collect source_dir output_dir =
-                     let* entries =
-                       Action_builder.of_memo (Loaded_source.readdir source source_dir)
-                     in
                      let+ children =
-                       Filename.Map.to_list entries
-                       |> Action_builder.List.filter_map ~f:(fun (name, kind) ->
-                         match kind with
-                         | `File -> Action_builder.return None
-                         | `Dir ->
-                           let+ deps =
-                             collect
-                               (Path.Local.relative_fname source_dir name)
-                               (Path.Build.relative_fname output_dir name)
-                           in
-                           Some deps)
+                       Source_tree.Rules.Dir.sub_dirs source_dir
+                       |> Filename.Array.Map.to_list
+                       |> Action_builder.List.map ~f:(fun (name, sub_dir) ->
+                         let* source_dir =
+                           Source_tree.Rules.Dir.sub_dir_as_t sub_dir
+                           |> Action_builder.of_memo
+                         in
+                         collect source_dir (Path.Build.relative_fname output_dir name))
                      in
                      hidden_deps (Path.build output_dir) :: List.concat children
                    in
-                   let source_dir =
-                     Loaded_source.local_path source source_dir |> Option.value_exn
-                   in
                    let+ deps = collect source_dir output_dir in
-                   Command.Args.S deps)
+                   Command.Args.S deps
+                 | None ->
+                   (match Loaded_project.source_path loaded_project output_dir with
+                    | None | Some (Source_path.Build _) -> include_dir_does_not_exist ()
+                    | Some (Source_path.Workspace source_dir) ->
+                      Action_builder.of_memo (Source_tree.find_dir source_dir)
+                      >>= (function
+                       | None -> include_dir_does_not_exist ()
+                       | Some source_dir ->
+                         let+ l =
+                           Source_tree_map_reduce.map_reduce
+                             source_dir
+                             ~traverse:Source_dir_status.Set.all
+                             ~trace_event_name:"Foreign rules"
+                             ~f:(fun source_dir ->
+                               let output_dir =
+                                 Loaded_project.output_path
+                                   loaded_project
+                                   (Source_path.Workspace
+                                      (Source_tree.Dir.path source_dir))
+                                 |> Option.value_exn
+                               in
+                               hidden_deps (Path.build output_dir)
+                               |> Appendable_list.singleton
+                               |> Action_builder.return)
+                         in
+                         Command.Args.S (Appendable_list.to_list l))))
        in
        Command.Args.S [ A "-I"; Path include_dir; dep_args ])
   in

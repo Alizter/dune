@@ -67,17 +67,12 @@ let expander_for_artifacts t ~dir =
   let external_env = t.get_node dir >>= Env_node.external_env in
   let scope = Scope.DB.find_by_dir dir in
   let scope_host = scope_host ~scope t.context in
-  let+ loaded_project = Dune_load.find_loaded_project ~dir in
+  let* loaded_project = Dune_load.find_loaded_project ~dir in
+  let+ source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
   let project = Loaded_project.project loaded_project in
   let source_dir = Loaded_project.source_path loaded_project dir |> Option.value_exn in
   Expander.extend_env t.root_expander ~env:external_env
-  |> Expander.set_scope
-       ~dir
-       ~source_dir
-       ~loaded_source:(Loaded_project.loaded_source loaded_project)
-       ~project
-       ~scope
-       ~scope_host
+  |> Expander.set_scope ~dir ~source_dir ~source_tree_dir ~project ~scope ~scope_host
 ;;
 
 let expander t ~dir = t.get_expander dir
@@ -325,7 +320,7 @@ let create ~(context : Context.t) ~(host : t option) ~packages ~stanzas =
     Expander.make_root
       ~project:(Loaded_project.project loaded_project)
       ~source_dir:(Loaded_project.source_root loaded_project)
-      ~loaded_source:(Loaded_project.loaded_source loaded_project)
+      ~source_tree_dir:(Some (Loaded_project.source_tree_root loaded_project))
       ~scope
       ~scope_host
       ~context

@@ -20,5 +20,5 @@ val gen_rules
   -> t
   -> dir:Path.Build.t
   -> scope:Scope.t
-  -> loaded_source:Loaded_source.t option
+  -> source_tree_dir:Source_tree.Rules.Dir.t option
   -> unit Memo.t
