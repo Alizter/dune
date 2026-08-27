@@ -35,13 +35,16 @@ the mounted package without creating a second semantic workspace context.
   >  (target foo.ml)
   >  (deps ../generator/proof.ml)
   >  (action (copy ../generator/proof.ml %{target})))
+  > (rule
+  >  (target from_lib.ml)
+  >  (action (copy %{lib:foo.ppx_support:foo_ppx_support.ml} %{target})))
   > (dynamic_include ../generator/dynamic.inc)
   > EOF
   $ cat > foo/lib/libraries.inc <<'EOF'
   > (library
   >  (name foo)
   >  (public_name foo)
-  >  (modules foo dynamic)
+  >  (modules foo dynamic from_lib)
   >  (preprocess (staged_pps foo.ppx)))
   > (library
   >  (name foo_ppx_support)
