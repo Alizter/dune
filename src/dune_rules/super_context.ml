@@ -72,7 +72,11 @@ let expander_for_artifacts t ~dir =
     scope_host >>= fun scope -> Scope.DB.public_libs_by_dir (Scope.root scope)
   in
   let* loaded_project = Dune_load.find_loaded_project ~dir in
-  let+ source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
+  let+ source_tree_dir =
+    match Build_partition.purpose (Loaded_project.partition loaded_project) with
+    | Workspace -> Memo.return None
+    | Mounted -> Loaded_project.source_tree_dir loaded_project dir
+  in
   let project = Loaded_project.project loaded_project in
   let source_dir = Loaded_project.source_path loaded_project dir |> Option.value_exn in
   Expander.extend_env t.root_expander ~env:external_env
