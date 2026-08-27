@@ -15,7 +15,7 @@ module File : sig
     -> expand:(String_with_vars.t -> Value.t Memo.t)
     -> dir:Path.Build.t
     -> source_dir:Source_path.t
-    -> loaded_source:Loaded_source.t option
+    -> source_tree_dir:Source_tree.Rules.Dir.t option
     -> File_binding.Unexpanded.t list Memo.t
 
   val to_file_bindings_expanded
@@ -23,7 +23,7 @@ module File : sig
     -> expand:(String_with_vars.t -> Value.t Memo.t)
     -> dir:Path.Build.t
     -> source_dir:Source_path.t
-    -> loaded_source:Loaded_source.t option
+    -> source_tree_dir:Source_tree.Rules.Dir.t option
     -> File_binding.Expanded.t list Memo.t
 
   val of_file_binding : File_binding.Unexpanded.t -> t

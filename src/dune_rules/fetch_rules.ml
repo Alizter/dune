@@ -35,6 +35,16 @@ type kind =
   | `Directory
   ]
 
+let target (source : Source.t) kind =
+  let _, url = source.url in
+  let url_or_checksum =
+    match source.checksum with
+    | Some (_, checksum) -> `Checksum checksum
+    | None -> `Url url
+  in
+  make_target ~kind url_or_checksum
+;;
+
 let resolve_url =
   (* Before we fetch any git repo, we make sure to convert the URL to fetch the
      git object directly. The object is used to compute the fetch action digest
@@ -148,14 +158,11 @@ let extract_checksums_and_urls (lockdir : Dune_pkg.Lock_dir.t) =
            | Some source -> source :: sources
          in
          List.fold_left sources ~init:acc ~f:(fun (checksums, urls) (source : Source.t) ->
-           match Source.kind source with
-           | `Directory_or_archive _ -> checksums, urls
-           | `Fetch ->
-             let url = source.url in
-             (match source.checksum with
-              | Some ((_, checksum) as checksum_with_loc) ->
-                Checksum.Map.set checksums checksum (url, checksum_with_loc), urls
-              | None -> checksums, Digest.Map.set urls (digest_of_url (snd url)) url)))
+           let url = source.url in
+           match source.checksum with
+           | Some ((_, checksum) as checksum_with_loc) ->
+             Checksum.Map.set checksums checksum (url, checksum_with_loc), urls
+           | None -> checksums, Digest.Map.set urls (digest_of_url (snd url)) url))
 ;;
 
 let find_checksum, find_url =

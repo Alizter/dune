@@ -426,7 +426,7 @@ module Rules = struct
 
   module Dir = struct
     type loaded =
-      { source : Loaded_source.t
+      { path : Path.Build.t
       ; relative_dir : Path.Local.t
       ; status : Source_dir_status.t
       ; files : Filename.Array.Set.t
@@ -439,70 +439,84 @@ module Rules = struct
 
     type t =
       | Source of Workspace_dir.t
-      | Loaded of loaded
+      | Build of loaded
 
     type sub_dir =
       | Source_sub_dir of Workspace_dir.sub_dir
-      | Loaded_sub_dir of loaded_sub_dir
+      | Build_sub_dir of loaded_sub_dir
 
     let source dir = Source dir
 
-    let make_loaded ~source ~relative_dir ~status ~files ~sub_dirs ~dune_file ~project =
-      { source; relative_dir; status; files; sub_dirs; dune_file; project }
+    let make_loaded ~path ~relative_dir ~status ~files ~sub_dirs ~dune_file ~project =
+      { path; relative_dir; status; files; sub_dirs; dune_file; project }
     ;;
 
     let source_path = function
       | Source dir -> Source_path.workspace (Workspace_dir.path dir)
-      | Loaded { source; relative_dir; _ } ->
-        Loaded_source.source_path source relative_dir |> Source_path.build
+      | Build { path; _ } -> Source_path.build path
+    ;;
+
+    let path = function
+      | Source dir -> Path.source (Workspace_dir.path dir)
+      | Build { path; _ } -> Path.build path
     ;;
 
     let file t filename =
       match t with
       | Source dir ->
         Path.Source.relative_fname (Workspace_dir.path dir) filename |> File.workspace
-      | Loaded { source; relative_dir; _ } ->
-        Path.Local.relative_fname relative_dir filename |> File.loaded source
+      | Build { path; _ } -> Path.Build.relative_fname path filename |> File.build
     ;;
 
     let relative_dir = function
       | Source dir -> Workspace_dir.path dir |> Path.Source.to_local
-      | Loaded { relative_dir; _ } -> relative_dir
+      | Build { relative_dir; _ } -> relative_dir
     ;;
 
     let filenames = function
       | Source dir -> Workspace_dir.filenames dir
-      | Loaded { files; _ } -> files
+      | Build { files; _ } -> files
     ;;
 
     let sub_dirs = function
       | Source dir ->
         Workspace_dir.sub_dirs dir
         |> Filename.Array.Map.mapi ~f:(fun _ dir -> Source_sub_dir dir)
-      | Loaded { sub_dirs; _ } ->
-        Filename.Array.Map.mapi sub_dirs ~f:(fun _ dir -> Loaded_sub_dir dir)
+      | Build { sub_dirs; _ } ->
+        Filename.Array.Map.mapi sub_dirs ~f:(fun _ dir -> Build_sub_dir dir)
     ;;
 
     let sub_dir_names t = sub_dirs t |> Filename.Array.Map.keys
 
     let sub_dir_as_t = function
       | Source_sub_dir dir -> Workspace_dir.sub_dir_as_t dir >>| source
-      | Loaded_sub_dir { dir; _ } -> dir >>| fun dir -> Loaded dir
+      | Build_sub_dir { dir; _ } -> dir >>| fun dir -> Build dir
+    ;;
+
+    let rec find_dir t path =
+      match Path.Local.explode path with
+      | [] -> Memo.return (Some t)
+      | name :: rest ->
+        (match Filename.Array.Map.find (sub_dirs t) name with
+         | None -> Memo.return None
+         | Some sub_dir ->
+           let* sub_dir = sub_dir_as_t sub_dir in
+           find_dir sub_dir (Path.Local.of_comps rest))
     ;;
 
     let status = function
       | Source dir -> Workspace_dir.status dir
-      | Loaded { status; _ } -> status
+      | Build { status; _ } -> status
     ;;
 
     let dune_file = function
       | Source dir -> Workspace_dir.dune_file dir
-      | Loaded { dune_file; _ } -> dune_file
+      | Build { dune_file; _ } -> dune_file
     ;;
 
     let project = function
       | Source dir -> Workspace_dir.project dir
-      | Loaded { project; _ } -> project
+      | Build { project; _ } -> project
     ;;
 
     let to_dyn t =
@@ -533,33 +547,32 @@ module Rules = struct
     end
   end
 
-  module Loaded = struct
+  module Build = struct
     type t =
-      { source : Loaded_source.t
+      { source_root : Path.Build.t
       ; root : Dir.t
-      ; projects : Dune_project.t list
+      ; projects : (Dune_project.t * Dir.t) list
       }
 
-    let source t = t.source
+    let source_root t = t.source_root
     let root t = t.root
     let projects t = t.projects
 
-    let load source =
-      let rec traverse ~relative_dir ~status ~parent_dune_file ~parent_project ~physical =
+    let load_impl source_root =
+      let rec traverse
+                ~path
+                ~relative_dir
+                ~status
+                ~parent_dune_file
+                ~parent_project
+                ~physical
+        =
         let* files, physical_subdirs =
-          if not physical
-          then Memo.return (Filename.Array.Set.empty, Filename.Array.Set.empty)
-          else
-            let+ entries = Loaded_source.readdir source relative_dir in
-            Filename.Map.foldi entries ~init:([], []) ~f:(fun name kind (files, dirs) ->
-              match kind with
-              | `File -> name :: files, dirs
-              | `Dir -> files, name :: dirs)
-            |> fun (files, dirs) ->
-            Filename.Array.Set.of_list files, Filename.Array.Set.of_list dirs
+          if physical
+          then Build_system.directory_target_contents ~dir:path
+          else Memo.return (Filename.Array.Set.empty, Filename.Array.Set.empty)
         in
-        let source_dir = Loaded_source.source_path source relative_dir in
-        let source_path = Source_path.build source_dir in
+        let source_path = Source_path.build path in
         let* loaded_project =
           match status, physical with
           | Source_dir_status.Data_only, _ | _, false -> Memo.return None
@@ -567,34 +580,29 @@ module Rules = struct
             Dune_project.gen_load_source
               ~read:(fun path ->
                 match path with
-                | Source_path.Build path ->
-                  Loaded_source.local_path source path
-                  |> Option.value_exn
-                  |> Loaded_source.read_file source
+                | Source_path.Build path -> Build_system.read_file (Path.build path)
                 | Workspace _ ->
-                  Code_error.raise "Loaded project requested a workspace source" [])
+                  Code_error.raise "Build-backed project requested a workspace source" [])
               ~dir:source_path
               ~files
               ~infer_from_opam_files:false
               ~load_opam_file_with_contents:
                 Dune_pkg.Opam_file.load_opam_file_with_contents
         in
-        let project, projects =
+        let project, is_project_root =
           match loaded_project, parent_project with
-          | Some project, _ -> project, [ project ]
-          | None, Some project -> project, []
+          | Some project, _ -> project, true
+          | None, Some project -> project, false
           | None, None ->
-            let project =
-              Dune_project.anonymous
+            ( Dune_project.anonymous
                 ~dir:source_path
                 Package_info.empty
                 Package.Name.Map.empty
-            in
-            project, [ project ]
+            , true )
         in
         let* dune_file =
           Dune_file.load
-            ~dir:(Source_tree_file.Dir.loaded source relative_dir)
+            ~dir:(Source_tree_file.Dir.build path)
             status
             project
             ~files
@@ -639,6 +647,7 @@ module Rules = struct
               in
               let+ child, child_projects =
                 traverse
+                  ~path:(Path.Build.relative_fname path basename)
                   ~relative_dir:(Path.Local.relative_fname relative_dir basename)
                   ~status:child_status
                   ~parent_dune_file:dune_file
@@ -652,13 +661,10 @@ module Rules = struct
             name, { Dir.dir = Memo.return child })
           |> Filename.Array.Map.of_list_exn
         in
-        let projects =
-          List.fold_left children ~init:projects ~f:(fun projects (_, _, children) ->
-            projects @ children)
-        in
+        let projects = List.concat_map children ~f:(fun (_, _, children) -> children) in
         let dir =
           Dir.make_loaded
-            ~source
+            ~path
             ~relative_dir
             ~status
             ~files:visible_files
@@ -666,17 +672,28 @@ module Rules = struct
             ~dune_file
             ~project
         in
+        let projects =
+          if is_project_root then (project, Dir.Build dir) :: projects else projects
+        in
         Memo.return (dir, projects)
       in
       let+ root, projects =
         traverse
+          ~path:source_root
           ~relative_dir:Path.Local.root
           ~status:Source_dir_status.Vendored
           ~parent_dune_file:None
           ~parent_project:None
           ~physical:true
       in
-      { source; root = Dir.Loaded root; projects }
+      { source_root; root = Dir.Build root; projects }
+    ;;
+
+    let load =
+      let memo =
+        Memo.create "build-backed-source-tree" ~input:(module Path.Build) load_impl
+      in
+      Memo.exec memo
     ;;
   end
 end

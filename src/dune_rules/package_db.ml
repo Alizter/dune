@@ -18,7 +18,7 @@ let find_package ctx pkg =
      | Some mounted ->
        let package =
          Pkg_sources.Mounted.projects mounted
-         |> List.find_map ~f:(fun project ->
+         |> List.find_map ~f:(fun (project, _) ->
            Package.Name.Map.find (Dune_project.including_hidden_packages project) pkg)
          |> Option.value_exn
        in

@@ -34,6 +34,7 @@ let get_installed_binaries stanzas =
     let dir = Dune_file.output_dir d in
     let source_dir = Dune_file.source_dir d in
     let* loaded_project = Dune_load.find_loaded_project ~dir in
+    let* source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
     let partition = Loaded_project.partition loaded_project in
     let install_bin_dir =
       match Build_partition.purpose partition with
@@ -66,7 +67,7 @@ let get_installed_binaries stanzas =
           ~expand:expand_value
           ~dir
           ~source_dir
-          ~loaded_source:(Loaded_project.loaded_source loaded_project)
+          ~source_tree_dir
       in
       Memo.List.map unexpanded_file_bindings ~f:(fun fb ->
         let+ p =
