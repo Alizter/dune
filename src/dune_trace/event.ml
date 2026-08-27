@@ -162,6 +162,18 @@ let scan_source ~name ~start ~stop ~dir =
   Event.complete ~name ~start ~args ~dur Rules
 ;;
 
+let mounted_dune_load ~start ~stop ~context ~package ~source_root ~artifact_root =
+  let dur = Time.diff stop start in
+  let args =
+    [ "context", Arg.string context
+    ; "package", Arg.string package
+    ; "source_root", Arg.build_path source_root
+    ; "artifact_root", Arg.build_path artifact_root
+    ]
+  in
+  Event.complete ~name:"mounted-dune-load" ~start ~args ~dur Rules
+;;
+
 let evalauted_rules ~rule_total =
   let now = Time.now () in
   let args = [ "value", Arg.int rule_total ] in

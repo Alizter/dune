@@ -252,11 +252,24 @@ let loaded =
               in
               Memo.return dune_files
             in
-            Build_source_tree_map_reduce.map_reduce
-              (Pkg_sources.Mounted.tree mounted |> Source_tree.Rules.Build.root)
-              ~traverse:Source_dir_status.Set.all
-              ~trace_event_name:"Loaded source tree"
-              ~f)
+            let candidate = Pkg_sources.Mounted.candidate mounted in
+            let start = Time.now () in
+            let+ dune_files =
+              Build_source_tree_map_reduce.map_reduce
+                (Pkg_sources.Mounted.tree mounted |> Source_tree.Rules.Build.root)
+                ~traverse:Source_dir_status.Set.all
+                ~trace_event_name:"Loaded source tree"
+                ~f
+            in
+            Dune_trace.emit Rules (fun () ->
+              Dune_trace.Event.mounted_dune_load
+                ~start
+                ~stop:(Time.now ())
+                ~context:(Context_name.to_string context_name)
+                ~package:(Pkg_sources.Candidate.name candidate |> Package.Name.to_string)
+                ~source_root:(Pkg_sources.Mounted.source_root mounted)
+                ~artifact_root:(Pkg_sources.Candidate.artifact_root candidate));
+            dune_files)
           >>| Appendable_list.concat
         in
         let source_dune_files =

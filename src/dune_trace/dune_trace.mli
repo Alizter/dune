@@ -116,6 +116,16 @@ module Event : sig
     -> t
 
   val scan_source : name:string -> start:Time.t -> stop:Time.t -> dir:Path.Source.t -> t
+
+  val mounted_dune_load
+    :  start:Time.t
+    -> stop:Time.t
+    -> context:string
+    -> package:string
+    -> source_root:Path.Build.t
+    -> artifact_root:Path.Build.t
+    -> t
+
   val scheduler_idle : unit -> t
   val process_cleanup_start : unit -> t
   val process_cleanup_sigkill : unit -> t
