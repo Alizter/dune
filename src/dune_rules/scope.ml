@@ -5,6 +5,7 @@ type t =
   { project : Dune_project.t
   ; source_root : Source_path.t
   ; db : Lib.DB.t
+  ; public_libs : Lib.DB.t
   ; rocq_db : Rocq_lib.DB.t Memo.t
   ; root : Path.Build.t
   }
@@ -353,12 +354,16 @@ module DB = struct
         ()
   ;;
 
-  let legacy_libraries context package =
+  (* Build legacy dependencies one package at a time. Each resulting findlib DB
+     points back to the dispatcher so its transitive requirements remain lazy;
+     eagerly loading the whole closure would introduce reverse package cycles. *)
+  let legacy_libraries context package ~parent =
     let libraries =
       Memo.lazy_ ~name:"legacy-libraries" (fun () ->
         Pkg_rules.Legacy_libraries.for_package (Context.name context) package)
       |> Memo.Lazy.force
     in
+    let db_ref = Fdecl.create Dyn.opaque in
     let find =
       let memo =
         Memo.create
@@ -367,7 +372,9 @@ module DB = struct
           (fun package ->
              let* libraries = libraries in
              let* paths = Pkg_rules.Legacy_libraries.find libraries package in
-             Memo.Option.map paths ~f:(fun paths -> Lib.DB.of_paths context ~paths))
+             Memo.Option.map paths ~f:(fun paths ->
+               let+ db = Lib.DB.of_paths context ~paths in
+               Lib.DB.with_parent db ~parent:(Fdecl.get db_ref)))
       in
       Memo.exec memo
     in
@@ -377,18 +384,22 @@ module DB = struct
       | None -> Lib.DB.Resolve_result.not_found
       | Some db -> Lib.DB.Resolve_result.redirect_by_name db (Loc.none, name)
     in
-    Lib.DB.create
-      ~parent:None
-      ~resolve:(fun name ->
-        let+ resolved = resolve name in
-        [ resolved ])
-      ~resolve_lib_id:(fun lib_id -> resolve (Lib_id.name lib_id))
-      ~all:(fun () ->
-        let+ libraries = libraries in
-        Pkg_rules.Legacy_libraries.packages libraries
-        |> List.map ~f:Lib_name.of_package_name)
-      ~instrument_with:(Context.instrument_with context)
-      ()
+    let db =
+      Lib.DB.create
+        ~parent:(Some parent)
+        ~resolve:(fun name ->
+          let+ resolved = resolve name in
+          [ resolved ])
+        ~resolve_lib_id:(fun lib_id -> resolve (Lib_id.name lib_id))
+        ~all:(fun () ->
+          let+ libraries = libraries in
+          Pkg_rules.Legacy_libraries.packages libraries
+          |> List.map ~f:Lib_name.of_package_name)
+        ~instrument_with:(Context.instrument_with context)
+        ()
+    in
+    Fdecl.set db_ref db;
+    db
   ;;
 
   let scopes_by_dir
@@ -438,29 +449,26 @@ module DB = struct
                   "Mounted project has no visible package"
                   [ "project", Loaded_project.to_dyn loaded_project ]
             in
-            let legacy_libs =
-              legacy_libraries context package
-              |> Lib.DB.with_parent ~parent:installed_libs
-            in
+            let legacy_libs = legacy_libraries context package ~parent:installed_libs in
             Lib.DB.with_parent public_libs ~parent:legacy_libs
         in
         let db =
           create_db_from_stanzas stanzas ~instrument_with ~public_libs ~lib_config
         in
-        loaded_project, project, db)
+        loaded_project, project, db, public_libs)
     in
     let db_by_project_output_root =
-      Path.Build.Map.map db_by_project ~f:(fun (loaded_project, _, db) ->
+      Path.Build.Map.map db_by_project ~f:(fun (loaded_project, _, db, _) ->
         loaded_project, db)
     in
     let rocq_scopes =
       Rocq_scope.make context ~public_libs ~db_by_project_output_root rocq_stanzas
     in
-    Path.Build.Map.map db_by_project ~f:(fun (loaded_project, project, db) ->
+    Path.Build.Map.map db_by_project ~f:(fun (loaded_project, project, db, public_libs) ->
       let root = Loaded_project.output_root loaded_project in
       let source_root = Loaded_project.source_root loaded_project in
       let rocq_db = Rocq_scope.find rocq_scopes ~project:loaded_project in
-      { project; source_root; db; rocq_db; root })
+      { project; source_root; db; public_libs; rocq_db; root })
   ;;
 
   let create ~installed_libs ~context ~loaded_projects stanzas rocq_stanzas =
@@ -559,6 +567,14 @@ module DB = struct
   let public_libs context =
     let+ _, public_libs = create_from_stanzas context in
     public_libs
+  ;;
+
+  let public_libs_by_dir dir =
+    let* context = Context.DB.by_dir dir
+    and* loaded_project = Dune_load.find_loaded_project ~dir in
+    let purpose = Loaded_project.partition loaded_project |> Build_partition.purpose in
+    let+ scopes, _ = scopes_for_purpose purpose (Context.name context) in
+    (find_scope_by_dir scopes dir).public_libs
   ;;
 
   let find_by_dir dir =

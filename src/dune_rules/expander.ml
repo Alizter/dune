@@ -80,8 +80,27 @@ let set_local_env_var t ~var ~value =
   { t with local_env = Env.Var.Map.set t.local_env var value }
 ;;
 
-let set_scope t ~dir ~source_dir ~source_tree_dir ~project ~scope ~scope_host =
-  { t with dir; source_dir; source_tree_dir; project; scope; scope_host }
+let set_scope
+      t
+      ~dir
+      ~source_dir
+      ~source_tree_dir
+      ~project
+      ~scope
+      ~scope_host
+      ~public_libs
+      ~public_libs_host
+  =
+  { t with
+    dir
+  ; source_dir
+  ; source_tree_dir
+  ; project
+  ; scope
+  ; scope_host
+  ; public_libs
+  ; public_libs_host
+  }
 ;;
 
 let set_artifacts t ~artifacts_host = { t with artifacts_host }
@@ -342,18 +361,26 @@ let file_of_lib db context ~loc ~lib ~file =
     match Lib.is_local lib with
     | false -> Resolve.Memo.return @@ Lib_info.src_dir info
     | true ->
-      let name = Lib.name lib in
-      let subdir =
-        Lib_info.Status.relative_to_package (Lib_info.status info) name
-        |> Option.value_exn
+      let src_dir = Lib_info.src_dir info in
+      let output_dir = Path.as_in_build_dir_exn src_dir in
+      let* loaded_project =
+        Dune_load.find_loaded_project ~dir:output_dir |> Resolve.Memo.lift_memo
       in
-      let+ pkg_root =
-        let package = Lib_name.package_name name in
-        (* Why do we return the install path? *)
-        let+ context = Resolve.Memo.lift_memo @@ context >>| Context.name in
-        Install.Context.lib_dir ~context ~package
-      in
-      Path.build (Path.Build.append_local pkg_root subdir)
+      (match Build_partition.purpose (Loaded_project.partition loaded_project) with
+       | Mounted -> Resolve.Memo.return src_dir
+       | Workspace ->
+         let name = Lib.name lib in
+         let subdir =
+           Lib_info.Status.relative_to_package (Lib_info.status info) name
+           |> Option.value_exn
+         in
+         let+ pkg_root =
+           let package = Lib_name.package_name name in
+           (* Why do we return the install path? *)
+           let+ context = Resolve.Memo.lift_memo @@ context >>| Context.name in
+           Install.Context.lib_dir ~context ~package
+         in
+         Path.build (Path.Build.append_local pkg_root subdir))
   in
   Path.relative dir file
 ;;

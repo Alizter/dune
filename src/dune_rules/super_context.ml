@@ -67,12 +67,24 @@ let expander_for_artifacts t ~dir =
   let external_env = t.get_node dir >>= Env_node.external_env in
   let scope = Scope.DB.find_by_dir dir in
   let scope_host = scope_host ~scope t.context in
+  let public_libs = Scope.DB.public_libs_by_dir dir in
+  let public_libs_host =
+    scope_host >>= fun scope -> Scope.DB.public_libs_by_dir (Scope.root scope)
+  in
   let* loaded_project = Dune_load.find_loaded_project ~dir in
   let+ source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
   let project = Loaded_project.project loaded_project in
   let source_dir = Loaded_project.source_path loaded_project dir |> Option.value_exn in
   Expander.extend_env t.root_expander ~env:external_env
-  |> Expander.set_scope ~dir ~source_dir ~source_tree_dir ~project ~scope ~scope_host
+  |> Expander.set_scope
+       ~dir
+       ~source_dir
+       ~source_tree_dir
+       ~project
+       ~scope
+       ~scope_host
+       ~public_libs
+       ~public_libs_host
 ;;
 
 let expander t ~dir = t.get_expander dir
