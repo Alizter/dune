@@ -206,6 +206,8 @@ let prepare candidate =
       build_command_is_dune_only build && List.is_empty candidate.lock_pkg.depexts
     | Some _, Some _ | None, _ -> false
   in
+  (* A selected dependency on Dune is deliberately authoritative: native rule
+     generation replaces the complete recorded build and install recipe. *)
   let mount_recipe = depends_on_dune || recipe_is_dune_only in
   match
     ( mount_recipe && List.is_empty candidate.lock_pkg.info.extra_sources
