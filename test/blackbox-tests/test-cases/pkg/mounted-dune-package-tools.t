@@ -110,3 +110,64 @@ either package's old rules.
   mounted-generated-artifacts
   $ test ! -e _build/_private/default/.pkg/tool.1.0-* && test ! -e _build/_private/default/.pkg/foo.1.0-* && echo no-old-package-rules
   no-old-package-rules
+
+Looking up a system C compiler for a mounted package must not load binaries from
+an unrelated legacy package. The package graph is acyclic: the legacy transition
+package depends on the mounted package, whose foreign stubs use the system
+compiler.
+
+  $ mkdir binary-scope-cycle
+  $ cd binary-scope-cycle
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name workspace)
+  >  (depends legacy-transition))
+  > EOF
+
+  $ mkdir mounted-foreign
+  $ cat > mounted-foreign/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name mounted-foreign))
+  > EOF
+  $ cat > mounted-foreign/dune <<'EOF'
+  > (library
+  >  (name mounted_foreign)
+  >  (public_name mounted-foreign)
+  >  (foreign_stubs
+  >   (language c)
+  >   (names mounted_stubs)))
+  > EOF
+  $ cat > mounted-foreign/mounted_foreign.ml <<'EOF'
+  > external touch : unit -> unit = "mounted_touch"
+  > EOF
+  $ cat > mounted-foreign/mounted_stubs.c <<'EOF'
+  > #include <caml/mlvalues.h>
+  > CAMLprim value mounted_touch(value unit) {
+  >   return Val_unit;
+  > }
+  > EOF
+  $ tar cf mounted-foreign.tar mounted-foreign
+  $ rm -rf mounted-foreign
+
+  $ make_lockdir
+  $ make_lockpkg mounted-foreign <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/mounted-foreign.tar)
+  >   (checksum md5=$(md5sum mounted-foreign.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs} @install))
+  > EOF
+  $ make_lockpkg legacy-transition <<'EOF'
+  > (version transition)
+  > (depends mounted-foreign)
+  > EOF
+
+  $ build_pkg legacy-transition && echo binary-lookup-complete
+  binary-lookup-complete
