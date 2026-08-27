@@ -39,6 +39,8 @@ val set_scope
   -> project:Dune_project.t
   -> scope:Scope.t Memo.t
   -> scope_host:Scope.t Memo.t
+  -> public_libs:Lib.DB.t Memo.t
+  -> public_libs_host:Lib.DB.t Memo.t
   -> t
 
 val set_artifacts : t -> artifacts_host:Artifacts.t Memo.t -> t
