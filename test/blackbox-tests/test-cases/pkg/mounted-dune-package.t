@@ -272,6 +272,30 @@ A mounted package can depend on a library built by the legacy package route.
 The dependency must be built before its library metadata is resolved, without
 making unrelated legacy packages dependencies of the mounted package.
 
+  $ mkdir legacy-leaf
+  $ cat > legacy-leaf/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name legacy-leaf))
+  > EOF
+  $ cat > legacy-leaf/dune <<'EOF'
+  > (library
+  >  (name legacy_leaf)
+  >  (public_name legacy-leaf))
+  > EOF
+  $ echo 'let message = "legacy-base"' > legacy-leaf/legacy_leaf.ml
+  $ tar cf legacy-leaf.tar legacy-leaf
+  $ rm -rf legacy-leaf
+
+  $ make_lockpkg legacy-leaf <<EOF
+  > (version 1.0)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/legacy-leaf.tar)
+  >   (checksum md5=$(md5sum legacy-leaf.tar | cut -f1 -d' '))))
+  > (build
+  >  (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
   $ mkdir legacy-base
   $ cat > legacy-base/dune-project <<'EOF'
   > (lang dune 3.20)
@@ -280,14 +304,16 @@ making unrelated legacy packages dependencies of the mounted package.
   $ cat > legacy-base/dune <<'EOF'
   > (library
   >  (name legacy_base)
-  >  (public_name legacy-base))
+  >  (public_name legacy-base)
+  >  (libraries legacy-leaf))
   > EOF
-  $ echo 'let message = "legacy-base"' > legacy-base/legacy_base.ml
+  $ echo 'let message = Legacy_leaf.message' > legacy-base/legacy_base.ml
   $ tar cf legacy-base.tar legacy-base
   $ rm -rf legacy-base
 
   $ make_lockpkg legacy-base <<EOF
   > (version 1.0)
+  > (depends legacy-leaf)
   > (source
   >  (fetch
   >   (url file://$PWD/legacy-base.tar)
