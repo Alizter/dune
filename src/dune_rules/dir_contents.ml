@@ -23,6 +23,12 @@ let loc_of_dune_file source_dir dune_file =
     |> Loc.in_file
 ;;
 
+let workspace_dir source_dir =
+  match Source_tree.Rules.Dir.source_path source_dir |> Source_path.as_workspace with
+  | None -> Memo.return None
+  | Some source_dir -> Source_tree.find_dir source_dir
+;;
+
 type t =
   { kind : kind
   ; dir : Path.Build.t
@@ -347,8 +353,9 @@ end = struct
       let loc, qualif_mode = qualification in
       loc, Include_subdirs.Include qualif_mode
     in
-    let loc = loc_of_dune_file (Some source_dir) dune_file in
-    let+ components = components in
+    let+ workspace_source_dir = workspace_dir source_dir
+    and+ components = components in
+    let loc = loc_of_dune_file workspace_source_dir dune_file in
     let contents =
       Memo.lazy_
         ~name:"group-dir-contents"
@@ -364,7 +371,7 @@ end = struct
                     stanzas
                     >>= load_text_files
                           sctx
-                          (Some source_dir)
+                          workspace_source_dir
                           ~project
                           ~src_dir:(Dune_file.dir dune_file)
                           ~dir)
@@ -372,20 +379,20 @@ end = struct
                     Memo.parallel_map
                       components
                       ~f:(fun { dir; path_to_group_root; source_dir; stanzas } ->
+                        let* workspace_source_dir = workspace_dir source_dir in
                         let+ files =
                           load_text_files
                             sctx
-                            (Some source_dir)
+                            workspace_source_dir
                             stanzas
                             ~project
-                            ~src_dir:
-                              (Source_path.workspace (Source_tree.Dir.path source_dir))
+                            ~src_dir:(Source_tree.Rules.Dir.source_path source_dir)
                             ~dir
                         in
                         { Source_file_dir.dir
                         ; path_to_root = path_to_group_root
                         ; files
-                        ; source_dir = Some source_dir
+                        ; source_dir = workspace_source_dir
                         ; stanzas
                         })))
            in
@@ -396,7 +403,7 @@ end = struct
                  { Source_file_dir.dir
                  ; path_to_root = []
                  ; files
-                 ; source_dir = Some source_dir
+                 ; source_dir = workspace_source_dir
                  ; stanzas
                  }
                  :: subdirs))
@@ -447,7 +454,7 @@ end = struct
            in
            let root =
              { kind = Group_root subdirs
-             ; source_dir = Some source_dir
+             ; source_dir = workspace_source_dir
              ; dir
              ; text_files = files
              ; ocaml = ml

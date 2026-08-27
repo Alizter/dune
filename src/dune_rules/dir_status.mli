@@ -11,14 +11,14 @@ module Group_component : sig
   type t =
     { dir : Path.Build.t
     ; path_to_group_root : Filename.t list
-    ; source_dir : Source_tree.Dir.t
+    ; source_dir : Source_tree.Rules.Dir.t
     ; stanzas : Stanza.t list
     }
 end
 
 module Group_root : sig
   type t =
-    { source_dir : Source_tree.Dir.t
+    { source_dir : Source_tree.Rules.Dir.t
     ; qualification : Loc.t * Include_subdirs.qualification
     ; dune_file : Dune_file.t
     ; components : Group_component.t list Memo.t
