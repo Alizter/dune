@@ -146,7 +146,7 @@ let build_command_is_dune_only = function
      | No_unconditional_action | Other -> false)
 ;;
 
-let selected_action candidate =
+let selected_recipe candidate =
   let* platform = Lock_dir.Sys_vars.solver_env in
   let lock_pkg = candidate.Candidate.lock_pkg in
   let build =
@@ -159,7 +159,13 @@ let selected_action candidate =
       lock_pkg.install_command
       ~platform
   in
-  Memo.return (build, install)
+  let depends_on_dune =
+    Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform lock_pkg.depends ~platform
+    |> Option.value ~default:[]
+    |> List.exists ~f:(fun { Dune_pkg.Lock_dir.Dependency.name; _ } ->
+      Package.Name.equal name (Package.Name.of_string "dune"))
+  in
+  Memo.return (build, install, depends_on_dune)
 ;;
 
 module Build_source_tree = Source_tree.Rules.Build
@@ -193,12 +199,20 @@ let mount candidate source_root tree =
 ;;
 
 let prepare candidate =
-  let* build, install = selected_action candidate in
-  match build, install, Candidate.source candidate, Candidate.source_root candidate with
-  | Some build, None, Some source, Some source_root
-    when build_command_is_dune_only build
-         && List.is_empty candidate.lock_pkg.depexts
-         && List.is_empty candidate.lock_pkg.info.extra_sources ->
+  let* build, install, depends_on_dune = selected_recipe candidate in
+  let recipe_is_dune_only =
+    match build, install with
+    | Some build, None ->
+      build_command_is_dune_only build && List.is_empty candidate.lock_pkg.depexts
+    | Some _, Some _ | None, _ -> false
+  in
+  let mount_recipe = depends_on_dune || recipe_is_dune_only in
+  match
+    ( mount_recipe && List.is_empty candidate.lock_pkg.info.extra_sources
+    , Candidate.source candidate
+    , Candidate.source_root candidate )
+  with
+  | true, Some source, Some source_root ->
     Lock_dir.source_kind source
     >>= (function
      | `Local (`File, _) ->
@@ -208,11 +222,7 @@ let prepare candidate =
        let* tree = load_source source_root in
        mount candidate source_root tree
      | `Local (`Directory, _) | `Fetch -> Memo.return None)
-  | Some _, None, Some _, Some _
-  | Some _, None, Some _, None
-  | Some _, None, None, _
-  | Some _, Some _, _, _
-  | None, _, _, _ -> Memo.return None
+  | false, _, _ | true, Some _, None | true, None, _ -> Memo.return None
 ;;
 
 let mounted =
