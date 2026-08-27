@@ -123,7 +123,7 @@ the mounted package without creating a second semantic workspace context.
   1
 
 A second process re-evaluates the mounted OCaml-syntax file once, while both
-include paths retain snapshot ownership.
+include paths retain source-tree ownership.
 
   $ dune build ./main.exe --display quiet
   $ ./_build/default/main.exe

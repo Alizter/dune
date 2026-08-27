@@ -97,15 +97,15 @@ data and must be masked before mounted project discovery attempts to decode it.
   $ test ! -d _build/_private/default/.pkg && echo no-old-package-rules
   no-old-package-rules
 
-The shared transport has one immutable source snapshot and two lock identities
+The shared transport has one build-backed fetch target and two lock identities
 with distinct output roots. Package masking selects the relevant package from
 each mounted view, while the nested library retains its project-relative output
 directory.
 
-  $ test "$(find "$DUNE_CACHE_ROOT/pkg-sources/v1" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 && echo one-source-snapshot
-  one-source-snapshot
-  $ test ! -e _build/_private/default/.pkg-source && echo no-directory-source-target
-  no-directory-source-target
+  $ test "$(find _build/_fetch -type d -name dir | wc -l)" -eq 1 && echo one-source-target
+  one-source-target
+  $ test ! -e "$DUNE_CACHE_ROOT/pkg-sources" && echo no-external-source-store
+  no-external-source-store
   $ test "$(find _build/_default+lockfile/pkg -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 2 && echo two-artifact-roots
   two-artifact-roots
   $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)

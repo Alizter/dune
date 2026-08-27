@@ -84,7 +84,7 @@ nested Dune command is run.
   $ cat > foo/fallback.ml <<'EOF'
   > let message = "source-fallback"
   > EOF
-  $ echo snapshot-only > foo/unused.txt
+  $ echo source-only > foo/unused.txt
   $ tar cf foo.tar foo
   $ rm -rf foo
 
@@ -257,8 +257,8 @@ legacy package route. It remains usable alongside the mounted package.
   layout-metadata
   $ test -L "$foo_layout/META" && test -L "$foo_layout/dune-package" && test "$(realpath "$foo_layout/META")" = "$(realpath "$foo_artifact_root/META.foo")" && test "$(realpath "$foo_layout/dune-package")" = "$(realpath "$foo_artifact_root/foo.dune-package")" && echo metadata-from-artifact-root
   metadata-from-artifact-root
-  $ test ! -e _build/_private/default/.pkg-source && echo snapshot-not-build-output
-  snapshot-not-build-output
+  $ test ! -e "$DUNE_CACHE_ROOT/pkg-sources" && echo no-snapshot-store
+  no-snapshot-store
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   symlink-source/generated/source-fallback/legacy-symlink-source
