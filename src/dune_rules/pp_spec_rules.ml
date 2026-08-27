@@ -46,7 +46,10 @@ let get_rules sctx key =
   let ctx = Super_context.context sctx in
   let* pp_names, scope, root =
     match Digest.from_hex key with
-    | None -> User_error.raise [ Pp.textf "invalid ppx key %S" key ]
+    | None ->
+      let exe = Ppx_exe.ppx_exe_path (Context.build_dir ctx) ~key in
+      User_error.raise
+        [ Pp.textf "invalid ppx key for %s" (Path.Build.to_string_maybe_quoted exe) ]
     | Some digest ->
       let { Ppx_exe.Key.Decoded.pps; scope = scope_key } = Ppx_exe.Key.decode digest in
       let+ scope, root =

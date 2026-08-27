@@ -309,6 +309,7 @@ let ppx_driver_and_flags_internal
       ~loc
       ~expander
       ~lib_name
+      ~scope
       ~flags
       libs
   =
@@ -324,7 +325,9 @@ let ppx_driver_and_flags_internal
   and+ cookies =
     let* libs = Resolve.Memo.read (Lib.closure libs ~linking:true ~for_) in
     Action_builder.of_memo (get_cookies ~loc ~lib_name ~expander libs)
-  and+ ppx_driver_exe = Action_builder.of_memo @@ Ppx_exe.ppx_driver_exe context libs in
+  and+ ppx_driver_exe =
+    Action_builder.of_memo @@ Ppx_exe.ppx_driver_exe context ~scope libs
+  in
   ppx_driver_exe, flags @ cookies
 ;;
 
@@ -333,7 +336,15 @@ let ppx_driver_and_flags ctx ~lib_name ~expander ~scope ~loc ~flags pps =
   let* libs = Resolve.Memo.read (Lib.DB.resolve_pps (Scope.libs scope) pps) in
   let+ exe, flags =
     let dune_version = Scope.project scope |> Dune_project.dune_version in
-    ppx_driver_and_flags_internal ctx ~loc ~expander ~dune_version ~lib_name ~flags libs
+    ppx_driver_and_flags_internal
+      ctx
+      ~loc
+      ~expander
+      ~dune_version
+      ~lib_name
+      ~scope
+      ~flags
+      libs
   and+ driver =
     let* libs = Resolve.Memo.read (Lib.closure libs ~linking:true ~for_) in
     Action_builder.of_memo (Driver.select libs ~loc:(User_file (loc, pps)))
@@ -346,7 +357,15 @@ let get_ppx_driver ctx ~loc ~expander ~scope ~lib_name ~flags pps =
   let open Action_builder.O in
   let* libs = Resolve.Memo.read (Lib.DB.resolve_pps (Scope.libs scope) pps) in
   let dune_version = Scope.project scope |> Dune_project.dune_version in
-  ppx_driver_and_flags_internal ctx ~loc ~expander ~dune_version ~lib_name ~flags libs
+  ppx_driver_and_flags_internal
+    ctx
+    ~loc
+    ~expander
+    ~dune_version
+    ~lib_name
+    ~scope
+    ~flags
+    libs
 ;;
 
 let ppx_exe ctx ~scope pp = Ppx_exe.get_ppx_exe ctx ~scope [ Loc.none, pp ]
