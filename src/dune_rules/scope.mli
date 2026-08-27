@@ -21,6 +21,7 @@ module DB : sig
   val find_by_dir : Path.Build.t -> t Memo.t
   val find_by_project : Context_name.t -> Dune_project.t -> t Memo.t
   val public_libs : Context_name.t -> Lib.DB.t Memo.t
+  val public_libs_by_dir : Path.Build.t -> Lib.DB.t Memo.t
 
   module Lib_entry : sig
     type t =
