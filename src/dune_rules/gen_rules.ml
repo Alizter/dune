@@ -543,7 +543,7 @@ let has_rules ~dir subdirs f =
        rules)
 ;;
 
-let gen_rules_standalone_or_root sctx ~dir ~source_dir ~project =
+let gen_rules_standalone_or_root sctx ~dir ~project =
   let* sctx = sctx in
   let* standalone_or_root =
     Dir_contents.triage ~dir sctx
@@ -555,6 +555,7 @@ let gen_rules_standalone_or_root sctx ~dir ~source_dir ~project =
   let* rules' =
     Rules.collect_unit (fun () ->
       let* dir_contents = Dir_contents.Standalone_or_root.root standalone_or_root in
+      let source_dir = Dir_contents.source_dir dir_contents in
       let* cctxs =
         gen_rules_group_part_or_root
           sctx
@@ -698,20 +699,12 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
           gen_rules_source_only sctx ~dir source_dir |> make_rules |> Gen_rules.rules_here
         | Generated | Is_component_of_a_group_but_not_the_root _ ->
           Memo.return Rules.empty |> make_rules |> Gen_rules.redirect_to_parent
-        | Standalone (source_dir, dune_file) ->
-          gen_rules_standalone_or_root
-            sctx
-            ~dir
-            ~source_dir
-            ~project:(Dune_file.project dune_file)
+        | Standalone (_, dune_file) ->
+          gen_rules_standalone_or_root sctx ~dir ~project:(Dune_file.project dune_file)
           |> make_rules
           |> Gen_rules.rules_here
-        | Group_root { source_dir; dune_file; _ } ->
-          gen_rules_standalone_or_root
-            sctx
-            ~dir
-            ~source_dir:(Some source_dir)
-            ~project:(Dune_file.project dune_file)
+        | Group_root { dune_file; _ } ->
+          gen_rules_standalone_or_root sctx ~dir ~project:(Dune_file.project dune_file)
           |> make_rules
           |> Gen_rules.rules_here
       in

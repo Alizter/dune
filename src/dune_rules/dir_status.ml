@@ -12,14 +12,14 @@ module Group_component = struct
   type t =
     { dir : Path.Build.t
     ; path_to_group_root : Filename.t list
-    ; source_dir : Source_tree.Dir.t
+    ; source_dir : Source_tree.Rules.Dir.t
     ; stanzas : Stanza.t list
     }
 end
 
 module Group_root = struct
   type t =
-    { source_dir : Source_tree.Dir.t
+    { source_dir : Source_tree.Rules.Dir.t
     ; qualification : Loc.t * Include_subdirs.qualification
     ; dune_file : Dune_file.t
     ; components : Group_component.t list Memo.t
@@ -258,10 +258,10 @@ end = struct
                  })
     and walk_children st_dir ~dir ~local =
       (* TODO take account of directory targets *)
-      Source_tree.Dir.sub_dirs st_dir
+      Source_tree.Rules.Dir.sub_dirs st_dir
       |> Filename.Array.Map.to_list
       |> Memo.parallel_map ~f:(fun (basename, st_dir) ->
-        let* st_dir = Source_tree.Dir.sub_dir_as_t st_dir in
+        let* st_dir = Source_tree.Rules.Dir.sub_dir_as_t st_dir in
         let dir = Path.Build.relative_fname dir basename in
         let local = basename :: local in
         walk st_dir ~dir ~local)
@@ -275,24 +275,30 @@ end = struct
     >>| get_include_subdirs
     >>= function
     | Some (loc, Include mode) ->
-      (match st_dir with
-       | None ->
-         User_error.raise
-           ~loc
-           [ Pp.text
-               "(include_subdirs ...) is not yet supported for mounted package sources"
-           ]
-       | Some st_dir ->
-         let components =
-           Memo.Lazy.create ~name:"group-components" (fun () -> collect_group st_dir ~dir)
-         in
-         Memo.return
-         @@ T.Group_root
-              { source_dir = st_dir
-              ; qualification = loc, mode
-              ; dune_file = d
-              ; components = Memo.Lazy.force components
-              })
+      let* source_dir =
+        match st_dir with
+        | Some source_dir -> Memo.return (Source_tree.Rules.Dir.source source_dir)
+        | None ->
+          let loaded_project = Dune_file.loaded_dir d |> Loaded_dir.project in
+          Loaded_project.source_tree_dir loaded_project dir
+          >>= (function
+           | Some source_dir -> Memo.return source_dir
+           | None ->
+             User_error.raise
+               ~loc
+               [ Pp.text "(include_subdirs ...) requires a source directory" ])
+      in
+      let components =
+        Memo.Lazy.create ~name:"group-components" (fun () ->
+          collect_group source_dir ~dir)
+      in
+      Memo.return
+      @@ T.Group_root
+           { source_dir
+           ; qualification = loc, mode
+           ; dune_file = d
+           ; components = Memo.Lazy.force components
+           }
     | Some (_, No) -> Memo.return (Standalone (st_dir, d))
     | None ->
       if build_dir_is_project_root
