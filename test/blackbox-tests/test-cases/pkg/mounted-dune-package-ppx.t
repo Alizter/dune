@@ -227,3 +227,106 @@ package pipeline.
   mounted-resolver-ppx
   $ test ! -e _build/_private/default/.pkg/foo.1.0-* && echo no-old-package-rules
   no-old-package-rules
+
+Computing install entries for a workspace package must not eagerly compute
+unrelated mounted PPX entries. In particular, an acyclic mounted-to-legacy chain
+must not lead back to the workspace install computation.
+
+  $ mkdir install-cycle
+  $ cd install-cycle
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name workspace)
+  >  (depends mounted-ppx))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (library
+  >  (name workspace)
+  >  (public_name workspace))
+  > EOF
+  $ echo 'let message = "workspace"' > workspace.ml
+
+  $ mkdir mounted-base
+  $ cat > mounted-base/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name mounted-base))
+  > EOF
+  $ cat > mounted-base/dune <<'EOF'
+  > (library
+  >  (name mounted_base)
+  >  (public_name mounted-base))
+  > EOF
+  $ echo 'let message = "mounted-base"' > mounted-base/mounted_base.ml
+  $ tar cf mounted-base.tar mounted-base
+  $ rm -rf mounted-base
+
+  $ mkdir legacy-middle
+  $ cat > legacy-middle/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name legacy-middle))
+  > EOF
+  $ cat > legacy-middle/dune <<'EOF'
+  > (library
+  >  (name legacy_middle)
+  >  (public_name legacy-middle)
+  >  (libraries mounted-base))
+  > EOF
+  $ echo 'let message = Mounted_base.message' > legacy-middle/legacy_middle.ml
+  $ tar cf legacy-middle.tar legacy-middle
+  $ rm -rf legacy-middle
+
+  $ mkdir mounted-ppx
+  $ cat > mounted-ppx/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name mounted-ppx)
+  >  (depends legacy-middle))
+  > EOF
+  $ cat > mounted-ppx/dune <<'EOF'
+  > (library
+  >  (name mounted_ppx)
+  >  (public_name mounted-ppx)
+  >  (kind ppx_rewriter)
+  >  (modules ())
+  >  (libraries legacy-middle)
+  >  (ppx.driver (main "(fun () -> ignore Legacy_middle.message)")))
+  > EOF
+  $ tar cf mounted-ppx.tar mounted-ppx
+  $ rm -rf mounted-ppx
+
+  $ make_lockdir
+  $ make_lockpkg mounted-base <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/mounted-base.tar)
+  >   (checksum md5=$(md5sum mounted-base.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+  $ make_lockpkg legacy-middle <<EOF
+  > (version 1.0)
+  > (depends mounted-base)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/legacy-middle.tar)
+  >   (checksum md5=$(md5sum legacy-middle.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+  $ make_lockpkg mounted-ppx <<EOF
+  > (version 1.0)
+  > (depends dune legacy-middle)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/mounted-ppx.tar)
+  >   (checksum md5=$(md5sum mounted-ppx.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
+  $ dune build @install --display quiet && echo install-metadata-complete
+  install-metadata-complete
