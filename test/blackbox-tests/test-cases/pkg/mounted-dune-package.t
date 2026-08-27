@@ -369,3 +369,72 @@ making unrelated legacy packages dependencies of the mounted package.
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   legacy-base/mounted
+
+A mounted package resolves libraries from its permitted legacy dependency
+branches rather than assuming that the findlib library name is also a lock
+package name. This models virtual packages such as [base-bytes], whose [bytes]
+metadata is actually installed by [ocamlfind].
+
+  $ mkdir provider-scope
+  $ cd provider-scope
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name workspace)
+  >  (depends mounted-consumer))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (libraries mounted-consumer))
+  > EOF
+  $ cat > main.ml <<'EOF'
+  > let () = print_endline Mounted_consumer.message
+  > EOF
+
+  $ mkdir mounted-consumer
+  $ cat > mounted-consumer/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name mounted-consumer))
+  > EOF
+  $ cat > mounted-consumer/dune <<'EOF'
+  > (library
+  >  (name mounted_consumer)
+  >  (public_name mounted-consumer)
+  >  (libraries compatibility))
+  > EOF
+  $ cat > mounted-consumer/mounted_consumer.ml <<'EOF'
+  > let message = "provider-resolved"
+  > EOF
+  $ tar cf mounted-consumer.tar mounted-consumer
+  $ rm -rf mounted-consumer
+
+  $ make_lockdir
+  $ make_lockpkg findlib-provider <<'EOF'
+  > (version 1.0)
+  > (build
+  >  (progn
+  >   (run mkdir -p %{lib}/compatibility)
+  >   (run touch %{lib}/compatibility/META)))
+  > EOF
+  $ make_lockpkg base-compatibility <<'EOF'
+  > (version base)
+  > (depends findlib-provider)
+  > EOF
+  $ make_lockpkg mounted-consumer <<EOF
+  > (version 1.0)
+  > (depends dune base-compatibility)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/mounted-consumer.tar)
+  >   (checksum md5=$(md5sum mounted-consumer.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs} @install))
+  > EOF
+
+  $ dune build ./main.exe --display quiet
+  $ ./_build/default/main.exe
+  provider-resolved
