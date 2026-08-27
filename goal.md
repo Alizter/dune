@@ -181,16 +181,19 @@ That value is passed to source-tree construction, `Dune_load`, package-rule
 routing, and dependency integration. It is not published through a mutable global
 registry or recovered by reverse path lookup.
 
-For the first milestone, the local archive is mounted only if:
+A source archive is eligible for mounting if its complete `dune-project` package
+universe declares the locked package and either:
 
-1. its complete `dune-project` package universe declares the locked package; and
+1. the package's selected dependency list contains `dune`; or
 2. every unconditional executable step in the selected action is a literal
    `dune build ...` invocation.
 
-Wrappers such as `chdir` and environment updates are transparent. Non-Dune,
-dynamic, shell, patch, substitute, install, mixed, or unknown unconditional work
-fails closed to the legacy route. Package masking is applied after the complete
-project has been decoded.
+The dependency check is deliberately a coarse heuristic. A `dune` dependency is
+authoritative even when the recorded recipe contains separate install, shell, or
+other non-Dune work: native rule generation replaces the complete recipe. The
+action inspection remains as a fallback for older and hand-written lock entries
+that omit `dune`. Sources with unapplied extra-source overlays remain legacy.
+Package masking is applied after the complete project has been decoded.
 
 ## Artifact ownership and dependency resolution
 
@@ -250,7 +253,8 @@ separate throughout this flow.
 Later milestones retain these proven decisions:
 
 - runtime source inspection chooses native loading versus legacy rules;
-- the conservative action veto prevents dropping non-Dune work;
+- a selected `dune` dependency routes the package natively and supersedes its
+  recorded recipe;
 - mounted projects have vendored warning, alias, and promotion behaviour;
 - masks are applied after complete project decoding;
 - mounted packages strictly bypass old package rules;
