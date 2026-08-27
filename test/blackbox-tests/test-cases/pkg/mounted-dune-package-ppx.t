@@ -12,12 +12,12 @@ the mounted package without creating a second semantic workspace context.
   > (lang dune 3.20)
   > (package
   >  (name main)
-  >  (depends foo))
+  >  (depends foo legacy-user))
   > EOF
   $ cat > dune <<'EOF'
   > (executable
   >  (name main)
-  >  (libraries foo)
+  >  (libraries foo legacy-user)
   >  (preprocess (staged_pps foo.ppx)))
   > EOF
   $ cat > main.ml <<'EOF'
@@ -114,6 +114,34 @@ the mounted package without creating a second semantic workspace context.
   >   (url file://$PWD/foo.tar)
   >   (checksum md5=$(md5sum foo.tar | cut -f1 -d' '))))
   > (build (run dune build @install))
+  > EOF
+
+The legacy package depends on the mounted package. This must not make the
+mounted package's public PPX executable depend back on the legacy package.
+
+  $ mkdir legacy-user
+  $ cat > legacy-user/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name legacy-user))
+  > EOF
+  $ cat > legacy-user/dune <<'EOF'
+  > (library
+  >  (name legacy_user)
+  >  (public_name legacy-user)
+  >  (libraries foo))
+  > EOF
+  $ echo 'let message = Foo.message' > legacy-user/legacy_user.ml
+  $ tar cf legacy-user.tar legacy-user
+  $ rm -rf legacy-user
+
+  $ make_lockpkg legacy-user <<EOF
+  > (version 1.0)
+  > (depends foo)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/legacy-user.tar)
+  >   (checksum md5=$(md5sum legacy-user.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
   > EOF
 
   $ dune build ./main.exe --display quiet
