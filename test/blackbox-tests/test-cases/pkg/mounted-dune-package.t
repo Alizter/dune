@@ -267,3 +267,78 @@ legacy package route. It remains usable alongside the mounted package.
   legacy-package-rules
   $ test ! -d _build/_default+lockfile/pkg/legacy.1.0-* && echo legacy-not-mounted
   legacy-not-mounted
+
+A mounted package can depend on a library built by the legacy package route.
+The dependency must be built before its library metadata is resolved, without
+making unrelated legacy packages dependencies of the mounted package.
+
+  $ mkdir legacy-base
+  $ cat > legacy-base/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name legacy-base))
+  > EOF
+  $ cat > legacy-base/dune <<'EOF'
+  > (library
+  >  (name legacy_base)
+  >  (public_name legacy-base))
+  > EOF
+  $ echo 'let message = "legacy-base"' > legacy-base/legacy_base.ml
+  $ tar cf legacy-base.tar legacy-base
+  $ rm -rf legacy-base
+
+  $ make_lockpkg legacy-base <<EOF
+  > (version 1.0)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/legacy-base.tar)
+  >   (checksum md5=$(md5sum legacy-base.tar | cut -f1 -d' '))))
+  > (build
+  >  (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
+  $ mkdir mounted-consumer
+  $ cat > mounted-consumer/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name mounted-consumer))
+  > EOF
+  $ cat > mounted-consumer/dune <<'EOF'
+  > (library
+  >  (name mounted_consumer)
+  >  (public_name mounted-consumer)
+  >  (libraries legacy-base))
+  > EOF
+  $ cat > mounted-consumer/mounted_consumer.ml <<'EOF'
+  > let message = Legacy_base.message ^ "/mounted"
+  > EOF
+  $ tar cf mounted-consumer.tar mounted-consumer
+  $ rm -rf mounted-consumer
+
+  $ make_lockpkg mounted-consumer <<EOF
+  > (version 1.0)
+  > (depends legacy-base)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/mounted-consumer.tar)
+  >   (checksum md5=$(md5sum mounted-consumer.tar | cut -f1 -d' '))))
+  > (build
+  >  (run dune build @install))
+  > EOF
+
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends mounted-consumer))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (libraries mounted-consumer))
+  > EOF
+  $ cat > main.ml <<'EOF'
+  > let () = print_endline Mounted_consumer.message
+  > EOF
+
+  $ "$real_dune" build ./main.exe --display quiet
+  $ ./_build/default/main.exe
+  legacy-base/mounted
