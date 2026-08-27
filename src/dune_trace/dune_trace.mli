@@ -126,6 +126,13 @@ module Event : sig
     -> artifact_root:Path.Build.t
     -> t
 
+  val mounted_packages_load
+    :  start:Time.t
+    -> stop:Time.t
+    -> context:string
+    -> mounted:int
+    -> t
+
   val scheduler_idle : unit -> t
   val process_cleanup_start : unit -> t
   val process_cleanup_sigkill : unit -> t
