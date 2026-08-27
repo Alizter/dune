@@ -18,16 +18,48 @@ the mounted package without creating a second semantic workspace context.
   > (executable
   >  (name main)
   >  (libraries foo legacy-user)
-  >  (preprocess (staged_pps foo.ppx)))
+  >  (preprocess (staged_pps foo.ppx helper.ppx)))
   > EOF
   $ cat > main.ml <<'EOF'
   > let () = print_endline Foo.message
   > EOF
 
+  $ mkdir helper
+  $ cat > helper/dune-project <<'EOF'
+  > (lang dune 3.24)
+  > (package (name helper))
+  > EOF
+  $ cat > helper/dune <<'EOF'
+  > (library
+  >  (name helper_ppx)
+  >  (public_name helper.ppx)
+  >  (kind ppx_rewriter)
+  >  (ppx.driver (main Helper_ppx.main)))
+  > EOF
+  $ cat > helper/helper_ppx.ml <<'EOF'
+  > let touch () = ()
+  > let main () =
+  >   if Array.length Sys.argv >= 3 then (
+  >     let input_file = Sys.argv.(Array.length Sys.argv - 2) in
+  >     let output_file = Sys.argv.(Array.length Sys.argv - 1) in
+  >     let input = open_in_bin input_file in
+  >     let contents = really_input_string input (in_channel_length input) in
+  >     close_in input;
+  >     let output = open_out_bin output_file in
+  >     output_string output contents;
+  >     close_out output)
+  >   else
+  >     exit 2
+  > EOF
+  $ tar cf helper.tar helper
+  $ rm -rf helper
+
   $ mkdir -p foo/lib foo/generator
   $ cat > foo/dune-project <<'EOF'
   > (lang dune 3.24)
-  > (package (name foo))
+  > (package
+  >  (name foo)
+  >  (depends helper))
   > EOF
   $ cat > foo/lib/dune <<'EOF'
   > (include libraries.inc)
@@ -45,7 +77,7 @@ the mounted package without creating a second semantic workspace context.
   >  (name foo)
   >  (public_name foo)
   >  (modules foo dynamic from_lib)
-  >  (preprocess (staged_pps foo.ppx)))
+  >  (preprocess (staged_pps foo.ppx helper.ppx)))
   > (library
   >  (name foo_ppx_support)
   >  (public_name foo.ppx_support)
@@ -55,7 +87,7 @@ the mounted package without creating a second semantic workspace context.
   >  (public_name foo.ppx)
   >  (modules foo_ppx)
   >  (kind ppx_rewriter)
-  >  (libraries foo_ppx_support)
+  >  (libraries foo_ppx_support helper.ppx)
   >  (ppx.driver (main Foo_ppx.main)))
   > EOF
   $ cat > foo/lib/dynamic-source.inc <<'EOF'
@@ -71,6 +103,7 @@ the mounted package without creating a second semantic workspace context.
   $ cat > foo/lib/foo_ppx.ml <<'EOF'
   > let main () =
   >   Foo_ppx_support.touch ();
+  >   Helper_ppx.touch ();
   >   if Array.length Sys.argv >= 3 then (
   >     let input_file = Sys.argv.(Array.length Sys.argv - 2) in
   >     let output_file = Sys.argv.(Array.length Sys.argv - 1) in
@@ -110,8 +143,18 @@ the mounted package without creating a second semantic workspace context.
   $ rm -rf foo
 
   $ make_lockdir
+  $ make_lockpkg helper <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/helper.tar)
+  >   (checksum md5=$(md5sum helper.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
   $ make_lockpkg foo <<EOF
   > (version 1.0)
+  > (depends helper)
   > (source
   >  (fetch
   >   (url file://$PWD/foo.tar)
