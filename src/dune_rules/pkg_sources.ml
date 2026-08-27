@@ -243,7 +243,11 @@ let load_mounted context =
 
 let mounted =
   let by_context =
-    Per_context.create_by_name ~name:"mounted-packages" load_mounted |> Staged.unstage
+    Per_context.create_by_name ~name:"mounted-packages" (fun context ->
+      Memo.Lazy.create ~name:"mounted-packages-for-context" (fun () ->
+        load_mounted context)
+      |> Memo.Lazy.force)
+    |> Staged.unstage
   in
   fun context -> by_context context
 ;;
