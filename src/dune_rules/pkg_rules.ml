@@ -2800,6 +2800,35 @@ let project_ocamlpath context =
   ocamlpath_of_deps view.legacy
 ;;
 
+module Legacy_libraries = struct
+  type t = Pkg.t Package.Name.Map.t
+
+  let for_package context package =
+    Memo.push_stack_frame ~human_readable_description:(fun () ->
+      Pp.textf
+        "Loading legacy library dependencies of package %S"
+        (Package.Name.to_string package))
+    @@ fun () ->
+    let* pkg = resolve_pkg_dep context (Loc.none, package) in
+    let* dependencies =
+      Dependency_view.make context pkg ~is_mounted:(is_project_mounted_pkg context)
+    in
+    let+ () = Action_expander.refresh_exported_env context dependencies in
+    Package.Name.Map.of_list_map_exn dependencies.legacy ~f:(fun (pkg : Pkg.t) ->
+      pkg.info.name, pkg)
+  ;;
+
+  let find t package =
+    match Package.Name.Map.find t package with
+    | None -> Memo.return None
+    | Some (pkg : Pkg.t) ->
+      let* () = Build_system.build_file (Paths.install_cookie pkg.paths) in
+      Memo.return (Some (ocamlpath_of_deps [ pkg ]))
+  ;;
+
+  let packages = Package.Name.Map.keys
+end
+
 let dev_tool_ocamlpath dev_tool =
   let+ deps = all_deps (Dev_tool dev_tool) in
   ocamlpath_of_deps deps

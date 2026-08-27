@@ -353,10 +353,49 @@ module DB = struct
         ()
   ;;
 
+  let legacy_libraries context package =
+    let libraries =
+      Memo.lazy_ ~name:"legacy-libraries" (fun () ->
+        Pkg_rules.Legacy_libraries.for_package (Context.name context) package)
+      |> Memo.Lazy.force
+    in
+    let find =
+      let memo =
+        Memo.create
+          "legacy-library-db"
+          ~input:(module Package.Name)
+          (fun package ->
+             let* libraries = libraries in
+             let* paths = Pkg_rules.Legacy_libraries.find libraries package in
+             Memo.Option.map paths ~f:(fun paths -> Lib.DB.of_paths context ~paths))
+      in
+      Memo.exec memo
+    in
+    let resolve name =
+      let+ db = find (Lib_name.package_name name) in
+      match db with
+      | None -> Lib.DB.Resolve_result.not_found
+      | Some db -> Lib.DB.Resolve_result.redirect_by_name db (Loc.none, name)
+    in
+    Lib.DB.create
+      ~parent:None
+      ~resolve:(fun name ->
+        let+ resolved = resolve name in
+        [ resolved ])
+      ~resolve_lib_id:(fun lib_id -> resolve (Lib_id.name lib_id))
+      ~all:(fun () ->
+        let+ libraries = libraries in
+        Pkg_rules.Legacy_libraries.packages libraries
+        |> List.map ~f:Lib_name.of_package_name)
+      ~instrument_with:(Context.instrument_with context)
+      ()
+  ;;
+
   let scopes_by_dir
         ~lib_config
         ~loaded_projects
         ~public_libs
+        ~installed_libs
         ~instrument_with
         context
         stanzas
@@ -381,6 +420,30 @@ module DB = struct
           let stanzas = Option.value stanzas ~default:[] in
           Some (loaded_project, project, stanzas))
       |> Path.Build.Map.map ~f:(fun (loaded_project, project, stanzas) ->
+        let public_libs =
+          match Build_partition.purpose (Loaded_project.partition loaded_project) with
+          | Workspace -> public_libs
+          | Mounted ->
+            let package =
+              match Loaded_project.visible_packages loaded_project with
+              | Some packages ->
+                (match Package.Name.Set.to_list packages with
+                 | [ package ] -> package
+                 | _ ->
+                   Code_error.raise
+                     "Mounted project does not have exactly one visible package"
+                     [ "project", Loaded_project.to_dyn loaded_project ])
+              | None ->
+                Code_error.raise
+                  "Mounted project has no visible package"
+                  [ "project", Loaded_project.to_dyn loaded_project ]
+            in
+            let legacy_libs =
+              legacy_libraries context package
+              |> Lib.DB.with_parent ~parent:installed_libs
+            in
+            Lib.DB.with_parent public_libs ~parent:legacy_libs
+        in
         let db =
           create_db_from_stanzas stanzas ~instrument_with ~public_libs ~lib_config
         in
@@ -414,6 +477,7 @@ module DB = struct
         ~lib_config
         ~loaded_projects
         ~public_libs
+        ~installed_libs
         ~instrument_with
         context
         stanzas
