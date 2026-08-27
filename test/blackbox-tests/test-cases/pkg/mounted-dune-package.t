@@ -126,14 +126,14 @@ beforehand, so a nested package command would fail the build and leave a marker.
   $ "$real_dune" trace cat --trace-file trace.csexp | grep -c '_private/default/\.pkg/foo' || true
   0
 
-The fetched package source is the real directory target beneath the lockfile
-context. It is part of the workspace executable's recursive rule graph, while
+The fetched package source is the real directory target in the independent fetch
+namespace. It is part of the workspace executable's recursive rule graph, while
 artifacts have a separate owner.
 
-  $ source_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
-  $ artifact_root=$(echo _build/_default+lockfile/pkg-artifacts/foo.1.0-*)
+  $ source_root=$(find _build/_fetch -type d -name dir)
+  $ artifact_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
   $ "$real_dune" rules --recursive --format=json ./main.exe |
-  > jq_dune --arg source_root "$PWD/$source_root" \
+  > jq_dune --arg source_root "$source_root" \
   >   '[.[] | .targets.directories[] | select(. == $source_root)] | length'
   1
   $ test -f "$source_root/dune-project" && test -f "$source_root/unused.txt" && echo complete-build-source
