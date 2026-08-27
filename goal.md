@@ -26,8 +26,8 @@ The first working milestone contains only:
 - one local archive containing one Dune package;
 - one literal translated `dune build ...` action;
 - one target-backed package source root whose real location is a `Path.Build.t`
-  beneath `_build/_default+lockfile/pkg/`;
-- one separate package artifact root that does not contain the source target;
+  in an independent fetch namespace;
+- one separate package artifact root beneath `_build/_default+lockfile/pkg/`;
 - one workspace library consuming the mounted library;
 - no virtual `Path.Source.t`, nested Dune process, old `.pkg` rule for the mounted
   package, or package-specific engine behaviour.
@@ -46,11 +46,11 @@ Path kinds retain their existing meanings:
 - `Path.External.t` is external input that may be watched but must not be modified
   by build rules or promotion.
 
-A fetched package source is not a `Path.Source.t`. Its producing rule may own a
-build directory beneath `_build/_default+lockfile/pkg/`; that directory and the
-files beneath it remain build-backed sources. The source directory target is the
-real mounted source root, not staging for another representation. Generated
-objects and install entries live under a different output root; they are never
+A fetched package source is not a `Path.Source.t`. Its independently derived
+fetch rule owns a build directory, and that directory and the files beneath it
+remain build-backed sources. The source directory target is the real mounted
+source root, not staging for another representation. Generated objects and
+install entries live beneath `_build/_default+lockfile/pkg/`; they are never
 placed beneath the source directory target.
 
 The following are independent values:
@@ -284,8 +284,8 @@ a scaffold.
 
 ## Implementation order
 
-1. Remove the snapshot-store detour and return package input to its real
-   `_build/_default+lockfile/pkg/` directory target.
+1. Remove the snapshot-store detour and use the independently derived fetch
+   directory target as the real package input.
 2. Make workspace and build-backed roots private cases of the rules-side
    `Source_tree` directory/file API.
 3. Migrate rules to ask `Source_tree` for source operations rather than dispatch
@@ -310,8 +310,8 @@ The first milestone is complete only when the built Dune executable demonstrates
 
 1. A local-archive package is loaded and built in the current process.
 2. A workspace library compiles and links against the mounted library.
-3. Mounted source topology and reads depend on the real
-   `_build/_default+lockfile/pkg/` directory target through `Source_tree`.
+3. Mounted source topology and reads depend on the real fetch directory target
+   through `Source_tree`.
 4. Package artifacts exist only beneath the explicit package output root.
 5. The mounted package has no old `.pkg` build directory, cookie, or action.
 6. No nested/external Dune invocation occurs.
