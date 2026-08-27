@@ -227,11 +227,23 @@ let prepare candidate =
   | false, _, _ | true, Some _, None | true, None, _ -> Memo.return None
 ;;
 
+let load_mounted context =
+  let start = Time.now () in
+  let+ mounted =
+    candidates context >>= Memo.parallel_map ~f:prepare >>| List.filter_opt
+  in
+  Dune_trace.emit Pkg (fun () ->
+    Dune_trace.Event.mounted_packages_load
+      ~start
+      ~stop:(Time.now ())
+      ~context:(Context_name.to_string context)
+      ~mounted:(List.length mounted));
+  mounted
+;;
+
 let mounted =
   let by_context =
-    Per_context.create_by_name ~name:"mounted-packages" (fun context ->
-      candidates context >>= Memo.parallel_map ~f:prepare >>| List.filter_opt)
-    |> Staged.unstage
+    Per_context.create_by_name ~name:"mounted-packages" load_mounted |> Staged.unstage
   in
   fun context -> by_context context
 ;;
