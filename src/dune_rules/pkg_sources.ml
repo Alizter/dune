@@ -208,11 +208,11 @@ let prepare candidate =
        let* tree = load_source source_root in
        mount candidate source_root tree
      | `Local (`Directory, _) | `Fetch -> Memo.return None)
-  | ( Some _, None, Some _, Some _
-    | Some _, None, Some _, None
-    | Some _, None, None, _
-    | Some _, Some _, _, _
-    | None, _, _, _ ) -> Memo.return None
+  | Some _, None, Some _, Some _
+  | Some _, None, Some _, None
+  | Some _, None, None, _
+  | Some _, Some _, _, _
+  | None, _, _, _ -> Memo.return None
 ;;
 
 let mounted =
