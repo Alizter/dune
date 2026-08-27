@@ -30,6 +30,15 @@ val binaries_for_package
 
 val exported_env : Context_name.t -> Env.t Memo.t
 val project_ocamlpath : Context_name.t -> Path.t list Memo.t
+
+module Legacy_libraries : sig
+  type t
+
+  val for_package : Context_name.t -> Package.Name.t -> t Memo.t
+  val find : t -> Package.Name.t -> Path.t list option Memo.t
+  val packages : t -> Package.Name.t list
+end
+
 val dev_tool_ocamlpath : Dune_pkg.Dev_tool.t -> Path.t list Memo.t
 val find_package : Context_name.t -> Package.Name.t -> unit Action_builder.t option Memo.t
 
