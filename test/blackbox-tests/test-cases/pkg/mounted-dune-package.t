@@ -190,8 +190,9 @@ exactly once, under the same artifact root.
   $ cat local.txt
   workspace-promotion
 
-A Dune source with any unconditional non-Dune executable step stays on the
-legacy package route. It remains usable alongside the mounted package.
+A package that declares a dependency on Dune is mounted even when its recorded
+recipe contains an unconditional non-Dune step. The native graph replaces the
+whole recipe.
 
   $ mkdir legacy
   $ cat > legacy/dune-project <<'EOF'
@@ -214,7 +215,7 @@ legacy package route. It remains usable alongside the mounted package.
 
   $ make_lockpkg legacy <<EOF
   > (version 1.0)
-  > (depends foo)
+  > (depends dune foo)
   > (source
   >  (fetch
   >   (url file://$PWD/legacy.tar)
@@ -248,7 +249,6 @@ legacy package route. It remains usable alongside the mounted package.
 
   $ "$real_dune" clean
   $ "$real_dune" build @pkg-install --display quiet
-  legacy-route
   $ foo_artifact_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
   $ foo_layout=$(echo _build/install/default/.packages/*/lib/foo)
   $ test -f "$foo_artifact_root/META.foo" && test -f "$foo_artifact_root/foo.dune-package" && echo artifact-metadata
@@ -262,11 +262,12 @@ legacy package route. It remains usable alongside the mounted package.
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   symlink-source/generated/source-fallback/legacy-symlink-source
-  $ legacy_root=$(echo _build/_private/default/.pkg/legacy.1.0-*)
-  $ test -d "$legacy_root/target" && echo legacy-package-rules
-  legacy-package-rules
-  $ test ! -d _build/_default+lockfile/pkg/legacy.1.0-* && echo legacy-not-mounted
-  legacy-not-mounted
+  $ legacy_artifact_root=$(echo _build/_default+lockfile/pkg/legacy.1.0-*)
+  $ legacy_layout=$(echo _build/install/default/.packages/*/lib/legacy)
+  $ test -f "$legacy_artifact_root/META.legacy" && test -L "$legacy_layout/META" && echo dune-dependency-mounted
+  dune-dependency-mounted
+  $ test ! -d _build/_private/default/.pkg/legacy.1.0-* && echo no-legacy-package-rules
+  no-legacy-package-rules
 
 A mounted package can depend on a library built by the legacy package route.
 The dependency must be built before its library metadata is resolved, without
