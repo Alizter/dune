@@ -174,6 +174,12 @@ let mounted_dune_load ~start ~stop ~context ~package ~source_root ~artifact_root
   Event.complete ~name:"mounted-dune-load" ~start ~args ~dur Rules
 ;;
 
+let mounted_packages_load ~start ~stop ~context ~mounted =
+  let dur = Time.diff stop start in
+  let args = [ "context", Arg.string context; "mounted", Arg.int mounted ] in
+  Event.complete ~name:"mounted-packages-load" ~start ~args ~dur Pkg
+;;
+
 let evalauted_rules ~rule_total =
   let now = Time.now () in
   let args = [ "value", Arg.int rule_total ] in
