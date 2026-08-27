@@ -368,18 +368,40 @@ module DB = struct
       let memo =
         Memo.create
           "legacy-library-db"
-          ~input:(module Package.Name)
-          (fun package ->
+          ~input:(module Lib_name)
+          (fun name ->
              let* libraries = libraries in
-             let* paths = Pkg_rules.Legacy_libraries.find libraries package in
-             Memo.Option.map paths ~f:(fun paths ->
-               let+ db = Lib.DB.of_paths context ~paths in
-               Lib.DB.with_parent db ~parent:(Fdecl.get db_ref)))
+             let package = Lib_name.package_name name in
+             let db_if_available paths =
+               let* db = Lib.DB.of_paths context ~paths in
+               let+ available = Lib.DB.available db name in
+               if available
+               then Some (Lib.DB.with_parent db ~parent:(Fdecl.get db_ref))
+               else None
+             in
+             let find_provider () =
+               let* available_from_parent = Lib.DB.available parent name in
+               if available_from_parent
+               then Memo.return None
+               else
+                 let* paths =
+                   Pkg_rules.Legacy_libraries.find_provider libraries package
+                 in
+                 Memo.Option.bind paths ~f:(fun paths -> db_if_available paths)
+             in
+             Pkg_rules.Legacy_libraries.find libraries package
+             >>= function
+             | None -> find_provider ()
+             | Some paths ->
+               db_if_available paths
+               >>= (function
+                | Some _ as db -> Memo.return db
+                | None -> find_provider ()))
       in
       Memo.exec memo
     in
     let resolve name =
-      let+ db = find (Lib_name.package_name name) in
+      let+ db = find name in
       match db with
       | None -> Lib.DB.Resolve_result.not_found
       | Some db -> Lib.DB.Resolve_result.redirect_by_name db (Loc.none, name)

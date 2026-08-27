@@ -2842,7 +2842,10 @@ let project_ocamlpath context =
 ;;
 
 module Legacy_libraries = struct
-  type t = Pkg.t Package.Name.Map.t
+  type t =
+    { by_name : Pkg.t Package.Name.Map.t
+    ; packages : Pkg.t list
+    }
 
   let for_package context package =
     Memo.push_stack_frame ~human_readable_description:(fun () ->
@@ -2855,19 +2858,44 @@ module Legacy_libraries = struct
       Dependency_view.make context pkg ~is_mounted:(is_project_mounted_pkg context)
     in
     let+ () = Action_expander.refresh_exported_env context dependencies in
-    Package.Name.Map.of_list_map_exn dependencies.legacy ~f:(fun (pkg : Pkg.t) ->
-      pkg.info.name, pkg)
+    let packages = dependencies.legacy in
+    let by_name =
+      Package.Name.Map.of_list_map_exn packages ~f:(fun (pkg : Pkg.t) ->
+        pkg.info.name, pkg)
+    in
+    { by_name; packages }
   ;;
 
   let find t package =
-    match Package.Name.Map.find t package with
+    match Package.Name.Map.find t.by_name package with
     | None -> Memo.return None
     | Some (pkg : Pkg.t) ->
       let* () = Build_system.build_file (Paths.install_cookie pkg.paths) in
       Memo.return (Some (ocamlpath_of_deps [ pkg ]))
   ;;
 
-  let packages = Package.Name.Map.keys
+  let path_provides_library path package =
+    let package = Package.Name.to_string package in
+    let package_dir = Path.relative path package in
+    Memo.List.exists
+      [ Path.relative_fname package_dir Dune_findlib.Package.meta_fn
+      ; Path.relative package_dir Dune_package.fn
+      ; Path.relative path ("META." ^ package)
+      ]
+      ~f:Fs.file_exists
+  ;;
+
+  let find_provider t package =
+    Memo.List.find_map t.packages ~f:(fun (pkg : Pkg.t) ->
+      let* () = Build_system.build_file (Paths.install_cookie pkg.paths) in
+      let paths = ocamlpath_of_deps [ pkg ] in
+      let+ provides =
+        Memo.List.exists paths ~f:(fun path -> path_provides_library path package)
+      in
+      if provides then Some paths else None)
+  ;;
+
+  let packages t = Package.Name.Map.keys t.by_name
 end
 
 let dev_tool_ocamlpath dev_tool =

@@ -50,6 +50,7 @@ module Legacy_libraries : sig
 
   val for_package : Context_name.t -> Package.Name.t -> t Memo.t
   val find : t -> Package.Name.t -> Path.t list option Memo.t
+  val find_provider : t -> Package.Name.t -> Path.t list option Memo.t
   val packages : t -> Package.Name.t list
 end
 
