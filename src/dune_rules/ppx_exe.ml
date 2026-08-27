@@ -16,7 +16,7 @@ module Key : sig
       ; scope : scope option
       }
 
-    val of_libs : Lib.t list -> t Memo.t
+    val of_libs : Lib.t list -> scope:Scope.t -> t Memo.t
   end
 
   val encode : Decoded.t -> encoded
@@ -63,22 +63,24 @@ end = struct
           (Path.Local.to_string_maybe_quoted dir)
     ;;
 
-    let of_libs libs =
+    let of_libs libs ~scope:consumer_scope =
       let pps =
         (let compare a b = Lib_name.compare (Lib.name a) (Lib.name b) in
          List.sort libs ~compare)
         |> List.map ~f:Lib.name
       in
-      let+ scope =
+      let* private_scope =
         Memo.List.fold_left libs ~init:None ~f:(fun acc lib ->
           let info = Lib.info lib in
-          let add_scope project =
+          match Lib_info.status info with
+          | Installed_private | Installed | Public _ -> Memo.return acc
+          | Private (project, _) ->
             let output_dir = Path.as_in_build_dir_exn (Lib_info.src_dir info) in
             let+ loaded_project = Dune_load.find_loaded_project ~dir:output_dir in
             if not (Dune_project.equal project (Loaded_project.project loaded_project))
             then
               Code_error.raise
-                "PPX library project does not match its loaded project"
+                "Private PPX library project does not match its loaded project"
                 [ "library_project", Dune_project.to_dyn project
                 ; "loaded_project", Loaded_project.to_dyn loaded_project
                 ];
@@ -96,23 +98,39 @@ end = struct
               if not (Loaded_project.Identity.equal a.project b.project)
               then
                 Code_error.raise
-                  "PPX libraries belong to different loaded projects"
+                  "Private PPX libraries belong to different loaded projects"
                   [ "first", Loaded_project.Identity.to_dyn a.project
                   ; "second", Loaded_project.Identity.to_dyn b.project
                   ];
-              { a with dir = Ordering.min Path.Local.compare a.dir b.dir })
-          in
-          match Lib_info.status info with
-          | Installed_private | Installed -> Memo.return acc
-          | Private (project, _) -> add_scope project
-          | Public (project, _) ->
-            let output_dir = Path.as_in_build_dir_exn (Lib_info.src_dir info) in
-            let* loaded_project = Dune_load.find_loaded_project ~dir:output_dir in
-            (match Build_partition.purpose (Loaded_project.partition loaded_project) with
-             | Workspace -> Memo.return acc
-             | Mounted -> add_scope project))
+              { a with dir = Ordering.min Path.Local.compare a.dir b.dir }))
+      and* consumer_loaded_project =
+        Dune_load.find_loaded_project ~dir:(Scope.root consumer_scope)
       in
-      { pps; scope }
+      let consumer_scope =
+        match
+          Build_partition.purpose (Loaded_project.partition consumer_loaded_project)
+        with
+        | Workspace -> None
+        | Mounted ->
+          Some
+            { project = Loaded_project.identity consumer_loaded_project
+            ; dir = Path.Local.root
+            }
+      in
+      let scope =
+        match consumer_scope, private_scope with
+        | None, scope | scope, None -> scope
+        | Some consumer, Some private_ ->
+          if not (Loaded_project.Identity.equal consumer.project private_.project)
+          then
+            Code_error.raise
+              "Private PPX library is outside the consuming mounted project"
+              [ "consumer", Loaded_project.Identity.to_dyn consumer.project
+              ; "private", Loaded_project.Identity.to_dyn private_.project
+              ];
+          Some private_
+      in
+      Memo.return { pps; scope }
     ;;
   end
 
@@ -151,8 +169,8 @@ end
 
 let ppx_exe_path root ~key = Path.Build.relative root (".ppx/" ^ key ^ "/ppx.exe")
 
-let ppx_driver_exe (ctx : Context.t) libs =
-  let* decoded = Key.Decoded.of_libs libs
+let ppx_driver_exe (ctx : Context.t) ~scope libs =
+  let* decoded = Key.Decoded.of_libs libs ~scope
   and* host = Context.host ctx in
   let key = Digest.to_string (Key.encode decoded) in
   let+ root =
@@ -174,5 +192,5 @@ let ppx_driver_exe (ctx : Context.t) libs =
 let get_ppx_exe ctx ~scope pps =
   let open Resolve.Memo.O in
   let* libs = Lib.DB.resolve_pps (Scope.libs scope) pps in
-  ppx_driver_exe ctx libs |> Resolve.Memo.lift_memo
+  ppx_driver_exe ctx ~scope libs |> Resolve.Memo.lift_memo
 ;;

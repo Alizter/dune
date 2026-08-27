@@ -88,7 +88,9 @@ the mounted package without creating a second semantic workspace context.
   >  (modules foo_ppx)
   >  (kind ppx_rewriter)
   >  (libraries foo_ppx_support helper.ppx)
-  >  (ppx.driver (main Foo_ppx.main)))
+  >  (ppx.driver
+  >   (main Foo_ppx.main)
+  >   (replaces helper.ppx)))
   > EOF
   $ cat > foo/lib/dynamic-source.inc <<'EOF'
   > (rule
