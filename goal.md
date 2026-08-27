@@ -1,10 +1,10 @@
 # Build locked Dune packages in one workspace
 
 This is the design plan for the next `flatten-dune` prototype. The archived
-prototype remains evidence for supported behaviour, but its virtual-source
-architecture is not a compatibility constraint. The snapshot-backed design in
-`prototype/flatten-dune/plan` is the architectural baseline; in particular, the
-later directory-target proposal is explicitly rejected.
+prototype remains the baseline for target-backed source preparation and
+supported behaviour. Its source remapping is the part to replace: build-backed
+sources must become first-class in the rules-side `Source_tree` rather than
+masquerading as workspace `Path.Source.t` values.
 
 ## Goal
 
@@ -25,17 +25,16 @@ The first working milestone contains only:
 - one existing explicit source lock;
 - one local archive containing one Dune package;
 - one literal translated `dune build ...` action;
-- one immutable, content-addressed source snapshot prepared from the archive;
-- provider-backed loading of Dune language files from that snapshot;
-- ordinary file-target materialization of selected compilation inputs;
-- one separate package artifact root;
+- one target-backed package source root whose real location is a `Path.Build.t`
+  beneath `_build/_default+lockfile/pkg/`;
+- one separate package artifact root that does not contain the source target;
 - one workspace library consuming the mounted library;
-- no directory target, virtual `Path.Source.t`, nested Dune process, old `.pkg`
-  rule for the mounted package, or package-specific engine behaviour.
+- no virtual `Path.Source.t`, nested Dune process, old `.pkg` rule for the mounted
+  package, or package-specific engine behaviour.
 
-HTTP, VCS and live-directory sources, autolock, shared sources, nested
-projects, legacy consumers, source refresh, and watch mode are outside this
-milestone. They are added only after the core path works.
+HTTP, VCS and live-directory sources, autolock, shared sources, nested projects,
+legacy consumers, source refresh, and watch mode are outside this milestone. They
+are added only after the core path works.
 
 ## Path and ownership invariants
 
@@ -44,20 +43,15 @@ Path kinds retain their existing meanings:
 - `Path.Source.t` is watched, user-owned workspace input and may be promoted to;
 - `Path.Build.t` is graph-produced data, is not watched as workspace input, and
   is never a promotion destination;
-- `Path.External.t` is external input that may be watched but must not be
-  modified by build rules or promotion.
+- `Path.External.t` is external input that may be watched but must not be modified
+  by build rules or promotion.
 
-A fetched archive may be a regular `Path.Build.t` file target. Its unpacked
-tree is not a build target. `Source_snapshot` prepares a content-addressed
-cache entry outside `_build`, publishes it atomically, and exposes its
-immutable topology and bytes through a provider. Only `Source_snapshot` may
-create cache entries; consumers treat published files as read-only external
-input.
-
-Selected source files are materialized as ordinary `Path.Build.t` file targets
-beneath the package output partition. Generated objects and install entries have
-the same explicit artifact owner, but the immutable snapshot remains a separate
-input and is never an output or promotion destination.
+A fetched package source is not a `Path.Source.t`. Its producing rule may own a
+build directory beneath `_build/_default+lockfile/pkg/`; that directory and the
+files beneath it remain build-backed sources. The source directory target is the
+real mounted source root, not staging for another representation. Generated
+objects and install entries live under a different output root; they are never
+placed beneath the source directory target.
 
 The following are independent values:
 
@@ -65,9 +59,9 @@ The following are independent values:
 |---|---|
 | Lock package identity | Exact package identity in one lock universe |
 | Project identity | Stable semantic identity, independent of physical paths |
-| Source input | Workspace path or snapshot provider plus local path |
-| Materialized input | Ordinary `Path.Build.t` file target |
-| Artifact ownership | Resolver/toolchain plus `Path.Build.t` output root |
+| Source location | Workspace `Path.Source.t` or mounted `Path.Build.t` |
+| Relative project path | `Path.Local.t` |
+| Artifact ownership | Explicit resolver/toolchain and `Path.Build.t` output root |
 
 No value is reconstructed from another. In particular:
 
@@ -76,60 +70,55 @@ No value is reconstructed from another. In particular:
 - no library object owner is recovered from its name and source path;
 - no context-name suffix stands in for artifact ownership.
 
-## Explicit rejection of directory targets
-
-A fetched or mounted package tree must never be represented as a Dune directory
-target. In particular, the implementation must not:
-
-- call `Fetch_rules.fetch` with `Directory` for a mounted source tree;
-- register that tree in `Gen_rules.directory_targets`;
-- traverse it with `Build_system.directory_target_contents`;
-- extract it under `_build` as `.pkg-source`, `.pkg-fetch`, or an equivalent
-  staging directory;
-- use a directory target merely to bootstrap another source representation; or
-- place generated package artifacts beneath an extracted source root.
-
-The archive itself may be a regular file target. Dune language files are read
-through the immutable snapshot provider, and every build-local source copy and
-generated artifact is an ordinary file target. Directories beneath the package
-output root are rule-generation directories, not targets.
-
 ## Generalizing `Path.Source.t`
 
 Existing rules-layer APIs use `Path.Source.t` because workspace input was
 historically the only source kind. Those types are hypotheses, not compatibility
 boundaries.
 
-At each affected API:
+The distinction belongs in the rules-side `Source_tree`, not in every rule that
+happens to receive a `Path.Build.t`. A generic build path is not necessarily a
+mounted source, so rules must not dispatch on `Path.Build.t` or reconstruct
+source ownership from paths. They receive a `Source_tree` directory or file and
+ask it to perform source operations.
 
-1. If it reads bytes or enumerates topology, accept a workspace or
-   provider-backed input and preserve its ownership.
-2. If it needs only project-relative identity, take `Path.Local.t` and an
-   explicit project identity instead of a physical source root.
-3. If a compiler or tool needs a build-local path, request the selected ordinary
-   file target from `Source_selection`.
-4. If it places generated files, take the output `Path.Build.t` explicitly.
-5. If it reports a location, use the provider's diagnostic name without making a
-   cache path an identity or artifact authority.
-6. If it promotes, permit only genuine workspace `Path.Source.t` inputs.
-
-An illustrative rules-side location is:
+The private representation is conceptually:
 
 ```ocaml
-type source_location =
+type root =
   | Workspace of Path.Source.t
-  | Mounted of
-      { snapshot : Source_snapshot.t
-      ; dir : Path.Local.t
-      ; package : Package_instance.t
-      ; visible_packages : Package.Name.Set.t
-      }
+  | Build_backed of Path.Build.t
+
+type dir =
+  { root : root
+  ; local : Path.Local.t
+  }
 ```
 
-The exact type and module name are not prescribed. There need not be one global
-variant when an API can simply stop depending on a source path. What is required
-is that mounted input remains provider-backed and that consumers cannot silently
-apply workspace or writable-build-path semantics to it.
+The exact private types are not prescribed. The public rules-side API must make
+these operations first class:
+
+- enumerate a directory and build its source target when necessary;
+- resolve a relative directory or file without changing its ownership;
+- read a file while recording the appropriate workspace or build dependency;
+- return a logical source location for parsing and diagnostics;
+- distinguish workspace promotion from non-promotable build-backed input.
+
+At each affected rules API:
+
+1. If it reads bytes, enumerates topology, or records a source dependency, take a
+   `Source_tree` directory or file rather than dispatching on a generic path.
+2. If it needs only project-relative identity, take `Path.Local.t` and an explicit
+   project identity instead of a physical source root.
+3. If it places generated files, take the artifact `Path.Build.t` explicitly.
+4. If it reports a location, use the real source-tree location without making it
+   an artifact authority.
+5. If it promotes, permit only a source-tree file backed by a genuine workspace
+   `Path.Source.t`.
+
+Mounted input remains a real `Path.Build.t` internally, but consumers cannot
+silently apply workspace semantics to it and do not learn that an arbitrary
+build path is a source merely from its path shape.
 
 A loaded directory or project must carry, directly or through its owner:
 
@@ -143,29 +132,33 @@ This is the boundary at which source and output paths become explicit.
 
 The engine continues to receive the ordinary workspace `Source_tree`. It uses
 that tree for workspace source-copy rules, fallback suppression, directory
-loading, and cleanup. It receives no mount registry, package identity, or
-mounted source exception.
+loading, and cleanup. It receives no mount registry, package identity, or mounted
+source exception.
 
-`Dune_load` and rule generation need a richer rules-side forest containing:
+`Dune_load` and rule generation need a richer rules-side view containing:
 
 - ordinary workspace directories; and
-- mounted roots backed by immutable source-snapshot providers.
+- mounted directories rooted at real `Path.Build.t` fetch targets.
 
-Workspace nodes use the existing source scanner. Mounted nodes enumerate and
-read only through their provider. They never inspect an extraction directory
-with filesystem or build-system directory APIs, and they are not installed as
-pseudo-sources in the engine's workspace view.
+The rules-side `Source_tree` privately distinguishes workspace and build-backed
+roots and presents one directory/file API to rule generation. It is the sole
+deciding point for whether an operation uses workspace filesystem APIs or
+build-system APIs. Rules do not contain mounted branches and do not treat all
+`Path.Build.t` values as sources. The engine's existing `Source_tree` projection
+remains workspace-only and receives no build-backed pseudo-sources.
 
-Archive file rules are derived from lock data alone. Snapshot preparation
-depends only on the completed archive file, so loading a mounted `dune-project`
-cannot depend on rules that themselves require that project to be loaded.
+Mounted nodes are built, enumerated, and read through existing build-system APIs.
+Their directory target and source-preparation rules are derived from lock data
+alone, so loading a mounted `dune-project` cannot depend on rules that themselves
+require that project to be loaded. Ordinary `(include)` resolution also goes
+through the source-tree file API; `dynamic_include` remains a normal build-graph
+operation.
 
 ```text
 lock data
-  -> independent archive file rules
-  -> immutable source snapshots
+  -> independent fetch/source target rules
   -> prepared mounted-or-legacy routes
-  -> provider-backed rules-side source forest
+  -> rules-side source view
   -> Dune_load
   -> package rules
 ```
@@ -177,19 +170,16 @@ package's complete translated action, including wrappers, filters, environment
 updates, configure steps, and mixed commands. It does not store a `dune_based`
 marker, and a build does not consult the opam repository again.
 
-Source transport and build routing are separate decisions. Preparation returns
-an explicit immutable value for each selected package:
+Source transport and build routing are separate decisions. Preparation returns an
+explicit immutable value for each selected package:
 
 ```text
-exact package identity
-+ archive, if any
-+ snapshot, if any
-+ Mounted or Legacy route
+exact package identity + source target, if any + Mounted or Legacy route
 ```
 
 That value is passed to source-tree construction, `Dune_load`, package-rule
-routing, and dependency integration. It is not published through a mutable
-global registry or recovered by reverse path lookup.
+routing, and dependency integration. It is not published through a mutable global
+registry or recovered by reverse path lookup.
 
 For the first milestone, the local archive is mounted only if:
 
@@ -209,11 +199,11 @@ host relationship, but owns artifacts beneath a separate package output root.
 This is an alternate physical owner, not a second semantic workspace context.
 Implicit workspace aliases and path targets do not run in it.
 
-Libraries, objects, binaries, install entries, scopes, diagnostics, Merlin
-data, and compile commands must use the explicit source and artifact owners.
-The first milestone migrates only the consumers needed by its package and
-workspace library; later milestones complete the same type migration rather
-than add mounted conditionals.
+Libraries, objects, binaries, install entries, scopes, diagnostics, Merlin data,
+and compile commands must use the explicit source and artifact owners. The first
+milestone migrates only the consumers needed by its package and workspace library;
+later milestones complete the same type migration rather than add mounted
+conditionals.
 
 A mounted package receives no old `.pkg` target, cookie, or second build/install
 action. Legacy consumers are deferred, but their eventual integration has two
@@ -224,19 +214,17 @@ separate edges:
 
 ## Source selection
 
-With snapshot inputs and package outputs separated, the rules layer owns one
-consistent selection policy for each logical path:
+With source and artifact roots separated, the rules layer owns one consistent
+selection policy for each output path:
 
 - a standard or promote-mode generated rule may replace the corresponding source
   input when ordinary Dune semantics say it does;
-- an existing workspace or snapshot file suppresses a fallback target;
+- an existing source suppresses a fallback target;
 - selectors and module discovery observe the same selected input;
-- a selected snapshot file is materialized as an ordinary file target only
-  when a compiler or tool requires a build-local path; and
-- promotion never writes to a snapshot or its materialized copy.
+- promotion never writes to mounted `Path.Build.t` sources.
 
-Do not reintroduce engine source claims, eager source-tree synchronization, or
-source/output co-location to implement this precedence.
+Do not reintroduce engine source claims or source/output co-location to implement
+this precedence.
 
 ## End-to-end flow
 
@@ -244,19 +232,18 @@ source/output co-location to implement this precedence.
 workspace source view
   -> read explicit lock
   -> retain complete translated actions
-  -> obtain regular archive file inputs or targets
-  -> prepare immutable content-addressed snapshots
+  -> create source targets from lock data
   -> inspect and classify packages
-  -> construct the provider-backed rules-side source forest
-  -> load complete projects and apply directory and package masks
-  -> materialize selected source files as ordinary file targets
+  -> construct the rules-side source view
+  -> lazily build/read mounted Path.Build roots
+  -> load complete projects and apply semantic masks
   -> generate mounted rules into explicit package output roots
   -> expose mounted libraries to workspace rules
   -> route only Legacy packages through existing .pkg rules
 ```
 
-Logical project identity, physical source location, and artifact ownership
-remain separate throughout this flow.
+Logical project identity, physical source location, and artifact ownership remain
+separate throughout this flow.
 
 ## Behaviour retained from the archived prototype
 
@@ -278,42 +265,38 @@ Later milestones retain these proven decisions:
 
 The new implementation must not contain:
 
-- directory targets for fetched or mounted package trees;
-- extracted `.pkg-source`, `.pkg-fetch`, or synchronized source trees beneath
-  `_build`;
-- virtual `Path.Source.t` identities for fetched input;
+- virtual `Path.Source.t` identities for fetched targets;
 - virtual-to-real source lookup or `Source_tree.real_path` engine configuration;
 - mounted exceptions in engine copying, lookup, selectors, fallback handling,
   cleanup, or promotion;
-- co-located canonical source snapshots and package artifacts;
+- co-located fetched sources and package artifacts;
 - build-start synchronization into the artifact root;
 - synthetic source-claim rules;
 - a mutable process-global mount registry or registry-generation invalidation;
 - reverse path-to-package or path-to-context lookups;
-- physical snapshot-store paths used as project or artifact identity;
-- a second full workspace context; or
+- rule-local dispatch that interprets a generic `Path.Build.t` as a mounted source;
+- a second full workspace context;
+- an external source-snapshot store, manifest, or provider callback layer;
 - compatibility shims around the archived prototype's internal APIs.
 
-The archived implementation may be consulted for behaviour and tests, not used
-as a scaffold.
+The archived implementation may be consulted for behaviour and tests, not used as
+a scaffold.
 
 ## Implementation order
 
-1. Implement the immutable source-snapshot provider using regular local or
-   fetched archive files, content-addressed atomic publication, and a validated
-   manifest.
-2. Define the minimal provider-backed source-location, loaded-directory, and
-   explicit artifact-owner boundaries.
-3. Migrate the workspace loading path through those boundaries without changing
-   behaviour; the engine source view remains workspace-only.
-4. Prepare one local archive snapshot from lock data and load its
-   `dune-project`, `dune` files, subdirectories, and modules through provider
-   callbacks.
-5. Materialize selected source files as ordinary file targets and generate one
-   mounted library into an explicit, separate package output root.
+1. Remove the snapshot-store detour and return package input to its real
+   `_build/_default+lockfile/pkg/` directory target.
+2. Make workspace and build-backed roots private cases of the rules-side
+   `Source_tree` directory/file API.
+3. Migrate rules to ask `Source_tree` for source operations rather than dispatch
+   on `Path.Source.t` or generic `Path.Build.t`; the engine source view remains
+   workspace-only.
+4. Derive the local archive's source rule from lock data and load its
+   `dune-project` and `dune` files through the real `Path.Build.t` root.
+5. Generate one mounted library into an explicit, separate package output root.
 6. Expose that library to and link it from one workspace library.
-7. Add source/generated/fallback cases before expanding the supported package
-   envelope.
+7. Add source/generated/fallback cases before expanding materialization or source
+   selection machinery.
 8. Extend the proven path to HTTP and action fallback, then legacy consumers,
    package masking and nested projects, autolock, refresh, and watch mode.
 9. Exercise a real package graph once the smallest end-to-end path works.
@@ -323,26 +306,20 @@ No step adds an abstraction solely to preserve an API that incorrectly requires
 
 ## Verification
 
-The first milestone is complete only when the built Dune executable
-demonstrates:
+The first milestone is complete only when the built Dune executable demonstrates:
 
 1. A local-archive package is loaded and built in the current process.
 2. A workspace library compiles and links against the mounted library.
-3. The archive is an external input or ordinary file target; no mounted-source
-   rule declares a directory target.
-4. Package topology and Dune language files are read through the immutable
-   snapshot provider, not an extracted build directory.
-5. Every materialized source is an ordinary file target selected explicitly by
-   `Source_selection`.
-6. Package artifacts exist only beneath the explicit package output root.
-7. Published snapshots remain immutable and outside `_build`.
-8. The mounted package has no old `.pkg` build directory, cookie, or action.
-9. No nested/external Dune invocation occurs.
-10. The engine has no mounted-source branch, fake source fact, or cleanup
-    exception.
-11. Existing workspace loading and build behaviour remain unchanged.
-12. The implementation contains no virtual source redirection or physical cache
-    path used as semantic identity.
+3. Mounted source topology and reads depend on the real
+   `_build/_default+lockfile/pkg/` directory target through `Source_tree`.
+4. Package artifacts exist only beneath the explicit package output root.
+5. The mounted package has no old `.pkg` build directory, cookie, or action.
+6. No nested/external Dune invocation occurs.
+7. The engine has no mounted-source branch, fake source fact, or cleanup exception.
+8. Existing workspace loading and build behaviour remain unchanged.
+9. The source root and artifact root have distinct rule ownership.
+10. The implementation contains no virtual source redirection, snapshot provider,
+    or rule-local generic `Path.Build.t` source dispatch.
 
 Use `_build/default/bin/main.exe` for the end-to-end scenario. Trace assertions
 must use a fresh action cache when checking process execution.
@@ -356,11 +333,8 @@ symlinks, promotion suppression, and a real opam-repository package graph.
 
 The implementation review should show:
 
-- archive acquisition and immutable snapshot preparation;
-- the provider-backed source-location and loaded-directory boundaries;
-- proof that the recursive rule graph contains no mounted-source directory
-  target;
-- ordinary file-target materialization selected by `Source_selection`;
+- the source-location and loaded-directory boundaries;
+- the rule-generation dependency path from lock data to source targets;
 - explicit source and artifact ownership at changed call sites;
 - the end-to-end trace and artifact layout;
 - any remaining `Path.Source.t` assumptions and why they are workspace-only.
