@@ -37,6 +37,10 @@ type t =
        but the artifacts database is depended on by the logic which expands
        globs. The computation of this field is deferred to break the cycle. *)
     local_bins : local_bins Memo.Lazy.t
+  ; (* The packages whose binaries are visible from the dir: its owning package
+       and that package's dependency closure. Applies to both [local_bins] and
+       the lock directory. [None] means that every package is visible. *)
+    visible_packages : Package.Name.Set.t option
   }
 
 let force { local_bins; _ } =
@@ -49,6 +53,15 @@ let local_binaries { local_bins; _ } =
   List.filter_map (Filename.Map.to_list local_bins) ~f:(function
     | _, Resolved p -> Some p.binding
     | _, Origin _origins -> None)
+;;
+
+let origin_is_visible t (origin : origin) =
+  match t.visible_packages, origin.package with
+  | Some visible, Some package -> Package.Name.Set.mem visible package
+  (* All origins are visible if visible_packages is None. An origin with no
+     owning package is also always visible, similar to the rule visibility with
+     dune build -p. *)
+  | _ -> true
 ;;
 
 let analyze_binary t ~dir name =
@@ -82,7 +95,8 @@ let analyze_binary t ~dir name =
      | Some (Resolved p) -> Memo.return (`Resolved (Path.build p.path))
      | None -> which ()
      | Some (Origin origins) ->
-       Memo.parallel_map origins ~f:(fun origin ->
+       List.filter origins ~f:(origin_is_visible t)
+       |> Memo.parallel_map ~f:(fun origin ->
          origin.enabled_if
          >>| function
          | true -> Some origin
@@ -108,6 +122,13 @@ let binary t ?hint ?(where = Original_path) ~dir ~loc name =
   >>= function
   | `Resolved path -> Memo.return @@ Ok path
   | `None ->
+    let hint =
+      match t.visible_packages, hint with
+      | Some _, None ->
+        Some
+          (sprintf "add a dependency on the package installing %S to this package" name)
+      | _ -> hint
+    in
     let context = Context.name t.context in
     Memo.return
     @@ Error
@@ -161,6 +182,15 @@ let with_dependency_binaries t dependency_bins =
   { t with dependency_bins; which = Which.which ~path:(Context.path t.context) }
 ;;
 
+let set_visible_packages t ~visible_packages =
+  let which =
+    match visible_packages with
+    | None -> Context.which t.context
+    | Some packages -> Context.which_narrowed_to_packages t.context ~packages
+  in
+  { t with visible_packages; which }
+;;
+
 let create =
   fun (context : Context.t)
     ~(local_bins : origin Appendable_list.t Filename.Map.t Memo.Lazy.t) ->
@@ -176,5 +206,6 @@ let create =
   ; which = Context.which context
   ; dependency_bins = Memo.Lazy.of_val Filename.Map.empty
   ; local_bins
+  ; visible_packages = None
   }
 ;;

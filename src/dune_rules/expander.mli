@@ -10,6 +10,14 @@ val source_tree_dir : t -> Source_tree.Rules.Dir.t option
 val context : t -> Context_name.t
 val project : t -> Dune_project.t
 
+(** The packages whose binaries the stanzas in this expander's directory may
+    use: the transitive closure of the [(depends ...)] fields, starting at the
+    package owning the directory (via its [(dir ...)] field).
+
+    [None] when the directory has no owning package, and means that every
+    package is visible. *)
+val visible_packages : t -> Package.Name.Set.t option
+
 val make_root
   :  project:Dune_project.t
   -> source_dir:Source_path.t

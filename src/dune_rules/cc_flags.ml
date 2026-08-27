@@ -135,7 +135,11 @@ let resolve_c_compiler context ~dir program =
   | Relative_to_current_dir -> Memo.return (Ok (Path.relative (Path.build dir) program))
   | In_path ->
     let program = Filename.of_string_exn program in
-    Context.which context program
+    (* Compiler vendor detection is context-wide and has no owning package whose
+       dependencies could narrow a lock-directory lookup. The configured C
+       compiler therefore comes from the context's base PATH; package-local
+       foreign rules resolve it through their own artifacts separately. *)
+    Which.which ~path:(Context.path context) program
     >>| (function
      | Some path -> Ok path
      | None ->
