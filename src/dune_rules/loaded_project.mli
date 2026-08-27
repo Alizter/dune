@@ -23,7 +23,7 @@ val create
   :  project:Dune_project.t
   -> identity:Identity.t
   -> source_root:Source_path.t
-  -> loaded_source:Loaded_source.t option
+  -> source_tree_root:Source_tree.Rules.Dir.t
   -> partition:Build_partition.t
   -> output_root:Path.Build.t
   -> visible_packages:Package.Name.Set.t option
@@ -32,7 +32,8 @@ val create
 val project : t -> Dune_project.t
 val identity : t -> Identity.t
 val source_root : t -> Source_path.t
-val loaded_source : t -> Loaded_source.t option
+val source_tree_root : t -> Source_tree.Rules.Dir.t
+val source_tree_dir : t -> Path.Build.t -> Source_tree.Rules.Dir.t option Memo.t
 val partition : t -> Build_partition.t
 val output_root : t -> Path.Build.t
 val visible_packages : t -> Package.Name.Set.t option

@@ -38,11 +38,15 @@ end
 
 val root : unit -> Dir.t Memo.t
 
+(** The source view used by rule generation. Its directories and files retain
+    either workspace or build-target ownership; callers use this API rather than
+    dispatching on generic paths. *)
 module Rules : sig
   module File : sig
     type t
 
     val source_path : t -> Source_path.t
+    val path : t -> Path.t
     val relative : t -> Loc.t -> string -> t
     val read : t -> string option Memo.t
     val equal : t -> t -> bool
@@ -56,12 +60,14 @@ module Rules : sig
 
     val source : Dir.t -> t
     val source_path : t -> Source_path.t
+    val path : t -> Path.t
     val file : t -> Filename.t -> File.t
     val relative_dir : t -> Path.Local.t
     val filenames : t -> Filename.Array.Set.t
     val sub_dirs : t -> sub_dir Filename.Array.Map.t
     val sub_dir_names : t -> Filename.Array.Set.t
     val sub_dir_as_t : sub_dir -> t Memo.t
+    val find_dir : t -> Path.Local.t -> t option Memo.t
     val status : t -> Source_dir_status.t
     val dune_file : t -> Dune_file.t option
     val project : t -> Dune_project.t
@@ -77,13 +83,16 @@ module Rules : sig
     end
   end
 
-  module Loaded : sig
+  module Build : sig
     type t
 
-    val load : Loaded_source.t -> t Memo.t
-    val source : t -> Loaded_source.t
+    (** Load a tree whose root is a build-system directory target. Topology and
+        file contents are obtained through [Build_system]. *)
+    val load : Path.Build.t -> t Memo.t
+
+    val source_root : t -> Path.Build.t
     val root : t -> Dir.t
-    val projects : t -> Dune_project.t list
+    val projects : t -> (Dune_project.t * Dir.t) list
   end
 end
 

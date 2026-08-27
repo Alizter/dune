@@ -177,10 +177,23 @@ let mlg_files ~sctx ~dir ~modules =
   let open Memo.O in
   let* project = Dune_load.find_loaded_project ~dir in
   let source_dir = Loaded_project.source_path project dir |> Option.value_exn in
+  let* source_tree_dir = Loaded_project.source_tree_dir project dir in
   let+ standard =
     (* All .mlg files in the current directory *)
-    match source_dir with
-    | Source_path.Workspace source_dir ->
+    match source_tree_dir with
+    | Some source_dir ->
+      Source_tree.Rules.Dir.filenames source_dir
+      |> Filename.Array.Set.to_list
+      |> List.filter_map ~f:(fun filename ->
+        if
+          Filename.Extension.Or_empty.check
+            (Filename.extension filename)
+            Filename.Extension.mlg
+        then Some (Path.Build.relative_fname dir filename)
+        else None)
+      |> Memo.return
+    | None ->
+      let source_dir = Source_path.as_workspace source_dir |> Option.value_exn in
       Source_tree.files_of source_dir
       >>| Path.Source.Set.to_list
       >>| List.filter_map ~f:(fun source ->
@@ -193,27 +206,6 @@ let mlg_files ~sctx ~dir ~modules =
             (Path.Build.append_source
                (Super_context.context sctx |> Context.build_dir)
                source)
-        else None)
-    | Build source_dir ->
-      let source = Loaded_project.loaded_source project |> Option.value_exn in
-      let+ filenames =
-        Loaded_source.local_path source source_dir
-        |> Option.value_exn
-        |> Loaded_source.readdir source
-        >>| Filename.Map.to_list
-        >>| List.filter_map ~f:(fun (filename, kind) ->
-          match kind with
-          | `Dir -> None
-          | `File -> Some filename)
-        >>| Filename.Array.Set.of_list
-      in
-      Filename.Array.Set.to_list filenames
-      |> List.filter_map ~f:(fun filename ->
-        if
-          Filename.Extension.Or_empty.check
-            (Filename.extension filename)
-            Filename.Extension.mlg
-        then Some (Path.Build.relative_fname dir filename)
         else None)
   in
   let parse ~loc:_ file = Path.Build.relative dir (file ^ ".mlg") in

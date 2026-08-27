@@ -9,7 +9,6 @@ include struct
   module Source_dir_status = Source_dir_status
   module Include_stanza = Include_stanza
   module Source_tree = Source_tree
-  module Loaded_source = Loaded_source
   module Cram_test = Cram_test
   module Only_packages = Only_packages
   module Workspace = Workspace

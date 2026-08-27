@@ -271,13 +271,20 @@ let () =
 
 (** Returns the list of files (in _build) to be passed to mdx for the given
     stanza and context *)
-let files_to_mdx t ~sctx ~dir ~source_dir ~loaded_source =
+let files_to_mdx t ~sctx ~dir ~source_dir ~source_tree_dir =
   let standard = default_files_of_version t.version in
   let must_mdx filename =
     Predicate_lang.Glob.test t.files ~standard (Filename.to_string filename)
   in
-  match source_dir with
-  | Source_path.Workspace source_dir ->
+  match source_tree_dir with
+  | Some source_dir ->
+    Source_tree.Rules.Dir.filenames source_dir
+    |> Filename.Array.Set.to_list
+    |> List.filter_map ~f:(fun filename ->
+      if must_mdx filename then Some (Path.Build.relative_fname dir filename) else None)
+    |> Memo.return
+  | None ->
+    let source_dir = Source_path.as_workspace source_dir |> Option.value_exn in
     Source_tree.files_of source_dir
     >>| Path.Source.Set.to_list
     >>| List.filter_map ~f:(fun source ->
@@ -288,22 +295,6 @@ let files_to_mdx t ~sctx ~dir ~source_dir ~loaded_source =
              (Context.build_dir (Super_context.context sctx))
              source)
       else None)
-  | Build source_dir ->
-    let source = Option.value_exn loaded_source in
-    let+ files =
-      Loaded_source.local_path source source_dir
-      |> Option.value_exn
-      |> Loaded_source.readdir source
-      >>| Filename.Map.to_list
-      >>| List.filter_map ~f:(fun (filename, kind) ->
-        match kind with
-        | `Dir -> None
-        | `File -> Some filename)
-      >>| Filename.Array.Set.of_list
-    in
-    Filename.Array.Set.to_list files
-    |> List.filter_map ~f:(fun filename ->
-      if must_mdx filename then Some (Path.Build.relative_fname dir filename) else None)
 ;;
 
 (** Generates the rules for a single [src] file covered covered by the given
@@ -547,7 +538,7 @@ let gen_rules t ~sctx ~dir ~scope ~expander =
         ~sctx
         ~dir
         ~source_dir
-        ~loaded_source:(Expander.loaded_source expander)
+        ~source_tree_dir:(Expander.source_tree_dir expander)
     in
     let mdx_prog =
       Super_context.resolve_program

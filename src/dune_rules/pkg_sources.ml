@@ -4,36 +4,26 @@ module Gen_rules = Build_config.Gen_rules
 module Lock_pkg = Dune_pkg.Lock_dir.Pkg
 module Build_command = Dune_pkg.Lock_dir.Build_command
 
-let archive_dir_basename = ".pkg-archive"
 let artifact_dir_basename = "pkg"
 
 module Candidate = struct
   type t =
     { lock_pkg : Lock_pkg.t
     ; identity_digest : Dune_digest.t
-    ; source_id : string
-    ; archive_file : Path.Build.t
+    ; source_root : Path.Build.t option
     ; artifact_root : Path.Build.t
     }
 
   let name t = t.lock_pkg.info.name
   let source t = t.lock_pkg.info.source
-  let archive_file t = t.archive_file
+  let source_root t = t.source_root
   let artifact_root t = t.artifact_root
   let identity_digest t = t.identity_digest
-  let source_id t = t.source_id
 
   let make context lock_pkg =
     let identity_digest =
       Dune_digest.Feed.compute_digest Lock_pkg.digest_feed (Lock_pkg.remove_locs lock_pkg)
     in
-    let source_digest =
-      match lock_pkg.info.source with
-      | None -> identity_digest
-      | Some source ->
-        Dune_digest.repr Dune_pkg.Source.repr (Dune_pkg.Source.remove_locs source)
-    in
-    let source_id = Dune_digest.to_string source_digest in
     let id =
       sprintf
         "%s.%s-%s"
@@ -41,56 +31,48 @@ module Candidate = struct
         (Package_version.to_string lock_pkg.info.version)
         (Dune_digest.to_string identity_digest)
     in
-    let archive_file =
-      Path.Build.L.relative
-        Private_context.t.build_dir
-        [ Context_name.to_string context; archive_dir_basename; source_id; "file" ]
+    let mounted_context = Context_name.build_dir (Mounted_context.make context) in
+    let source_root =
+      Option.map lock_pkg.info.source ~f:(fun source ->
+        Fetch_rules.target source `Directory)
     in
     let artifact_root =
-      Path.Build.L.relative
-        (Context_name.build_dir (Mounted_context.make context))
-        [ artifact_dir_basename; id ]
+      Path.Build.L.relative mounted_context [ artifact_dir_basename; id ]
     in
-    { lock_pkg; identity_digest; source_id; archive_file; artifact_root }
+    { lock_pkg; identity_digest; source_root; artifact_root }
   ;;
 end
 
 module Mounted = struct
   type t =
     { candidate : Candidate.t
-    ; source : Loaded_source.t
-    ; projects : Dune_project.t list
-    ; tree : Source_tree.Rules.Loaded.t
+    ; source_root : Path.Build.t
+    ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
+    ; tree : Source_tree.Rules.Build.t
     }
 
   let candidate t = t.candidate
-  let source t = t.source
+  let source_root t = t.source_root
   let projects t = t.projects
   let tree t = t.tree
 end
 
-let candidates =
-  let by_context =
-    Per_context.create_by_name ~name:"mounted-package-candidates" (fun context ->
-      let* active = Lock_dir.lock_dir_active context in
-      if not active
-      then Memo.return []
-      else
-        let* lock_dir = Lock_dir.get_exn context
-        and* platform = Lock_dir.Sys_vars.solver_env in
-        Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
-        |> Package.Name.Map.values
-        |> List.map ~f:(Candidate.make context)
-        |> Memo.return)
-    |> Staged.unstage
-  in
-  fun context -> by_context context
+let load_candidates context =
+  let* active = Lock_dir.lock_dir_active context in
+  if not active
+  then Memo.return []
+  else
+    let* lock_dir = Lock_dir.get_exn context
+    and* platform = Lock_dir.Sys_vars.solver_env in
+    Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
+    |> Package.Name.Map.values
+    |> List.map ~f:(Candidate.make context)
+    |> Memo.return
 ;;
 
-let find_candidate context id =
-  let+ candidates = candidates context in
-  List.find candidates ~f:(fun candidate ->
-    String.equal id (Candidate.source_id candidate))
+let candidates =
+  Per_context.create_by_name ~name:"mounted-package-candidates" load_candidates
+  |> Staged.unstage
 ;;
 
 let literal = function
@@ -180,15 +162,15 @@ let selected_action candidate =
   Memo.return (build, install)
 ;;
 
-module Loaded_tree = Source_tree.Rules.Loaded
+module Build_source_tree = Source_tree.Rules.Build
 
-let load_source = Loaded_tree.load
+let load_source = Build_source_tree.load
 
-let mount candidate source tree =
-  let projects = Loaded_tree.projects tree in
+let mount candidate source_root tree =
+  let projects = Build_source_tree.projects tree in
   let package = Candidate.name candidate in
   let* represents_package =
-    Memo.List.exists projects ~f:(fun project ->
+    Memo.List.exists projects ~f:(fun (project, _) ->
       match
         Package.Name.Map.find (Dune_project.including_hidden_packages project) package
       with
@@ -199,55 +181,38 @@ let mount candidate source tree =
   then Memo.return None
   else (
     let projects =
-      List.map projects ~f:(fun project ->
-        Dune_project.set_package_version
-          project
-          ~package
-          ~version:candidate.lock_pkg.info.version
-        |> Dune_project.filter_packages ~f:(Package.Name.equal package))
+      List.map projects ~f:(fun (project, source_dir) ->
+        ( Dune_project.set_package_version
+            project
+            ~package
+            ~version:candidate.lock_pkg.info.version
+          |> Dune_project.filter_packages ~f:(Package.Name.equal package)
+        , source_dir ))
     in
-    Memo.return (Some { Mounted.candidate; source; projects; tree }))
-;;
-
-let prepare_snapshot candidate source =
-  let archive_file = Candidate.archive_file candidate |> Path.build in
-  let* archive =
-    Build_system.with_file archive_file ~f:(fun path ->
-      let filename =
-        let url = snd source.Dune_pkg.Source.url in
-        Filename.basename url.path |> Filename.of_string_exn
-      in
-      { Dune_pkg.Source_snapshot.Archive.path; filename; digest = Dune_digest.file path })
-  in
-  Dune_pkg.Source_snapshot.prepare archive
+    Memo.return (Some { Mounted.candidate; source_root; projects; tree }))
 ;;
 
 let prepare candidate =
   let* build, install = selected_action candidate in
-  match build, install, Candidate.source candidate with
-  | Some build, None, Some source
+  match build, install, Candidate.source candidate, Candidate.source_root candidate with
+  | Some build, None, Some source, Some source_root
     when build_command_is_dune_only build
          && List.is_empty candidate.lock_pkg.depexts
          && List.is_empty candidate.lock_pkg.info.extra_sources ->
     Lock_dir.source_kind source
     >>= (function
      | `Local (`File, _) ->
-       let* snapshot = prepare_snapshot candidate source in
-       let loaded_source =
-         Loaded_source.create ~snapshot ~root:(Candidate.artifact_root candidate)
-       in
-       let* source = load_source loaded_source in
-       mount candidate loaded_source source
+       let* tree = load_source source_root in
+       mount candidate source_root tree
      | `Fetch when (snd source.url).backend = `http ->
-       let* snapshot = prepare_snapshot candidate source in
-       let loaded_source =
-         Loaded_source.create ~snapshot ~root:(Candidate.artifact_root candidate)
-       in
-       let* source = load_source loaded_source in
-       mount candidate loaded_source source
+       let* tree = load_source source_root in
+       mount candidate source_root tree
      | `Local (`Directory, _) | `Fetch -> Memo.return None)
-  | Some _, None, Some _ | Some _, Some _, _ | Some _, None, None | None, _, _ ->
-    Memo.return None
+  | ( Some _, None, Some _, Some _
+    | Some _, None, Some _, None
+    | Some _, None, None, _
+    | Some _, Some _, _, _
+    | None, _, _, _ ) -> Memo.return None
 ;;
 
 let mounted =
@@ -265,92 +230,30 @@ let find_mounted context name =
     Package.Name.equal name (Candidate.name (Mounted.candidate mounted)))
 ;;
 
-let source_rules ~context ~dir ~id =
-  let* candidate = find_candidate context id in
-  match candidate with
-  | None -> Memo.return Gen_rules.no_rules
-  | Some candidate ->
-    (match Candidate.source candidate with
-     | None -> Memo.return Gen_rules.no_rules
-     | Some source ->
-       Lock_dir.source_kind source
-       >>| (function
-        | `Local (`File, _) | `Fetch ->
-          let target = Candidate.archive_file candidate in
-          let parent = Path.Build.parent_exn target in
-          if not (Path.Build.equal parent dir)
-          then
-            Code_error.raise
-              "Mounted package archive rule requested at an unexpected path"
-              [ "requested", Path.Build.to_dyn dir; "expected", Path.Build.to_dyn parent ];
-          let loc = fst source.url in
-          let rules =
-            Rules.collect_unit (fun () ->
-              let { Action_builder.With_targets.build; targets } =
-                Fetch_rules.fetch ~target `File source
-              in
-              Rule.make ~info:(Rule.Info.of_loc_opt (Some loc)) ~targets build
-              |> Rules.Produce.rule)
-          in
-          Gen_rules.make rules
-        | `Local (`Directory, _) -> Gen_rules.no_rules))
-;;
-
-let setup_rules ~context ~dir ~components =
-  match components with
-  | [] ->
-    let build_dir_only_sub_dirs =
-      Gen_rules.Build_only_sub_dirs.singleton
-        ~dir
-        (Subdir_set.of_list [ Filename.of_string_exn archive_dir_basename ])
-    in
-    Gen_rules.make ~build_dir_only_sub_dirs (Memo.return Rules.empty) |> Memo.return
-  | [ component ] when String.equal component archive_dir_basename ->
-    let+ candidates = candidates context in
-    let subdirs =
-      List.map candidates ~f:(fun candidate ->
-        Candidate.source_id candidate |> Filename.of_string_exn)
-      |> Subdir_set.of_list
-    in
-    Gen_rules.make_empty ~dir subdirs
-  | [ component; id ] when String.equal component archive_dir_basename ->
-    source_rules ~context ~dir ~id
-  | component :: _ :: _ :: _ when String.equal component archive_dir_basename ->
-    Gen_rules.redirect_to_parent Gen_rules.Rules.empty |> Memo.return
-  | _ -> Gen_rules.rules_here Gen_rules.Rules.empty |> Memo.return
-;;
-
-let source_copy_rule ~dir ~source ~source_dir filename =
+let source_copy_rule ~dir ~source_dir filename =
   let src =
-    Path.Local.relative_fname source_dir filename |> Loaded_source.file_path source
+    Source_tree.Rules.Dir.file source_dir filename |> Source_tree.Rules.File.path
   in
   let dst = Path.Build.relative_fname dir filename in
   let { Action_builder.With_targets.build; targets } = Action_builder.copy ~src ~dst in
   Rule.make ~info:(Rule.Info.Source_file_copy src) ~targets build
 ;;
 
-let add_artifact_source_rules ~dir ~source ~source_dir rules =
+let add_artifact_source_rules ~dir ~source_dir rules =
   Gen_rules.map_rules rules ~f:(fun generated ->
     let rules =
-      let* source_filenames =
-        Loaded_source.readdir source source_dir
-        >>| Filename.Map.foldi ~init:[] ~f:(fun name kind files ->
-          match kind with
-          | `File -> name :: files
-          | `Dir -> files)
-        >>| Filename.Array.Set.of_list
-      and* generated_rules = generated.rules in
+      let* generated_rules = generated.rules in
       let generated_here =
         Rules.find generated_rules (Path.build dir) |> Rules.Dir_rules.consume
       in
       let selected =
         Dune_engine.Source_selection.select
           ~dir
-          ~source_dir:(Loaded_source.source_path source source_dir |> Path.build)
+          ~source_dir:(Source_tree.Rules.Dir.path source_dir)
           ~build_dir_only_sub_dirs:
             (Gen_rules.Build_only_sub_dirs.find generated.build_dir_only_sub_dirs dir)
-          ~source_filenames
-          ~source_dirs:Filename.Array.Set.empty
+          ~source_filenames:(Source_tree.Rules.Dir.filenames source_dir)
+          ~source_dirs:(Source_tree.Rules.Dir.sub_dir_names source_dir)
           generated_here.rules
       in
       let selected_rules = Rule.Set.of_list selected.rules in
@@ -365,7 +268,7 @@ let add_artifact_source_rules ~dir ~source ~source_dir rules =
       in
       let source_rules =
         Filename.Array.Set.to_list_map selected.source_filenames ~f:(fun filename ->
-          source_copy_rule ~dir ~source ~source_dir filename)
+          source_copy_rule ~dir ~source_dir filename)
         |> Rules.of_rules
       in
       Memo.return (Rules.union source_rules generated_rules)
