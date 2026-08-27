@@ -72,15 +72,13 @@ end = struct
       let+ scope =
         Memo.List.fold_left libs ~init:None ~f:(fun acc lib ->
           let info = Lib.info lib in
-          match Lib_info.status info with
-          | Installed_private | Public _ | Installed -> Memo.return acc
-          | Private (project, _) ->
+          let add_scope project =
             let output_dir = Path.as_in_build_dir_exn (Lib_info.src_dir info) in
             let+ loaded_project = Dune_load.find_loaded_project ~dir:output_dir in
             if not (Dune_project.equal project (Loaded_project.project loaded_project))
             then
               Code_error.raise
-                "Private library project does not match its loaded project"
+                "PPX library project does not match its loaded project"
                 [ "library_project", Dune_project.to_dyn project
                 ; "loaded_project", Loaded_project.to_dyn loaded_project
                 ];
@@ -98,11 +96,21 @@ end = struct
               if not (Loaded_project.Identity.equal a.project b.project)
               then
                 Code_error.raise
-                  "Private PPX libraries belong to different loaded projects"
+                  "PPX libraries belong to different loaded projects"
                   [ "first", Loaded_project.Identity.to_dyn a.project
                   ; "second", Loaded_project.Identity.to_dyn b.project
                   ];
-              { a with dir = Ordering.min Path.Local.compare a.dir b.dir }))
+              { a with dir = Ordering.min Path.Local.compare a.dir b.dir })
+          in
+          match Lib_info.status info with
+          | Installed_private | Installed -> Memo.return acc
+          | Private (project, _) -> add_scope project
+          | Public (project, _) ->
+            let output_dir = Path.as_in_build_dir_exn (Lib_info.src_dir info) in
+            let* loaded_project = Dune_load.find_loaded_project ~dir:output_dir in
+            (match Build_partition.purpose (Loaded_project.partition loaded_project) with
+             | Workspace -> Memo.return acc
+             | Mounted -> add_scope project))
       in
       { pps; scope }
     ;;
@@ -141,15 +149,26 @@ end = struct
   ;;
 end
 
-let ppx_exe_path (ctx : Build_context.t) ~key =
-  Path.Build.relative ctx.build_dir (".ppx/" ^ key ^ "/ppx.exe")
-;;
+let ppx_exe_path root ~key = Path.Build.relative root (".ppx/" ^ key ^ "/ppx.exe")
 
 let ppx_driver_exe (ctx : Context.t) libs =
   let* decoded = Key.Decoded.of_libs libs
   and* host = Context.host ctx in
   let key = Digest.to_string (Key.encode decoded) in
-  Memo.return (ppx_exe_path (Context.build_context host) ~key)
+  let+ root =
+    match decoded.scope with
+    | None -> Memo.return (Context.build_dir host)
+    | Some { project; _ } ->
+      let+ loaded_project =
+        Dune_load.find_loaded_project_by_identity
+          ~context:(Context.name host)
+          ~identity:project
+      in
+      (match Build_partition.purpose (Loaded_project.partition loaded_project) with
+       | Workspace -> Context.build_dir host
+       | Mounted -> Loaded_project.output_root loaded_project)
+  in
+  ppx_exe_path root ~key
 ;;
 
 let get_ppx_exe ctx ~scope pps =
