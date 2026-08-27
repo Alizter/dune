@@ -126,19 +126,26 @@ beforehand, so a nested package command would fail the build and leave a marker.
   $ "$real_dune" trace cat --trace-file trace.csexp | grep -c '_private/default/\.pkg/foo' || true
   0
 
-Mounted source transport must not introduce an opaque directory target into the
-workspace executable's recursive rule graph.
+The fetched package source is the real directory target beneath the lockfile
+context. It is part of the workspace executable's recursive rule graph, while
+artifacts have a separate owner.
 
+  $ source_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
+  $ artifact_root=$(echo _build/_default+lockfile/pkg-artifacts/foo.1.0-*)
   $ "$real_dune" rules --recursive --format=json ./main.exe |
-  > jq_dune '[.[] | .targets.directories[] | select(contains("/.pkg-source/"))] | length'
-  0
+  > jq_dune --arg source_root "$PWD/$source_root" \
+  >   '[.[] | .targets.directories[] | select(. == $source_root)] | length'
+  1
+  $ test -f "$source_root/dune-project" && test -f "$source_root/unused.txt" && echo complete-build-source
+  complete-build-source
+  $ test "$source_root" != "$artifact_root" && echo separate-source-and-artifacts
+  separate-source-and-artifacts
+  $ test ! -e "$DUNE_CACHE_ROOT/pkg-sources" && echo no-external-source-store
+  no-external-source-store
 
-Dune language files are read from the immutable source snapshot. Selected
-compilation inputs are materialized as ordinary file targets in the package
-output root alongside generated artifacts; no unpacked source tree is a build
-directory target.
+Selected compilation inputs are ordinary file targets in the package artifact
+root. Unselected source files remain only in the build-backed source target.
 
-  $ artifact_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
   $ test -f "$artifact_root/foo.ml" && echo materialized-source-file
   materialized-source-file
   $ "$real_dune" rules --format=json "$artifact_root/foo.ml" |
@@ -148,8 +155,6 @@ directory target.
   selective-materialization
   $ test -f "$artifact_root/foo.cmxa" && echo artifact-root
   artifact-root
-  $ test ! -e _build/_private/default/.pkg-source && echo no-directory-source-target
-  no-directory-source-target
   $ test ! -d _build/_private/default/.pkg && echo no-old-package-rules
   no-old-package-rules
   $ "$real_dune" build @pkg-install --display quiet
@@ -158,9 +163,8 @@ directory target.
   $ grep '^version' "$artifact_root/META.foo"
   version = "1.0"
   $ "$real_dune" runtest --display quiet
-  $ snapshot_root=$(find "$DUNE_CACHE_ROOT/pkg-sources/v1" -type d -name root)
-  $ test "$(cat "$snapshot_root/generated.ml")" = 'let message = "source-generated"' && echo snapshot-unchanged
-  snapshot-unchanged
+  $ test "$(cat "$source_root/generated.ml")" = 'let message = "source-generated"' && echo build-source-unchanged
+  build-source-unchanged
   $ test "$(cat "$artifact_root/generated.ml")" = 'let message = "generated"' && echo promotion-contained
   promotion-contained
   $ "$real_dune" trace commands --trace-file trace.csexp | grep 'foo.ml' | grep -- '-w -a' >/dev/null && echo vendored-flags
