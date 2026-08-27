@@ -114,3 +114,62 @@ directory.
   nested-artifacts
   $ test ! -e "$foo_root/sub/bar.cmxa" && test ! -e "$bar_root/foo.cmxa" && echo package-masks
   package-masks
+
+A mounted package may form one module group from files in nested build-backed
+source directories. Group discovery must use the rules-side source tree rather
+than the workspace-only engine source tree.
+
+  $ mkdir include-subdirs
+  $ cd include-subdirs
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends grouped))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (libraries grouped))
+  > EOF
+  $ echo 'let () = print_endline Grouped.message' > main.ml
+
+  $ mkdir -p grouped/src/nested
+  $ cat > grouped/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name grouped))
+  > EOF
+  $ cat > grouped/src/dune <<'EOF'
+  > (include_subdirs unqualified)
+  > (library
+  >  (name grouped)
+  >  (public_name grouped))
+  > EOF
+  $ echo 'let message = Message.message' > grouped/src/grouped.ml
+  $ echo 'let message = "mounted include_subdirs"' > grouped/src/nested/message.ml
+  $ tar cf grouped.tar grouped
+  $ rm -rf grouped
+
+  $ make_lockdir
+  $ make_lockpkg grouped <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/grouped.tar)
+  >   (checksum md5=$(md5sum grouped.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
+  $ "$real_dune" build ./main.exe --display quiet
+  $ ./_build/default/main.exe
+  mounted include_subdirs
+  $ grouped_root=$(echo _build/_default+lockfile/pkg/grouped.1.0-*)
+  $ test -n "$(find "$grouped_root/src/.grouped.objs" -name '*Message*.cmx' -print -quit)" && echo nested-module-artifact
+  nested-module-artifact
+  $ test ! -e _build/_private/default/.pkg/grouped.1.0-* && echo no-old-package-rules
+  no-old-package-rules
