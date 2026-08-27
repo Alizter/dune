@@ -130,6 +130,35 @@ let check_runtime_deps_relative_path local_path ~loc ~lib_info =
   | Some _ -> ()
 ;;
 
+let find_loaded_package sctx package =
+  let context = Super_context.context sctx |> Context.name in
+  let+ loaded_projects = Dune_load.loaded_projects context in
+  let matches =
+    List.filter_map loaded_projects ~f:(fun loaded_project ->
+      let visible =
+        match Loaded_project.visible_packages loaded_project with
+        | None -> true
+        | Some packages -> Package.Name.Set.mem packages package
+      in
+      if not visible
+      then None
+      else
+        Package.Name.Map.find
+          (Dune_project.packages (Loaded_project.project loaded_project))
+          package
+        |> Option.map ~f:(fun pkg -> loaded_project, pkg))
+  in
+  match matches with
+  | [] -> None
+  | [ match_ ] -> Some match_
+  | _ ->
+    Code_error.raise
+      "Install_rules: multiple loaded projects expose the same package"
+      [ "package", Package.Name.to_dyn package
+      ; "projects", Dyn.list Loaded_project.to_dyn (List.map matches ~f:fst)
+      ]
+;;
+
 module Stanzas_to_entries : sig
   val stanzas_to_entries
     :  Super_context.t
@@ -890,12 +919,25 @@ end = struct
     Memo.exec memo
   ;;
 
+  let entries_for_package_without_scope =
+    let memo =
+      Memo.create
+        ~input:(module Super_context.As_memo_key.And_package_name)
+        "install-entries-for-package"
+        (fun (sctx, package) ->
+           find_loaded_package sctx package
+           >>= function
+           | None -> Memo.return []
+           | Some (loaded_project, pkg) ->
+             entries_for_loaded_package sctx loaded_project ~scope:None pkg)
+    in
+    fun sctx package -> Memo.exec memo (sctx, package)
+  ;;
+
   let entries_for_package sctx loaded_project ~scope pkg =
-    match Loaded_project.visible_packages loaded_project with
-    | None ->
-      let+ entries = stanzas_to_entries sctx in
-      Package.Name.Map.find entries (Package.name pkg) |> Option.value ~default:[]
-    | Some _ -> entries_for_loaded_package sctx loaded_project ~scope pkg
+    match scope with
+    | None -> entries_for_package_without_scope sctx (Package.name pkg)
+    | Some scope -> entries_for_loaded_package sctx loaded_project ~scope:(Some scope) pkg
   ;;
 end
 
@@ -1398,35 +1440,6 @@ let promote_install_file (ctx : Context.t) =
   match Context.kind ctx with
   | Lock _ | Default -> true
   | Opam _ -> false
-;;
-
-let find_loaded_package sctx package =
-  let context = Super_context.context sctx |> Context.name in
-  let+ loaded_projects = Dune_load.loaded_projects context in
-  let matches =
-    List.filter_map loaded_projects ~f:(fun loaded_project ->
-      let visible =
-        match Loaded_project.visible_packages loaded_project with
-        | None -> true
-        | Some packages -> Package.Name.Set.mem packages package
-      in
-      if not visible
-      then None
-      else
-        Package.Name.Map.find
-          (Dune_project.packages (Loaded_project.project loaded_project))
-          package
-        |> Option.map ~f:(fun pkg -> loaded_project, pkg))
-  in
-  match matches with
-  | [] -> None
-  | [ match_ ] -> Some match_
-  | _ ->
-    Code_error.raise
-      "Install_rules: multiple loaded projects expose the same package"
-      [ "package", Package.Name.to_dyn package
-      ; "projects", Dyn.list Loaded_project.to_dyn (List.map matches ~f:fst)
-      ]
 ;;
 
 let install_entries sctx package =
