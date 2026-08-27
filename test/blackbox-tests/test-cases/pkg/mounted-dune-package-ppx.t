@@ -168,14 +168,14 @@ include, is read directly from the loaded source.
   $ test ! -e "$foo_root/lib/dynamic-source.inc" && echo dynamic-source-not-materialized
   dynamic-source-not-materialized
 
-The package objects use the mounted artifact root. The synthesized PPX executable
-is a tool of the workspace resolver and uses its ordinary [.ppx] directory.
-Loading the driver does not instantiate the old package pipeline.
+The package objects and synthesized PPX executable use the mounted artifact
+root. The PPX retains its mounted resolver and does not instantiate the old
+package pipeline.
 
   $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
   $ test -f "$foo_root/lib/.foo.objs/native/foo.cmx" && echo mounted-library-artifact
   mounted-library-artifact
-  $ test -n "$(find _build/default/.ppx -name ppx.exe -print -quit)" && echo workspace-resolver-ppx
-  workspace-resolver-ppx
+  $ test -n "$(find "$foo_root/.ppx" -name ppx.exe -print -quit)" && echo mounted-resolver-ppx
+  mounted-resolver-ppx
   $ test ! -e _build/_private/default/.pkg/foo.1.0-* && echo no-old-package-rules
   no-old-package-rules

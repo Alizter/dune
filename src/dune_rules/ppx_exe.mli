@@ -20,7 +20,7 @@ module Key : sig
   val decode : Digest.t -> Decoded.t
 end
 
-val ppx_exe_path : Build_context.t -> key:string -> Path.Build.t
+val ppx_exe_path : Path.Build.t -> key:string -> Path.Build.t
 val ppx_driver_exe : Context.t -> Lib.t list -> Path.Build.t Memo.t
 
 (** Get the path to the ppx driver executable for a list of ppx libraries.
