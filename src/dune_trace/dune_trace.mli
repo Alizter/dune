@@ -133,6 +133,7 @@ module Event : sig
     -> mounted:int
     -> t
 
+  val package_digest_table : start:Time.t -> stop:Time.t -> packages:int -> t
   val scheduler_idle : unit -> t
   val process_cleanup_start : unit -> t
   val process_cleanup_sigkill : unit -> t

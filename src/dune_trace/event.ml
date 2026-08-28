@@ -180,6 +180,12 @@ let mounted_packages_load ~start ~stop ~context ~mounted =
   Event.complete ~name:"mounted-packages-load" ~start ~args ~dur Pkg
 ;;
 
+let package_digest_table ~start ~stop ~packages =
+  let dur = Time.diff stop start in
+  let args = [ "packages", Arg.int packages ] in
+  Event.complete ~name:"package-digest-table" ~start ~args ~dur Pkg
+;;
+
 let evalauted_rules ~rule_total =
   let now = Time.now () in
   let args = [ "value", Arg.int rule_total ] in

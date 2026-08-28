@@ -129,6 +129,20 @@ Mounted-package discovery itself runs once per context.
   > '
   [{"context":"default","count":1}]
 
+Package digest table construction is currently repeated while resolving mounted
+packages.
+
+  $ dune trace cat | jq -s '
+  > [ .[] | select(.cat == "pkg" and .name == "package-digest-table") ]
+  > | {count: length, package_counts: map(.args.packages) | unique}
+  > '
+  {
+    "count": 16,
+    "package_counts": [
+      2
+    ]
+  }
+
 Looking up a system C compiler for a mounted package must not load binaries from
 an unrelated legacy package. The package graph is acyclic: the legacy transition
 package depends on the mounted package, whose foreign stubs use the system
