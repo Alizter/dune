@@ -810,7 +810,7 @@ explicitly anchored project-relative location
 resolver/toolchain
 artifact output root
 visible package mask
-permitted dependency capabilities
+exact selected package dependencies
 ```
 
 Do not reconstruct one from another. In particular:
@@ -930,7 +930,7 @@ Use two explicit values in sequence:
 package node
   = lock universe + exact package + complete recipe
   + immutable prepared source directory target
-  + dependency capabilities + artifact owner
+  + exact selected package dependencies + artifact owner
 
 builder
   = Dune of loaded Dune files
@@ -1008,7 +1008,7 @@ contains one internal `Opam` stanza with this boundary:
 ```text
 inputs
   = immutable prepared source directory target
-  + exact recipe + dependency capabilities
+  + exact recipe + exact selected package dependencies
 
 opaque rule
   = copied source directory in a copy sandbox
@@ -1033,39 +1033,32 @@ Dune rules.
 Keep this primitive internal until its ownership and dependency semantics are
 stable. The plan does not require user-facing `(opam ...)` syntax.
 
-Existing non-relocatable compiler packages can redirect their prefix to
-`Path.Outside_build_dir`. Redesign that behavior before converting them: their
-Opam stanza must install into its owned directory target and export toolchain
-paths through package capabilities. There is no external-toolchain builder or
-exception to output ownership.
-
-### Keep package capabilities at Opam boundaries
+### Pass package dependencies to Opam stanzas
 
 Loaded native projects compose through ordinary Dune scopes, libraries,
 executables, PPX rules, and dependencies, as in a composed monorepo. Do not wrap
 native-to-native edges in install cookies or opaque package targets. The later
 in/out design may constrain visibility without changing that rule model.
 
-An Opam stanza still needs explicit inputs from its selected dependency branch:
+An Opam stanza receives the exact package dependencies already selected by the
+lock graph. Do not replace those edges with a separately inferred collection of
+paths or capabilities. Package-dependency resolution exposes each dependency's
+builder-owned result: an Opam-built dependency has an install target and cookie,
+while a native dependency has ordinary Dune outputs and install metadata. The
+action expander derives binaries, variables, installed paths, and environment
+from those package dependencies.
 
-- installed libraries and package variables;
-- exported executables, install roots, and environments;
-- build/host dependencies;
-- ambient compiler and toolchain executables supplied by the resolver.
-
-Do not collapse package binaries and ambient tools into one set. Native rules
-consume an Opam-built dependency by adapting its cookie and installed artifacts
-into ordinary lookup. An Opam stanza consumes a native dependency through its
-ordinary install projection, binaries, and exported environment.
+In the reverse direction, native rules consume an Opam-built dependency through
+that package edge's installed artifacts and cookie.
 
 Keep three concepts distinct:
 
 - native project visibility, deferred in detail to in/out;
-- an Opam boundary's dependency capabilities;
+- exact package-dependency edges;
 - artifact ownership.
 
 The current `Pkg_rules.Dependency_view`, package-specific install layouts, and
-lazy legacy library databases are references for the boundary adapters. Prove
+lazy legacy library databases are references for resolving those edges. Prove
 both consumption directions and the complete native A -> Opam-built B ->
 workspace C composition before generalizing this machinery.
 
@@ -1099,23 +1092,22 @@ that foundation:
    stanza traversal and `Gen_rules`, outside generic workspace `Dune_load`.
 8. Give the stanza a copy-sandbox source dependency and one package-owned
    install-layout directory target.
-9. Add library, binary, variable, host, and environment adapters only at Opam
-   boundaries; keep native-to-native composition on ordinary Dune rules.
+9. Pass exact selected package dependencies to the Opam stanza and resolve their
+   builder-owned outputs during action expansion; keep native-to-native
+   composition on ordinary Dune rules.
 10. Prove native-to-Opam and Opam-to-native dependency edges.
 11. Port the exact native A -> Opam-built B -> workspace C composition.
-12. Redesign non-relocatable toolchain installs to remain in stanza-owned
-    output.
-13. Remove recipe-shape routing, mounted-list absence checks, and obsolete
-    parallel `.pkg` source/build ownership only after all existing sources and
-    toolchain cases have replacements.
-14. Add generated-over-source, fallback, selectors, and promotion containment.
-15. Add autolock, source refresh, retry, stale removal, and watch invalidation.
-16. Retain the complete decoded universe if useful, but defer all auxiliary
+12. Remove recipe-shape routing, mounted-list absence checks, and obsolete
+    parallel `.pkg` source/build ownership after all existing sources and
+    builders have replacements.
+13. Add generated-over-source, fallback, selectors, and promotion containment.
+14. Add autolock, source refresh, retry, stale removal, and watch invalidation.
+15. Retain the complete decoded universe if useful, but defer all auxiliary
     nested-project visibility semantics to in/out work.
-17. Port the remaining historical behavior matrix.
-18. Exercise `ocaml-re`, then `ocaml-cohttp` through both applicable builders.
-19. Measure successful clean and warm builds separately.
-20. Simplify interfaces only after the behavioral boundary is stable.
+16. Port the remaining historical behavior matrix.
+17. Exercise `ocaml-re`, then `ocaml-cohttp` through both applicable builders.
+18. Measure successful clean and warm builds separately.
+19. Simplify interfaces only after the behavioral boundary is stable.
 
 ### Verification milestones
 
@@ -1141,11 +1133,11 @@ The builder-unification milestone should additionally prove:
 - generic workspace `Dune_load` has no lock or Opam-recipe branch;
 - it owns one install-layout directory target and install cookie;
 - direct cookie and install-layout targets work after clean;
-- native and Opam-built packages consume each other through boundary adapters;
+- the Opam stanza sees its exact package dependencies and resolves their
+  builder-owned outputs;
 - native projects compose through ordinary fine-grained Dune rules without
   cookies or opaque package targets;
-- only Dune-file presence selects the builder, and loading errors propagate;
-- external toolchain installs do not escape claimed stanza ownership.
+- only Dune-file presence selects the builder, and loading errors propagate.
 
 Later milestones should add focused tests for:
 
@@ -1205,8 +1197,6 @@ Known broad areas for cleanup include:
   by absence and rechecked by name and digest.
 - Existing package source preparation separately layers primary sources, lock
   `files/`, and extra sources rather than producing one shared immutable target.
-- Non-relocatable compiler packages may install into an external toolchain
-  prefix, outside the proposed Opam stanza's directory-target ownership.
 - `Source_tree.Rules.Build.load` recursively enumerates and parses the complete
   build-backed tree.
 - Promotion eligibility is not a first-class file capability.
@@ -1241,31 +1231,30 @@ not reasons to discard the target-backed model.
    install-layout directory target.
 6. Add the source-only builder-selection matrix, proving that recipes and
    package declarations are irrelevant.
-7. Add adapters only where native rules cross an Opam install-layout/cookie
-   boundary; keep native-to-native rules directly composed.
+7. Pass exact selected package dependencies to Opam stanzas and resolve each
+   dependency's builder-owned output; keep native-to-native rules directly
+   composed.
 8. Port the exact native A -> Opam-built B -> workspace C composition.
-9. Redesign non-relocatable compiler/toolchain installs to remain in
-   stanza-owned output.
-10. Remove the old parallel package path only after all source and toolchain
-    cases have replacement coverage.
-11. Add direct workspace `%{bin:...}` coverage for a native package executable.
-12. Add the one-project shared-source mask, redirects, and package aliases.
-13. Port refresh/retry behavior without restoring manifests or source claims.
-14. Add cross-lock digest identity and lock-selected compiler provenance, with a
+9. Remove the old parallel package path after all source forms and builders have
+   replacement coverage.
+10. Add direct workspace `%{bin:...}` coverage for a native package executable.
+11. Add the one-project shared-source mask, redirects, and package aliases.
+12. Port refresh/retry behavior without restoring manifests or source claims.
+13. Add cross-lock digest identity and lock-selected compiler provenance, with a
     separate small configurator metadata test.
-15. Preserve the complete decoded universe if useful, but defer all auxiliary
+14. Preserve the complete decoded universe if useful, but defer all auxiliary
     nested-project visibility semantics to in/out work.
-16. Add smaller ownership regressions for `dune fmt`, Dune warnings, version
+15. Add smaller ownership regressions for `dune fmt`, Dune warnings, version
     pforms, generated opam files, workspace-target isolation, and symlink
     cycles.
-17. Add the broader promotion matrix after builder ownership is stable.
-18. Run a successful clean `ocaml-cohttp` build with the new
+16. Add the broader promotion matrix after builder ownership is stable.
+17. Run a successful clean `ocaml-cohttp` build with the new
     `materialize-dependencies` span and attribute sandbox creation precisely.
-19. Compare identical successful clean and warm workloads under Opam and native
+18. Compare identical successful clean and warm workloads under Opam and native
     builders.
-20. Only then decide whether source materialization or scheduling needs another
+19. Only then decide whether source materialization or scheduling needs another
     architectural change.
-21. Turn the broad guide above into a smaller feature design with explicit
+20. Turn the broad guide above into a smaller feature design with explicit
     module ownership and migration boundaries.
 
 ## Bottom line
