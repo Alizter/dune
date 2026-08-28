@@ -41,6 +41,15 @@ module Event : sig
 
   type t
 
+  val sandbox_materialize_dependencies
+    :  start:Time.t
+    -> stop:Time.t
+    -> Loc.t
+    -> dir:Path.Build.t
+    -> mode:Sandbox_mode.some
+    -> dependencies:int
+    -> t
+
   val sandbox
     :  [ `Create | `Snapshot | `Destroy | `Extract | `Corrected ]
     -> start:Time.t
