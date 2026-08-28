@@ -61,10 +61,10 @@ from the older prototypes. The highest-value comparison work is:
 2. port the complete native A -> Opam-built B -> workspace C composition;
 3. restore source refresh, stale-file removal, failed-fetch retry, and reuse;
 4. add lock-selected compiler and cross-lock digest-identity regressions;
-5. add direct workspace binary and same-project masking cases;
+5. add direct workspace binary and experimental scope/masking cases;
 6. complete formatting, warning, version, and promotion coverage;
-7. defer auxiliary nested-project visibility to the later in/out design unless
-   retaining the complete decoded universe simplifies the current model.
+7. defer auxiliary nested-project visibility beyond explicit package masks to
+   the later in/out design.
 
 Some archived cases are intentionally outside the current scope. Extra-source
 overlays, VCS sources, and live directory sources route through legacy package
@@ -977,10 +977,30 @@ the builder. Complete loading is needed for:
 - Cram data directories;
 - package-enabled conditions.
 
-Package masks and auxiliary-project visibility are later in/out decisions. They
-may be applied after decoding, but they must not turn a source containing Dune
-files into an Opam build. Preserve the complete decoded universe now only where
-that makes the ownership model simpler.
+An explicit package mask is useful now, but it must not turn a source containing
+Dune files into an Opam build. Auxiliary-project visibility beyond that mask
+remains later in/out work.
+
+### Represent package masks as unreleased scopes
+
+Add a real user-facing `scope` stanza guarded by `(using unreleased 0.1)`. The
+package-builder layer synthesizes the same value for each exact native package
+view. Decoded and synthetic forms share one representation and evaluator.
+
+This simplifies source mounting: build and decode one canonical source universe,
+then create cheap package scopes with independent artifact owners. Do not clone
+filtered `Dune_project.t` values, remount the source per package, or mutate the
+canonical package map.
+
+PR #13337 is relevant prior art, not a fixed API. Its `dir` grammar, closest
+ancestor behavior, duplicate-scope composition, and library-focused filtering
+need not be copied. The package mask should apply coherently to all
+package-associated stanza classes. Nested auxiliary-project in/out semantics
+remain deferred.
+
+Like `opam`, `scope` has no released compatibility promise and is rejected
+without the unreleased extension. Synthetic package loading constructs its value
+directly rather than rewriting a source Dune file.
 
 ### Generate into an explicit artifact owner
 
@@ -1090,30 +1110,33 @@ that foundation:
    target, with identity and invalidation tests.
 5. Select `Dune` when source enumeration finds any Dune build file and `Opam`
    only when it finds none; propagate all loading errors.
-6. Define one `opam` stanza representation and unreleased-extension decoder,
+6. Define one unreleased `scope` stanza representation and evaluator. Decode
+   each native source once, then synthesize exact package scopes and artifact
+   owners without filtering or reloading the canonical project.
+7. Define one `opam` stanza representation and unreleased-extension decoder,
    then extract the existing action expander, install action, cookie, and
    dependency view behind its rule generator.
-7. Put that stanza in one synthetic loaded project per exact package node and
+8. Put that stanza in one synthetic loaded project per exact package node and
    pass it through ordinary stanza traversal and `Gen_rules`, outside generic
    workspace `Dune_load`; never group projects by shared source identity.
-8. Give the stanza a copy-sandbox source dependency and one package-owned
+9. Give the stanza a copy-sandbox source dependency and one package-owned
    install-layout directory target.
-9. Pass exact selected package dependencies to the Opam stanza and resolve their
-   builder-owned outputs during action expansion; keep native-to-native
-   composition on ordinary Dune rules.
-10. Prove native-to-Opam and Opam-to-native dependency edges.
-11. Port the exact native A -> Opam-built B -> workspace C composition.
-12. Remove recipe-shape routing, mounted-list absence checks, and obsolete
+10. Pass exact selected package dependencies to the Opam stanza and resolve
+    their builder-owned outputs during action expansion; keep native-to-native
+    composition on ordinary Dune rules.
+11. Prove native-to-Opam and Opam-to-native dependency edges.
+12. Port the exact native A -> Opam-built B -> workspace C composition.
+13. Remove recipe-shape routing, mounted-list absence checks, and obsolete
     parallel `.pkg` source/build ownership after all existing sources and
     builders have replacements.
-13. Add generated-over-source, fallback, selectors, and promotion containment.
-14. Add autolock, source refresh, retry, stale removal, and watch invalidation.
-15. Retain the complete decoded universe if useful, but defer all auxiliary
-    nested-project visibility semantics to in/out work.
-16. Port the remaining historical behavior matrix.
-17. Exercise `ocaml-re`, then `ocaml-cohttp` through both applicable builders.
-18. Measure successful clean and warm builds separately.
-19. Simplify interfaces only after the behavioral boundary is stable.
+14. Add generated-over-source, fallback, selectors, and promotion containment.
+15. Add autolock, source refresh, retry, stale removal, and watch invalidation.
+16. Keep the canonical decoded universe, but defer auxiliary nested-project
+    visibility beyond the explicit mask to later in/out work.
+17. Port the remaining historical behavior matrix.
+18. Exercise `ocaml-re`, then `ocaml-cohttp` through both applicable builders.
+19. Measure successful clean and warm builds separately.
+20. Simplify interfaces only after the behavioral boundary is stable.
 
 ### Verification milestones
 
@@ -1134,6 +1157,12 @@ The builder-unification milestone should additionally prove:
 - every package has an immutable prepared source directory target, possibly
   empty;
 - prepared targets preserve lock `files/` and extra-source overlay semantics;
+- `(scope ...)` is rejected without `(using unreleased 0.1)` and decoded and
+  synthetic scopes share one evaluator;
+- two exact packages reuse one canonical decoded source under independent masks
+  and artifact owners;
+- masks cover package-associated stanza classes without affecting builder
+  selection;
 - an Opam stanza's copy sandbox cannot mutate the prepared source;
 - each exact package has its own synthetic project, recipe, dependencies,
   artifact root, and cookie even when the prepared source target is shared;
@@ -1152,7 +1181,7 @@ The builder-unification milestone should additionally prove:
 Later milestones should add focused tests for:
 
 - source/generated/fallback precedence;
-- complete package masks, with auxiliary nested visibility deferred to in/out;
+- auxiliary nested visibility beyond explicit package masks;
 - native/Opam-builder chains in both directions;
 - public binary and PPX lookup;
 - exact locked compiler and version behavior;
@@ -1184,7 +1213,8 @@ Do not reintroduce:
 - an Opam action writing directly into an immutable prepared source;
 - a parallel `.pkg` source/build system selected by absence from native loading;
 - lock-package or Opam-recipe branches in generic workspace `Dune_load`;
-- an unguarded or compatibility-stable user-facing `opam` stanza;
+- an unguarded or compatibility-stable user-facing `opam` or `scope` stanza;
+- destructive filtering or cloning of the canonical decoded project per package;
 - a second semantic workspace context;
 - context-name suffixes as the sole artifact authority;
 - nested Dune execution or an Opam stanza for a package selected for native
@@ -1206,6 +1236,8 @@ Known broad areas for cleanup include:
 - `Mounted_context` still encodes physical routing in a context-name suffix.
 - The mounted package list represents only one route; legacy is often inferred
   by absence and rechecked by name and digest.
+- `Pkg_sources.mount` constructs per-package filtered `Dune_project.t` values
+  instead of reusing one canonical decode under explicit package scopes.
 - Existing package source preparation separately layers primary sources, lock
   `files/`, and extra sources rather than producing one shared immutable target.
 - `Source_tree.Rules.Build.load` recursively enumerates and parses the complete
@@ -1235,39 +1267,43 @@ not reasons to discard the target-backed model.
    that common target contract.
 3. Select `Dune` solely when source enumeration finds a Dune build file and
    `Opam` otherwise, with loading errors propagated normally.
-4. Define one unreleased user-facing `opam` stanza and extract its rule
+4. Define one unreleased user-facing `scope` stanza and shared evaluator. Decode
+   each native source once, then synthesize an exact package scope and artifact
+   owner for every native package node.
+5. Define one unreleased user-facing `opam` stanza and extract its rule
    generator from the existing package action, install, cookie, and dependency
    machinery;
    each exact Opam-built package constructs the same stanza value in its own
    synthetic loaded project.
-5. Make it consume the prepared source in a copy sandbox and own one
-   install-layout directory target.
-6. Add the source-only builder-selection matrix, proving that recipes and
+6. Make the Opam stanza consume the prepared source in a copy sandbox and own
+   one install-layout directory target.
+7. Add the source-only builder-selection matrix, proving that recipes and
    package declarations are irrelevant.
-7. Pass exact selected package dependencies to Opam stanzas and resolve each
+8. Pass exact selected package dependencies to Opam stanzas and resolve each
    dependency's builder-owned output; keep native-to-native rules directly
    composed.
-8. Port the exact native A -> Opam-built B -> workspace C composition.
-9. Remove the old parallel package path after all source forms and builders have
-   replacement coverage.
-10. Add direct workspace `%{bin:...}` coverage for a native package executable.
-11. Add the one-project shared-source mask, redirects, and package aliases.
-12. Port refresh/retry behavior without restoring manifests or source claims.
-13. Add cross-lock digest identity and lock-selected compiler provenance, with a
+9. Port the exact native A -> Opam-built B -> workspace C composition.
+10. Remove the old parallel package path after all source forms and builders
+    have replacement coverage.
+11. Add direct workspace `%{bin:...}` coverage for a native package executable.
+12. Add shared-source scope tests covering package-associated stanzas,
+    redirects, aliases, independent output owners, and one canonical decode.
+13. Port refresh/retry behavior without restoring manifests or source claims.
+14. Add cross-lock digest identity and lock-selected compiler provenance, with a
     separate small configurator metadata test.
-14. Preserve the complete decoded universe if useful, but defer all auxiliary
-    nested-project visibility semantics to in/out work.
-15. Add smaller ownership regressions for `dune fmt`, Dune warnings, version
+15. Defer auxiliary nested-project visibility beyond the explicit package mask
+    to later in/out work.
+16. Add smaller ownership regressions for `dune fmt`, Dune warnings, version
     pforms, generated opam files, workspace-target isolation, and symlink
     cycles.
-16. Add the broader promotion matrix after builder ownership is stable.
-17. Run a successful clean `ocaml-cohttp` build with the new
+17. Add the broader promotion matrix after builder ownership is stable.
+18. Run a successful clean `ocaml-cohttp` build with the new
     `materialize-dependencies` span and attribute sandbox creation precisely.
-18. Compare identical successful clean and warm workloads under Opam and native
+19. Compare identical successful clean and warm workloads under Opam and native
     builders.
-19. Only then decide whether source materialization or scheduling needs another
+20. Only then decide whether source materialization or scheduling needs another
     architectural change.
-20. Turn the broad guide above into a smaller feature design with explicit
+21. Turn the broad guide above into a smaller feature design with explicit
     module ownership and migration boundaries.
 
 ## Bottom line
