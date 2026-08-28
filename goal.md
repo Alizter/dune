@@ -236,6 +236,19 @@ recorded recipe even if only an auxiliary Dune file caused native loading. The
 later in/out work will refine which loaded projects are internal or externally
 visible, not whether the source is loaded.
 
+The package-builder layer turns either choice into ordinary loaded-project input
+for rule generation:
+
+```text
+Dune files present -> normally loaded source projects and stanzas
+No Dune files      -> one synthetic loaded project with one Opam stanza
+```
+
+Generic workspace `Dune_load` remains unaware of locks and Opam recipes. The
+package-builder layer constructs the synthetic project after source enumeration,
+assigns its exact package and artifact owners, and passes it through the same
+stanza traversal and `Gen_rules` entry points as native projects.
+
 The `Opam` builder is an internal synthetic stanza, not initially user-facing
 syntax. It participates in ordinary rule generation at the package's artifact
 owner and owns one opaque package output subtree. Its rule:
@@ -368,6 +381,7 @@ The new implementation must not contain:
 - an external source-snapshot store, manifest, or provider callback layer;
 - a parallel `.pkg` source/build subsystem selected by absence from native
   loading;
+- lock-package or Opam-recipe branches in generic workspace `Dune_load`;
 - executing an Opam action directly in an immutable prepared source target;
 - compatibility shims around the archived prototype's internal APIs.
 
@@ -391,10 +405,11 @@ native package consumption. Continue from that foundation in this order:
    and dependency view behind an internal synthetic `Opam` stanza.
 5. Make the stanza depend on the prepared source, run with a writable copy in a
    copy sandbox, and own one install-layout directory target and cookie.
-6. Generate that stanza in the package artifact partition rather than the
-   parallel `.pkg` package-rule namespace.
-7. Select `Dune` when source enumeration finds any Dune build file and `Opam`
+6. Select `Dune` when source enumeration finds any Dune build file and `Opam`
    only when it finds none. Propagate source and Dune-loading errors normally.
+7. After selecting `Opam`, construct one synthetic loaded project containing the
+   stanza and pass it through ordinary stanza traversal and `Gen_rules`; do not
+   add lock knowledge to generic workspace `Dune_load`.
 8. Add adapters at Opam boundaries for native install projections, Opam
    cookies, libraries, binaries, variables, environments, and host tools. Keep
    native-to-native composition on ordinary Dune rules.
@@ -443,16 +458,18 @@ The builder-unification milestone additionally demonstrates:
 3. Its action receives a writable sandbox copy and cannot mutate the prepared
    target.
 4. It owns exactly one package install-layout subtree and its install cookie.
-5. Building the cookie or a file in the install layout works directly after a
+5. The Opam stanza belongs to a synthetic loaded project processed by ordinary
+   stanza traversal and `Gen_rules`, not a parallel package-rule pipeline.
+6. Building the cookie or a file in the install layout works directly after a
    clean build.
-6. Native and Opam-built packages consume one another through boundary adapters,
+7. Native and Opam-built packages consume one another through boundary adapters,
    while native projects compose through ordinary fine-grained Dune rules.
-7. Builder selection depends only on whether the prepared tree contains Dune
+8. Builder selection depends only on whether the prepared tree contains Dune
    build files; loading errors and system-provider metadata never select or
    bypass a builder.
-8. No package depends on absence from a mounted list to receive rules.
-9. Non-relocatable toolchain installation is redesigned to remain entirely
-   within stanza-owned output.
+9. No package depends on absence from a mounted list to receive rules.
+10. Non-relocatable toolchain installation is redesigned to remain entirely
+    within stanza-owned output.
 
 Use `_build/default/bin/main.exe` for the end-to-end scenarios. Trace assertions
 must use a fresh action cache when checking process execution.
