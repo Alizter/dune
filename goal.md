@@ -22,10 +22,12 @@ Source contents alone select one of two builders:
   stanza runs the complete recorded recipe in a copy sandbox and owns an opaque
   install-layout directory target and cookie.
 
-A package built by `Dune` does not launch a nested Dune process. An `Opam`
-builder may invoke Dune, Make, shell scripts, or another opaque build system as
-part of its recorded action. Both builders use the same package identity,
-artifact partition, dependency capabilities, and install-output interfaces.
+A package built by `Dune` does not launch a nested Dune process. Its projects
+and stanzas compose with other loaded Dune projects like an ordinary monorepo;
+it receives no opaque package rule or install cookie. An `Opam` builder may
+invoke Dune, Make, shell scripts, or another opaque build system as part of its
+recorded action. The install-layout target and cookie are specific to that Opam
+boundary.
 
 Workspace packages retain their existing behaviour.
 
@@ -176,8 +178,8 @@ lock data
   -> independent prepared-source target rules
   -> package node with an explicit artifact owner
   -> choose Dune or Opam builder
-  -> native Source_tree loading or one opaque Opam rule
-  -> shared package install-output interfaces
+  -> native monorepo rules or one opaque Opam rule
+  -> bridge only Opam boundaries through install layouts and cookies
 ```
 
 ## Package preparation and builders
@@ -269,18 +271,22 @@ milestone migrates only the consumers needed by its package and workspace
 library; later milestones complete the same type migration rather than add
 builder-specific conditionals.
 
-A `Dune` builder generates normal stanza outputs and install metadata directly.
-An `Opam` builder owns its full output directory target and produces an install
-cookie as the trace of files and variables created by its opaque action. The
-capability layer normalizes these builder-specific outputs for consumers rather
-than exposing a global package universe.
+A `Dune` builder generates ordinary fine-grained stanza rules. Loaded native
+projects compose directly through normal Dune scopes, libraries, executables,
+PPX rules, and dependencies. Do not wrap their outputs in a directory target or
+synthesize an install cookie.
 
-Interoperability has two separate edges:
+An `Opam` builder instead owns its full output directory target and produces an
+install cookie as the trace of files and variables created by its opaque action.
+Adapters are needed only when crossing this opaque boundary:
 
-- dependency identity selects the package node and builder without requesting a
-  parallel `.pkg` package rule;
-- build dependencies and environments consume the concrete install output and
-  capabilities exported by that builder.
+- native rules consume an Opam-built package through its installed artifacts and
+  cookie;
+- an Opam stanza consumes native rules through their ordinary install
+  projection, binaries, and exported environment.
+
+Dependency identity selects the exact package node without requesting a parallel
+`.pkg` package rule or making native-to-native composition package-opaque.
 
 ## Source selection
 
@@ -318,8 +324,8 @@ workspace source view
   -> construct exact package nodes and artifact owners
   -> inspect source and select Dune or Opam builder
   -> load native projects or instantiate one synthetic Opam stanza
-  -> generate both builders beneath explicit package output roots
-  -> expose scoped install, library, binary, and environment capabilities
+  -> compose native projects through ordinary Dune rules
+  -> expose Opam boundaries through install, binary, and environment adapters
 ```
 
 Logical package identity, physical source location, builder selection, and
@@ -334,8 +340,9 @@ Later milestones retain these proven decisions:
 - the native builder supersedes the complete recorded recipe;
 - native projects have vendored warning, alias, and promotion behaviour;
 - masks are applied after complete project decoding;
-- native packages strictly bypass the Opam stanza;
-- consumers receive scoped install outputs and environments from either builder;
+- native packages strictly bypass the Opam stanza and its cookie;
+- native projects compose directly, while Opam boundaries expose scoped install
+  outputs and environments through adapters;
 - lock generation uses a workspace-only source view;
 - autolock may complete in one invocation through two explicit loading phases;
 - source refresh, generated/fallback precedence, and watch invalidation are
@@ -388,9 +395,9 @@ native package consumption. Continue from that foundation in this order:
    parallel `.pkg` package-rule namespace.
 7. Select `Dune` when source enumeration finds any Dune build file and `Opam`
    only when it finds none. Propagate source and Dune-loading errors normally.
-8. Normalize dependency capabilities across native install metadata and Opam
-   cookies, including libraries, binaries, variables, environments, and host
-   tools.
+8. Add adapters at Opam boundaries for native install projections, Opam
+   cookies, libraries, binaries, variables, environments, and host tools. Keep
+   native-to-native composition on ordinary Dune rules.
 9. Prove a native consumer of an Opam-built dependency and an Opam-built
    consumer of a native dependency, then port the complete A -> B -> C
    composition.
@@ -438,8 +445,8 @@ The builder-unification milestone additionally demonstrates:
 4. It owns exactly one package install-layout subtree and its install cookie.
 5. Building the cookie or a file in the install layout works directly after a
    clean build.
-6. Native and Opam-built packages consume one another through scoped
-   capabilities.
+6. Native and Opam-built packages consume one another through boundary adapters,
+   while native projects compose through ordinary fine-grained Dune rules.
 7. Builder selection depends only on whether the prepared tree contains Dune
    build files; loading errors and system-provider metadata never select or
    bypass a builder.
