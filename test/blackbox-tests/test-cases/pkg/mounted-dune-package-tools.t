@@ -129,15 +129,14 @@ Mounted-package discovery itself runs once per context.
   > '
   [{"context":"default","count":1}]
 
-Package digest table construction is currently repeated while resolving mounted
-packages.
+Package digest table construction runs once for the project lock directory.
 
   $ dune trace cat | jq -s '
   > [ .[] | select(.cat == "pkg" and .name == "package-digest-table") ]
   > | {count: length, package_counts: map(.args.packages) | unique}
   > '
   {
-    "count": 16,
+    "count": 1,
     "package_counts": [
       2
     ]
