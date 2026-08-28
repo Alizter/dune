@@ -947,6 +947,18 @@ file is found, all source, parsing, and loading failures propagate normally
 rather than changing builders. Absence from a mounted list must not select or
 publish either builder.
 
+The package-builder layer presents both choices to ordinary rule generation:
+
+```text
+Dune files present -> normally loaded source projects and stanzas
+No Dune files      -> one synthetic loaded project with one Opam stanza
+```
+
+Construct the synthetic project after source enumeration, attach exact package
+and artifact ownership, and pass it through ordinary stanza traversal and
+`Gen_rules`. Generic workspace `Dune_load` remains unaware of locks and Opam
+recipes.
+
 Package-node and memo keys must include the owning lock universe or snapshot
 plus exact package identity. Fetch data may be shared by checksum, but builder,
 artifact, and capability identities remain distinct when two lock universes
@@ -989,9 +1001,9 @@ placement is prototype debt, not necessarily the final API.
 
 ### Represent opaque builds as an internal Opam stanza
 
-A package that cannot use native loading should still be a package-owned rule
-subtree, not a parallel source and routing system. Generate one internal
-synthetic `Opam` stanza with this boundary:
+A source tree with no Dune files should still become a package-owned rule
+subtree, not a parallel source and routing system. Its synthetic loaded project
+contains one internal `Opam` stanza with this boundary:
 
 ```text
 inputs
@@ -1083,25 +1095,27 @@ that foundation:
    only when it finds none; propagate all loading errors.
 6. Extract the existing action expander, install action, cookie, and dependency
    view behind one internal synthetic `Opam` stanza.
-7. Give the stanza a copy-sandbox source dependency and one package-owned
+7. Put that stanza in one synthetic loaded project and pass it through ordinary
+   stanza traversal and `Gen_rules`, outside generic workspace `Dune_load`.
+8. Give the stanza a copy-sandbox source dependency and one package-owned
    install-layout directory target.
-8. Add library, binary, variable, host, and environment adapters only at Opam
+9. Add library, binary, variable, host, and environment adapters only at Opam
    boundaries; keep native-to-native composition on ordinary Dune rules.
-9. Prove native-to-Opam and Opam-to-native dependency edges.
-10. Port the exact native A -> Opam-built B -> workspace C composition.
-11. Redesign non-relocatable toolchain installs to remain in stanza-owned
+10. Prove native-to-Opam and Opam-to-native dependency edges.
+11. Port the exact native A -> Opam-built B -> workspace C composition.
+12. Redesign non-relocatable toolchain installs to remain in stanza-owned
     output.
-12. Remove recipe-shape routing, mounted-list absence checks, and obsolete
+13. Remove recipe-shape routing, mounted-list absence checks, and obsolete
     parallel `.pkg` source/build ownership only after all existing sources and
     toolchain cases have replacements.
-13. Add generated-over-source, fallback, selectors, and promotion containment.
-14. Add autolock, source refresh, retry, stale removal, and watch invalidation.
-15. Retain the complete decoded universe if useful, but defer all auxiliary
+14. Add generated-over-source, fallback, selectors, and promotion containment.
+15. Add autolock, source refresh, retry, stale removal, and watch invalidation.
+16. Retain the complete decoded universe if useful, but defer all auxiliary
     nested-project visibility semantics to in/out work.
-16. Port the remaining historical behavior matrix.
-17. Exercise `ocaml-re`, then `ocaml-cohttp` through both applicable builders.
-18. Measure successful clean and warm builds separately.
-19. Simplify interfaces only after the behavioral boundary is stable.
+17. Port the remaining historical behavior matrix.
+18. Exercise `ocaml-re`, then `ocaml-cohttp` through both applicable builders.
+19. Measure successful clean and warm builds separately.
+20. Simplify interfaces only after the behavioral boundary is stable.
 
 ### Verification milestones
 
@@ -1123,6 +1137,8 @@ The builder-unification milestone should additionally prove:
   empty;
 - prepared targets preserve lock `files/` and extra-source overlay semantics;
 - an Opam stanza's copy sandbox cannot mutate the prepared source;
+- its synthetic loaded project uses ordinary stanza traversal and `Gen_rules`;
+- generic workspace `Dune_load` has no lock or Opam-recipe branch;
 - it owns one install-layout directory target and install cookie;
 - direct cookie and install-layout targets work after clean;
 - native and Opam-built packages consume each other through boundary adapters;
@@ -1165,6 +1181,7 @@ Do not reintroduce:
 - a generic rule that interprets arbitrary `Path.Build.t` as source;
 - an Opam action writing directly into an immutable prepared source;
 - a parallel `.pkg` source/build system selected by absence from native loading;
+- lock-package or Opam-recipe branches in generic workspace `Dune_load`;
 - a second semantic workspace context;
 - context-name suffixes as the sole artifact authority;
 - nested Dune execution or an Opam stanza for a package selected for native
@@ -1218,7 +1235,8 @@ not reasons to discard the target-backed model.
 3. Select `Dune` solely when source enumeration finds a Dune build file and
    `Opam` otherwise, with loading errors propagated normally.
 4. Extract one internal Opam stanza from the existing package action, install,
-   cookie, and dependency machinery.
+   cookie, and dependency machinery, then host it in a synthetic loaded project
+   processed by ordinary stanza traversal and `Gen_rules`.
 5. Make it consume the prepared source in a copy sandbox and own one
    install-layout directory target.
 6. Add the source-only builder-selection matrix, proving that recipes and
