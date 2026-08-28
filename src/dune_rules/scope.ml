@@ -8,6 +8,7 @@ type t =
   ; public_libs : Lib.DB.t
   ; rocq_db : Rocq_lib.DB.t Memo.t
   ; root : Path.Build.t
+  ; purpose : Build_partition.purpose
   }
 
 let root t = t.root
@@ -222,6 +223,75 @@ module DB = struct
         ~instrument_with
   ;;
 
+  let dynamic_libraries context libraries ~parent =
+    let db_ref = Fdecl.create Dyn.opaque in
+    let find =
+      let memo =
+        Memo.create
+          "dynamic-library-db"
+          ~input:(module Lib_name)
+          (fun name ->
+             let* libraries = libraries in
+             let package = Lib_name.package_name name in
+             let db_if_available paths =
+               let* db = Lib.DB.of_paths context ~paths in
+               let+ available = Lib.DB.available db name in
+               if available
+               then Some (Lib.DB.with_parent db ~parent:(Fdecl.get db_ref))
+               else None
+             in
+             let find_provider () =
+               let* available_from_parent = Lib.DB.available parent name in
+               if available_from_parent
+               then Memo.return None
+               else
+                 let* paths =
+                   Pkg_rules.Legacy_libraries.find_provider libraries package
+                 in
+                 Memo.Option.bind paths ~f:db_if_available
+             in
+             Pkg_rules.Legacy_libraries.find libraries package
+             >>= function
+             | None -> find_provider ()
+             | Some paths ->
+               db_if_available paths
+               >>= (function
+                | Some _ as db -> Memo.return db
+                | None -> find_provider ()))
+      in
+      Memo.exec memo
+    in
+    let resolve name =
+      let+ db = find name in
+      match db with
+      | None -> Lib.DB.Resolve_result.not_found
+      | Some db -> Lib.DB.Resolve_result.redirect_by_name db (Loc.none, name)
+    in
+    let db =
+      Lib.DB.create
+        ~parent:(Some parent)
+        ~resolve:(fun name ->
+          let+ resolved = resolve name in
+          [ resolved ])
+        ~resolve_lib_id:(fun lib_id -> resolve (Lib_id.name lib_id))
+        ~all:(fun () ->
+          let+ libraries = libraries in
+          Pkg_rules.Legacy_libraries.packages libraries
+          |> List.map ~f:Lib_name.of_package_name)
+        ~instrument_with:(Context.instrument_with context)
+        ()
+    in
+    Fdecl.set db_ref db;
+    db
+  ;;
+
+  let legacy_libraries context package ~parent =
+    dynamic_libraries
+      context
+      (Pkg_rules.Legacy_libraries.for_package (Context.name context) package)
+      ~parent
+  ;;
+
   type redirect_to =
     | Project of
         { project : Dune_project.t
@@ -354,76 +424,6 @@ module DB = struct
         ()
   ;;
 
-  (* Build legacy dependencies one package at a time. Each resulting findlib DB
-     points back to the dispatcher so its transitive requirements remain lazy;
-     eagerly loading the whole closure would introduce reverse package cycles. *)
-  let legacy_libraries context package ~parent =
-    let libraries =
-      Memo.lazy_ ~name:"legacy-libraries" (fun () ->
-        Pkg_rules.Legacy_libraries.for_package (Context.name context) package)
-      |> Memo.Lazy.force
-    in
-    let db_ref = Fdecl.create Dyn.opaque in
-    let find =
-      let memo =
-        Memo.create
-          "legacy-library-db"
-          ~input:(module Lib_name)
-          (fun name ->
-             let* libraries = libraries in
-             let package = Lib_name.package_name name in
-             let db_if_available paths =
-               let* db = Lib.DB.of_paths context ~paths in
-               let+ available = Lib.DB.available db name in
-               if available
-               then Some (Lib.DB.with_parent db ~parent:(Fdecl.get db_ref))
-               else None
-             in
-             let find_provider () =
-               let* available_from_parent = Lib.DB.available parent name in
-               if available_from_parent
-               then Memo.return None
-               else
-                 let* paths =
-                   Pkg_rules.Legacy_libraries.find_provider libraries package
-                 in
-                 Memo.Option.bind paths ~f:(fun paths -> db_if_available paths)
-             in
-             Pkg_rules.Legacy_libraries.find libraries package
-             >>= function
-             | None -> find_provider ()
-             | Some paths ->
-               db_if_available paths
-               >>= (function
-                | Some _ as db -> Memo.return db
-                | None -> find_provider ()))
-      in
-      Memo.exec memo
-    in
-    let resolve name =
-      let+ db = find name in
-      match db with
-      | None -> Lib.DB.Resolve_result.not_found
-      | Some db -> Lib.DB.Resolve_result.redirect_by_name db (Loc.none, name)
-    in
-    let db =
-      Lib.DB.create
-        ~parent:(Some parent)
-        ~resolve:(fun name ->
-          let+ resolved = resolve name in
-          [ resolved ])
-        ~resolve_lib_id:(fun lib_id -> resolve (Lib_id.name lib_id))
-        ~all:(fun () ->
-          let+ libraries = libraries in
-          Pkg_rules.Legacy_libraries.packages libraries
-          |> List.map ~f:Lib_name.of_package_name)
-        ~instrument_with:(Context.instrument_with context)
-        ()
-    in
-    Fdecl.set db_ref db;
-    db
-  ;;
-
   let scopes_by_dir
         ~lib_config
         ~loaded_projects
@@ -490,17 +490,25 @@ module DB = struct
       let root = Loaded_project.output_root loaded_project in
       let source_root = Loaded_project.source_root loaded_project in
       let rocq_db = Rocq_scope.find rocq_scopes ~project:loaded_project in
-      { project; source_root; db; public_libs; rocq_db; root })
+      let purpose = Loaded_project.partition loaded_project |> Build_partition.purpose in
+      { project; source_root; db; public_libs; rocq_db; root; purpose })
   ;;
 
   let create ~installed_libs ~context ~loaded_projects stanzas rocq_stanzas =
     let t = Fdecl.create Dyn.opaque in
-    let* context = Context.DB.get context in
+    let* context = Context.DB.get context
+    and* opam_package_names = Opam_rules.package_names context in
     let* lib_config =
       let+ ocaml = Context.ocaml context in
       ocaml.lib_config
     in
     let instrument_with = Context.instrument_with context in
+    let with_opam_libraries packages ~parent =
+      let packages = List.filter packages ~f:(Package.Name.Set.mem opam_package_names) in
+      match packages with
+      | [] -> parent
+      | _ :: _ -> Opam_rules.libraries context packages ~parent
+    in
     let public_libs = public_libs t ~instrument_with ~installed_libs stanzas in
     let scopes =
       scopes_by_dir
@@ -513,10 +521,85 @@ module DB = struct
         stanzas
         rocq_stanzas
     in
-    let by_dir = scopes in
     let by_project = Path.Build.Map.values scopes in
+    let by_dir =
+      Path.Build.Map.fold scopes ~init:scopes ~f:(fun scope by_dir ->
+        match scope.purpose with
+        | Mounted -> by_dir
+        | Workspace ->
+          let packages = Dune_project.packages scope.project in
+          Package.Name.Map.fold packages ~init:by_dir ~f:(fun package by_dir ->
+            match Package.exclusive_dir package with
+            | None -> by_dir
+            | Some (_, package_dir) ->
+              let package_output_dir =
+                let local =
+                  Source_path.descendant package_dir ~of_:scope.source_root
+                  |> Option.value_exn
+                in
+                Path.Build.append_local scope.root local
+              in
+              let rec add_dependencies name visited =
+                if Package.Name.Set.mem visited name
+                then visited
+                else (
+                  let visited = Package.Name.Set.add visited name in
+                  match Package.Name.Map.find packages name with
+                  | None -> visited
+                  | Some package ->
+                    List.fold_left
+                      (Package.depends package)
+                      ~init:visited
+                      ~f:(fun visited dependency ->
+                        add_dependencies dependency.Package_dependency.name visited))
+              in
+              let dependencies =
+                List.fold_left
+                  (Package.depends package)
+                  ~init:Package.Name.Set.empty
+                  ~f:(fun visited dependency ->
+                    add_dependencies dependency.Package_dependency.name visited)
+                |> Package.Name.Set.to_list
+              in
+              let public_libs =
+                with_opam_libraries dependencies ~parent:scope.public_libs
+              in
+              let scope =
+                { scope with
+                  db = Lib.DB.with_parent scope.db ~parent:public_libs
+                ; public_libs
+                }
+              in
+              Path.Build.Map.set by_dir package_output_dir scope))
+    in
+    let by_dir =
+      Path.Build.Map.fold scopes ~init:by_dir ~f:(fun scope by_dir ->
+        match scope.purpose with
+        | Mounted -> by_dir
+        | Workspace ->
+          let packages = Dune_project.packages scope.project |> Package.Name.Map.keys in
+          let public_libs = with_opam_libraries packages ~parent:scope.public_libs in
+          let scope =
+            { scope with
+              db = Lib.DB.with_parent scope.db ~parent:public_libs
+            ; public_libs
+            }
+          in
+          Path.Build.Map.set by_dir scope.root scope)
+    in
     let value = { by_dir; by_project } in
     Fdecl.set t value;
+    let public_libs =
+      List.concat_map loaded_projects ~f:(fun loaded_project ->
+        match Loaded_project.partition loaded_project |> Build_partition.purpose with
+        | Mounted -> []
+        | Workspace ->
+          Loaded_project.project loaded_project
+          |> Dune_project.packages
+          |> Package.Name.Map.keys)
+      |> List.sort_uniq ~compare:Package.Name.compare
+      |> with_opam_libraries ~parent:public_libs
+    in
     Memo.return (value, public_libs)
   ;;
 

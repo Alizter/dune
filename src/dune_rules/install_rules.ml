@@ -1624,6 +1624,20 @@ sig
     -> Action.t
 end)
 
+let opam_stanza_packages =
+  Per_context.create_by_name ~name:"opam-stanza-install-packages" (fun context ->
+    Memo.lazy_ ~name:"opam-stanza-install-packages" (fun () ->
+      let* dune_files = Dune_load.workspace_dune_files context in
+      let+ packages =
+        Memo.List.concat_map dune_files ~f:(fun dune_file ->
+          let+ stanzas = Dune_file.find_stanzas dune_file Opam_stanza.key in
+          List.map stanzas ~f:(fun stanza -> Package.name stanza.Opam_stanza.package))
+      in
+      Package.Name.Set.of_list packages)
+    |> Memo.Lazy.force)
+  |> Staged.unstage
+;;
+
 let gen_package_install_file_rules sctx (package : Package.t) =
   let package_name = Package.name package in
   let roots = Install.Roots.opam_from_prefix Path.root ~relative:Path.relative in
@@ -1633,6 +1647,8 @@ let gen_package_install_file_rules sctx (package : Package.t) =
   let entries = Action_builder.of_memo (symlinked_entries sctx package_name >>| fst) in
   let context = Super_context.context sctx in
   let build_context = Context.build_context context in
+  let* opam_stanza_packages = opam_stanza_packages (Context.name context) in
+  let has_opam_stanza = Package.Name.Set.mem opam_stanza_packages package_name in
   let pkg_build_dir = Package_paths.build_dir build_context package in
   let files =
     Action_builder.map
@@ -1729,7 +1745,7 @@ let gen_package_install_file_rules sctx (package : Package.t) =
                   ~prefix
             })
       in
-      if not (Package.allow_empty package)
+      if not (Package.allow_empty package || has_opam_stanza)
       then
         if
           List.for_all entries ~f:(fun (e : Install.Entry.Sourced.Expanded.t) ->

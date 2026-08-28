@@ -254,7 +254,7 @@ let package loc pkg_name (context : Build_context.t) ~dune_version =
      let* package_db = Package_db.create context.name in
      Package_db.find_package package_db pkg_name)
   >>= function
-  | Some (Build build) -> build
+  | Some (Build build) | Some (Opam build) -> build
   | Some (Local _) ->
     (* The named/unnamed paths skip [Package _] before reaching here so that
        [combined_package_deps_builder] handles the whole package set at once.
@@ -426,7 +426,7 @@ and combined_package_deps_builder expander pkgs =
     Action_builder.List.iter classified ~f:(fun (loc, pkg_name, found) ->
       match found with
       | Some (Local _) -> Action_builder.return ()
-      | Some (Build build) -> build
+      | Some (Build build) | Some (Opam build) -> build
       | Some (Installed _) | None -> package loc pkg_name context ~dune_version)
   in
   env

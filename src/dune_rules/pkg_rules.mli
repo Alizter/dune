@@ -36,6 +36,11 @@ val binaries_for_package
   -> Package.Name.t
   -> Path.t Filename.Map.t Memo.Lazy.t
 
+val package_binaries
+  :  packages:Package.Name.Set.t option
+  -> Context_name.t
+  -> Path.t Filename.Map.t Memo.t
+
 (** [bin_path_env ~packages context] is an env holding only a PATH made of the
     bin directories of the dependency closure of [packages] in the lock
     directory. [None] means the whole lock directory. Empty when the context

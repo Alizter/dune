@@ -187,24 +187,54 @@ let mounted_loaded_project context mounted (project, source_tree_root) =
       (Some (Package.Name.Set.singleton (Pkg_sources.Candidate.name candidate)))
 ;;
 
-let loaded =
+type workspace_loaded =
+  { dune_files : Dune_file.t list
+  ; loaded_projects : Loaded_project.t list
+  ; mask : Only_packages.t
+  }
+
+let workspace_loaded =
   let by_context =
-    Per_context.create_by_name ~name:"loaded-projects" (fun context_name ->
-      Memo.Lazy.create ~name:"loaded-projects-for-context" (fun () ->
+    Per_context.create_by_name ~name:"workspace-loaded-projects" (fun context_name ->
+      Memo.Lazy.create ~name:"workspace-loaded-projects-for-context" (fun () ->
         let* workspace = load ()
-        and* context = Context.DB.get context_name
-        and* mounted = Pkg_sources.mounted context_name in
-        let workspace_loaded_projects =
+        and* context = Context.DB.get context_name in
+        let loaded_projects =
           List.map workspace.projects ~f:(fun project ->
             let source_tree_root =
               Source_path.Map.find_exn workspace.project_dirs (Dune_project.root project)
             in
             workspace_loaded_project context project source_tree_root)
         in
-        let workspace_projects_by_root =
-          Source_path.Map.of_list_map_exn workspace_loaded_projects ~f:(fun project ->
+        let projects_by_root =
+          Source_path.Map.of_list_map_exn loaded_projects ~f:(fun project ->
             Loaded_project.source_root project, project)
         in
+        let source_dune_files =
+          Appendable_list.map
+            workspace.dune_files
+            ~f:(fun (source_dir, project, dune_file) ->
+              let loaded_project =
+                Source_path.Map.find_exn projects_by_root (Dune_project.root project)
+              in
+              loaded_project, source_dir, dune_file)
+        in
+        let* eval = Dune_file.eval source_dune_files workspace.mask in
+        let+ dune_files = eval context_name in
+        { dune_files; loaded_projects; mask = workspace.mask })
+      |> Memo.Lazy.force)
+    |> Staged.unstage
+  in
+  fun context -> by_context context
+;;
+
+let loaded =
+  let by_context =
+    Per_context.create_by_name ~name:"loaded-projects" (fun context_name ->
+      Memo.Lazy.create ~name:"loaded-projects-for-context" (fun () ->
+        let* workspace = workspace_loaded context_name
+        and* context = Context.DB.get context_name
+        and* mounted = Pkg_sources.mounted context_name in
         let mounted =
           List.map mounted ~f:(fun mounted ->
             let loaded_projects =
@@ -219,25 +249,14 @@ let loaded =
             mounted, loaded_projects, projects_by_root)
         in
         let loaded_projects =
-          workspace_loaded_projects
+          workspace.loaded_projects
           @ List.concat_map mounted ~f:(fun (_, projects, _) -> projects)
         in
         let projects_by_output_root =
           Path.Build.Map.of_list_map_exn loaded_projects ~f:(fun project ->
             Loaded_project.output_root project, project)
         in
-        let workspace_dune_files =
-          Appendable_list.map
-            workspace.dune_files
-            ~f:(fun (source_dir, project, dune_file) ->
-              let loaded_project =
-                Source_path.Map.find_exn
-                  workspace_projects_by_root
-                  (Dune_project.root project)
-              in
-              loaded_project, source_dir, dune_file)
-        in
-        let* mounted_dune_files =
+        let* mounted_source_dune_files =
           Memo.List.map mounted ~f:(fun (mounted, _, projects_by_root) ->
             let f dir =
               let project = Source_tree.Rules.Dir.project dir in
@@ -272,11 +291,9 @@ let loaded =
             dune_files)
           >>| Appendable_list.concat
         in
-        let source_dune_files =
-          Appendable_list.concat [ workspace_dune_files; mounted_dune_files ]
-        in
-        let* eval = Dune_file.eval source_dune_files workspace.mask in
-        let+ dune_files = eval context_name in
+        let* eval = Dune_file.eval mounted_source_dune_files workspace.mask in
+        let+ mounted_dune_files = eval context_name in
+        let dune_files = workspace.dune_files @ mounted_dune_files in
         { dune_files
         ; loaded_projects
         ; projects_by_output_root
@@ -286,6 +303,11 @@ let loaded =
     |> Staged.unstage
   in
   fun context -> by_context context
+;;
+
+let workspace_dune_files context =
+  let+ loaded = workspace_loaded context in
+  loaded.dune_files
 ;;
 
 let context_of_dir dir =

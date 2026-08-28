@@ -114,6 +114,10 @@ let stanzas : Stanza.Parser.t list =
            Include.decode) )
     ; ("generate_sites_module", Generate_sites_module_stanza.(decode_stanza decode))
     ; ("plugin", Plugin.(decode_stanza Plugin.decode))
+    ; ( "opam"
+      , Opam_stanza.decode_stanza
+          (let* () = Dune_lang.Unreleased.since () in
+           Opam_stanza.decode) )
     ]
   ]
   |> List.concat
@@ -133,6 +137,7 @@ let stanza_package stanza =
      | Plugin.T { package; _ }
      | Executables.T { install_conf = Some { package; _ }; _ }
      | Documentation.T { package; _ }
+     | Opam_stanza.T { package; _ }
      | Tests.T { package = Some package; _ } -> Some package
      | Rocq_stanza.Theory.T { package = Some package; _ } -> Some package
      | Melange_stanzas.Emit.T { package = Some package; _ } -> Some package

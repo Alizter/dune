@@ -752,7 +752,33 @@ let resolve_local_pkg_file ~loc ~context_name ~pkg_name ~section ~file =
   path
 ;;
 
-let expand_pkg_macro ~loc { context; _ } macro_invocation =
+(* CR-someday punchagan: Dependency filters such as [{with-test}] are not
+   interpreted here, so a dependency is visible whatever its filter says. *)
+let visible_packages t =
+  match Dune_project.exclusive_package t.project ~dir:t.source_dir with
+  | None -> None
+  | Some pkg_id ->
+    let packages = Dune_project.packages t.project in
+    (* A name that is not a workspace package is a lock directory package. It
+       is a leaf of this walk; its own dependencies are added by
+       [Pkg.top_closure] over the lock directory's graph. *)
+    let rec loop acc name =
+      if Package.Name.Set.mem acc name
+      then acc
+      else (
+        let acc = Package.Name.Set.add acc name in
+        match Package.Name.Map.find packages name with
+        | None -> acc
+        | Some pkg ->
+          List.fold_left
+            (Package.depends pkg)
+            ~init:acc
+            ~f:(fun acc (dep : Package_dependency.t) -> loop acc dep.name))
+    in
+    Some (loop Package.Name.Set.empty (Package.Id.name pkg_id))
+;;
+
+let expand_pkg_macro ~loc ({ context; _ } as t) macro_invocation =
   let context_name = Context.name context in
   let pkg_name, section, file =
     match Pform.Macro_invocation.Args.split macro_invocation with
@@ -805,34 +831,24 @@ let expand_pkg_macro ~loc { context; _ } macro_invocation =
     | Some (Local _) -> resolve_local_pkg_file ~loc ~context_name ~pkg_name ~section ~file
     | Some (Build _) ->
       Pkg_rules.resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file
+    | Some (Opam _) ->
+      (match visible_packages t with
+       | Some visible when not (Package.Name.Set.mem visible pkg_name) ->
+         User_error.raise
+           ~loc
+           ~hints:
+             [ Pp.textf
+                 "add a dependency on package %S to this package"
+                 (Package.Name.to_string pkg_name)
+             ]
+           [ Pp.textf
+               "Package %s is not visible from this directory"
+               (Package.Name.to_string pkg_name)
+           ]
+       | None | Some _ ->
+         Opam_rules.resolve_installed_file context_name pkg_name ~loc ~section ~file)
   in
   [ Value.Path path ]
-;;
-
-(* CR-someday punchagan: Dependency filters such as [{with-test}] are not
-   interpreted here, so a dependency is visible whatever its filter says. *)
-let visible_packages t =
-  match Dune_project.exclusive_package t.project ~dir:t.source_dir with
-  | None -> None
-  | Some pkg_id ->
-    let packages = Dune_project.packages t.project in
-    (* A name that is not a workspace package is a lock directory package. It
-       is a leaf of this walk; its own dependencies are added by
-       [Pkg.top_closure] over the lock directory's graph. *)
-    let rec loop acc name =
-      if Package.Name.Set.mem acc name
-      then acc
-      else (
-        let acc = Package.Name.Set.add acc name in
-        match Package.Name.Map.find packages name with
-        | None -> acc
-        | Some pkg ->
-          List.fold_left
-            (Package.depends pkg)
-            ~init:acc
-            ~f:(fun acc (dep : Package_dependency.t) -> loop acc dep.name))
-    in
-    Some (loop Package.Name.Set.empty (Package.Id.name pkg_id))
 ;;
 
 let expand_pform_macro
