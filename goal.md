@@ -29,6 +29,11 @@ invoke Dune, Make, shell scripts, or another opaque build system as part of its
 recorded action. The install-layout target and cookie are specific to that Opam
 boundary.
 
+Native package views use explicit package scopes over one canonical decoded
+source universe. Both `scope` and `opam` are available to users only through the
+unreleased language extension so their synthetic mechanisms can be tested
+directly.
+
 Workspace packages retain their existing behaviour.
 
 ## Native foundation milestone
@@ -243,16 +248,17 @@ The package-builder layer turns either choice into ordinary loaded-project input
 for rule generation:
 
 ```text
-Dune files present -> normally loaded source projects and stanzas
+Dune files present -> loaded source universe plus exact package scope views
 No Dune files      -> one synthetic loaded project and Opam stanza per package
 ```
 
-Generic workspace `Dune_load` remains unaware of locks and Opam recipes. The
-package-builder layer constructs the synthetic project after source
-enumeration, assigns its exact package and artifact owners, and passes it
-through the same stanza traversal and `Gen_rules` entry points as native
-projects. It constructs one such project for each exact package node, even when
-several nodes share the same prepared source target.
+Generic workspace `Dune_load` remains unaware of locks and Opam recipes. For
+native sources, the package-builder layer retains the complete decoded universe
+and applies an exact package scope view. For Opam sources, it constructs the
+synthetic project after source enumeration, assigns its exact package and
+artifact owners, and passes it through the same stanza traversal and `Gen_rules`
+entry points as native projects. It constructs one such project for each exact
+package node, even when several nodes share the same prepared source target.
 
 `opam` is a real Dune stanza type. Lock-package loading synthesizes its internal
 value, while users may write the stanza in a Dune file only with the unreleased
@@ -283,6 +289,35 @@ parallel `.pkg` routing path and hosted by this stanza rather than rewritten.
 The user-facing decoder is guarded by `Dune_lang.Unreleased`, while synthetic
 lock-package projects construct the same stanza value directly. The prepared
 source target is never writable, and the stanza owns no target beneath it.
+
+## Experimental scope stanza and package masks
+
+Package masking should use a second real stanza, `scope`, also guarded by
+`(using unreleased 0.1)`. Users can exercise masking directly, while the package
+builder synthesizes the same scope value for each exact native package view.
+Decoded and synthetic scopes must share one representation and evaluator.
+
+A scope is applied to the complete decoded source universe. It selects which
+package-associated stanzas belong to that view without changing source identity,
+builder selection, or artifact ownership. Several exact package nodes may
+therefore reuse one parsed source universe under independent scopes and output
+roots. Do not destructively replace the canonical project's package map.
+
+This should simplify source mounting: build and decode each prepared source
+once, then construct cheap package scopes over that canonical result. Package
+views no longer require remounting the source or cloning filtered
+`Dune_project.t` values. They also do not recover the selected package from a
+mounted-list lookup.
+
+PR #13337 is useful prior art for a `(scope ...)` stanza, but is not the
+required API. In particular, this plan does not yet adopt its `dir` grammar,
+ancestor precedence, duplicate-stanza union rules, or library-only filtering.
+A package mask must eventually apply coherently to every package-associated
+stanza class; auxiliary-project in/out semantics remain deferred.
+
+Like `opam`, `scope` has no released compatibility promise. Synthetic package
+loading constructs its value directly rather than manufacturing or rewriting a
+Dune file.
 
 ## Artifact ownership and dependency resolution
 
@@ -335,15 +370,15 @@ implement this precedence.
 
 ## Deferred in/out boundary
 
-Auxiliary nested projects in one prepared source may eventually be internal
-inputs to the selected package without becoming packages visible to unrelated
-consumers. That is the later in/out problem, not a prerequisite for the builder
-unification.
+The experimental scope establishes an explicit package mask now because that
+simplifies package views and testing. Auxiliary nested projects may eventually
+be internal inputs to the selected package without becoming packages visible to
+unrelated consumers. That broader visibility policy remains the later in/out
+problem.
 
-The current design should avoid destroying the complete decoded project
-universe. Keeping that representation may simplify source ownership, but no
-nested-project visibility or masking semantics are decided or implemented before
-the in/out work.
+Keep the complete decoded project universe independent of every scope. Do not
+use the first package-mask implementation to decide nested-project visibility,
+ancestor composition, or other in/out semantics prematurely.
 
 ## End-to-end flow
 
@@ -354,8 +389,8 @@ workspace source view
   -> create prepared source targets from lock data
   -> construct exact package nodes and artifact owners
   -> inspect source and select Dune or Opam builder
-  -> load native projects or instantiate one synthetic Opam stanza
-  -> compose native projects through ordinary Dune rules
+  -> load native projects under synthetic scopes or instantiate an Opam stanza
+  -> compose native projects through ordinary Dune rules inside each scope
   -> resolve Opam stanza inputs through exact package-dependency edges
 ```
 
@@ -400,8 +435,9 @@ The new implementation must not contain:
 - a parallel `.pkg` source/build subsystem selected by absence from native
   loading;
 - lock-package or Opam-recipe branches in generic workspace `Dune_load`;
-- an unguarded or released compatibility promise for the experimental `opam`
-  stanza;
+- an unguarded or released compatibility promise for the experimental `opam` or
+  `scope` stanza;
+- destructive per-package filtering of the canonical decoded source project;
 - executing an Opam action directly in an immutable prepared source target;
 - compatibility shims around the archived prototype's internal APIs.
 
@@ -421,30 +457,33 @@ native package consumption. Continue from that foundation in this order:
    target.
 3. Preserve the primary-source, lock `files/`, and extra-source overlay order in
    that target, with focused identity and invalidation tests.
-4. Define one `opam` stanza representation and unreleased-extension decoder,
+4. Select `Dune` when source enumeration finds any Dune build file and `Opam`
+   only when it finds none. Propagate source and Dune-loading errors normally.
+5. Define one unreleased `scope` stanza representation and evaluator. Decode a
+   native source once, then synthesize an exact package scope and artifact owner
+   for each package node instead of filtering or reloading the project.
+6. Define one `opam` stanza representation and unreleased-extension decoder,
    then extract the existing package action expander, install action, install
    cookie, and dependency view behind its rule generator.
-5. Make the stanza depend on the prepared source, run with a writable copy in a
+7. Make the stanza depend on the prepared source, run with a writable copy in a
    copy sandbox, and own one install-layout directory target and cookie.
-6. Select `Dune` when source enumeration finds any Dune build file and `Opam`
-   only when it finds none. Propagate source and Dune-loading errors normally.
-7. After selecting `Opam`, construct one synthetic loaded project per exact
+8. After selecting `Opam`, construct one synthetic loaded project per exact
    package node and pass its stanza through ordinary traversal and `Gen_rules`;
    do not group projects by source target or add lock knowledge to generic
    workspace `Dune_load`.
-8. Pass exact selected package dependencies to the Opam stanza. Resolve their
+9. Pass exact selected package dependencies to the Opam stanza. Resolve their
    builder-owned outputs when expanding environments, binaries, variables, and
    installed paths; keep native-to-native composition on ordinary Dune rules.
-9. Prove a native consumer of an Opam-built dependency and an Opam-built
-   consumer of a native dependency, then port the complete A -> B -> C
-   composition.
-10. Remove recipe-shape routing, mounted-list absence checks, and obsolete
+10. Prove a native consumer of an Opam-built dependency and an Opam-built
+    consumer of a native dependency, then port the complete A -> B -> C
+    composition.
+11. Remove recipe-shape routing, mounted-list absence checks, and obsolete
     `.pkg` source/build ownership after all existing source forms and builders
     have replacement coverage.
-11. Add refresh, retry, stale-removal, and watch tests over prepared sources.
-12. Preserve the complete decoded universe if useful, but defer all auxiliary
-    nested-project visibility semantics to the later in/out work.
-13. Re-run real package graphs and compare successful native and Opam-builder
+12. Add refresh, retry, stale-removal, and watch tests over prepared sources.
+13. Keep the canonical decoded universe, but defer auxiliary nested-project
+    visibility semantics beyond the explicit package mask to later in/out work.
+14. Re-run real package graphs and compare successful native and Opam-builder
     workloads before optimizing source materialization or scheduling.
 
 No step adds an abstraction solely to preserve an API that incorrectly requires
@@ -475,25 +514,32 @@ The builder-unification milestone additionally demonstrates:
    empty, and an Opam stanza consumes that target directly.
 2. Prepared directories preserve primary, lock `files/`, and extra-source
    overlay semantics.
-3. Its action receives a writable sandbox copy and cannot mutate the prepared
-   target.
-4. It owns exactly one package install-layout subtree and its install cookie.
-5. Each exact Opam-built package has its own synthetic loaded project, recipe,
+3. A user-authored `scope` stanza is rejected without
+   `(using unreleased 0.1)` and uses the same representation and evaluator as a
+   synthetic package scope.
+4. Two exact native package nodes can share one decoded source universe while
+   retaining independent package masks, artifact owners, and rule views.
+5. Package masks apply consistently to package-associated stanza classes and do
+   not affect Dune-versus-Opam selection.
+6. An Opam action receives a writable sandbox copy and cannot mutate the
+   prepared target.
+7. It owns exactly one package install-layout subtree and its install cookie.
+8. Each exact Opam-built package has its own synthetic loaded project, recipe,
    dependencies, artifact root, and cookie even when its source target is
    shared; ordinary stanza traversal and `Gen_rules` process that project.
-6. A user-authored `opam` stanza is rejected without
+9. A user-authored `opam` stanza is rejected without
    `(using unreleased 0.1)` and exercises the same representation and rule
    generator when enabled.
-7. Building the cookie or a file in the install layout works directly after a
-   clean build.
-8. The Opam stanza sees its exact package dependencies, whose builder-owned
-   outputs supply its environment, binaries, variables, and installed paths.
-9. Native and Opam-built packages consume one another across that package edge,
-   while native projects compose through ordinary fine-grained Dune rules.
-10. Builder selection depends only on whether the prepared tree contains Dune
+10. Building the cookie or a file in the install layout works directly after a
+    clean build.
+11. The Opam stanza sees its exact package dependencies, whose builder-owned
+    outputs supply its environment, binaries, variables, and installed paths.
+12. Native and Opam-built packages consume one another across that package edge,
+    while native projects compose through ordinary fine-grained Dune rules.
+13. Builder selection depends only on whether the prepared tree contains Dune
     build files; loading errors and system-provider metadata never select or
     bypass a builder.
-11. No package depends on absence from a mounted list to receive rules.
+14. No package depends on absence from a mounted list to receive rules.
 
 Use `_build/default/bin/main.exe` for the end-to-end scenarios. Trace assertions
 must use a fresh action cache when checking process execution.
@@ -509,7 +555,10 @@ The implementation review should show:
 
 - the source-location and loaded-directory boundaries;
 - the rule-generation dependency path from lock data to source targets;
-- explicit source, builder, and artifact ownership at changed call sites;
+- explicit source, package-scope, builder, and artifact ownership at changed
+  call sites;
+- proof that decoded and synthetic scopes share one evaluator over a canonical
+  loaded source universe;
 - the Opam stanza's source dependencies, sandbox, directory target, and cookie;
 - the end-to-end trace and artifact layout;
 - any remaining `Path.Source.t` assumptions and why they are workspace-only.
