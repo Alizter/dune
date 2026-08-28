@@ -1114,6 +1114,18 @@ let sat_solve ~start ~dur ~num_variables ~num_clauses ~num_decisions ~num_confli
   Event.complete ~args ~name:"solve" ~start ~dur Sat
 ;;
 
+let sandbox_materialize_dependencies ~start ~stop loc ~dir ~mode ~dependencies =
+  let args =
+    [ "loc", Arg.string (Loc.to_file_colon_line loc)
+    ; "dir", Arg.build_path dir
+    ; "mode", Arg.string (Sandbox_mode.to_string (Some mode))
+    ; "dependencies", Arg.int dependencies
+    ]
+  in
+  let dur = Time.diff stop start in
+  Event.complete ~args ~name:"materialize-dependencies" ~start ~dur Sandbox
+;;
+
 let sandbox name ~start ~stop ~queued loc ~dir =
   let args =
     [ "loc", Arg.string (Loc.to_file_colon_line loc); "dir", Arg.build_path dir ]

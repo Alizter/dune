@@ -192,6 +192,7 @@ let link_function ~(mode : Sandbox_mode.some) =
 ;;
 
 let link_deps t ~mode ~deps =
+  let start = Time.now () in
   let link = Staged.unstage (link_function ~mode) in
   Path.Set.iter deps ~f:(fun path ->
     match Path.as_in_build_dir path with
@@ -204,7 +205,16 @@ let link_deps t ~mode ~deps =
           "Action depends on source tree. All actions should depend on the copies in the \
            build directory instead."
           [ "path", Path.to_dyn path ]
-    | Some p -> link path (Path.build (map_real_path t p)))
+    | Some p -> link path (Path.build (map_real_path t p)));
+  let stop = Time.now () in
+  Dune_trace.emit ~buffered:true Sandbox (fun () ->
+    Dune_trace.Event.sandbox_materialize_dependencies
+      ~start
+      ~stop
+      t.loc
+      ~dir:t.dir
+      ~mode
+      ~dependencies:(Path.Set.cardinal deps))
 ;;
 
 let snapshot t =
