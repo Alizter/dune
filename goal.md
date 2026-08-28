@@ -197,7 +197,7 @@ package node
   = lock universe + exact package identity
   + immutable prepared source directory target
   + complete recorded recipe
-  + dependency capabilities
+  + exact selected package dependencies
   + artifact owner
 ```
 
@@ -253,7 +253,8 @@ The `Opam` builder is an internal synthetic stanza, not initially user-facing
 syntax. It participates in ordinary rule generation at the package's artifact
 owner and owns one opaque package output subtree. Its rule:
 
-1. depends on the immutable prepared source target and dependency capabilities;
+1. depends on the immutable prepared source target and its exact package
+   dependencies;
 2. copies the source into a writable copy sandbox;
 3. expands and executes the complete recorded build and install actions;
 4. produces a package-owned install-layout directory target; and
@@ -264,12 +265,6 @@ view are the starting implementation. They should be extracted from the
 parallel `.pkg` routing path and hosted by this stanza rather than rewritten.
 The prepared source target is never writable, and the stanza owns no target
 beneath it.
-
-Existing non-relocatable compiler packages redirect their prefix to a
-`Path.Outside_build_dir` toolchain location. That behavior must be redesigned
-before converting those packages: the Opam stanza must install into its owned
-directory target and export any toolchain location through package capabilities.
-There is no external-toolchain builder or exception to output ownership.
 
 ## Artifact ownership and dependency resolution
 
@@ -291,15 +286,20 @@ synthesize an install cookie.
 
 An `Opam` builder instead owns its full output directory target and produces an
 install cookie as the trace of files and variables created by its opaque action.
-Adapters are needed only when crossing this opaque boundary:
+Its inputs are the exact package dependencies already selected by the lock
+graph, not a separately inferred set of paths or capabilities.
 
-- native rules consume an Opam-built package through its installed artifacts and
-  cookie;
-- an Opam stanza consumes native rules through their ordinary install
-  projection, binaries, and exported environment.
+Package-dependency resolution exposes each dependency according to its builder:
+an Opam-built dependency has its install target and cookie, while a native
+dependency has ordinary Dune outputs and install metadata. The Opam action
+expander derives its environment, binaries, variables, and installed paths from
+those package dependencies. The stanza itself does not choose another dependency
+representation.
 
-Dependency identity selects the exact package node without requesting a parallel
-`.pkg` package rule or making native-to-native composition package-opaque.
+Native rules consuming an Opam-built package cross the inverse boundary through
+that dependency's installed artifacts and cookie. Native-to-native composition
+remains direct and fine-grained. Dependency identity never requests a parallel
+`.pkg` package rule.
 
 ## Source selection
 
@@ -338,7 +338,7 @@ workspace source view
   -> inspect source and select Dune or Opam builder
   -> load native projects or instantiate one synthetic Opam stanza
   -> compose native projects through ordinary Dune rules
-  -> expose Opam boundaries through install, binary, and environment adapters
+  -> resolve Opam stanza inputs through exact package-dependency edges
 ```
 
 Logical package identity, physical source location, builder selection, and
@@ -354,8 +354,8 @@ Later milestones retain these proven decisions:
 - native projects have vendored warning, alias, and promotion behaviour;
 - masks are applied after complete project decoding;
 - native packages strictly bypass the Opam stanza and its cookie;
-- native projects compose directly, while Opam boundaries expose scoped install
-  outputs and environments through adapters;
+- native projects compose directly, while each Opam stanza receives its selected
+  package dependencies and derives installed paths and environments from them;
 - lock generation uses a workspace-only source view;
 - autolock may complete in one invocation through two explicit loading phases;
 - source refresh, generated/fallback precedence, and watch invalidation are
@@ -410,21 +410,19 @@ native package consumption. Continue from that foundation in this order:
 7. After selecting `Opam`, construct one synthetic loaded project containing the
    stanza and pass it through ordinary stanza traversal and `Gen_rules`; do not
    add lock knowledge to generic workspace `Dune_load`.
-8. Add adapters at Opam boundaries for native install projections, Opam
-   cookies, libraries, binaries, variables, environments, and host tools. Keep
-   native-to-native composition on ordinary Dune rules.
+8. Pass exact selected package dependencies to the Opam stanza. Resolve their
+   builder-owned outputs when expanding environments, binaries, variables, and
+   installed paths; keep native-to-native composition on ordinary Dune rules.
 9. Prove a native consumer of an Opam-built dependency and an Opam-built
    consumer of a native dependency, then port the complete A -> B -> C
    composition.
-10. Redesign non-relocatable compiler/toolchain installs so their Opam stanza
-    owns the complete output directory target.
-11. Remove recipe-shape routing, mounted-list absence checks, and obsolete
-    `.pkg` source/build ownership only after all existing source forms,
-    builders, and toolchain cases have replacement coverage.
-12. Add refresh, retry, stale-removal, and watch tests over prepared sources.
-13. Preserve the complete decoded universe if useful, but defer all auxiliary
+10. Remove recipe-shape routing, mounted-list absence checks, and obsolete
+    `.pkg` source/build ownership after all existing source forms and builders
+    have replacement coverage.
+11. Add refresh, retry, stale-removal, and watch tests over prepared sources.
+12. Preserve the complete decoded universe if useful, but defer all auxiliary
     nested-project visibility semantics to the later in/out work.
-14. Re-run real package graphs and compare successful native and Opam-builder
+13. Re-run real package graphs and compare successful native and Opam-builder
     workloads before optimizing source materialization or scheduling.
 
 No step adds an abstraction solely to preserve an API that incorrectly requires
@@ -462,14 +460,14 @@ The builder-unification milestone additionally demonstrates:
    stanza traversal and `Gen_rules`, not a parallel package-rule pipeline.
 6. Building the cookie or a file in the install layout works directly after a
    clean build.
-7. Native and Opam-built packages consume one another through boundary adapters,
+7. The Opam stanza sees its exact package dependencies, whose builder-owned
+   outputs supply its environment, binaries, variables, and installed paths.
+8. Native and Opam-built packages consume one another across that package edge,
    while native projects compose through ordinary fine-grained Dune rules.
-8. Builder selection depends only on whether the prepared tree contains Dune
+9. Builder selection depends only on whether the prepared tree contains Dune
    build files; loading errors and system-provider metadata never select or
    bypass a builder.
-9. No package depends on absence from a mounted list to receive rules.
-10. Non-relocatable toolchain installation is redesigned to remain entirely
-    within stanza-owned output.
+10. No package depends on absence from a mounted list to receive rules.
 
 Use `_build/default/bin/main.exe` for the end-to-end scenarios. Trace assertions
 must use a fresh action cache when checking process execution.
