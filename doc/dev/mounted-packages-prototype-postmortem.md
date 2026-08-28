@@ -951,18 +951,19 @@ The package-builder layer presents both choices to ordinary rule generation:
 
 ```text
 Dune files present -> normally loaded source projects and stanzas
-No Dune files      -> one synthetic loaded project with one Opam stanza
+No Dune files      -> one synthetic loaded project and Opam stanza per package
 ```
 
-Construct the synthetic project after source enumeration, attach exact package
-and artifact ownership, and pass it through ordinary stanza traversal and
-`Gen_rules`. Generic workspace `Dune_load` remains unaware of locks and Opam
-recipes.
+Construct one synthetic project per exact package node after source enumeration,
+attach exact package and artifact ownership, and pass it through ordinary stanza
+traversal and `Gen_rules`. Generic workspace `Dune_load` remains unaware of
+locks and Opam recipes. Several projects may share one prepared source target;
+they do not share recipes, dependencies, artifact roots, or cookies.
 
 Package-node and memo keys must include the owning lock universe or snapshot
 plus exact package identity. Fetch data may be shared by checksum, but builder,
-artifact, and capability identities remain distinct when two lock universes
-contain the same name and version.
+artifact, and package identities remain distinct when two lock universes contain
+the same name and version.
 
 ### Load first, decide visibility later
 
@@ -999,11 +1000,11 @@ The current `Pkg_sources.add_artifact_source_rules` and
 `Dune_engine.Source_selection` demonstrate the required behavior. Their exact
 placement is prototype debt, not necessarily the final API.
 
-### Represent opaque builds as an internal Opam stanza
+### Represent opaque builds as an Opam stanza
 
 A source tree with no Dune files should still become a package-owned rule
 subtree, not a parallel source and routing system. Its synthetic loaded project
-contains one internal `Opam` stanza with this boundary:
+contains one `opam` stanza with this boundary:
 
 ```text
 inputs
@@ -1030,8 +1031,11 @@ implementation should extract and host that machinery behind the stanza rather
 than reinterpret arbitrary Opam actions or translate shell commands into native
 Dune rules.
 
-Keep this primitive internal until its ownership and dependency semantics are
-stable. The plan does not require user-facing `(opam ...)` syntax.
+Make `opam` a user-facing stanza for direct tests and experiments, guarded by
+`(using unreleased 0.1)`. Its grammar has no released compatibility promise. The
+unreleased decoder and synthetic lock-package project must construct the same
+stanza value and use the same rule generator; do not maintain a test-only
+facsimile of the package path.
 
 ### Pass package dependencies to Opam stanzas
 
@@ -1086,10 +1090,12 @@ that foundation:
    target, with identity and invalidation tests.
 5. Select `Dune` when source enumeration finds any Dune build file and `Opam`
    only when it finds none; propagate all loading errors.
-6. Extract the existing action expander, install action, cookie, and dependency
-   view behind one internal synthetic `Opam` stanza.
-7. Put that stanza in one synthetic loaded project and pass it through ordinary
-   stanza traversal and `Gen_rules`, outside generic workspace `Dune_load`.
+6. Define one `opam` stanza representation and unreleased-extension decoder,
+   then extract the existing action expander, install action, cookie, and
+   dependency view behind its rule generator.
+7. Put that stanza in one synthetic loaded project per exact package node and
+   pass it through ordinary stanza traversal and `Gen_rules`, outside generic
+   workspace `Dune_load`; never group projects by shared source identity.
 8. Give the stanza a copy-sandbox source dependency and one package-owned
    install-layout directory target.
 9. Pass exact selected package dependencies to the Opam stanza and resolve their
@@ -1129,7 +1135,11 @@ The builder-unification milestone should additionally prove:
   empty;
 - prepared targets preserve lock `files/` and extra-source overlay semantics;
 - an Opam stanza's copy sandbox cannot mutate the prepared source;
-- its synthetic loaded project uses ordinary stanza traversal and `Gen_rules`;
+- each exact package has its own synthetic project, recipe, dependencies,
+  artifact root, and cookie even when the prepared source target is shared;
+- synthetic projects use ordinary stanza traversal and `Gen_rules`;
+- `(opam ...)` is rejected without `(using unreleased 0.1)` and exercises the
+  same rule generator when enabled;
 - generic workspace `Dune_load` has no lock or Opam-recipe branch;
 - it owns one install-layout directory target and install cookie;
 - direct cookie and install-layout targets work after clean;
@@ -1174,6 +1184,7 @@ Do not reintroduce:
 - an Opam action writing directly into an immutable prepared source;
 - a parallel `.pkg` source/build system selected by absence from native loading;
 - lock-package or Opam-recipe branches in generic workspace `Dune_load`;
+- an unguarded or compatibility-stable user-facing `opam` stanza;
 - a second semantic workspace context;
 - context-name suffixes as the sole artifact authority;
 - nested Dune execution or an Opam stanza for a package selected for native
@@ -1224,9 +1235,11 @@ not reasons to discard the target-backed model.
    that common target contract.
 3. Select `Dune` solely when source enumeration finds a Dune build file and
    `Opam` otherwise, with loading errors propagated normally.
-4. Extract one internal Opam stanza from the existing package action, install,
-   cookie, and dependency machinery, then host it in a synthetic loaded project
-   processed by ordinary stanza traversal and `Gen_rules`.
+4. Define one unreleased user-facing `opam` stanza and extract its rule
+   generator from the existing package action, install, cookie, and dependency
+   machinery;
+   each exact Opam-built package constructs the same stanza value in its own
+   synthetic loaded project.
 5. Make it consume the prepared source in a copy sandbox and own one
    install-layout directory target.
 6. Add the source-only builder-selection matrix, proving that recipes and
