@@ -6,6 +6,7 @@
 open Import
 
 val dune_files : Context_name.t -> Dune_file.t list Memo.t
+val workspace_dune_files : Context_name.t -> Dune_file.t list Memo.t
 val loaded_projects : Context_name.t -> Loaded_project.t list Memo.t
 val workspace_projects_by_root : unit -> Dune_project.t Source_path.Map.t Memo.t
 val find_loaded_project : dir:Path.Build.t -> Loaded_project.t Memo.t
