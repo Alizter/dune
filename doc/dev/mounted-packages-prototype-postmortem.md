@@ -56,13 +56,15 @@ around target-backed ownership, includes, PPX, binary narrowing, lookup cycles,
 and loading multiplicity, but they do not directly retain every useful fixture
 from the older prototypes. The highest-value comparison work is:
 
-1. settle and test the routing/classification contract;
-2. port the complete mounted A -> legacy B -> workspace C composition;
-3. decide and characterize auxiliary nested vendored projects;
-4. restore source refresh, stale-file removal, failed-fetch retry, and reuse;
-5. add lock-selected compiler and cross-lock digest-identity regressions;
-6. add direct workspace binary and same-project masking cases;
-7. complete formatting, warning, version, and promotion coverage.
+1. replace recipe-shape routing with prepared package sources and explicit
+   `Dune`, `Opam`, or `Provided` outcomes;
+2. port the complete native A -> Opam-built B -> workspace C composition;
+3. restore source refresh, stale-file removal, failed-fetch retry, and reuse;
+4. add lock-selected compiler and cross-lock digest-identity regressions;
+5. add direct workspace binary and same-project masking cases;
+6. complete formatting, warning, version, and promotion coverage;
+7. defer auxiliary nested-project visibility to the later in/out design unless
+   retaining the complete decoded universe simplifies the current model.
 
 Some archived cases are intentionally outside the current scope. Extra-source
 overlays, VCS sources, and live directory sources route through legacy package
@@ -479,10 +481,13 @@ Current routing is deliberately different:
 - local directories, VCS sources, and other fetch forms remain legacy;
 - the decoded source must represent and enable the selected package.
 
-This increases native coverage but may discard meaningful custom work from a
-package that depends on `dune`. It is a prototype policy, not a settled product
-contract. The current test and comments in `different-dune-in-path.t` also need
-to be reconciled with this authoritative-dependency rule.
+This is the current prototype classifier, not the planned final boundary. The
+chosen direction is to prepare a source target for every source-backed package,
+use native loading whenever that source represents the selected package,
+otherwise instantiate an internal synthetic `Opam` stanza, and represent
+system-provided packages explicitly. Recipe shape, wrappers, separate install
+actions, and depexts do not veto native loading.
+`different-dune-in-path.t` must be reconciled with that native-first rule.
 
 ### Overall assessment
 
@@ -567,12 +572,13 @@ untested; it is likely narrower in the current implementation. The `exp3`
 fixture also checked that recursive `runtest` did not enter the auxiliary
 project.
 
-A product design must decide whether auxiliary nested projects are part of the
-mounted package's source capability. Once decided, add a focused test that
-characterizes parent consumption and recursive alias behavior rather than
-assuming the archived result automatically.
+The desired eventual behavior is that an auxiliary project can be an internal
+input without automatically becoming visible outside the package. That belongs
+to the later in/out design. Do not restore this fixture during builder
+unification unless retaining the complete decoded universe and delaying its
+external mask simplifies the current model.
 
-#### Complete mounted -> legacy -> workspace chain
+#### Complete native -> Opam-built -> workspace chain
 
 The complete historical fixture is the archive's
 `mounted-chain-abc.t`. Similarly named tests on `main`, `fresh`, and `exp3`
@@ -580,14 +586,14 @@ covered only parts of the composition.
 
 The full scenario combines several boundaries:
 
-- mounted A invokes a legacy package tool through `%{pkg:...}`;
-- legacy B compiles and links against mounted A through its environment;
+- native A invokes an Opam-built package tool through `%{pkg:...}`;
+- Opam-built B compiles and links against native A through its environment;
 - B installs a binary;
 - workspace C depends only on B, resolves A transitively, and runs B's binary;
-- only B receives old package rules.
+- under the planned builder model, only B receives the synthetic Opam stanza.
 
-Current tests exercise these mechanisms separately, including PPX-shaped legacy
-chains and mounted binary lookup. They do not retain this complete end-to-end
+Current tests exercise these mechanisms separately, including PPX-shaped opaque
+chains and native binary lookup. They do not retain this complete end-to-end
 shape. A combined test is valuable because capability narrowing can make every
 individual edge pass while losing the transitive composition.
 
@@ -643,34 +649,33 @@ Current package tables and mounted checks use complete digests, and recent index
 work explicitly preserves separate project and dev-tool name indexes. There is
 nevertheless no equivalent end-to-end regression.
 
-#### Routing and classification matrix
+#### Builder-selection matrix
 
 Historical tests:
 
 - `mounted-action-veto.t`;
 - `mounted-veto.t`.
 
-The old expectation that a mixed recipe depending on `dune` must remain legacy
-is intentionally reversed, but the current policy is not settled and conflicts
-with `different-dune-in-path.t`. Decide the contract first for mixed work,
-separate install actions, wrappers, program pforms, and depexts.
+The old expectation that mixed work must veto mounting is intentionally not
+retained. The planned contract prepares package sources independently, selects
+the native `Dune` builder whenever the source represents the selected package,
+and otherwise selects a synthetic `Opam` stanza containing the complete recipe.
 
-After that decision, add focused cases for:
+Add focused cases proving:
 
-- a non-Dune recipe with no selected `dune` dependency;
-- a program pform that cannot be proven to invoke Dune;
-- a source project that does not declare the lock package;
-- the chosen behavior for an invalid or unloadable `dune-project`;
-- unsupported transports retaining the complete legacy action.
+- mixed work, wrappers, separate install actions, and depexts do not veto a
+  technically available native build;
+- a non-Dune source selects `Opam` independently of action syntax;
+- a source project that does not declare the lock package selects `Opam`;
+- recognized native syntax or package-availability limitations select `Opam`
+  with an explicit reason, while source/read/internal failures propagate;
+- every currently supported source transport implements the common prepared
+  source contract before its old `.pkg` source ownership is removed.
 
 Current `extra-sources.t` already proves the observable patched result for an
-extra-source legacy package. A direct no-mounted-rules assertion would sharpen
-its routing coverage, but the behavior need not be duplicated here.
-
-The archive converted project-loading errors to legacy fallback. Current
-eligible-source loading may report such a parse error instead. Whether that
-must remain a lossless fallback is a product policy decision, not an established
-current invariant.
+extra-source package. Future extra-source preparation should produce one
+immutable overlaid source target that either builder can consume rather than
+remain a permanent routing exception.
 
 #### Same-project package masking
 
@@ -753,10 +758,10 @@ Current `Pkg_sources.prepare` explicitly routes every package with extra sources
 to legacy rules. This avoids another source-ownership and overlay problem but
 reduces native coverage.
 
-The existing `extra-sources.t` proves the patched legacy result, although it
-does not directly assert the absence of mounted rules. A future feature must
-either retain this fallback as a documented boundary or design a normal
-rule-owned overlay target before enabling mounting.
+The existing `extra-sources.t` proves the patched result under the current
+legacy route. The planned common source layer instead needs a normal rule-owned
+overlay target before native loading or the synthetic `Opam` stanza consumes the
+source.
 
 #### VCS and live directory sources
 
@@ -766,9 +771,10 @@ transport limitation.
 
 #### Mixed recipes with a selected Dune dependency
 
-The archive's conservative action veto and the current authoritative
-`depends dune` heuristic assert opposite behavior. This requires a product
-policy decision, not merely another regression test.
+The archive's conservative action veto is intentionally retired. Native loading
+wins whenever technically available and supersedes the complete recipe. A
+package that requires action-specific preparation or install layout must express
+that requirement through its Dune project; recipe shape is not a routing veto.
 
 #### Virtual workspace collisions
 
@@ -908,32 +914,50 @@ express those capabilities directly.
 What must not return is reconstructing output ownership or package identity from
 a source path and context name.
 
-### Derive source rules before mounted loading
+### Prepare package sources before choosing builders
 
-Create the source directory target using only lock data and source transport.
-The target must have an independent rule namespace such as `_fetch`.
+Create each immutable source directory target using only lock data and source
+transport. The target must have an independent rule namespace such as `_fetch`.
+Archive extraction, VCS checkout, local-source preparation, the lock package's
+`files/` tree, and extra-source overlays must converge on this contract rather
+than select a build backend themselves. Preserve the current order: primary
+source, then `files/`, then each extra source at its declared path. All layers,
+paths, and ordering participate in dependencies and source identity.
 
 Use two explicit values in sequence:
 
 ```text
-lock-only candidate
+package node
   = lock universe + exact package + complete recipe
-  + transport eligibility + optional source target
+  + prepared source capability + dependency capabilities
+  + artifact or external owner
 
-classified route
-  = Mounted decoded data
-  | Legacy complete recipe and classification reason
+prepared source
+  = Directory of immutable directory target
+  | Empty
+
+builder
+  = Dune of decoded native data
+  | Opam of complete recorded recipe and selection reason
+  | Provided of external package capabilities
 ```
 
-Project evidence is unavailable until the candidate's source target has been
-loaded, so final routing cannot precede source inspection. The classified route
-must exist before suppressing `.pkg` rules and should be passed to loading,
-package rules, and dependency integration. Absence from a mounted list is
-convenient in the prototype but should not be the final representation of
-`Legacy`.
+Project evidence is unavailable until the package's source target has been
+loaded, so builder selection cannot precede source inspection. Select `Dune`
+whenever the source represents and enables the exact package; action syntax does
+not veto it. Select `Opam` for explicit native unavailability and `Provided` for
+a selected system package. Absence from a mounted list must not select or
+publish any builder.
 
-Route maps and memo keys must include the owning lock universe or snapshot plus
-exact package identity. Fetch data may be shared by checksum, but route,
+Native eligibility must return structured `Available`, `Unavailable`, or
+`Failed` data. Only `Unavailable` selects `Opam`. Source preparation and read
+failures, cancellation, and internal errors propagate as `Failed`; do not catch
+arbitrary loading exceptions and silently run the recorded recipe. An unrelated
+auxiliary-project error must be avoided or reported as the precise deferred
+in/out limitation.
+
+Package-node and memo keys must include the owning lock universe or snapshot
+plus exact package identity. Fetch data may be shared by checksum, but builder,
 artifact, and capability identities remain distinct when two lock universes
 contain the same name and version.
 
@@ -971,9 +995,49 @@ The current `Pkg_sources.add_artifact_source_rules` and
 `Dune_engine.Source_selection` demonstrate the required behavior. Their exact
 placement is prototype debt, not necessarily the final API.
 
+### Represent opaque builds as an internal Opam stanza
+
+A package that cannot use native loading should still be a package-owned rule
+subtree, not a parallel source and routing system. Generate one internal
+synthetic `Opam` stanza with this boundary:
+
+```text
+inputs
+  = immutable Directory or explicit Empty source
+  + exact recipe + dependency capabilities
+
+opaque rule
+  = copied source or new empty work directory in a copy sandbox
+  + recorded build/install actions
+
+outputs
+  = package-owned install-layout directory target + install cookie
+```
+
+The stanza owns its entire output subtree. It may invoke nested Dune, Make, or
+shell commands, but it cannot write to `_fetch` and no other rule owns a target
+inside its install-layout directory target. Its cookie remains the installation
+trace for files and package variables.
+
+Most execution semantics already exist in `Pkg_rules`: source preparation,
+action expansion, dependency views, install actions, and install cookies. The
+implementation should extract and host that machinery behind the stanza rather
+than reinterpret arbitrary Opam actions or translate shell commands into native
+Dune rules.
+
+Keep this primitive internal until its ownership and dependency semantics are
+stable. The plan does not require user-facing `(opam ...)` syntax.
+
+Initially apply it only to packages whose install roots remain beneath the
+package artifact owner. Existing non-relocatable compiler packages can redirect
+their prefix to `Path.Outside_build_dir`; they require an owned relocatable
+artifact or an explicit external-toolchain primitive before this stanza can
+claim their complete output. Do not hide that exception or remove its old path
+prematurely.
+
 ### Introduce consumer-scoped capabilities early
 
-For each mounted package, derive what its selected dependency branch permits it
+For each package node, derive what its selected dependency branch permits it
 to consume:
 
 - target-package libraries and package variables;
@@ -994,77 +1058,97 @@ Keep three concepts distinct:
 - dependency capability: what those stanzas may consume;
 - artifact owner: where their outputs are produced.
 
-### Treat legacy interoperability as two edges
+### Normalize native and Opam-builder interoperability
 
-A mounted dependency must not receive an old `.pkg` target, cookie, or recorded
-build action. A legacy consumer must nevertheless receive the mounted
-library/install output it needs.
+A native package receives ordinary stanza outputs and install metadata. An
+Opam-built package receives an opaque install-layout target and cookie.
+Consumers must use a normalized capability interface without pretending the
+two builders have identical internal graphs.
 
 Therefore model separately:
 
-1. build dependency identity and route;
+1. exact package dependency identity and selected builder;
 2. concrete install environment and library/provider visibility.
 
 The current `Pkg_rules.Dependency_view`, package-specific install layouts, and
-lazy legacy library databases are references. The complete A -> B -> C test
-should be introduced before generalizing this machinery.
+lazy legacy library databases are references. Prove both consumption directions
+and the complete native A -> Opam-built B -> workspace C composition before
+generalizing this machinery.
 
 ### Preserve a workspace-only lock phase
 
 Autolock requires two explicit loading phases in one invocation:
 
 1. load only the workspace to generate or validate the lock;
-2. read the resulting lock, prepare source targets, then load mounted projects.
+2. read the resulting lock, prepare package sources, then select and instantiate
+   package builders.
 
-Lock generation must not force mounted roots whose existence depends on that
+Lock generation must not force package roots whose existence depends on that
 same lock.
 
 ### Suggested implementation sequence
 
+The prototype already establishes target-backed native loading. Continue from
+that foundation:
+
 1. Write path-kind, owner-root, artifact-owner, and lock-universe invariants.
-2. Make build-backed promotion unavailable in the initial source API.
-3. Add the minimal rules-side directory and file API for workspace roots.
-4. Migrate ordinary workspace loading through it without behavior changes.
-5. Add build-backed reads and dependency-recording directory enumeration.
-6. Introduce semantic loaded ownership without reverse path reconstruction.
-7. Add one independent local-archive directory target.
-8. Construct one lock-only candidate from the lock and source transport.
-9. Decode one candidate project, select one package, and classify its route.
-10. Add minimal ordinary-source selection/materialization for its artifact
-    owner.
-11. Generate one library into a separate artifact root.
-12. Link it from one workspace executable.
-13. Prove no nested Dune and no old `.pkg` rule.
-14. Add generated-over-source, fallback, selectors, and promotion containment.
-15. Add consumer-scoped library, binary, PPX, host, and environment
-    capabilities.
-16. Add both mounted/legacy interoperability directions.
-17. Add shared sources, nested projects, and directory groups.
-18. Add HTTP transport, then autolock and watch invalidation.
-19. Port the missing historical behavior matrix.
-20. Exercise `ocaml-re`, then `ocaml-cohttp`.
-21. Measure successful clean and warm builds separately.
-22. Simplify interfaces only after the behavioral boundary is stable.
+2. Introduce one exact package-node value without choosing a builder by absence.
+3. Define `Directory | Empty` prepared sources for every supported transport.
+4. Preserve primary, lock `files/`, and extra-source overlay ordering in one
+   immutable target, with identity and invalidation tests.
+5. Add structured `Available | Unavailable | Failed` native eligibility.
+6. Extract the existing action expander, install action, cookie, and dependency
+   view behind one internal synthetic `Opam` stanza.
+7. Give the stanza a copy-sandbox source dependency and one package-owned
+   install-layout directory target.
+8. Normalize consumer-scoped library, binary, variable, PPX, host, and
+   environment capabilities across `Dune`, `Opam`, and `Provided` outcomes.
+9. Prove native-to-Opam and Opam-to-native dependency edges.
+10. Port the exact native A -> Opam-built B -> workspace C composition.
+11. Redesign or explicitly isolate non-relocatable external toolchain installs.
+12. Remove recipe-shape routing, mounted-list absence checks, and obsolete
+    parallel `.pkg` source/build ownership only after all existing sources and
+    toolchain cases have replacements.
+13. Add generated-over-source, fallback, selectors, and promotion containment.
+14. Add autolock, source refresh, retry, stale removal, and watch invalidation.
+15. Defer auxiliary nested-project visibility to in/out work unless retaining
+    the complete decoded universe simplifies an earlier step.
+16. Port the remaining historical behavior matrix.
+17. Exercise `ocaml-re`, then `ocaml-cohttp` through both applicable builders.
+18. Measure successful clean and warm builds separately.
+19. Simplify interfaces only after the behavioral boundary is stable.
 
 ### Verification milestones
 
-The first vertical milestone should prove:
+The native vertical milestone should prove:
 
 - source topology and bytes depend on a real fetch directory target;
 - source and artifact roots have separate rule ownership;
-- a mounted library compiles and links in the current process;
+- a native library compiles and links in the current process;
 - the artifact exists only beneath its explicit package output root;
 - no nested Dune process builds the package;
 - no old `.pkg` target, cookie, or action exists;
 - direct artifact targets work after clean;
 - workspace loading remains unchanged;
-- the engine has no mounted source registry or redirection callback.
+- the engine has no package source registry or redirection callback.
+
+The builder-unification milestone should additionally prove:
+
+- an Opam stanza consumes an immutable directory or explicit empty source;
+- prepared targets preserve lock `files/` and extra-source overlay semantics;
+- its copy sandbox cannot mutate the prepared source;
+- it owns one install-layout directory target and install cookie;
+- direct cookie and install-layout targets work after clean;
+- native and Opam-built packages consume each other through scoped capabilities;
+- `Provided` packages do not receive manufactured build rules;
+- builder selection is structured and independent of recipe syntax;
+- external toolchain installs do not escape claimed stanza ownership.
 
 Later milestones should add focused tests for:
 
 - source/generated/fallback precedence;
-- complete package masks and auxiliary nested projects;
-- mounted/legacy chains in both directions;
+- complete package masks, with auxiliary nested visibility deferred to in/out;
+- native/Opam-builder chains in both directions;
 - public binary and PPX lookup;
 - exact locked compiler and version behavior;
 - autolock and watch mode;
@@ -1092,9 +1176,12 @@ Do not reintroduce:
 - mutable process-global mount publication;
 - reverse path-to-package or path-to-context registries;
 - a generic rule that interprets arbitrary `Path.Build.t` as source;
+- an Opam action writing directly into an immutable prepared source;
+- a parallel `.pkg` source/build system selected by absence from native loading;
 - a second semantic workspace context;
 - context-name suffixes as the sole artifact authority;
-- nested Dune execution or old `.pkg` rules for a mounted package;
+- nested Dune execution or an Opam stanza for a package selected for native
+  loading;
 - compatibility shims whose only purpose is preserving an incorrect
   `Path.Source.t` API.
 
@@ -1112,6 +1199,10 @@ Known broad areas for cleanup include:
 - `Mounted_context` still encodes physical routing in a context-name suffix.
 - The mounted package list represents only one route; legacy is often inferred
   by absence and rechecked by name and digest.
+- Existing package source preparation separately layers primary sources, lock
+  `files/`, and extra sources rather than producing one shared immutable target.
+- Non-relocatable compiler packages may install into an external toolchain
+  prefix, outside the proposed Opam stanza's directory-target ownership.
 - `Source_tree.Rules.Build.load` recursively enumerates and parses the complete
   build-backed tree.
 - Promotion eligibility is not a first-class file capability.
@@ -1124,7 +1215,8 @@ Known broad areas for cleanup include:
 - Broad `Vendored` status currently conflates mounted-root behavior with an
   explicit `(vendored_dirs ...)` declaration. The paused Menhir experiment
   exposed this distinction.
-- Routing policy and `different-dune-in-path.t` are not fully aligned.
+- Recipe-shape routing and `different-dune-in-path.t` do not yet implement the
+  chosen native-first builder model.
 - Several large cram tests should be split back into focused regressions.
 
 These are reasons to redesign interfaces before productionizing the feature,
@@ -1132,27 +1224,39 @@ not reasons to discard the target-backed model.
 
 ## Recommended next steps
 
-1. Settle routing policy for immediate `dune` dependencies, mixed work, separate
-   install actions, depexts, wrappers, and project-loading errors.
-2. Add a focused routing/classification matrix for that contract.
-3. Port the exact archived A -> legacy B -> workspace C composition.
-4. Add direct workspace `%{bin:...}` coverage for a mounted executable.
-5. Decide auxiliary nested-project semantics, then characterize parent
-   consumption and recursive alias behavior.
-6. Add the one-project shared-source mask, redirects, and package aliases.
-7. Port refresh/retry behavior without restoring manifests or source claims.
-8. Add cross-lock digest identity and lock-selected compiler provenance, with a
-   separate small configurator metadata test.
-9. Add smaller ownership regressions for `dune fmt`, Dune warnings, version
-   pforms, generated opam files, workspace-target isolation, and symlink cycles.
-10. Add the broader promotion matrix after routing and ownership are stable.
-11. Run a successful clean `ocaml-cohttp` build with the new
+1. Introduce the exact package node, `Directory | Empty` prepared source, and
+   explicit `Dune | Opam | Provided` outcome.
+2. Move every supported transport, lock `files/`, and extra-source overlay onto
+   the common immutable prepared-source contract.
+3. Add structured native eligibility without broad exception fallback.
+4. Extract one internal Opam stanza from the existing package action, install,
+   cookie, and dependency machinery.
+5. Make it consume the prepared source in a copy sandbox and own one
+   install-layout directory target.
+6. Add the native-first builder-selection matrix, including mixed recipes,
+   wrappers, separate install actions, depexts, non-Dune sources, and failures.
+7. Port the exact native A -> Opam-built B -> workspace C composition.
+8. Redesign or explicitly isolate non-relocatable compiler/toolchain installs.
+9. Remove the old parallel package path only after all source and toolchain
+   cases have replacement coverage.
+10. Add direct workspace `%{bin:...}` coverage for a native package executable.
+11. Add the one-project shared-source mask, redirects, and package aliases.
+12. Port refresh/retry behavior without restoring manifests or source claims.
+13. Add cross-lock digest identity and lock-selected compiler provenance, with a
+    separate small configurator metadata test.
+14. Defer auxiliary nested-project visibility to in/out work unless preserving
+    the complete decoded universe simplifies the package-node design.
+15. Add smaller ownership regressions for `dune fmt`, Dune warnings, version
+    pforms, generated opam files, workspace-target isolation, and symlink
+    cycles.
+16. Add the broader promotion matrix after builder ownership is stable.
+17. Run a successful clean `ocaml-cohttp` build with the new
     `materialize-dependencies` span and attribute sandbox creation precisely.
-12. Compare identical successful clean and warm workloads under legacy nested
-    recipes and native mounted routing.
-13. Only then decide whether source materialization, routing, or scheduling
-    needs another architectural change.
-14. Turn the broad guide above into a smaller feature design with explicit
+18. Compare identical successful clean and warm workloads under Opam and native
+    builders.
+19. Only then decide whether source materialization or scheduling needs another
+    architectural change.
+20. Turn the broad guide above into a smaller feature design with explicit
     module ownership and migration boundaries.
 
 ## Bottom line
@@ -1164,7 +1268,7 @@ loaded through a rules-side API while the engine remains workspace-only and
 artifacts retain separate ownership.
 
 Building `ocaml-re` and `ocaml-cohttp` is a substantial success. The remaining
-work is not to return to the old architecture, but to restore the useful missing
-behavioral fixtures, make routing policy explicit, measure the full-build path
-with narrow events, and turn the broad prototype migration into a smaller,
-reviewable feature design.
+work is not to return to the old architecture, but to unify native and opaque
+package builders around prepared sources and explicit output ownership, restore
+the useful missing fixtures, measure the full-build path with narrow events, and
+turn the broad prototype migration into a smaller, reviewable feature design.
