@@ -169,6 +169,11 @@ end = struct
                      dir
                      (exe ^ Filename.Extension.to_string (Js_of_ocaml.Ext.exe ~mode)))))
         })
+    | Opam_stanza.T opam ->
+      let+ () =
+        Opam_rules.gen_rules (Super_context.context sctx |> Context.name) ~dir opam
+      in
+      empty_none
     | Alias_conf.T alias ->
       let+ () = Simple_rules.alias sctx alias ~dir ~expander in
       empty_none

@@ -32,7 +32,8 @@ let make
       ~default_env
       ~default_artifacts
       ~visible_packages
-      ~lockdir_bin_env
+      ~package_env
+      ~package_binaries
   =
   let open Memo.O in
   let config = Dune_env.find config_stanza ~profile in
@@ -55,14 +56,14 @@ let make
     inherited ~field:base_env ~root:default_env (fun env ->
       Memo.return (Env.extend_env env config.env_vars))
   in
-  (* The lock directory [PATH] is added to each node's own [base_env] rather
-     than inherited: the visible packages differ per directory, so inheriting
-     it would widen a descendant's [PATH] back to its ancestor's. *)
+  (* The package environment is added to each node's own [base_env] rather than
+     inherited: the visible packages differ per directory, so inheriting it
+     would widen a descendant's environment back to its ancestor's. *)
   let env_without_local_bins =
     Memo.lazy_ ~name:"env-without-local-bins" (fun () ->
       let* env = Memo.Lazy.force base_env in
-      let+ bin_env = lockdir_bin_env in
-      Env_path.extend_env_concat_path env bin_env)
+      let+ package_env = package_env in
+      Env_path.extend_env_concat_path env package_env)
   in
   (* [local_bin_dirs] go ahead of the lock directory, so that a binary bound by
      [(env (binaries ...))] wins on [PATH] just as it does in [%{bin:...}],
@@ -81,7 +82,8 @@ let make
         config_binaries
         ~f:(File_binding_expand.expand ~dir ~f:(expand_str_lazy expander))
       >>| Artifacts.add_binaries binaries ~dir
-      >>| Artifacts.set_visible_packages ~visible_packages)
+      >>| Artifacts.set_visible_packages ~visible_packages
+      >>| fun artifacts -> Artifacts.with_dependency_binaries artifacts package_binaries)
   in
   let local_binaries =
     Memo.lazy_ ~name:"local-binaries" (fun () ->

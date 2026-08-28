@@ -508,13 +508,19 @@ let is_local t =
   | External _ -> false
   | In_source_tree _ -> true
   | In_build_dir dir ->
-    (match Path.Build.extract_build_context dir with
-     | None -> true
-     | Some (name, _) ->
-       not
-         (Context_name.equal
-            (Context_name.of_string (Filename.to_string name))
-            Private_context.t.name))
+    if
+      Path.Build.explode dir
+      |> List.exists ~f:(fun component ->
+        Filename.equal component (Filename.of_string_exn ".opam"))
+    then false
+    else (
+      match Path.Build.extract_build_context dir with
+      | None -> true
+      | Some (name, _) ->
+        not
+          (Context_name.equal
+             (Context_name.of_string (Filename.to_string name))
+             Private_context.t.name))
 ;;
 
 let resolve_main_module_name t =

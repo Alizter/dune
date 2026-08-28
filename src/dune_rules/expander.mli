@@ -19,6 +19,9 @@ val project : t -> Dune_project.t
     owning package, and means that every package is visible. *)
 val visible_packages : t -> Package.Name.Set.t option Memo.t
 
+(** Package dependencies for explicit opam stanzas, even without a lock directory. *)
+val package_dependencies : t -> Package.Name.Set.t option Memo.t
+
 val make_root
   :  project:Dune_project.t
   -> source_dir:Source_path.t

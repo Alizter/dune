@@ -7,11 +7,16 @@ type any_package =
   | Local of Package.t
   | Installed of Dune_package.t
   | Build of unit Action_builder.t
+  | Opam of unit Action_builder.t
 
 let find_package ctx pkg =
   let* packages = Dune_load.packages () in
   match Package.Name.Map.find packages pkg with
-  | Some p -> Memo.return (Some (Local p))
+  | Some package ->
+    Opam_rules.find_package ctx pkg
+    >>| (function
+     | None -> Some (Local package)
+     | Some build -> Some (Opam build))
   | None ->
     Pkg_sources.find_mounted ctx pkg
     >>= (function
@@ -46,7 +51,7 @@ let create ctx = Memo.return ctx
 let section_of_any_package_site any_package pkg_name loc site =
   let sites =
     match any_package with
-    | Build _ ->
+    | Build _ | Opam _ ->
       (* TODO We should be able to extract this information after the package
          is built *)
       Site.Map.empty
