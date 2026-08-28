@@ -1446,11 +1446,28 @@ module DB = struct
     (* Associate each package's digest with the package and its dependencies. *)
     type t = entry Pkg_digest.Map.t
 
-    let of_lock_dir lock_dir ~platform ~system_provided =
-      entries_by_name_of_lock_dir lock_dir ~platform ~system_provided
-      |> Package.Name.Map.values
-      |> Pkg_digest.Map.of_list_map_exn ~f:(fun entry -> entry.pkg_digest, entry)
+    type index =
+      { entries_by_name : entry Package.Name.Map.t
+      ; entries_by_digest : t
+      }
+
+    let index_of_lock_dir lock_dir ~platform ~system_provided =
+      let entries_by_name =
+        entries_by_name_of_lock_dir lock_dir ~platform ~system_provided
+      in
+      let entries_by_digest =
+        Package.Name.Map.values entries_by_name
+        |> Pkg_digest.Map.of_list_map_exn ~f:(fun entry -> entry.pkg_digest, entry)
+      in
+      { entries_by_name; entries_by_digest }
     ;;
+
+    let find_digest_by_name { entries_by_name; _ } name =
+      Package.Name.Map.find entries_by_name name
+      |> Option.map ~f:(fun { pkg_digest; _ } -> pkg_digest)
+    ;;
+
+    let digest_by_name index name = find_digest_by_name index name |> Option.value_exn
 
     (* Helper which is called when both tables have an entry with the same
        digest. This happens when two lock directories have a package in common
@@ -1485,28 +1502,8 @@ module DB = struct
       Some entry
     ;;
 
-    let empty = Pkg_digest.Map.empty
     let union = Pkg_digest.Map.union ~f:union_check
     let union_all = Pkg_digest.Map.union_all ~f:union_check
-
-    let of_dev_tool_deps_if_lock_dir_exists dev_tool ~platform ~system_provided =
-      let+ lock_dir_opt = Lock_dir.of_dev_tool_if_lock_dir_exists dev_tool in
-      Option.map lock_dir_opt ~f:(of_lock_dir ~platform ~system_provided)
-    ;;
-
-    let all_existing_dev_tools =
-      Memo.lazy_ ~name:"all-existing-dev-tools" (fun () ->
-        let* platform = Lock_dir.Sys_vars.solver_env in
-        let+ xs =
-          Memo.List.map
-            Pkg_dev_tool.all
-            ~f:
-              (of_dev_tool_deps_if_lock_dir_exists
-                 ~platform
-                 ~system_provided:default_system_provided)
-        in
-        List.filter_opt xs |> union_all)
-    ;;
   end
 
   module Id = Id.Make ()
@@ -1514,21 +1511,130 @@ module DB = struct
   type t =
     { id : Id.t
     ; pkg_digest_table : Pkg_table.t
-    ; system_provided : Package.Name.Set.t
     }
 
   let equal x y = Id.equal x.id y.id
+  let create ~pkg_digest_table = { id = Id.gen (); pkg_digest_table }
 
-  let create ~pkg_digest_table ~system_provided =
-    { id = Id.gen (); pkg_digest_table; system_provided }
+  module Lock_dir_index_key = struct
+    type t =
+      { path : Path.t
+      ; lock_dir : Dune_pkg.Lock_dir.t
+      ; platform : Dune_pkg.Solver_env.t
+      }
+
+    let to_dyn { path; lock_dir = _; platform } =
+      Dyn.record
+        [ "path", Path.to_dyn path; "platform", Dune_pkg.Solver_env.to_dyn platform ]
+    ;;
+
+    (* The index retains locations and hashes ordered package data, so the lock
+       directory part of this key must use structural equality. *)
+    let hash { path; lock_dir; platform } =
+      Tuple.T3.hash Path.hash Poly.hash Dune_pkg.Solver_env.hash (path, lock_dir, platform)
+    ;;
+
+    let equal { path; lock_dir; platform } t =
+      Path.equal path t.path
+      && Poly.equal lock_dir t.lock_dir
+      && Dune_pkg.Solver_env.equal platform t.platform
+    ;;
+  end
+
+  let lock_dir_index =
+    let memo =
+      Memo.create "pkg-db-lock-dir-index" ~input:(module Lock_dir_index_key)
+      @@ fun { path = _; lock_dir; platform } ->
+      Pkg_table.index_of_lock_dir
+        lock_dir
+        ~platform
+        ~system_provided:default_system_provided
+      |> Memo.return
+    in
+    fun path lock_dir platform -> Memo.exec memo { path; lock_dir; platform }
   ;;
 
-  let pkg_digest_of_name lock_dir platform pkg_name ~system_provided =
-    let entries_by_name =
-      Pkg_table.entries_by_name_of_lock_dir lock_dir ~platform ~system_provided
+  type dev_tool_index =
+    { dev_tool : Pkg_dev_tool.t
+    ; key : Lock_dir_index_key.t
+    ; index : Pkg_table.index
+    }
+
+  type existing_dev_tools =
+    { indexes : dev_tool_index list
+    ; combined : Pkg_table.t
+    }
+
+  let index_of_dev_tool_if_lock_dir_exists dev_tool ~platform =
+    Lock_dir.of_dev_tool_if_lock_dir_exists dev_tool
+    >>= function
+    | None -> Memo.return None
+    | Some lock_dir ->
+      let path = Lock_dir.dev_tool_external_lock_dir dev_tool |> Path.external_ in
+      let key = { Lock_dir_index_key.path; lock_dir; platform } in
+      let+ index = lock_dir_index path lock_dir platform in
+      Some { dev_tool; key; index }
+  ;;
+
+  let combined_dev_tool_indexes indexes =
+    List.map indexes ~f:(fun { index; _ } -> index.Pkg_table.entries_by_digest)
+    |> Pkg_table.union_all
+  ;;
+
+  let all_existing_dev_tools =
+    Memo.lazy_ ~name:"all-existing-dev-tools" (fun () ->
+      let* platform = Lock_dir.Sys_vars.solver_env in
+      let+ indexes =
+        Memo.List.map Pkg_dev_tool.all ~f:(index_of_dev_tool_if_lock_dir_exists ~platform)
+        >>| List.filter_opt
+      in
+      { indexes; combined = combined_dev_tool_indexes indexes })
+  ;;
+
+  let find_existing_dev_tool { indexes; _ } dev_tool =
+    List.find indexes ~f:(fun index -> Pkg_dev_tool.equal index.dev_tool dev_tool)
+  ;;
+
+  let replace_dev_tool_index indexes replacement =
+    let rec loop = function
+      | [] -> [ replacement ]
+      | index :: indexes ->
+        if Pkg_dev_tool.equal index.dev_tool replacement.dev_tool
+        then replacement :: indexes
+        else index :: loop indexes
     in
-    let entry = Package.Name.Map.find_exn entries_by_name pkg_name in
-    entry.pkg_digest
+    loop indexes
+  ;;
+
+  let project_index =
+    let memo =
+      Memo.create
+        "pkg-db-project-index"
+        ~input:(module Context_name)
+        (fun ctx ->
+           let* path, lock_dir = Lock_dir.get_with_path ctx >>| User_error.ok_exn
+           and* platform = Lock_dir.Sys_vars.solver_env in
+           lock_dir_index path lock_dir platform)
+    in
+    fun ctx -> Memo.exec memo ctx
+  ;;
+
+  module Project_pkg_key = struct
+    type t = Context_name.t * Package.Name.t
+
+    let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn Package.Name.to_dyn
+    let hash = Tuple.T2.hash Context_name.hash Package.Name.hash
+    let equal = Tuple.T2.equal Context_name.equal Package.Name.equal
+  end
+
+  let project_pkg_digest =
+    let memo =
+      Memo.create "pkg-db-project-package" ~input:(module Project_pkg_key)
+      @@ fun (ctx, pkg_name) ->
+      let+ index = project_index ctx in
+      Pkg_table.find_digest_by_name index pkg_name
+    in
+    fun ctx pkg_name -> Memo.exec memo (ctx, pkg_name)
   ;;
 
   let of_ctx =
@@ -1553,18 +1659,17 @@ module DB = struct
                 dependencies to be shared with the project's if it too is being
                 built in the default context. *)
              let allow_sharing = allow_sharing && Context_name.is_default ctx in
-             (* Is this value anything other than [default_system_provided]? *)
-             let system_provided = default_system_provided in
+             let* project_index = project_index ctx in
              let+ pkg_digest_table =
-               let* lock_dir = Lock_dir.get_exn ctx
-               and* platform = Lock_dir.Sys_vars.solver_env in
-               (if allow_sharing
-                then Memo.Lazy.force Pkg_table.all_existing_dev_tools
-                else Memo.return Pkg_table.empty)
-               >>| Pkg_table.union
-                     (Pkg_table.of_lock_dir lock_dir ~platform ~system_provided)
+               if allow_sharing
+               then
+                 let+ existing_dev_tools = Memo.Lazy.force all_existing_dev_tools in
+                 Pkg_table.union
+                   project_index.Pkg_table.entries_by_digest
+                   existing_dev_tools.combined
+               else Memo.return project_index.Pkg_table.entries_by_digest
              in
-             create ~pkg_digest_table ~system_provided)
+             create ~pkg_digest_table)
     in
     fun ctx ~allow_sharing -> Memo.exec of_ctx_memo (ctx, allow_sharing)
   ;;
@@ -1572,40 +1677,60 @@ module DB = struct
   (* Returns the db for the given context and the digest of the given package
      within that context. *)
   let of_project_pkg ctx pkg_name =
-    let* lock_dir = Lock_dir.get_exn ctx
-    and* platform = Lock_dir.Sys_vars.solver_env in
-    let+ t = of_ctx ctx ~allow_sharing:true in
-    t, pkg_digest_of_name lock_dir platform pkg_name ~system_provided:t.system_provided
+    let+ t = of_ctx ctx ~allow_sharing:true
+    and+ pkg_digest = project_pkg_digest ctx pkg_name in
+    t, Option.value_exn pkg_digest
   ;;
 
   (* Returns the db for all dev tools combined with the default context, and
      the digest for the dev tool's package. *)
   let of_dev_tool =
-    let system_provided = default_system_provided in
     let inactive_lockdir =
       Memo.lazy_ ~name:"inactive-lockdir-package-db" (fun () ->
-        let+ pkg_digest_table = Memo.Lazy.force Pkg_table.all_existing_dev_tools in
-        create ~pkg_digest_table ~system_provided)
+        let+ existing_dev_tools = Memo.Lazy.force all_existing_dev_tools in
+        create ~pkg_digest_table:existing_dev_tools.combined)
     in
-    let of_dev_tool_memo =
+    let memo =
       Memo.create "pkg-db-dev-tool" ~input:(module Dune_pkg.Dev_tool)
       @@ fun dev_tool ->
-      let+ lock_dir = Lock_dir.of_dev_tool dev_tool
-      and+ platform = Lock_dir.Sys_vars.solver_env in
-      pkg_digest_of_name
-        lock_dir
-        platform
-        (Pkg_dev_tool.package_name dev_tool)
-        ~system_provided
-    in
-    fun dev_tool ->
+      let* existing_dev_tools = Memo.Lazy.force all_existing_dev_tools in
+      let* lock_dir = Lock_dir.of_dev_tool dev_tool
+      and* platform = Lock_dir.Sys_vars.solver_env in
+      let path = Lock_dir.dev_tool_external_lock_dir dev_tool |> Path.external_ in
+      let key = { Lock_dir_index_key.path; lock_dir; platform } in
+      let* index = lock_dir_index path lock_dir platform in
+      let current = { dev_tool; key; index } in
+      let included_in_existing =
+        match find_existing_dev_tool existing_dev_tools dev_tool with
+        | None -> false
+        | Some existing -> Lock_dir_index_key.equal existing.key key
+      in
       let+ db =
-        Lock_dir.lock_dir_active Context_name.default
-        >>= function
-        | false -> Memo.Lazy.force inactive_lockdir
-        | true -> of_ctx Context_name.default ~allow_sharing:true
-      and+ pkg_digest = Memo.exec of_dev_tool_memo dev_tool in
-      db, pkg_digest
+        if included_in_existing
+        then
+          Lock_dir.lock_dir_active Context_name.default
+          >>= function
+          | false -> Memo.Lazy.force inactive_lockdir
+          | true -> of_ctx Context_name.default ~allow_sharing:true
+        else (
+          let current_dev_tools =
+            replace_dev_tool_index existing_dev_tools.indexes current
+            |> combined_dev_tool_indexes
+          in
+          Lock_dir.lock_dir_active Context_name.default
+          >>= function
+          | false -> create ~pkg_digest_table:current_dev_tools |> Memo.return
+          | true ->
+            let+ project_index = project_index Context_name.default in
+            create
+              ~pkg_digest_table:
+                (Pkg_table.union
+                   project_index.Pkg_table.entries_by_digest
+                   current_dev_tools))
+      in
+      db, Pkg_table.digest_by_name index (Pkg_dev_tool.package_name dev_tool)
+    in
+    fun dev_tool -> Memo.exec memo dev_tool
   ;;
 end
 
@@ -3018,8 +3143,6 @@ let all_filtered_depexts context =
 ;;
 
 let pkg_digest_of_project_dependency ctx package_name =
-  let+ db = DB.of_ctx ctx ~allow_sharing:false in
-  Pkg_digest.Map.keys db.pkg_digest_table
-  |> List.find ~f:(fun (pkg_digest : Pkg_digest.t) ->
-    Package.Name.equal pkg_digest.name package_name)
+  let* _ = DB.of_ctx ctx ~allow_sharing:false in
+  DB.project_pkg_digest ctx package_name
 ;;
