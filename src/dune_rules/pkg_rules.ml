@@ -1378,6 +1378,7 @@ module DB = struct
           ~platform
           ~system_provided
       =
+      let start = Time.now () in
       let pkgs_by_name = Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform in
       let cache =
         (* Cache so that the digest of each package is only computed once *)
@@ -1429,9 +1430,17 @@ module DB = struct
           in
           { pkg; deps; has_dune_dep; pkg_digest })
       in
-      Package.Name.Map.map
-        pkgs_by_name
-        ~f:(compute_entry ~seen_set:Package.Name.Set.empty ~seen_list:[])
+      let entries =
+        Package.Name.Map.map
+          pkgs_by_name
+          ~f:(compute_entry ~seen_set:Package.Name.Set.empty ~seen_list:[])
+      in
+      Dune_trace.emit Pkg (fun () ->
+        Dune_trace.Event.package_digest_table
+          ~start
+          ~stop:(Time.now ())
+          ~packages:(Package.Name.Map.cardinal entries));
+      entries
     ;;
 
     (* Associate each package's digest with the package and its dependencies. *)
