@@ -467,26 +467,26 @@ workspace context while disabling implicit workspace targets.
 The archive used a conservative action veto. Any unconditional non-Dune step or
 separate install action kept a package on legacy rules.
 
-Current routing is deliberately different:
+The in-progress cutover instead classifies source-backed project dependencies
+from the immutable primary source target:
 
-- an immediate selected dependency on `dune` is authoritative;
-- otherwise the selected build is either the lock's special Dune marker or an
-  action with at least one literal `dune build ... @install` and no other
-  unconditional executable work;
-- condition-guarded actions do not participate in that fallback classification;
-- the fallback action route also requires no selected install action and no
-  depexts;
-- extra sources force legacy routing;
-- local archive files and HTTP sources may mount;
-- local directories, VCS sources, and other fetch forms remain legacy;
-- the decoded source must represent and enable the selected package.
+- any Dune build file selects native loading;
+- a tree with no Dune build file receives an internal synthetic `Opam` stanza;
+- lock metadata and recipe shape do not participate in selection;
+- Dune parsing and loading errors propagate rather than selecting `Opam`;
+- local archives and live directories use the same primary-source contract;
+- source-less packages still use legacy rules until empty primary-source targets
+  are implemented.
 
-This is the current prototype classifier, not the planned final boundary. The
-chosen direction is to prepare a source directory target for every package,
-including an empty target for a source-less package. Any Dune build file selects
-native loading; only a tree with no Dune build files receives the internal
-synthetic `Opam` stanza. Lock metadata and recipe shape do not participate.
-`different-dune-in-path.t` must be reconciled with that native-first rule.
+Lock `files/`, extra sources, patches, substitutions, and other recipe actions
+are deliberately not applied before classification. Synthetic `Opam` packages
+apply their overlays and complete recipe in the copy sandbox. A native-selected
+package currently consumes the immutable primary source as-is and ignores the
+recorded Opam recipe. This is a known limitation for upstream Dune projects that
+require a patch or source transformation before they can build. Supporting them
+requires a separate design such as
+`_fetch/raw -> transformed source target -> native loading`; mutating the
+primary fetch target or silently falling back to `Opam` is not acceptable.
 
 ### Overall assessment
 
@@ -671,10 +671,11 @@ Add focused cases proving:
 - every currently supported source transport implements the common prepared
   source contract before its old `.pkg` source ownership is removed.
 
-Current `extra-sources.t` already proves the observable patched result for an
-extra-source package. Future extra-source preparation should produce one
-immutable overlaid source target that either builder can consume rather than
-remain a permanent routing exception.
+Synthetic `Opam` coverage proves that lock `files/` and ordered extra sources
+are overlaid in its copy sandbox without mutating the primary source. Native
+selection intentionally inspects and consumes only the immutable primary source
+for now; pre-loading transformations require the separate transformed-source
+phase described above.
 
 #### Same-project package masking
 
@@ -750,23 +751,25 @@ Lower-priority archived cases without exact current equivalents include:
 The following should be reported as prototype scope or policy differences, not
 blindly restored as old tests.
 
-#### Extra-source overlays
+#### Source transformations
 
-The archive mounted checksum-verified extra sources over the primary archive.
-Current `Pkg_sources.prepare` explicitly routes every package with extra sources
-to legacy rules. This avoids another source-ownership and overlay problem but
-reduces native coverage.
+Synthetic `Opam` packages overlay checksum-verified extra sources and lock
+`files/` after copying the immutable primary source into their sandbox. Native
+packages do not receive those overlays and do not execute patch, substitute, or
+other preparation actions from the lock recipe. A Dune-bearing upstream that
+needs such preparation is therefore unsupported by native selection today.
 
-The existing `extra-sources.t` proves the patched result under the current
-legacy route. The planned common source layer instead needs a normal rule-owned
-overlay target before native loading or the synthetic `Opam` stanza consumes the
-source.
+The future extension point is a separately owned transformed source directory
+target between the raw fetch and native loading. It must preserve checksum and
+cache identity for the raw source, deterministic overlay ordering, and ordinary
+rule-graph invalidation.
 
-#### VCS and live directory sources
+#### VCS and source-less packages
 
-Current mounting supports local archive files and HTTP fetches. VCS sources,
-live directories, and other fetch forms remain legacy. This is an explicit
-transport limitation.
+Archive and live-directory primary sources participate in classification. VCS
+coverage still needs an end-to-end regression. Source-less packages remain on
+legacy rules until the common source layer can materialize an empty directory
+target for them.
 
 #### Mixed recipes with a selected Dune dependency
 

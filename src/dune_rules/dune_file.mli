@@ -14,6 +14,13 @@ val static_stanzas : t -> Stanza.t list
 val project : t -> Dune_project.t
 val to_dyn : t -> Dyn.t
 val find_stanzas : t -> 'a Stanza.Key.t -> 'a list Memo.t
+
+val create_synthetic
+  :  project:Loaded_project.t
+  -> source_dir:Source_path.t
+  -> stanzas:Stanza.t list
+  -> t
+
 val fold_static_stanzas : t list -> init:'acc -> f:(t -> Stanza.t -> 'acc -> 'acc) -> 'acc
 
 val eval

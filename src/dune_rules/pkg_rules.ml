@@ -406,13 +406,59 @@ module DB = struct
   ;;
 end
 
-let is_project_mounted_pkg context (pkg : Pkg.t) =
+let exact_mounted_package context (pkg : Pkg.t) =
   Pkg_sources.find_mounted context pkg.info.name
   >>= function
-  | None -> Memo.return false
-  | Some _ ->
+  | None -> Memo.return None
+  | Some mounted ->
     let+ _, mounted_digest = DB.of_project_pkg context pkg.info.name in
-    Pkg_digest.equal pkg.pkg_digest mounted_digest
+    Option.some_if (Pkg_digest.equal pkg.pkg_digest mounted_digest) mounted
+;;
+
+let is_project_mounted_pkg context pkg =
+  exact_mounted_package context pkg
+  >>| function
+  | Some mounted -> Pkg_sources.Mounted.is_dune mounted
+  | None -> false
+;;
+
+let opam_paths mounted package_name =
+  let candidate = Pkg_sources.Mounted.candidate mounted in
+  let root =
+    Path.Build.L.relative
+      (Pkg_sources.Candidate.artifact_root candidate)
+      [ ".opam"; Package.Name.to_string package_name ]
+  in
+  let write_paths =
+    Opam_package_rules.Paths.of_root package_name ~root ~relative:Path.Build.relative
+  in
+  let write_paths =
+    { write_paths with source_dir = Pkg_sources.Mounted.source_root mounted }
+  in
+  let paths = Opam_package_rules.Paths.map_path write_paths ~f:Path.build in
+  paths, write_paths
+;;
+
+let remap_opam_package context (pkg : Pkg.t) =
+  exact_mounted_package context pkg
+  >>| function
+  | Some mounted ->
+    (match Pkg_sources.Mounted.kind mounted with
+     | Dune -> pkg
+     | Opam _ ->
+       let paths, write_paths = opam_paths mounted pkg.info.name in
+       { pkg with paths; write_paths })
+  | None -> pkg
+;;
+
+let dependency_view_for_package context (pkg : Pkg.t) =
+  let* dependencies =
+    Pkg.deps_closure pkg |> Memo.parallel_map ~f:(remap_opam_package context)
+  in
+  Dependency_view.of_list
+    context
+    dependencies
+    ~is_mounted:(is_project_mounted_pkg context)
 ;;
 
 module rec Resolve : sig
@@ -577,11 +623,7 @@ end = struct
         }
       in
       let* dependencies =
-        Dependency_view.make
-          (Package_universe.context_name package_universe)
-          t
-          ~is_mounted:
-            (is_project_mounted_pkg (Package_universe.context_name package_universe))
+        dependency_view_for_package (Package_universe.context_name package_universe) t
       in
       let* () =
         Action_expander.refresh_exported_env
@@ -623,12 +665,7 @@ end = struct
 end
 
 let gen_rules context_name (pkg : Pkg.t) =
-  let* dependencies =
-    Dependency_view.make
-      context_name
-      pkg
-      ~is_mounted:(is_project_mounted_pkg context_name)
-  in
+  let* dependencies = dependency_view_for_package context_name pkg in
   let* source_deps, copy_rules = Opam_package_rules.source_rules pkg in
   let* () = copy_rules in
   let source =
@@ -668,15 +705,30 @@ let setup_pkg_install_alias =
     (* Fetching the package target implies that we will also fetch the extra
        sources. *)
     let open Action_builder.O in
-    let* pkg_digests, mounted_names =
+    let* pkg_digests, native_names, opam_targets =
       Action_builder.of_memo
         (let open Memo.O in
          let* db = DB.of_ctx ctx_name ~allow_sharing:true
          and* mounted = Pkg_sources.mounted ctx_name in
-         let mounted_names =
-           List.map mounted ~f:(fun mounted ->
-             Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.name)
-           |> Package.Name.Set.of_list
+         let mounted_names, native_names, opam_targets =
+           List.fold_left
+             mounted
+             ~init:(Package.Name.Set.empty, Package.Name.Set.empty, [])
+             ~f:(fun (mounted_names, native_names, opam_targets) mounted ->
+               let candidate = Pkg_sources.Mounted.candidate mounted in
+               let name = Pkg_sources.Candidate.name candidate in
+               let mounted_names = Package.Name.Set.add mounted_names name in
+               match Pkg_sources.Mounted.kind mounted with
+               | Dune ->
+                 mounted_names, Package.Name.Set.add native_names name, opam_targets
+               | Opam stanza ->
+                 let target =
+                   Opam_stanza.target_dir
+                     stanza
+                     ~dir:(Pkg_sources.Candidate.artifact_root candidate)
+                   |> Path.build
+                 in
+                 mounted_names, native_names, target :: opam_targets)
          in
          let* mounted_digests =
            Memo.parallel_map (Package.Name.Set.to_list mounted_names) ~f:(fun name ->
@@ -688,18 +740,19 @@ let setup_pkg_install_alias =
            |> List.filter ~f:(fun pkg_digest ->
              not (Pkg_digest.Set.mem mounted_digests pkg_digest))
          in
-         Memo.return (pkg_digests, mounted_names))
+         Memo.return (pkg_digests, native_names, opam_targets))
     in
     let* () =
       List.map pkg_digests ~f:(fun pkg_digest ->
         Paths.make ~relative:Path.Build.relative pkg_digest (Dependencies ctx_name)
         |> Paths.target_dir
         |> Path.build)
+      |> List.rev_append opam_targets
       |> Action_builder.paths
     in
-    if Package.Name.Set.is_empty mounted_names
+    if Package.Name.Set.is_empty native_names
     then Action_builder.return ()
-    else Install_layout.deps ctx_name mounted_names
+    else Install_layout.deps ctx_name native_names
   in
   fun ~dir ctx_name ->
     let rule =
@@ -733,9 +786,12 @@ let setup_package_rules db ~package_universe ~dir ~pkg_digest : Gen_rules.result
       Pkg_sources.find_mounted context pkg.info.name
       >>= (function
        | None -> Memo.return false
-       | Some _ ->
-         let+ _, mounted_digest = DB.of_project_pkg context pkg.info.name in
-         Pkg_digest.equal pkg_digest mounted_digest)
+       | Some mounted ->
+         if not (Pkg_sources.Mounted.is_dune mounted)
+         then Memo.return false
+         else
+           let+ _, mounted_digest = DB.of_project_pkg context pkg.info.name in
+           Pkg_digest.equal pkg_digest mounted_digest)
   in
   if mounted
   then Memo.return Gen_rules.no_rules
@@ -809,6 +865,34 @@ let resolve_pkg_dep context (loc, package_name) =
   Resolve.resolve db loc pkg_digest (Dependencies context)
 ;;
 
+let gen_opam_rules context ~dir package_name =
+  let* package = resolve_pkg_dep context (Loc.none, package_name)
+  and* mounted = Pkg_sources.find_mounted context package_name in
+  let mounted = Option.value_exn mounted in
+  let candidate = Pkg_sources.Mounted.candidate mounted in
+  if not (Path.Build.equal dir (Pkg_sources.Candidate.artifact_root candidate))
+  then
+    Code_error.raise
+      "Synthetic opam stanza has an unexpected artifact root"
+      [ "dir", Path.Build.to_dyn dir
+      ; ( "artifact_root"
+        , Pkg_sources.Candidate.artifact_root candidate |> Path.Build.to_dyn )
+      ];
+  let source_root = Pkg_sources.Mounted.source_root mounted in
+  let* package = remap_opam_package context package in
+  let* dependencies = dependency_view_for_package context package in
+  let source =
+    { Opam_package_rules.Source_input.root = source_root
+    ; files_dir = Some package.files_dir
+    ; extra_sources =
+        List.map package.info.extra_sources ~f:(fun (local, source) ->
+          local, Fetch_rules.target source `File |> Path.build)
+    }
+  in
+  let source_deps = Dep.Set.of_files [ Path.build source_root ] in
+  Opam_package_rules.gen_rules context package ~source ~source_deps ~dependencies
+;;
+
 let binaries_for_package context package =
   Memo.lazy_
     ~name:"package-dependency-binaries"
@@ -819,9 +903,7 @@ let binaries_for_package context package =
         (Context_name.to_string context))
     (fun () ->
        let* pkg = resolve_pkg_dep context (Loc.none, package) in
-       let* dependencies =
-         Dependency_view.make context pkg ~is_mounted:(is_project_mounted_pkg context)
-       in
+       let* dependencies = dependency_view_for_package context pkg in
        let* () = Action_expander.refresh_exported_env context dependencies in
        let+ { Action_expander.Artifacts_and_deps.binaries; dep_info = _ } =
          Action_expander.Artifacts_and_deps.of_dependency_view context dependencies
@@ -839,10 +921,12 @@ let ocaml_toolchain context =
   match lock_dir.ocaml with
   | None -> Memo.return None
   | Some ocaml ->
-    let+ pkg = resolve_pkg_dep context ocaml in
+    let* pkg = resolve_pkg_dep context ocaml in
+    let* transitive_deps =
+      pkg :: Pkg.deps_closure pkg |> Memo.parallel_map ~f:(remap_opam_package context)
+    in
     let toolchain =
       let open Action_builder.O in
-      let transitive_deps = pkg :: Pkg.deps_closure pkg in
       let* env, binaries =
         Action_builder.List.fold_left
           ~init:(Global.env (), Path.Set.empty)
@@ -861,7 +945,7 @@ let ocaml_toolchain context =
       let path = Env_path.path (Global.env ()) in
       Action_builder.of_memo @@ Ocaml_toolchain.of_binaries ~path context env binaries
     in
-    Some (Action_builder.memoize "ocaml_toolchain" toolchain)
+    Some (Action_builder.memoize "ocaml_toolchain" toolchain) |> Memo.return
 ;;
 
 let all_deps universe =
@@ -896,6 +980,7 @@ let project_deps_closure ~(packages : Package.Name.Set.t option) context =
 ;;
 
 let dependency_view context dependencies =
+  let* dependencies = Memo.parallel_map dependencies ~f:(remap_opam_package context) in
   let* view =
     Dependency_view.of_list
       context
@@ -1089,7 +1174,8 @@ let find_package context package =
   >>= function
   | false -> Memo.return None
   | true ->
-    let+ package = resolve_pkg_dep context (Loc.none, package) in
+    let* package = resolve_pkg_dep context (Loc.none, package) in
+    let+ package = remap_opam_package context package in
     Some
       (let open Action_builder.O in
        let+ _cookie = (Pkg_installed.of_paths package.paths).cookie in
@@ -1099,7 +1185,10 @@ let find_package context package =
 let resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file =
   let open Action_builder.O in
   let* { paths; _ } =
-    Action_builder.of_memo (resolve_pkg_dep context_name (loc, pkg_name))
+    Action_builder.of_memo
+      (Memo.bind
+         (resolve_pkg_dep context_name (loc, pkg_name))
+         ~f:(fun package -> remap_opam_package context_name package))
   in
   let* { files; _ } = (Pkg_installed.of_paths paths).cookie in
   let section_dir =
@@ -1132,9 +1221,7 @@ let resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file =
 let all_filtered_depexts context =
   let* all_project_deps = all_project_deps context in
   Memo.List.map all_project_deps ~f:(fun (pkg : Pkg.t) ->
-    let* dependencies =
-      Dependency_view.make context pkg ~is_mounted:(is_project_mounted_pkg context)
-    in
+    let* dependencies = dependency_view_for_package context pkg in
     let* () = Action_expander.refresh_exported_env context dependencies in
     let expander = Action_expander.expander context pkg dependencies in
     Action_expander.Expander.filtered_depexts expander)

@@ -252,6 +252,20 @@ let loaded =
           workspace.loaded_projects
           @ List.concat_map mounted ~f:(fun (_, projects, _) -> projects)
         in
+        let synthetic_dune_files =
+          List.filter_map mounted ~f:(fun (mounted, projects, _) ->
+            match Pkg_sources.Mounted.kind mounted with
+            | Dune -> None
+            | Opam stanza ->
+              let loaded_project = List.hd projects in
+              Some
+                (Dune_file.create_synthetic
+                   ~project:loaded_project
+                   ~source_dir:
+                     (Pkg_sources.Mounted.source_root mounted |> Source_path.build)
+                   ~stanzas:
+                     [ Opam_stanza.make_stanza stanza (Some (Package.id stanza.package)) ]))
+        in
         let projects_by_output_root =
           Path.Build.Map.of_list_map_exn loaded_projects ~f:(fun project ->
             Loaded_project.output_root project, project)
@@ -293,7 +307,9 @@ let loaded =
         in
         let* eval = Dune_file.eval mounted_source_dune_files workspace.mask in
         let+ mounted_dune_files = eval context_name in
-        let dune_files = workspace.dune_files @ mounted_dune_files in
+        let dune_files =
+          workspace.dune_files @ mounted_dune_files @ synthetic_dune_files
+        in
         { dune_files
         ; loaded_projects
         ; projects_by_output_root

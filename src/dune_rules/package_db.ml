@@ -21,13 +21,17 @@ let find_package ctx pkg =
     Pkg_sources.find_mounted ctx pkg
     >>= (function
      | Some mounted ->
-       let package =
-         Pkg_sources.Mounted.projects mounted
-         |> List.find_map ~f:(fun (project, _) ->
-           Package.Name.Map.find (Dune_project.including_hidden_packages project) pkg)
-         |> Option.value_exn
-       in
-       Memo.return (Some (Local package))
+       (match Pkg_sources.Mounted.kind mounted with
+        | Dune ->
+          let package =
+            Pkg_sources.Mounted.projects mounted
+            |> List.find_map ~f:(fun (project, _) ->
+              Package.Name.Map.find (Dune_project.including_hidden_packages project) pkg)
+            |> Option.value_exn
+          in
+          Memo.return (Some (Local package))
+        | Opam _ ->
+          Pkg_rules.find_package ctx pkg >>| Option.map ~f:(fun build -> Opam build))
      | None ->
        Pkg_rules.lock_dir_active ctx
        >>= (function

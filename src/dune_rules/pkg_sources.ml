@@ -2,7 +2,6 @@ open Import
 open Memo.O
 module Gen_rules = Build_config.Gen_rules
 module Lock_pkg = Dune_pkg.Lock_dir.Pkg
-module Build_command = Dune_pkg.Lock_dir.Build_command
 
 let artifact_dir_basename = "pkg"
 
@@ -15,8 +14,8 @@ module Candidate = struct
     }
 
   let name t = t.lock_pkg.info.name
-  let source t = t.lock_pkg.info.source
   let source_root t = t.source_root
+  let lock_pkg t = t.lock_pkg
   let artifact_root t = t.artifact_root
   let identity_digest t = t.identity_digest
 
@@ -44,17 +43,29 @@ module Candidate = struct
 end
 
 module Mounted = struct
+  type kind =
+    | Dune
+    | Opam of Opam_stanza.t
+
   type t =
     { candidate : Candidate.t
     ; source_root : Path.Build.t
     ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
     ; tree : Source_tree.Rules.Build.t
+    ; kind : kind
     }
 
   let candidate t = t.candidate
   let source_root t = t.source_root
   let projects t = t.projects
   let tree t = t.tree
+  let kind t = t.kind
+
+  let is_dune t =
+    match t.kind with
+    | Dune -> true
+    | Opam _ -> false
+  ;;
 end
 
 let load_candidates context =
@@ -75,77 +86,6 @@ let candidates =
   |> Staged.unstage
 ;;
 
-let literal = function
-  | Dune_lang.Slang.Literal value -> String_with_vars.text_only value
-  | _ -> None
-;;
-
-(* Arguments may contain package variables and filtered targets. Replacing the
-   action is safe when its literal target includes the package install alias. *)
-let is_dune_build = function
-  | program :: command :: args ->
-    Option.equal String.equal (literal program) (Some "dune")
-    && Option.equal String.equal (literal command) (Some "build")
-    && List.exists args ~f:(fun arg ->
-      Option.equal String.equal (literal arg) (Some "@install"))
-  | [] | [ _ ] -> false
-;;
-
-(* Condition-guarded steps such as [dune subst] for development packages do not
-   veto mounting. At least one unconditional [dune build] is still required. *)
-type action_kind =
-  | No_unconditional_action
-  | Dune_only
-  | Other
-
-let combine_action_kinds actions =
-  List.fold_left actions ~init:No_unconditional_action ~f:(fun kind action ->
-    match kind, action with
-    | Other, _ | _, Other -> Other
-    | Dune_only, _ | _, Dune_only -> Dune_only
-    | No_unconditional_action, No_unconditional_action -> No_unconditional_action)
-;;
-
-let rec action_kind (action : Dune_lang.Action.t) =
-  match action with
-  | Run args | Runexec args -> if is_dune_build args then Dune_only else Other
-  | Chdir (_, action)
-  | No_infer action
-  | Setenv (_, _, action)
-  | Withenv (_, action)
-  | With_accepted_exit_codes (_, action) -> action_kind action
-  | Progn actions | Concurrent actions ->
-    List.map actions ~f:action_kind |> combine_action_kinds
-  | When _ -> No_unconditional_action
-  | Dynamic_run _
-  | Redirect_out _
-  | Redirect_in _
-  | Ignore _
-  | Echo _
-  | Cat _
-  | Copy _
-  | Symlink _
-  | Copy_and_add_line_directive _
-  | System _
-  | Bash _
-  | Write_file _
-  | Mkdir _
-  | Diff _
-  | Pipe _
-  | Cram _
-  | Patch _
-  | Substitute _
-  | Format_dune_file _ -> Other
-;;
-
-let build_command_is_dune_only = function
-  | Build_command.Dune -> true
-  | Build_command.Action action ->
-    (match action_kind action with
-     | Dune_only -> true
-     | No_unconditional_action | Other -> false)
-;;
-
 let selected_recipe candidate =
   let* platform = Lock_dir.Sys_vars.solver_env in
   let lock_pkg = candidate.Candidate.lock_pkg in
@@ -159,13 +99,11 @@ let selected_recipe candidate =
       lock_pkg.install_command
       ~platform
   in
-  let depends_on_dune =
+  let dependencies =
     Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform lock_pkg.depends ~platform
     |> Option.value ~default:[]
-    |> List.exists ~f:(fun { Dune_pkg.Lock_dir.Dependency.name; _ } ->
-      Package.Name.equal name (Package.Name.of_string "dune"))
   in
-  Memo.return (build, install, depends_on_dune)
+  Memo.return (build, install, dependencies)
 ;;
 
 module Build_source_tree = Source_tree.Rules.Build
@@ -195,36 +133,85 @@ let mount candidate source_root tree =
           |> Dune_project.filter_packages ~f:(Package.Name.equal package)
         , source_dir ))
     in
-    Memo.return (Some { Mounted.candidate; source_root; projects; tree }))
+    Memo.return (Some { Mounted.candidate; source_root; projects; tree; kind = Dune }))
+;;
+
+module Scan_dune_files = Source_tree.Rules.Dir.Make_map_reduce (Memo) (Monoid.Exists)
+
+let has_dune_file tree =
+  Scan_dune_files.map_reduce
+    (Build_source_tree.root tree)
+    ~traverse:Source_dir_status.Set.all
+    ~trace_event_name:"Package source classification"
+    ~f:(fun dir -> Memo.return (Option.is_some (Source_tree.Rules.Dir.dune_file dir)))
+;;
+
+let make_package candidate source_root dependencies =
+  let { Lock_pkg.info; _ } = Candidate.lock_pkg candidate in
+  let dir = Source_path.build source_root in
+  Package.create
+    ~name:info.name
+    ~loc:Loc.none
+    ~version:(Some info.version)
+    ~conflicts:[]
+    ~depends:
+      (List.map dependencies ~f:(fun { Dune_pkg.Lock_dir.Dependency.name; _ } ->
+         { Package_dependency.name; constraint_ = None }))
+    ~depopts:[]
+    ~enabled_if:None
+    ~info:Package_info.empty
+    ~has_opam_file:(Exists false)
+    ~dir
+    ~sites:Site.Map.empty
+    ~allow_empty:true
+    ~synopsis:None
+    ~description:None
+    ~tags:[]
+    ~original_opam_file:None
+    ~deprecated_package_names:Package.Name.Map.empty
+    ~contents_basename:None
+;;
+
+let make_opam candidate source_root tree =
+  let* build, install, dependencies = selected_recipe candidate in
+  let package = make_package candidate source_root dependencies in
+  let project =
+    Dune_project.anonymous
+      ~dir:(Source_path.build source_root)
+      Package_info.empty
+      (Package.Name.Map.singleton (Package.name package) package)
+  in
+  let stanza =
+    { Opam_stanza.loc = Loc.none
+    ; origin = Lock
+    ; package
+    ; depends =
+        List.map dependencies ~f:(fun { Dune_pkg.Lock_dir.Dependency.loc; name } ->
+          loc, name)
+    ; build
+    ; install
+    ; depexts = candidate.lock_pkg.depexts
+    ; exported_env = candidate.lock_pkg.exported_env
+    }
+  in
+  { Mounted.candidate
+  ; source_root
+  ; projects = [ project, Build_source_tree.root tree ]
+  ; tree
+  ; kind = Opam stanza
+  }
+  |> Memo.return
 ;;
 
 let prepare candidate =
-  let* build, install, depends_on_dune = selected_recipe candidate in
-  let recipe_is_dune_only =
-    match build, install with
-    | Some build, None ->
-      build_command_is_dune_only build && List.is_empty candidate.lock_pkg.depexts
-    | Some _, Some _ | None, _ -> false
-  in
-  (* A selected dependency on Dune is deliberately authoritative: native rule
-     generation replaces the complete recorded build and install recipe. *)
-  let mount_recipe = depends_on_dune || recipe_is_dune_only in
-  match
-    ( mount_recipe && List.is_empty candidate.lock_pkg.info.extra_sources
-    , Candidate.source candidate
-    , Candidate.source_root candidate )
-  with
-  | true, Some source, Some source_root ->
-    Lock_dir.source_kind source
-    >>= (function
-     | `Local (`File, _) ->
-       let* tree = load_source source_root in
-       mount candidate source_root tree
-     | `Fetch when (snd source.url).backend = `http ->
-       let* tree = load_source source_root in
-       mount candidate source_root tree
-     | `Local (`Directory, _) | `Fetch -> Memo.return None)
-  | false, _, _ | true, Some _, None | true, None, _ -> Memo.return None
+  match Candidate.source_root candidate with
+  | None -> Memo.return None
+  | Some source_root ->
+    let* tree = load_source source_root in
+    let* has_dune_file = has_dune_file tree in
+    if has_dune_file
+    then mount candidate source_root tree
+    else make_opam candidate source_root tree >>| Option.some
 ;;
 
 let load_mounted context =

@@ -20,6 +20,7 @@ val setup_rules
 
 val lock_dir_path : Context_name.t -> Path.t option Memo.t
 val lock_dir_active : Context_name.t -> bool Memo.t
+val gen_opam_rules : Context_name.t -> dir:Path.Build.t -> Package.Name.t -> unit Memo.t
 val ocaml_toolchain : Context_name.t -> Ocaml_toolchain.t Action_builder.t option Memo.t
 
 (** [which ~packages context program] looks [program] up among the binaries

@@ -220,6 +220,8 @@ let find_checksum, find_url =
 ;;
 
 let gen_rules_for_checksum_or_url (loc_url, (url : OpamUrl.t)) checksum =
+  let source = { Source.url = loc_url, url; checksum } in
+  let* source_kind = Lock_dir.source_kind source in
   let loc_url = Dune_pkg.Lock_dir.loc_in_source_tree loc_url in
   let checksum_or_url =
     match checksum with
@@ -249,11 +251,31 @@ let gen_rules_for_checksum_or_url (loc_url, (url : OpamUrl.t)) checksum =
         Action_builder.of_memo (resolve_url url)
       in
       fun ~target ~kind ->
-        Action_builder.with_no_targets
-          (let open Action_builder.O in
-           let+ url = url in
-           action ~url:(loc_url, url) ~checksum ~target ~kind
-           |> Action.Full.make ~can_go_in_shared_cache:true)
+        match source_kind, kind with
+        | `Local (`Directory, source_root), `Directory ->
+          let source_root = Path.outside_build_dir source_root in
+          Action_builder.with_no_targets
+            (let open Action_builder.O in
+             Action_builder.path source_root
+             >>> Action_builder.return
+                   (Action.Full.make
+                      ~can_go_in_shared_cache:true
+                      (Action.Copy (source_root, target))))
+        | `Local (`File, source), `File ->
+          let source = Path.outside_build_dir source in
+          Action_builder.with_no_targets
+            (let open Action_builder.O in
+             Action_builder.path source
+             >>> Action_builder.return
+                   (Action.Full.make
+                      ~can_go_in_shared_cache:true
+                      (Action.Copy (source, target))))
+        | `Local (`Directory, _), `File | `Local (`File, _), `Directory | `Fetch, _ ->
+          Action_builder.with_no_targets
+            (let open Action_builder.O in
+             let+ url = url in
+             action ~url:(loc_url, url) ~checksum ~target ~kind
+             |> Action.Full.make ~can_go_in_shared_cache:true)
     in
     let dir_rule =
       let target = make_target ~kind:`Directory in
@@ -269,7 +291,7 @@ let gen_rules_for_checksum_or_url (loc_url, (url : OpamUrl.t)) checksum =
     and+ () = rule file_rule in
     ()
   in
-  Gen_rules.make rules ~directory_targets
+  Gen_rules.make rules ~directory_targets |> Memo.return
 ;;
 
 let gen_rules ~dir ~components =
@@ -282,10 +304,10 @@ let gen_rules ~dir ~components =
   | [ ("url" | "checksum") ] -> Gen_rules.make_empty ~dir Subdir_set.all |> Memo.return
   | [ "checksum"; checksum ] ->
     let checksum = Dune_pkg.Checksum.parse_string_exn (Loc.none, checksum) in
-    let+ url, checksum = find_checksum checksum in
+    let* url, checksum = find_checksum checksum in
     gen_rules_for_checksum_or_url url (Some checksum)
   | [ "url"; digest ] ->
-    let+ url =
+    let* url =
       match Digest.from_hex digest with
       | Some s -> find_url s
       | None -> User_error.raise [ Pp.textf "invalid digest %s" digest ]
