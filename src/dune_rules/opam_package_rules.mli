@@ -77,11 +77,16 @@ module Paths : sig
 end
 
 module Source_input : sig
-  (** Source inputs for an opaque package build. [files_dir] is overlaid on
-      [root], followed by [extra_sources] in list order, inside the rule's copy
-      sandbox. *)
+  (** Source inputs for an opaque package build. A [No_source] build starts with
+      an empty sandbox working directory. [files_dir] is then overlaid on [root],
+      followed by [extra_sources] in list order. *)
+  type kind =
+    | Directory
+    | No_source
+
   type t =
     { root : Path.Build.t
+    ; kind : kind
     ; files_dir : Path.Build.t option
     ; extra_sources : (Path.Local.t * Path.t) list
     }

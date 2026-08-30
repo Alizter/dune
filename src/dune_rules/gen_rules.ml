@@ -898,7 +898,15 @@ let mounted_context ~resolver ~dir components =
          String.equal id (Path.Build.basename artifact_root |> Filename.to_string))
      with
      | None -> Memo.return Gen_rules.unknown_context
-     | Some _ -> gen_rules resolver (Super_context.find_exn resolver) ~dir rest)
+     | Some mounted ->
+       (match Pkg_sources.Mounted.source_kind mounted with
+        | Primary_source -> gen_rules resolver (Super_context.find_exn resolver) ~dir rest
+        | No_source ->
+          Pkg_rules.setup_mounted_opam_package_rules
+            resolver
+            mounted
+            ~dir
+            ~components:rest))
   | _ -> Memo.return Gen_rules.unknown_context
 ;;
 

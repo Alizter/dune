@@ -475,8 +475,8 @@ from the immutable primary source target:
 - lock metadata and recipe shape do not participate in selection;
 - Dune parsing and loading errors propagate rather than selecting `Opam`;
 - local archives and live directories use the same primary-source contract;
-- source-less packages still use legacy rules until empty primary-source targets
-  are implemented.
+- a source-less package selects synthetic `Opam` directly, without fabricating a
+  fetch target or loaded source project.
 
 Lock `files/`, extra sources, patches, substitutions, and other recipe actions
 are deliberately not applied before classification. Synthetic `Opam` packages
@@ -665,7 +665,7 @@ Add focused cases proving:
 - mixed work, wrappers, separate install actions, depexts, and package
   declarations do not participate in selection;
 - a tree with no Dune build file selects `Opam` independently of action syntax;
-- an empty source-less package tree also selects `Opam`;
+- a source-less package selects `Opam` without a fabricated source tree;
 - a Dune file anywhere in the prepared tree selects native loading;
 - Dune parsing/loading errors propagate instead of falling back to `Opam`;
 - every currently supported source transport implements the common prepared
@@ -767,9 +767,9 @@ rule-graph invalidation.
 #### VCS and source-less packages
 
 Archive and live-directory primary sources participate in classification. VCS
-coverage still needs an end-to-end regression. Source-less packages remain on
-legacy rules until the common source layer can materialize an empty directory
-target for them.
+coverage still needs an end-to-end regression. A source-less package bypasses
+source inspection, starts with an empty Opam sandbox working directory, and has
+no primary-source target.
 
 #### Mixed recipes with a selected Dune dependency
 
@@ -932,7 +932,7 @@ Use two explicit values in sequence:
 ```text
 package node
   = lock universe + exact package + complete recipe
-  + immutable prepared source directory target
+  + optional immutable primary-source directory target
   + exact selected package dependencies + artifact owner
 
 builder
@@ -940,28 +940,31 @@ builder
   | Opam of complete recorded recipe
 ```
 
-Every package receives a prepared directory target, including an empty target
-for a source-less package. Enumerate it through the rules-side `Source_tree`.
+When a primary source exists, enumerate it through the rules-side `Source_tree`.
 The presence of any Dune build file selects `Dune`; only the absence of all Dune
-build files selects `Opam`. Do not inspect the lock recipe, dependency metadata,
-package declarations, install layout, or system-provider metadata. External
-tools remain resolver capabilities rather than builder outcomes. Once a Dune
-file is found, all source, parsing, and loading failures propagate normally
-rather than changing builders. Absence from a mounted list must not select or
-publish either builder.
+build files selects `Opam`. A package with no primary source selects `Opam`
+directly. Do not inspect the lock recipe, dependency metadata, package
+declarations, install layout, or system-provider metadata. External tools remain
+resolver capabilities rather than builder outcomes. Once a Dune file is found,
+all source, parsing, and loading failures propagate normally rather than changing
+builders. Absence from a mounted list must not select or publish either builder.
 
 The package-builder layer presents both choices to ordinary rule generation:
 
 ```text
 Dune files present -> normally loaded source projects and stanzas
-No Dune files      -> one synthetic loaded project and Opam stanza per package
+Source, no Dune    -> one synthetic loaded project and Opam stanza per package
+No source          -> synthetic Opam rules with no loaded source project
 ```
 
-Construct one synthetic project per exact package node after source enumeration,
-attach exact package and artifact ownership, and pass it through ordinary stanza
-traversal and `Gen_rules`. Generic workspace `Dune_load` remains unaware of
-locks and Opam recipes. Several projects may share one prepared source target;
-they do not share recipes, dependencies, artifact roots, or cookies.
+For a source-backed Opam node, construct one synthetic project after source
+enumeration, attach exact package and artifact ownership, and pass it through
+ordinary stanza traversal and `Gen_rules`. A source-less node retains the same
+exact identity and artifact ownership but dispatches its synthetic Opam rules
+directly, without entering `Dune_load`. Generic workspace `Dune_load` remains
+unaware of locks and Opam recipes. Several projects may share one prepared
+source target; they do not share recipes, dependencies, artifact roots, or
+cookies.
 
 Package-node and memo keys must include the owning lock universe or snapshot
 plus exact package identity. Fetch data may be shared by checksum, but builder,

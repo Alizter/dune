@@ -184,6 +184,7 @@ let gen_rules context ~dir stanza =
       let* dependencies = dependency_view context package in
       let source =
         { Package_rules.Source_input.root = package.write_paths.source_dir
+        ; kind = Directory
         ; files_dir = None
         ; extra_sources = []
         }

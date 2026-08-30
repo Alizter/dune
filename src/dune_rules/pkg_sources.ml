@@ -43,6 +43,10 @@ module Candidate = struct
 end
 
 module Mounted = struct
+  type source_kind =
+    | Primary_source
+    | No_source
+
   type kind =
     | Dune
     | Opam of Opam_stanza.t
@@ -51,14 +55,16 @@ module Mounted = struct
     { candidate : Candidate.t
     ; source_root : Path.Build.t
     ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
-    ; tree : Source_tree.Rules.Build.t
+    ; tree : Source_tree.Rules.Build.t option
+    ; source_kind : source_kind
     ; kind : kind
     }
 
   let candidate t = t.candidate
-  let source_root t = t.source_root
+  let working_dir t = t.source_root
   let projects t = t.projects
   let tree t = t.tree
+  let source_kind t = t.source_kind
   let kind t = t.kind
 
   let is_dune t =
@@ -133,7 +139,15 @@ let mount candidate source_root tree =
           |> Dune_project.filter_packages ~f:(Package.Name.equal package)
         , source_dir ))
     in
-    Memo.return (Some { Mounted.candidate; source_root; projects; tree; kind = Dune }))
+    Memo.return
+      (Some
+         { Mounted.candidate
+         ; source_root
+         ; projects
+         ; tree = Some tree
+         ; source_kind = Primary_source
+         ; kind = Dune
+         }))
 ;;
 
 module Scan_dune_files = Source_tree.Rules.Dir.Make_map_reduce (Memo) (Monoid.Exists)
@@ -172,14 +186,20 @@ let make_package candidate source_root dependencies =
     ~contents_basename:None
 ;;
 
-let make_opam candidate source_root tree =
+let make_opam candidate ~source_root ~source_kind ~tree =
   let* build, install, dependencies = selected_recipe candidate in
   let package = make_package candidate source_root dependencies in
-  let project =
-    Dune_project.anonymous
-      ~dir:(Source_path.build source_root)
-      Package_info.empty
-      (Package.Name.Map.singleton (Package.name package) package)
+  let projects, tree =
+    match tree with
+    | Some tree ->
+      let project =
+        Dune_project.anonymous
+          ~dir:(Source_path.build source_root)
+          Package_info.empty
+          (Package.Name.Map.singleton (Package.name package) package)
+      in
+      [ project, Build_source_tree.root tree ], Some tree
+    | None -> [], None
   in
   let stanza =
     { Opam_stanza.loc = Loc.none
@@ -194,24 +214,27 @@ let make_opam candidate source_root tree =
     ; exported_env = candidate.lock_pkg.exported_env
     }
   in
-  { Mounted.candidate
-  ; source_root
-  ; projects = [ project, Build_source_tree.root tree ]
-  ; tree
-  ; kind = Opam stanza
-  }
+  { Mounted.candidate; source_root; projects; tree; source_kind; kind = Opam stanza }
   |> Memo.return
 ;;
 
 let prepare candidate =
   match Candidate.source_root candidate with
-  | None -> Memo.return None
   | Some source_root ->
     let* tree = load_source source_root in
     let* has_dune_file = has_dune_file tree in
     if has_dune_file
     then mount candidate source_root tree
-    else make_opam candidate source_root tree >>| Option.some
+    else
+      make_opam candidate ~source_root ~source_kind:Primary_source ~tree:(Some tree)
+      >>| Option.some
+  | None ->
+    let source_root =
+      Path.Build.L.relative
+        (Candidate.artifact_root candidate)
+        [ ".opam"; Candidate.name candidate |> Package.Name.to_string; "source" ]
+    in
+    make_opam candidate ~source_root ~source_kind:No_source ~tree:None >>| Option.some
 ;;
 
 let load_mounted context =
