@@ -3,8 +3,13 @@
 
 open Import
 
+type origin =
+  | User
+  | Lock
+
 type t =
   { loc : Loc.t
+  ; origin : origin
   ; package : Package.t
   ; depends : (Loc.t * Package.Name.t) list
   ; build : Dune_pkg.Lock_dir.Build_command.t option

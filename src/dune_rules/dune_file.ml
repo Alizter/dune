@@ -15,6 +15,13 @@ let stanzas t = Memo.Lazy.force t.stanzas
 let static_stanzas t = t.static_stanzas
 let project t = Loaded_project.project (Loaded_dir.project t.loaded_dir)
 
+let create_synthetic ~project ~source_dir ~stanzas =
+  { loaded_dir = Loaded_dir.create ~project ~source_dir
+  ; stanzas = Memo.Lazy.of_val stanzas
+  ; static_stanzas = stanzas
+  }
+;;
+
 module Mask = struct
   type 'a t =
     | True

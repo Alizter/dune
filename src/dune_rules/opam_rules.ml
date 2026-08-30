@@ -174,22 +174,29 @@ let dependency_view context (pkg : Pkg.t) =
 ;;
 
 let gen_rules context ~dir stanza =
-  let* packages = packages context in
-  let package =
-    Package.Name.Map.find_exn packages (Package.name stanza.Opam_stanza.package)
+  let package_name = Package.name stanza.Opam_stanza.package in
+  let* target =
+    match stanza.origin with
+    | User ->
+      let* packages = packages context in
+      let package = Package.Name.Map.find_exn packages package_name in
+      let* source_deps, _source_files = Source_deps.files package.paths.source_dir in
+      let* dependencies = dependency_view context package in
+      let source =
+        { Package_rules.Source_input.root = package.write_paths.source_dir
+        ; files_dir = None
+        ; extra_sources = []
+        }
+      in
+      let+ () =
+        Package_rules.gen_rules context package ~source ~source_deps ~dependencies
+      in
+      package.paths.target_dir
+    | Lock ->
+      let+ () = Pkg_rules.gen_opam_rules context ~dir package_name in
+      Opam_stanza.target_dir stanza ~dir |> Path.build
   in
-  let* source_deps, _source_files = Source_deps.files package.paths.source_dir in
-  let* dependencies = dependency_view context package in
-  let source =
-    { Package_rules.Source_input.root = package.write_paths.source_dir
-    ; files_dir = None
-    ; extra_sources = []
-    }
-  in
-  let* () = Package_rules.gen_rules context package ~source ~source_deps ~dependencies in
-  Rules.Produce.Alias.add_deps
-    (Alias.make Alias0.all ~dir)
-    (Action_builder.path package.paths.target_dir)
+  Rules.Produce.Alias.add_deps (Alias.make Alias0.all ~dir) (Action_builder.path target)
 ;;
 
 let find_package context name =
@@ -201,7 +208,7 @@ let find_package context name =
     ())
 ;;
 
-let resolve_installed_file context name ~loc ~section ~file =
+let resolve_stanza_installed_file context name ~loc ~section ~file =
   let package =
     let open Memo.O in
     let+ packages = packages context in
@@ -234,6 +241,23 @@ let resolve_installed_file context name ~loc ~section ~file =
           (Section.to_string section)
           (Package.Name.to_string name)
       ])
+;;
+
+let resolve_installed_file context name ~loc ~section ~file =
+  let open Action_builder.O in
+  let* mounted = Action_builder.of_memo (Pkg_sources.find_mounted context name) in
+  match mounted with
+  | Some mounted ->
+    (match Pkg_sources.Mounted.kind mounted with
+     | Opam _ ->
+       Pkg_rules.resolve_installed_file
+         ~loc
+         ~context_name:context
+         ~pkg_name:name
+         ~section
+         ~file
+     | Dune -> resolve_stanza_installed_file context name ~loc ~section ~file)
+  | None -> resolve_stanza_installed_file context name ~loc ~section ~file
 ;;
 
 let binaries_of_package (package : Pkg.t) =
