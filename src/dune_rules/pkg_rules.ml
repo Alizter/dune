@@ -631,7 +631,15 @@ let gen_rules context_name (pkg : Pkg.t) =
   in
   let* source_deps, copy_rules = Opam_package_rules.source_rules pkg in
   let* () = copy_rules in
-  Opam_package_rules.gen_rules context_name pkg ~source_deps ~dependencies
+  let source =
+    { Opam_package_rules.Source_input.root = pkg.write_paths.source_dir
+    ; files_dir = Some pkg.files_dir
+    ; extra_sources =
+        List.map pkg.info.extra_sources ~f:(fun (local, _) ->
+          local, Paths.extra_source pkg.paths local)
+    }
+  in
+  Opam_package_rules.gen_rules context_name pkg ~source ~source_deps ~dependencies
 ;;
 
 module Gen_rules = Build_config.Gen_rules
