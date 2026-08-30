@@ -1,7 +1,12 @@
 open Import
 
+type origin =
+  | User
+  | Lock
+
 type t =
   { loc : Loc.t
+  ; origin : origin
   ; package : Package.t
   ; depends : (Loc.t * Package.Name.t) list
   ; build : Dune_pkg.Lock_dir.Build_command.t option
@@ -41,7 +46,7 @@ let decode =
          (package_decoder (repeat Dune_lang.Action.Env_update.decode))
          ~default:[]
      in
-     { loc; package; depends; build; install; depexts; exported_env }
+     { loc; origin = User; package; depends; build; install; depexts; exported_env }
 ;;
 
 let target_dir t ~dir =

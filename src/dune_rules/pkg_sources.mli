@@ -11,12 +11,18 @@ module Candidate : sig
 end
 
 module Mounted : sig
+  type kind =
+    | Dune
+    | Opam of Opam_stanza.t
+
   type t
 
   val candidate : t -> Candidate.t
   val source_root : t -> Path.Build.t
   val projects : t -> (Dune_project.t * Source_tree.Rules.Dir.t) list
   val tree : t -> Source_tree.Rules.Build.t
+  val kind : t -> kind
+  val is_dune : t -> bool
 end
 
 val mounted : Context_name.t -> Mounted.t list Memo.t
