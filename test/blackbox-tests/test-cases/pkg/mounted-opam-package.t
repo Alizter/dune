@@ -10,7 +10,7 @@ from build-time overlays and installed artifacts.
   > (lang dune 3.20)
   > (package
   >  (name main)
-  >  (depends opaque)
+  >  (depends native)
   >  (allow_empty))
   > EOF
 
@@ -18,6 +18,27 @@ from build-time overlays and installed artifacts.
   $ echo primary > opaque/input.txt
   $ echo extra > extra.txt
   $ echo source-less-extra > source-less-extra.txt
+
+The native package consumes an installed file from the synthetic package. This
+keeps the native-to-Opam edge in the ordinary package dependency graph.
+
+  $ mkdir native
+  $ cat > native/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name native))
+  > EOF
+  $ cat > native/dune <<'EOF'
+  > (rule
+  >  (target from-opaque.txt)
+  >  (deps %{pkg:opaque:share:built.txt})
+  >  (action (copy %{deps} %{target})))
+  > (install
+  >  (package native)
+  >  (section share)
+  >  (files from-opaque.txt))
+  > EOF
+  $ tar cf native.tar native
+  $ rm -rf native
 
   $ make_lockdir
   $ make_lockpkg opaque <<EOF
@@ -33,6 +54,12 @@ from build-time overlays and installed artifacts.
   $ make_lockpkg_file opaque from-files <<'EOF'
   > files
   > EOF
+  $ make_lockpkg native <<EOF
+  > (version 1.0)
+  > (depends opaque)
+  > (source (copy $PWD/native.tar))
+  > (build (run dune build @install))
+  > EOF
 
   $ dune build @pkg-install
 
@@ -47,13 +74,18 @@ stanza, rooted beneath the exact package artifact directory.
   extra
   $ test -f "$target/cookie" && echo cookie
   cookie
+  $ native_root=$(echo _build/_default+lockfile/pkg/native.1.0-*)
+  $ cat "$native_root/from-opaque.txt"
+  primary
+  files
+  extra
   $ test ! -d _build/_private/default/.pkg && echo no-legacy-package-target
   no-legacy-package-target
 
 The build recipe and overlays mutate only the copy sandbox. They do not become
 part of the primary source target.
 
-  $ source_root=$(find _build/_fetch -type d -name dir)
+  $ source_root=$(dirname "$(find _build/_fetch -type f -name input.txt)")
   $ test -f "$source_root/input.txt" && echo primary-source
   primary-source
   $ test ! -e "$source_root/from-files" && test ! -e "$source_root/extra.txt" && test ! -e "$source_root/built.txt" && echo source-unchanged
