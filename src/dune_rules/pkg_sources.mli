@@ -11,6 +11,10 @@ module Candidate : sig
 end
 
 module Mounted : sig
+  type source_kind =
+    | Primary_source
+    | No_source
+
   type kind =
     | Dune
     | Opam of Opam_stanza.t
@@ -18,9 +22,14 @@ module Mounted : sig
   type t
 
   val candidate : t -> Candidate.t
-  val source_root : t -> Path.Build.t
+
+  (** The primary source root, or the sandbox working directory for
+      [No_source]. *)
+  val working_dir : t -> Path.Build.t
+
   val projects : t -> (Dune_project.t * Source_tree.Rules.Dir.t) list
-  val tree : t -> Source_tree.Rules.Build.t
+  val tree : t -> Source_tree.Rules.Build.t option
+  val source_kind : t -> source_kind
   val kind : t -> kind
   val is_dune : t -> bool
 end

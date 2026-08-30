@@ -36,15 +36,32 @@ let execution_parameters ~sandbox_actions =
        | Install _ | Invalid -> None)
     | Regular Root | Anonymous_action Root | Invalid _ -> None
   in
+  let is_source_less_mounted_dir context path =
+    match Mounted_context.resolver context with
+    | None -> Memo.return false
+    | Some resolver ->
+      let open Memo.O in
+      let+ mounted = Pkg_sources.mounted resolver in
+      List.exists mounted ~f:(fun mounted ->
+        match Pkg_sources.Mounted.source_kind mounted with
+        | Primary_source -> false
+        | No_source ->
+          let artifact_root =
+            Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.artifact_root
+          in
+          Path.is_descendant (Path.build path) ~of_:(Path.build artifact_root))
+  in
   let f context path =
     let open Memo.O in
-    let* ep = Execution_parameters.default in
+    let* ep = Execution_parameters.default
+    and* source_less_mounted_dir = is_source_less_mounted_dir context path in
     let ep =
       if sandbox_actions then Execution_parameters.set_sandbox_actions true ep else ep
     in
     if
       Context_name.equal context Private_context.t.name
       || Context_name.equal context Fetch_rules.context.name
+      || source_less_mounted_dir
     then Memo.return ep
     else (
       match source_backed_dir path with

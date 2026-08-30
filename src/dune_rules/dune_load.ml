@@ -158,7 +158,7 @@ let workspace_loaded_project context project source_tree_root =
 let mounted_loaded_project context mounted (project, source_tree_root) =
   let candidate = Pkg_sources.Mounted.candidate mounted in
   let package_source_root =
-    Pkg_sources.Mounted.source_root mounted |> Source_path.build
+    Pkg_sources.Mounted.working_dir mounted |> Source_path.build
   in
   let source_root = Dune_project.root project in
   let project_root =
@@ -236,24 +236,27 @@ let loaded =
         and* context = Context.DB.get context_name
         and* mounted = Pkg_sources.mounted context_name in
         let mounted =
-          List.map mounted ~f:(fun mounted ->
-            let loaded_projects =
-              List.map
-                (Pkg_sources.Mounted.projects mounted)
-                ~f:(mounted_loaded_project context mounted)
-            in
-            let projects_by_root =
-              Source_path.Map.of_list_map_exn loaded_projects ~f:(fun project ->
-                Loaded_project.source_root project, project)
-            in
-            mounted, loaded_projects, projects_by_root)
+          List.filter_map mounted ~f:(fun mounted ->
+            match Pkg_sources.Mounted.tree mounted with
+            | None -> None
+            | Some tree ->
+              let loaded_projects =
+                List.map
+                  (Pkg_sources.Mounted.projects mounted)
+                  ~f:(mounted_loaded_project context mounted)
+              in
+              let projects_by_root =
+                Source_path.Map.of_list_map_exn loaded_projects ~f:(fun project ->
+                  Loaded_project.source_root project, project)
+              in
+              Some (mounted, tree, loaded_projects, projects_by_root))
         in
         let loaded_projects =
           workspace.loaded_projects
-          @ List.concat_map mounted ~f:(fun (_, projects, _) -> projects)
+          @ List.concat_map mounted ~f:(fun (_, _, projects, _) -> projects)
         in
         let synthetic_dune_files =
-          List.filter_map mounted ~f:(fun (mounted, projects, _) ->
+          List.filter_map mounted ~f:(fun (mounted, _, projects, _) ->
             match Pkg_sources.Mounted.kind mounted with
             | Dune -> None
             | Opam stanza ->
@@ -262,7 +265,7 @@ let loaded =
                 (Dune_file.create_synthetic
                    ~project:loaded_project
                    ~source_dir:
-                     (Pkg_sources.Mounted.source_root mounted |> Source_path.build)
+                     (Pkg_sources.Mounted.working_dir mounted |> Source_path.build)
                    ~stanzas:
                      [ Opam_stanza.make_stanza stanza (Some (Package.id stanza.package)) ]))
         in
@@ -271,7 +274,7 @@ let loaded =
             Loaded_project.output_root project, project)
         in
         let* mounted_source_dune_files =
-          Memo.List.map mounted ~f:(fun (mounted, _, projects_by_root) ->
+          Memo.List.map mounted ~f:(fun (mounted, tree, _, projects_by_root) ->
             let f dir =
               let project = Source_tree.Rules.Dir.project dir in
               let loaded_project =
@@ -289,7 +292,7 @@ let loaded =
             let start = Time.now () in
             let+ dune_files =
               Build_source_tree_map_reduce.map_reduce
-                (Pkg_sources.Mounted.tree mounted |> Source_tree.Rules.Build.root)
+                (Source_tree.Rules.Build.root tree)
                 ~traverse:Source_dir_status.Set.all
                 ~trace_event_name:"Loaded source tree"
                 ~f
@@ -300,7 +303,7 @@ let loaded =
                 ~stop:(Time.now ())
                 ~context:(Context_name.to_string context_name)
                 ~package:(Pkg_sources.Candidate.name candidate |> Package.Name.to_string)
-                ~source_root:(Pkg_sources.Mounted.source_root mounted)
+                ~source_root:(Pkg_sources.Mounted.working_dir mounted)
                 ~artifact_root:(Pkg_sources.Candidate.artifact_root candidate));
             dune_files)
           >>| Appendable_list.concat

@@ -433,7 +433,7 @@ let opam_paths mounted package_name =
     Opam_package_rules.Paths.of_root package_name ~root ~relative:Path.Build.relative
   in
   let write_paths =
-    { write_paths with source_dir = Pkg_sources.Mounted.source_root mounted }
+    { write_paths with source_dir = Pkg_sources.Mounted.working_dir mounted }
   in
   let paths = Opam_package_rules.Paths.map_path write_paths ~f:Path.build in
   paths, write_paths
@@ -665,11 +665,20 @@ end = struct
 end
 
 let gen_rules context_name (pkg : Pkg.t) =
-  let* dependencies = dependency_view_for_package context_name pkg in
+  let* dependencies =
+    Dependency_view.make
+      context_name
+      pkg
+      ~is_mounted:(is_project_mounted_pkg context_name)
+  in
   let* source_deps, copy_rules = Opam_package_rules.source_rules pkg in
   let* () = copy_rules in
   let source =
     { Opam_package_rules.Source_input.root = pkg.write_paths.source_dir
+    ; kind =
+        (match pkg.info.source with
+         | Some _ -> Directory
+         | None -> No_source)
     ; files_dir = Some pkg.files_dir
     ; extra_sources =
         List.map pkg.info.extra_sources ~f:(fun (local, _) ->
@@ -878,19 +887,70 @@ let gen_opam_rules context ~dir package_name =
       ; ( "artifact_root"
         , Pkg_sources.Candidate.artifact_root candidate |> Path.Build.to_dyn )
       ];
-  let source_root = Pkg_sources.Mounted.source_root mounted in
+  let working_dir = Pkg_sources.Mounted.working_dir mounted in
   let* package = remap_opam_package context package in
   let* dependencies = dependency_view_for_package context package in
+  let source_kind = Pkg_sources.Mounted.source_kind mounted in
   let source =
-    { Opam_package_rules.Source_input.root = source_root
+    { Opam_package_rules.Source_input.root = working_dir
+    ; kind =
+        (match source_kind with
+         | Primary_source -> Directory
+         | No_source -> No_source)
     ; files_dir = Some package.files_dir
     ; extra_sources =
         List.map package.info.extra_sources ~f:(fun (local, source) ->
           local, Fetch_rules.target source `File |> Path.build)
     }
   in
-  let source_deps = Dep.Set.of_files [ Path.build source_root ] in
+  let source_deps =
+    match source_kind with
+    | Primary_source -> Dep.Set.of_files [ Path.build working_dir ]
+    | No_source -> Dep.Set.empty
+  in
   Opam_package_rules.gen_rules context package ~source ~source_deps ~dependencies
+;;
+
+let setup_mounted_opam_package_rules context mounted ~dir ~components =
+  let candidate = Pkg_sources.Mounted.candidate mounted in
+  let package_name = Pkg_sources.Candidate.name candidate in
+  let package = Package.Name.to_string package_name in
+  let artifact_root = Pkg_sources.Candidate.artifact_root candidate in
+  let stanza =
+    match Pkg_sources.Mounted.kind mounted with
+    | Dune ->
+      Code_error.raise
+        "Native package dispatched through synthetic opam rules"
+        [ "package", Package.Name.to_dyn package_name ]
+    | Opam stanza -> stanza
+  in
+  match components with
+  | [] ->
+    let target = Opam_stanza.target_dir stanza ~dir:artifact_root |> Path.build in
+    let rules =
+      Rules.collect_unit (fun () ->
+        Rules.Produce.Alias.add_deps
+          (Alias.make Alias0.all ~dir:artifact_root)
+          (Action_builder.path target))
+    in
+    let build_dir_only_sub_dirs =
+      Gen_rules.Build_only_sub_dirs.singleton
+        ~dir
+        (Subdir_set.of_list [ Filename.of_string_exn ".opam" ])
+    in
+    Gen_rules.make ~build_dir_only_sub_dirs rules |> Memo.return
+  | [ ".opam" ] ->
+    Gen_rules.make_empty ~dir (Subdir_set.of_list [ Filename.of_string_exn package ])
+    |> Memo.return
+  | [ ".opam"; package' ] when String.equal package package' ->
+    let target = Opam_stanza.target_dir stanza ~dir:artifact_root in
+    let directory_targets = Path.Build.Map.singleton target Loc.none in
+    let rules =
+      Rules.collect_unit (fun () ->
+        gen_opam_rules context ~dir:artifact_root package_name)
+    in
+    Gen_rules.make rules ~directory_targets |> Memo.return
+  | _ -> Memo.return Gen_rules.no_rules
 ;;
 
 let binaries_for_package context package =
