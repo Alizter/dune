@@ -180,7 +180,13 @@ let gen_rules context ~dir stanza =
   in
   let* source_deps, _source_files = Source_deps.files package.paths.source_dir in
   let* dependencies = dependency_view context package in
-  let* () = Package_rules.gen_rules context package ~source_deps ~dependencies in
+  let source =
+    { Package_rules.Source_input.root = package.write_paths.source_dir
+    ; files_dir = None
+    ; extra_sources = []
+    }
+  in
+  let* () = Package_rules.gen_rules context package ~source ~source_deps ~dependencies in
   Rules.Produce.Alias.add_deps
     (Alias.make Alias0.all ~dir)
     (Action_builder.path package.paths.target_dir)

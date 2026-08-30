@@ -291,6 +291,14 @@ module Paths = struct
   let target_dir t = t.target_dir
 end
 
+module Source_input = struct
+  type t =
+    { root : Path.Build.t
+    ; files_dir : Path.Build.t option
+    ; extra_sources : (Path.Local.t * Path.t) list
+    }
+end
+
 module Install_cookie = struct
   (* The install cookie represents a serialized representation of all the
      installed artifacts and variables.
@@ -1918,57 +1926,65 @@ let dune_dep =
   lazy (Sys.executable_name |> Path.External.of_string |> Path.external_ |> Dep.file)
 ;;
 
-let build_rule context_name ~source_deps ~dependencies (pkg : Pkg.t) =
+let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
+  let { Source_input.root; files_dir; extra_sources } = source in
+  if not (Path.Build.equal root pkg.write_paths.source_dir)
+  then
+    Code_error.raise
+      "Opam package source input and package paths disagree"
+      [ "source_input", Path.Build.to_dyn root
+      ; "package_source", Path.Build.to_dyn pkg.write_paths.source_dir
+      ];
   let* () = Action_expander.refresh_exported_env context_name dependencies in
   let+ build_action =
     let+ copy_action, build_action, install_action =
       let+ copy_action =
-        let+ copy_action =
-          let+ () = Memo.return () in
-          let open Action_builder.O in
-          [ Action_builder.with_no_targets
-            @@ (Action_builder.of_memo
-                  (Memo.of_thunk (fun () ->
-                     let deps, source_deps = files pkg.files_dir in
-                     Memo.return (source_deps, deps)))
-                |> Action_builder.dyn_deps
-                >>= fun source_deps ->
-                Path.Set.to_list_map source_deps ~f:(fun src ->
-                  let dst =
-                    let prefix = Path.build pkg.files_dir in
-                    let local_path = Path.drop_prefix_exn src ~prefix in
-                    Path.Build.append_local pkg.write_paths.source_dir local_path
-                  in
-                  Action.progn
-                    [ Action.mkdir (Path.Build.parent_exn dst); Action.copy src dst ])
-                |> Action.concurrent
-                |> Action.Full.make
-                |> Action_builder.return)
-          ]
-        in
-        copy_action
-        @ List.map pkg.info.extra_sources ~f:(fun (local, _) ->
-          (* If the package has extra sources, they will be
-             initially stored in the extra_sources directory for that
-             package. Prior to building, the contents of
-             extra_sources must be copied into the package's source
-             directory. *)
-          let src = Paths.extra_source pkg.paths local in
-          let dst = Path.Build.append_local pkg.write_paths.source_dir local in
-          Action.progn
-            [ (* If the package has no source directory (some
-                 low-level packages are exclusively made up of extra
-                 sources), the source directory is first created. *)
-              Action.mkdir pkg.write_paths.source_dir
-            ; (* It's possible for some extra sources to already be at
-                 the destination. If these files are write-protected
-                 then the copy action will fail if we don't first remove
-                 them. *)
-              Action.remove_tree dst
-            ; Action.copy src dst
+        let+ () = Memo.return () in
+        let copy_files =
+          match files_dir with
+          | None -> []
+          | Some files_dir ->
+            let open Action_builder.O in
+            [ Action_builder.with_no_targets
+              @@ (Action_builder.of_memo
+                    (Memo.of_thunk (fun () ->
+                       let deps, source_deps = files files_dir in
+                       Memo.return (source_deps, deps)))
+                  |> Action_builder.dyn_deps
+                  >>= fun source_deps ->
+                  Path.Set.to_list_map source_deps ~f:(fun src ->
+                    let dst =
+                      let prefix = Path.build files_dir in
+                      let local_path = Path.drop_prefix_exn src ~prefix in
+                      Path.Build.append_local root local_path
+                    in
+                    Action.progn
+                      [ Action.mkdir (Path.Build.parent_exn dst); Action.copy src dst ])
+                  |> Action.concurrent
+                  |> Action.Full.make
+                  |> Action_builder.return)
             ]
-          |> Action.Full.make
-          |> Action_builder.With_targets.return)
+        in
+        copy_files
+        @ List.map extra_sources ~f:(fun (local, src) ->
+          let dst = Path.Build.append_local root local in
+          let action =
+            Action.progn
+              [ (* If the package has no source directory (some
+                   low-level packages are exclusively made up of extra
+                   sources), the source directory is first created. *)
+                Action.mkdir root
+              ; (* It's possible for some extra sources to already be at
+                   the destination. If these files are write-protected
+                   then the copy action will fail if we don't first remove
+                   them. *)
+                Action.remove_tree dst
+              ; Action.copy src dst
+              ]
+          in
+          let open Action_builder.O in
+          Action_builder.with_no_targets
+            (Action_builder.path src >>> Action_builder.return (Action.Full.make action)))
       and+ build_action =
         match Action_expander.build_command context_name pkg dependencies with
         | None -> Memo.return []
@@ -2040,7 +2056,7 @@ let build_rule context_name ~source_deps ~dependencies (pkg : Pkg.t) =
        ~directory_targets:[ pkg.write_paths.target_dir ]
 ;;
 
-let gen_rules context_name (pkg : Pkg.t) ~source_deps ~dependencies =
-  let* build_rule = build_rule context_name pkg ~source_deps ~dependencies in
+let gen_rules context_name (pkg : Pkg.t) ~source ~source_deps ~dependencies =
+  let* build_rule = build_rule context_name pkg ~source ~source_deps ~dependencies in
   rule ~loc:Loc.none (* TODO *) build_rule
 ;;

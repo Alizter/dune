@@ -76,6 +76,17 @@ module Paths : sig
   val target_dir : 'a t -> 'a
 end
 
+module Source_input : sig
+  (** Source inputs for an opaque package build. [files_dir] is overlaid on
+      [root], followed by [extra_sources] in list order, inside the rule's copy
+      sandbox. *)
+  type t =
+    { root : Path.Build.t
+    ; files_dir : Path.Build.t option
+    ; extra_sources : (Path.Local.t * Path.t) list
+    }
+end
+
 module Install_cookie : sig
   module Gen : sig
     type 'files t =
@@ -196,6 +207,7 @@ val source_rules : Pkg.t -> (Dep.Set.t * unit Memo.t) Memo.t
 val gen_rules
   :  Context_name.t
   -> Pkg.t
+  -> source:Source_input.t
   -> source_deps:Dep.Set.t
   -> dependencies:Dependency_view.t
   -> unit Memo.t
