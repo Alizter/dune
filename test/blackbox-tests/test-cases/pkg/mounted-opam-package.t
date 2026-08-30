@@ -60,6 +60,22 @@ keeps the native-to-Opam edge in the ordinary package dependency graph.
   > (source (copy $PWD/native.tar))
   > (build (run dune build @install))
   > EOF
+  $ make_lockpkg source-less <<EOF
+  > (version 1.0)
+  > (extra_sources (extra.txt (copy $PWD/source-less-extra.txt)))
+  > (build (system "cat from-files extra.txt > built.txt"))
+  > (install
+  >  (progn
+  >   (run mkdir -p %{share}/source-less)
+  >   (run cp built.txt %{share}/source-less/built.txt)))
+  > EOF
+  $ make_lockpkg_file source-less from-files <<'EOF'
+  > source-less-files
+  > EOF
+  $ make_lockpkg transition <<'EOF'
+  > (version 1.0)
+  > (depends source-less)
+  > EOF
 
   $ dune build @pkg-install
 
@@ -79,6 +95,25 @@ stanza, rooted beneath the exact package artifact directory.
   primary
   files
   extra
+
+A source-less package starts with an empty sandbox working directory and uses
+the same synthetic target and cookie protocol without a fetch target.
+
+  $ source_less_root=$(echo _build/_default+lockfile/pkg/source-less.1.0-*)
+  $ source_less_target="$source_less_root/.opam/source-less/target"
+  $ cat "$source_less_target/share/source-less/built.txt"
+  source-less-files
+  source-less-extra
+  $ test -f "$source_less_target/cookie" && echo source-less-cookie
+  source-less-cookie
+  $ test ! -e "$source_less_root/.opam/source-less/source" && echo no-primary-source-target
+  no-primary-source-target
+  $ transition_root=$(echo _build/_default+lockfile/pkg/transition.1.0-*)
+  $ test -f "$transition_root/.opam/transition/target/cookie" && echo empty-transition-cookie
+  empty-transition-cookie
+  $ test ! -e "$transition_root/.opam/transition/source" && echo no-transition-source-target
+  no-transition-source-target
+
   $ test ! -d _build/_private/default/.pkg && echo no-legacy-package-target
   no-legacy-package-target
 
