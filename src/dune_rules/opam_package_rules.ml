@@ -292,8 +292,13 @@ module Paths = struct
 end
 
 module Source_input = struct
+  type kind =
+    | Directory
+    | No_source
+
   type t =
     { root : Path.Build.t
+    ; kind : kind
     ; files_dir : Path.Build.t option
     ; extra_sources : (Path.Local.t * Path.t) list
     }
@@ -1927,7 +1932,7 @@ let dune_dep =
 ;;
 
 let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
-  let { Source_input.root; files_dir; extra_sources } = source in
+  let { Source_input.root; kind; files_dir; extra_sources } = source in
   if not (Path.Build.equal root pkg.write_paths.source_dir)
   then
     Code_error.raise
@@ -1965,7 +1970,18 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
                   |> Action_builder.return)
             ]
         in
-        copy_files
+        let initialize_source =
+          match kind with
+          | Directory -> []
+          | No_source ->
+            [ Action.mkdir root
+              |> Action.Full.make
+              |> Action_builder.return
+              |> Action_builder.with_no_targets
+            ]
+        in
+        initialize_source
+        @ copy_files
         @ List.map extra_sources ~f:(fun (local, src) ->
           let dst = Path.Build.append_local root local in
           let action =
@@ -2051,7 +2067,13 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
    in
    dependencies_builder
    >>> add_env (Pkg.exported_env_with_deps pkg dependencies.all) build_action)
-  |> Action_builder.With_targets.map ~f:Action.Full.disable_sandbox_policy
+  |> Action_builder.With_targets.map ~f:(fun action ->
+    let action =
+      match kind with
+      | Directory -> action
+      | No_source -> Action.Full.add_sandbox Action_expander.sandbox action
+    in
+    Action.Full.disable_sandbox_policy action)
   |> Action_builder.With_targets.add_directories
        ~directory_targets:[ pkg.write_paths.target_dir ]
 ;;
