@@ -174,6 +174,17 @@ module Action_expander : sig
   val refresh_exported_env : Context_name.t -> Dependency_view.t -> unit Memo.t
 end
 
+module Dependency_provider : sig
+  type t =
+    | Local of Package.t
+    | Opam of
+        { stanza : Opam_stanza.t
+        ; paths : Path.Build.t Paths.t
+        }
+
+  val materialize : Context_name.t -> t list -> Package_deps.t Action_builder.t
+end
+
 val source_rules : Pkg.t -> (Dep.Set.t * unit Memo.t) Memo.t
 
 val gen_rules

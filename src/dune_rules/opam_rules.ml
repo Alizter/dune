@@ -47,31 +47,23 @@ let closure (entries : entry Package.Name.Map.t) (roots : entry list) =
             ~f:(fun name -> Pp.verbatim (Package.Name.to_string name))
         ]
     else (
-      let entry =
-        match Package.Name.Map.find entries name with
-        | Some entry -> entry
-        | None ->
-          User_error.raise
-            ~loc
-            [ Pp.textf
-                "Package %s is not provided by an opam stanza"
-                (Package.Name.to_string name)
-            ]
-      in
-      let visiting = Package.Name.Set.add visiting name in
-      let visited, ordered =
-        List.fold_left
-          (Package.depends entry.stanza.package)
-          ~init:(visited, ordered)
-          ~f:(fun (visited, ordered) dependency ->
-            visit
-              ~loc:entry.stanza.loc
-              dependency.Package_dependency.name
-              visiting
-              visited
-              ordered)
-      in
-      Package.Name.Set.add visited name, entry :: ordered)
+      match Package.Name.Map.find entries name with
+      | None -> Package.Name.Set.add visited name, ordered
+      | Some entry ->
+        let visiting = Package.Name.Set.add visiting name in
+        let visited, ordered =
+          List.fold_left
+            (Package.depends entry.stanza.package)
+            ~init:(visited, ordered)
+            ~f:(fun (visited, ordered) dependency ->
+              visit
+                ~loc:entry.stanza.loc
+                dependency.Package_dependency.name
+                visiting
+                visited
+                ordered)
+        in
+        Package.Name.Set.add visited name, entry :: ordered)
   in
   let _, ordered =
     List.fold_left
@@ -82,20 +74,6 @@ let closure (entries : entry Package.Name.Map.t) (roots : entry list) =
         visit ~loc:entry.stanza.loc name Package.Name.Set.empty visited ordered)
   in
   List.rev ordered
-;;
-
-let dependency_entries entries (entry : entry) =
-  let (_ : entry list) = closure entries [ entry ] in
-  List.map (Package.depends entry.stanza.package) ~f:(fun dependency ->
-    match Package.Name.Map.find entries dependency.Package_dependency.name with
-    | Some entry -> entry
-    | None ->
-      User_error.raise
-        ~loc:entry.stanza.loc
-        [ Pp.textf
-            "Package %s is not provided by an opam stanza"
-            (Package.Name.to_string dependency.name)
-        ])
 ;;
 
 let selected_entries (entries : entry Package.Name.Map.t) selected =
@@ -159,6 +137,7 @@ let gen_rules context ~dir stanza =
        [ "package", Package.Name.to_dyn package_name ]);
   let* entries = entries context in
   let entry = Package.Name.Map.find_exn entries package_name in
+  let (_ : entry list) = closure entries [ entry ] in
   let write_paths = write_paths entry in
   let read_paths = Paths.map_path write_paths ~f:Path.build in
   let* source_deps, _source_files = Source_deps.files read_paths.source_dir in
@@ -177,7 +156,16 @@ let gen_rules context ~dir stanza =
       ~variables:(package_variables entry)
       ~source
       ~source_deps
-      ~dependencies:(materialize context (dependency_entries entries entry))
+      ~dependencies:
+        (Package.depends stanza.package
+         |> List.map ~f:(fun dependency ->
+           { Package_deps_eval.loc = stanza.loc
+           ; name = dependency.Package_dependency.name
+           })
+         |> Package_deps_eval.materialize
+              context
+              ~dune_version:
+                (Dune_lang.Syntax.greatest_supported_version_exn Stanza.syntax))
   in
   Rules.Produce.Alias.add_deps
     (Alias.make Alias0.all ~dir)

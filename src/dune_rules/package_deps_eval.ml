@@ -86,38 +86,21 @@ let materialize context ~dune_version dependencies =
       in
       dependency, found)
   in
-  let local_package_names =
+  let providers =
     List.filter_map classified ~f:(fun (_, found) ->
       match found with
-      | Some (Package_db.Local package) -> Some (Package.name package)
-      | _ -> None)
-    |> Package.Name.Set.of_list
-  in
-  let* env =
-    if Package.Name.Set.is_empty local_package_names
-    then Action_builder.return Env.empty
-    else Install_layout.env context local_package_names
-  in
-  let* binaries =
-    if Package.Name.Set.is_empty local_package_names
-    then Action_builder.return Filename.Map.empty
-    else Action_builder.of_memo (Install_layout.binaries context local_package_names)
-  in
-  let packages =
-    let install_root = Install_layout.root context local_package_names |> Path.build in
-    List.fold_left classified ~init:Package.Name.Map.empty ~f:(fun packages (_, found) ->
-      match found with
       | Some (Package_db.Local package) ->
-        Package.Name.Map.set
-          packages
-          (Package.name package)
-          ( Package_deps.variables package
-          , Package_deps.Paths.of_local_package package ~install_root )
-      | _ -> packages)
+        Some (Opam_package_rules.Dependency_provider.Local package)
+      | Some (Opam { stanza; paths }) ->
+        Some (Opam_package_rules.Dependency_provider.Opam { stanza; paths })
+      | Some (Installed _) | None -> None)
+  in
+  let* materialized =
+    Opam_package_rules.Dependency_provider.materialize context providers
   in
   let+ () =
     Action_builder.List.iter classified ~f:(fun (dependency, found) ->
       depend_on_found dependency ~dune_version found)
   in
-  { Package_deps.env; binaries; packages }
+  materialized
 ;;
