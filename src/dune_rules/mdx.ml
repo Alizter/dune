@@ -563,10 +563,16 @@ let gen_rules t ~sctx ~dir ~scope ~expander =
     | None -> Memo.return true
     | Some package ->
       let+ mask = Dune_load.mask ()
-      and+ package_scope = Dune_load.package_scope () in
-      (Only_packages.mem_all mask || Only_packages.mem mask (Package.name package))
+      and+ loaded_project = Dune_load.find_loaded_project ~dir in
+      let selected_by_only_packages =
+        match Build_partition.purpose (Loaded_project.partition loaded_project) with
+        | Workspace ->
+          Only_packages.mem_all mask || Only_packages.mem mask (Package.name package)
+        | Mounted -> true
+      in
+      selected_by_only_packages
       && Package_scope.is_stanza_visible
-           package_scope
+           (Loaded_project.package_scope loaded_project)
            ~dir:(Scope.source_dir scope dir)
            (Package.id package)
   in
