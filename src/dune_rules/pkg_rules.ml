@@ -1267,7 +1267,7 @@ let project_ocamlpath context =
       Some (Paths.install_roots paths).lib_root)
 ;;
 
-module Legacy_libraries = struct
+module Opaque_libraries = struct
   type package =
     { name : Package.Name.t
     ; paths : Path.t Paths.t
@@ -1431,11 +1431,6 @@ let all_filtered_depexts context =
       dependencies)
   >>| List.concat
   >>| List.sort_uniq ~compare:String.compare
-;;
-
-let pkg_digest_of_project_dependency ctx package_name =
-  let* _ = DB.of_ctx ctx ~allow_sharing:false in
-  DB.project_pkg_digest ctx package_name
 ;;
 
 let artifact_root_of_project_dependency context package_name =
