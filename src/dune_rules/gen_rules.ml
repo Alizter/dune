@@ -170,8 +170,17 @@ end = struct
                      (exe ^ Filename.Extension.to_string (Js_of_ocaml.Ext.exe ~mode)))))
         })
     | Opam_stanza.T opam ->
+      let context = Super_context.context sctx |> Context.name in
       let+ () =
-        Opam_rules.gen_rules (Super_context.context sctx |> Context.name) ~dir opam
+        match opam.origin with
+        | User -> Opam_rules.gen_rules context ~dir opam
+        | Lock ->
+          let package_name = Package.name opam.package in
+          let* () = Pkg_rules.gen_opam_rules context ~dir package_name in
+          let target = Opam_stanza.target_dir opam ~dir |> Path.build in
+          Rules.Produce.Alias.add_deps
+            (Alias.make Alias0.all ~dir)
+            (Action_builder.path target)
       in
       empty_none
     | Alias_conf.T alias ->
