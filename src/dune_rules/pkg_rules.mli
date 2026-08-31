@@ -1,16 +1,12 @@
-(** rules for packages built by dune *)
+(** Rules and capability lookup for selected lock packages. *)
 
 open Import
 
-(** The package management rules setup two rules for every package:
-
-    - A rule for fetching the source to produce .pkg/$package/source
-
-    - A rule to build the package and produce the artifacts in
-      .pkg/$package/target.
-
-    It setups an alias rules to trigger the fetch and build of the
-    package universe. *)
+(** Normal project dependencies are classified from their primary-source
+    contents and built under the alternate package context. Native packages use
+    ordinary Dune rules; synthetic Opam packages own an install target and
+    cookie. Legacy [.pkg] generation remains temporarily available for explicit
+    targets, and dev tools retain their separate [.dev-tool] route. *)
 
 val setup_rules
   :  components:string list
