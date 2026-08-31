@@ -50,7 +50,6 @@ loaded capabilities and installs the observations as its own package outputs.
   $ cat >consumer/dune <<'EOF'
   > (opam
   >  (package consumer)
-  >  (depends producer)
   >  (build
   >   (progn
   >    (system "producer-tool > bin.txt")

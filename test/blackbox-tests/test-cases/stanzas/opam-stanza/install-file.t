@@ -30,7 +30,6 @@ records their contents in the install cookie.
   $ cat >consumer/dune <<'EOF'
   > (opam
   >  (package consumer)
-  >  (depends foo)
   >  (build
   >   (system "echo %{pkg:foo:answer} > answer.txt"))
   >  (install
