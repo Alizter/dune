@@ -1,9 +1,8 @@
-Workspace-installed binaries (the local_bins in [Artifacts]) are narrowed: a
-package's stanzas resolve any workspace package's binary present in its closure.
+Workspace-installed binaries (the local_bins in [Artifacts]) are narrowed to a
+package and its immediate dependencies.
 
-Three workspace packages forming a chain [p] -> [q] -> [r]. [q] installs
-[q-tool] and [r] installs [r-tool]. A sibling [s] installs [s-tool] and is not
-in [p]'s dependency closure.
+Three workspace packages form a chain [p] -> [q] -> [r]. [q] installs [q-tool]
+and [r] installs [r-tool]. A sibling [s] installs [s-tool].
 
   $ mkdir -p p q r s
   $ cat >q/q-tool.sh <<'EOF'
@@ -48,12 +47,12 @@ in [p]'s dependency closure.
   $ cat _build/default/p/q-avail
   true
 
-[r-tool] (transitive dep p -> q -> r) is available:
+[r-tool] (transitive dep p -> q -> r) is not implicitly available:
 
   $ cat _build/default/p/r-avail
-  true
+  false
 
-[s-tool] (sibling not in p's closure) is NOT available:
+[s-tool] (an undeclared sibling) is also not available:
 
   $ cat _build/default/p/s-avail
   false
