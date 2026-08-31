@@ -54,6 +54,37 @@ module Identity = struct
   ;;
 end
 
+module Package_view = struct
+  type t =
+    | Workspace of Package_scope.t
+    | Mounted of
+        { package_scope : Package_scope.t
+        ; owner_package : Package.t
+        ; owner_project : Dune_project.t
+        }
+
+  let workspace package_scope = Workspace package_scope
+
+  let mounted ~package_scope ~owner_package ~owner_project =
+    Mounted { package_scope; owner_package; owner_project }
+  ;;
+
+  let package_scope = function
+    | Workspace package_scope | Mounted { package_scope; _ } -> package_scope
+  ;;
+
+  let visible_packages = function
+    | Workspace _ -> None
+    | Mounted { owner_package; _ } ->
+      Some (Package.Name.Set.singleton (Package.name owner_package))
+  ;;
+
+  let owner = function
+    | Workspace _ -> None
+    | Mounted { owner_package; owner_project; _ } -> Some (owner_package, owner_project)
+  ;;
+end
+
 type t =
   { project : Dune_project.t
   ; identity : Identity.t
@@ -61,7 +92,7 @@ type t =
   ; source_tree_root : Source_tree.Rules.Dir.t
   ; partition : Build_partition.t
   ; output_root : Path.Build.t
-  ; visible_packages : Package.Name.Set.t option
+  ; package_view : Package_view.t
   }
 
 let create
@@ -71,7 +102,7 @@ let create
       ~source_tree_root
       ~partition
       ~output_root
-      ~visible_packages
+      ~package_view
   =
   if
     not
@@ -99,7 +130,7 @@ let create
   ; source_tree_root
   ; partition
   ; output_root
-  ; visible_packages
+  ; package_view
   }
 ;;
 
@@ -109,7 +140,9 @@ let source_root t = t.source_root
 let source_tree_root t = t.source_tree_root
 let partition t = t.partition
 let output_root t = t.output_root
-let visible_packages t = t.visible_packages
+let visible_packages t = Package_view.visible_packages t.package_view
+let package_scope t = Package_view.package_scope t.package_view
+let package_owner t = Package_view.owner t.package_view
 
 let output_path t source_path =
   Source_path.descendant source_path ~of_:t.source_root
@@ -134,6 +167,6 @@ let to_dyn t =
     ; "source_tree_root", Source_tree.Rules.Dir.to_dyn t.source_tree_root
     ; "partition", Build_partition.to_dyn t.partition
     ; "output_root", Path.Build.to_dyn t.output_root
-    ; "visible_packages", Dyn.option Package.Name.Set.to_dyn t.visible_packages
+    ; "visible_packages", Dyn.option Package.Name.Set.to_dyn (visible_packages t)
     ]
 ;;

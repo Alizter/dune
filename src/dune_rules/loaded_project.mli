@@ -17,6 +17,18 @@ module Identity : sig
   val to_dyn : t -> Dyn.t
 end
 
+module Package_view : sig
+  type t
+
+  val workspace : Package_scope.t -> t
+
+  val mounted
+    :  package_scope:Package_scope.t
+    -> owner_package:Package.t
+    -> owner_project:Dune_project.t
+    -> t
+end
+
 type t
 
 val create
@@ -26,7 +38,7 @@ val create
   -> source_tree_root:Source_tree.Rules.Dir.t
   -> partition:Build_partition.t
   -> output_root:Path.Build.t
-  -> visible_packages:Package.Name.Set.t option
+  -> package_view:Package_view.t
   -> t
 
 val project : t -> Dune_project.t
@@ -37,6 +49,8 @@ val source_tree_dir : t -> Path.Build.t -> Source_tree.Rules.Dir.t option Memo.t
 val partition : t -> Build_partition.t
 val output_root : t -> Path.Build.t
 val visible_packages : t -> Package.Name.Set.t option
+val package_scope : t -> Package_scope.t
+val package_owner : t -> (Package.t * Dune_project.t) option
 val output_path : t -> Source_path.t -> Path.Build.t option
 val source_path : t -> Path.Build.t -> Source_path.t option
 val to_dyn : t -> Dyn.t

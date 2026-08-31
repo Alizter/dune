@@ -4,6 +4,7 @@ type t
 
 val empty : t
 val is_empty : t -> bool
+val intersect : t -> t -> t
 
 val create
   :  scopes:(Source_path.t * Dune_lang.Scope_stanza.t) list
