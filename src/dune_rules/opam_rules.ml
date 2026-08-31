@@ -1,13 +1,9 @@
 open Import
 open Memo.O
 module Package_rules = Opam_package_rules
-module Pkg = Package_rules.Pkg
 module Paths = Package_rules.Paths
 module Install_cookie = Package_rules.Install_cookie
-module Pkg_installed = Package_rules.Pkg_installed
-module Dependency_view = Package_rules.Dependency_view
 module Action_expander = Package_rules.Action_expander
-module Value_list_env = Package_rules.Value_list_env
 
 type entry =
   { stanza : Opam_stanza.t
@@ -19,63 +15,6 @@ let make_paths name output_dir stanza =
   let root = Path.Build.parent_exn target_dir in
   let paths = Paths.of_root name ~root ~relative:Path.Build.relative in
   { paths with source_dir = output_dir; target_dir }
-;;
-
-let make_pkg context { stanza; output_dir } depends =
-  let name = Package.name stanza.package in
-  let version =
-    Package.version stanza.package
-    |> Option.value ~default:Dune_pkg.Lock_dir.Pkg_info.default_version
-  in
-  let write_paths = make_paths name output_dir stanza in
-  let paths = Paths.map_path write_paths ~f:Path.build in
-  let info =
-    { Dune_pkg.Lock_dir.Pkg_info.name
-    ; version
-    ; dev = false
-    ; avoid = false
-    ; source = None
-    ; extra_sources = []
-    }
-  in
-  let pkg_digest =
-    { Package_rules.Pkg_digest.name
-    ; version
-    ; lockfile_and_dependency_digest =
-        Dune_digest.string
-          (Path.Build.to_string output_dir ^ ":" ^ Package.Name.to_string name)
-    }
-  in
-  let pkg =
-    { Pkg.id = Pkg.Id.gen ()
-    ; build_command = stanza.build
-    ; install_command = stanza.install
-    ; depends
-    ; depends_on_dune =
-        List.exists depends ~f:(fun (dependency : Pkg.t) ->
-          Package.Name.equal dependency.info.name Dune_pkg.Dune_dep.name)
-    ; depexts = stanza.depexts
-    ; info
-    ; paths
-    ; write_paths
-    ; files_dir =
-        Path.Build.relative (Path.Build.parent_exn write_paths.target_dir) "files"
-    ; pkg_digest
-    ; unexpanded_exported_env = stanza.exported_env
-    ; exported_env = []
-    }
-  in
-  let* dependencies =
-    Dependency_view.of_list context (Pkg.deps_closure pkg) ~is_mounted:(fun _ ->
-      Memo.return false)
-  in
-  let* () = Action_expander.refresh_exported_env context dependencies in
-  let expander = Action_expander.expander context pkg dependencies in
-  let+ exported_env =
-    Memo.parallel_map stanza.exported_env ~f:(Action_expander.exported_env expander)
-  in
-  pkg.exported_env <- exported_env;
-  pkg
 ;;
 
 let entries =
@@ -106,74 +45,132 @@ let package_names context =
   Package.Name.Map.keys entries |> Package.Name.Set.of_list
 ;;
 
-let packages =
-  Per_context.create_by_name ~name:"opam-stanza-packages" (fun context ->
-    Memo.lazy_ ~name:"opam-stanza-packages" (fun () ->
-      let* entries = entries context in
-      let rec resolve resolved stack (loc, name) =
-        match Package.Name.Map.find resolved name with
-        | Some package -> Memo.return (resolved, package)
+let write_paths { stanza; output_dir } =
+  make_paths (Package.name stanza.package) output_dir stanza
+;;
+
+let read_paths entry = write_paths entry |> Paths.map_path ~f:Path.build
+
+let package_variables { stanza; _ } =
+  let name = Package.name stanza.package in
+  let version =
+    Package.version stanza.package
+    |> Option.value ~default:Dune_pkg.Lock_dir.Pkg_info.default_version
+  in
+  Package_variable_name.Map.of_list_exn
+    [ Package_variable_name.name, Package_deps.Variable.S (Package.Name.to_string name)
+    ; Package_variable_name.version, S (Package_version.to_string version)
+    ; Package_variable_name.dev, B false
+    ]
+;;
+
+let closure entries roots =
+  let rec visit ~loc name visiting visited ordered =
+    if Package.Name.Set.mem visited name
+    then visited, ordered
+    else if Package.Name.Set.mem visiting name
+    then
+      User_error.raise
+        ~loc
+        [ Pp.text "The following opam stanzas form a dependency cycle:"
+        ; Pp.chain
+            (Package.Name.Set.to_list (Package.Name.Set.add visiting name))
+            ~f:(fun name -> Pp.verbatim (Package.Name.to_string name))
+        ]
+    else (
+      let entry =
+        match Package.Name.Map.find entries name with
+        | Some entry -> entry
         | None ->
-          (match Package.Name.Map.find entries name with
-           | None ->
-             User_error.raise
-               ~loc
-               [ Pp.textf
-                   "Package %s is not provided by an opam stanza"
-                   (Package.Name.to_string name)
-               ]
-           | Some entry ->
-             if Package.Name.Set.mem stack name
-             then
-               User_error.raise
-                 ~loc
-                 [ Pp.text "The following opam stanzas form a dependency cycle:"
-                 ; Pp.chain
-                     (Package.Name.Set.to_list (Package.Name.Set.add stack name))
-                     ~f:(fun name -> Pp.verbatim (Package.Name.to_string name))
-                 ]
-             else (
-               let stack = Package.Name.Set.add stack name in
-               let* resolved, depends =
-                 Memo.List.fold_left
-                   (Package.depends entry.stanza.package)
-                   ~init:(resolved, [])
-                   ~f:(fun (resolved, depends) dependency ->
-                     let dependency =
-                       entry.stanza.loc, dependency.Package_dependency.name
-                     in
-                     let+ resolved, package = resolve resolved stack dependency in
-                     resolved, package :: depends)
-               in
-               let* package = make_pkg context entry (List.rev depends) in
-               let resolved = Package.Name.Map.add_exn resolved name package in
-               Memo.return (resolved, package)))
+          User_error.raise
+            ~loc
+            [ Pp.textf
+                "Package %s is not provided by an opam stanza"
+                (Package.Name.to_string name)
+            ]
       in
-      Package.Name.Map.to_list entries
-      |> Memo.List.fold_left
-           ~init:Package.Name.Map.empty
-           ~f:(fun resolved (name, entry) ->
-             let+ resolved, _ =
-               resolve resolved Package.Name.Set.empty (entry.stanza.loc, name)
-             in
-             resolved))
-    |> Memo.Lazy.force)
-  |> Staged.unstage
+      let visiting = Package.Name.Set.add visiting name in
+      let visited, ordered =
+        List.fold_left
+          (Package.depends entry.stanza.package)
+          ~init:(visited, ordered)
+          ~f:(fun (visited, ordered) dependency ->
+            visit
+              ~loc:entry.stanza.loc
+              dependency.Package_dependency.name
+              visiting
+              visited
+              ordered)
+      in
+      Package.Name.Set.add visited name, entry :: ordered)
+  in
+  let _, ordered =
+    List.fold_left
+      roots
+      ~init:(Package.Name.Set.empty, [])
+      ~f:(fun (visited, ordered) entry ->
+        let name = Package.name entry.stanza.package in
+        visit ~loc:entry.stanza.loc name Package.Name.Set.empty visited ordered)
+  in
+  List.rev ordered
 ;;
 
-let selected_packages context selected =
-  let+ packages = packages context in
-  Package.Name.Map.values packages
-  |> List.filter ~f:(fun (package : Pkg.t) ->
-    match selected with
-    | None -> true
-    | Some selected -> Package.Name.Set.mem selected package.info.name)
-  |> Pkg.top_closure
+let dependency_entries entries entry =
+  let name = Package.name entry.stanza.package in
+  closure entries [ entry ]
+  |> List.filter ~f:(fun dependency ->
+    not (Package.Name.equal name (Package.name dependency.stanza.package)))
 ;;
 
-let dependency_view context (pkg : Pkg.t) =
-  Dependency_view.of_list context (Pkg.deps_closure pkg) ~is_mounted:(fun _ ->
-    Memo.return false)
+let selected_entries entries selected =
+  let roots =
+    Package.Name.Map.values entries
+    |> List.filter ~f:(fun entry ->
+      match selected with
+      | None -> true
+      | Some selected -> Package.Name.Set.mem selected (Package.name entry.stanza.package))
+  in
+  closure entries roots
+;;
+
+let cookie entry =
+  let open Action_builder.O in
+  let paths = read_paths entry in
+  let path = Paths.install_cookie paths in
+  let+ () = Action_builder.dep (Dep.file path) in
+  Install_cookie.load_exn path
+;;
+
+let materialize context entries =
+  let open Action_builder.O in
+  Action_builder.List.fold_left
+    entries
+    ~init:Package_deps.empty
+    ~f:(fun materialized entry ->
+      let paths = read_paths entry in
+      let* () = Action_builder.dep (Dep.file paths.target_dir) in
+      let cookie = Install_cookie.load_exn (Paths.install_cookie paths) in
+      let variables =
+        Package_variable_name.Map.superpose
+          (Package_variable_name.Map.of_list_exn cookie.variables)
+          (package_variables entry)
+      in
+      let* exported_env =
+        Action_builder.of_memo
+          (Action_expander.exported_env_of_stanza
+             context
+             entry.stanza
+             ~paths
+             ~variables
+             materialized)
+      in
+      Action_builder.return
+        (Package_deps.add_package
+           materialized
+           ~paths
+           ~variables
+           ~files:cookie.files
+           ~exported_env))
 ;;
 
 let gen_rules context ~dir stanza =
@@ -181,30 +178,29 @@ let gen_rules context ~dir stanza =
   let* target =
     match stanza.origin with
     | User ->
-      let* packages = packages context in
-      let package = Package.Name.Map.find_exn packages package_name in
-      let* source_deps, _source_files = Source_deps.files package.paths.source_dir in
-      let* dependencies = dependency_view context package in
+      let* entries = entries context in
+      let entry = Package.Name.Map.find_exn entries package_name in
+      let write_paths = write_paths entry in
+      let read_paths = Paths.map_path write_paths ~f:Path.build in
+      let* source_deps, _source_files = Source_deps.files read_paths.source_dir in
       let source =
-        { Package_rules.Source_input.root = package.write_paths.source_dir
+        { Package_rules.Source_input.root = write_paths.source_dir
         ; kind = Directory
         ; files_dir = None
         ; extra_sources = []
         }
       in
-      let* () = Action_expander.refresh_exported_env context dependencies in
       let+ () =
         Package_rules.gen_rules
           context
           stanza
-          ~paths:package.write_paths
-          ~variables:(Dune_pkg.Lock_dir.Pkg_info.variables package.info)
+          ~paths:write_paths
+          ~variables:(package_variables entry)
           ~source
           ~source_deps
-          ~dependencies:
-            (Action_expander.Artifacts_and_deps.materialize context dependencies)
+          ~dependencies:(materialize context (dependency_entries entries entry))
       in
-      package.paths.target_dir
+      read_paths.target_dir
     | Lock ->
       let+ () = Pkg_rules.gen_opam_rules context ~dir package_name in
       Opam_stanza.target_dir stanza ~dir |> Path.build
@@ -213,26 +209,25 @@ let gen_rules context ~dir stanza =
 ;;
 
 let find_package context name =
-  let+ packages = packages context in
-  Package.Name.Map.find packages name
-  |> Option.map ~f:(fun (package : Pkg.t) ->
+  let+ entries = entries context in
+  Package.Name.Map.find entries name
+  |> Option.map ~f:(fun entry ->
     let open Action_builder.O in
-    let+ _ = (Pkg_installed.of_paths package.paths).cookie in
+    let+ _ = cookie entry in
     ())
 ;;
 
 let resolve_stanza_installed_file context name ~loc ~section ~file =
-  let package =
-    let open Memo.O in
-    let+ packages = packages context in
-    Package.Name.Map.find_exn packages name
-  in
   let open Action_builder.O in
-  let* package = Action_builder.of_memo package in
-  let* ({ files; _ } : Install_cookie.t) =
-    (Pkg_installed.of_paths package.paths).cookie
+  let* entry =
+    Action_builder.of_memo
+      (let open Memo.O in
+       let+ entries = entries context in
+       Package.Name.Map.find_exn entries name)
   in
-  let section_dir = Install.Paths.get (Paths.install_paths package.paths) section in
+  let* ({ files; _ } : Install_cookie.t) = cookie entry in
+  let paths = read_paths entry in
+  let section_dir = Install.Paths.get (Paths.install_paths paths) section in
   let path = Path.append_local section_dir file in
   let installed = Section.Map.find files section |> Option.value ~default:[] in
   if List.exists installed ~f:(Path.equal path)
@@ -273,49 +268,40 @@ let resolve_installed_file context name ~loc ~section ~file =
   | None -> resolve_stanza_installed_file context name ~loc ~section ~file
 ;;
 
-let binaries_of_package (package : Pkg.t) =
-  let cookie = (Pkg_installed.of_paths package.paths).cookie in
-  Action_builder.evaluate_and_collect_facts cookie
-  >>| fun ((cookie : Install_cookie.t), _) ->
-  Section.Map.Multi.find cookie.files Bin
-  |> List.fold_left ~init:Filename.Map.empty ~f:(fun binaries path ->
-    let name =
-      Path.basename path |> Filename.to_string |> Bin.strip_exe |> Filename.of_string_exn
-    in
-    Filename.Map.set binaries name path)
+let materialize_selected context selected =
+  let* entries = entries context in
+  materialize context (selected_entries entries selected)
+  |> Action_builder.evaluate_and_collect_facts
+  >>| fst
 ;;
 
 let binaries context ~packages:selected =
-  let* packages = selected_packages context selected in
-  let+ binaries = Memo.parallel_map packages ~f:binaries_of_package in
-  Filename.Map.union_all binaries ~f:(fun _name first _second -> Some first)
+  let+ materialized = materialize_selected context selected in
+  materialized.Package_deps.binaries
 ;;
 
 let exported_env context ~packages:selected =
-  let+ packages = selected_packages context selected in
-  let variables =
-    Pkg.build_env_of_deps packages |> Env.Map.map ~f:Value_list_env.string_of_env_values
-  in
-  Env.extend Env.empty ~vars:variables
+  let+ materialized = materialize_selected context selected in
+  materialized.Package_deps.env
 ;;
 
 let libraries context package_names ~parent =
   let context_name = Context.name context in
   let candidates =
-    let+ packages = packages context_name in
-    List.filter_map package_names ~f:(Package.Name.Map.find packages) |> Pkg.top_closure
+    let+ entries = entries context_name in
+    let selected = Package.Name.Set.of_list package_names in
+    selected_entries entries (Some selected)
   in
   let db_ref = Fdecl.create Dyn.opaque in
-  let db_for_package (package : Pkg.t) =
-    let cookie = (Pkg_installed.of_paths package.paths).cookie in
+  let db_for_package entry =
     let* (cookie : Install_cookie.t), _ =
-      Action_builder.evaluate_and_collect_facts cookie
+      cookie entry |> Action_builder.evaluate_and_collect_facts
     in
     match Section.Map.find cookie.files Lib, Section.Map.find cookie.files Lib_root with
     | None, None -> Memo.return None
     | Some [], None | None, Some [] | Some [], Some [] -> Memo.return None
     | _ ->
-      let path = (Paths.install_roots package.paths).lib_root in
+      let path = (Paths.install_roots (read_paths entry)).lib_root in
       let+ db = Lib.DB.of_paths context ~paths:[ path ] in
       Some db
   in
