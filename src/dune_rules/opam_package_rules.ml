@@ -14,44 +14,7 @@ include struct
   module Dune_dep = Dune_dep
 end
 
-module Variable = struct
-  type value = OpamVariable.variable_contents =
-    | B of bool
-    | S of string
-    | L of string list
-
-  type t = Package_variable_name.t * value
-
-  let value_repr =
-    Repr.variant
-      "package-variable-value"
-      [ Repr.case "Bool" Repr.bool ~proj:(function
-          | B b -> Some b
-          | _ -> None)
-      ; Repr.case "String" Repr.string ~proj:(function
-          | S s -> Some s
-          | _ -> None)
-      ; Repr.case "Strings" (Repr.list Repr.string) ~proj:(function
-          | L xs -> Some xs
-          | _ -> None)
-      ]
-  ;;
-
-  let repr = Repr.pair Package_variable_name.repr value_repr
-
-  let dune_value : value -> Value.t list = function
-    | B b -> [ String (Bool.to_string b) ]
-    | S s -> [ String s ]
-    | L s -> List.map s ~f:(fun x -> Value.String x)
-  ;;
-
-  let of_values : dir:Path.t -> Value.t list -> value =
-    fun ~dir xs ->
-    match List.map xs ~f:(Value.to_string ~dir) with
-    | [ x ] -> S x
-    | xs -> L xs
-  ;;
-end
+module Variable = Package_deps.Variable
 
 module Package_universe = struct
   (* A type of group of packages that are co-installed. Multiple different
@@ -197,64 +160,7 @@ module Pkg_digest = struct
 end
 
 module Paths = struct
-  (* The [paths] of a package are the information about the artifacts
-     that we know {e without} executing any commands. *)
-  type 'a t =
-    { source_dir : 'a
-    ; target_dir : 'a
-    ; extra_sources : 'a
-    ; name : Package.Name.t
-    ; install_roots : 'a Install.Roots.t Lazy.t
-    ; install_paths : 'a Install.Paths.t Lazy.t
-    ; prefix : 'a
-    }
-
-  let map_path t ~f =
-    { t with
-      source_dir = f t.source_dir
-    ; target_dir = f t.target_dir
-    ; extra_sources = f t.extra_sources
-    ; install_roots = Lazy.map ~f:(Install.Roots.map ~f) t.install_roots
-    ; install_paths = Lazy.map ~f:(Install.Paths.map ~f) t.install_paths
-    ; prefix = f t.prefix
-    }
-  ;;
-
-  let install_roots ~target_dir ~relative =
-    Install.Roots.opam_from_prefix ~relative target_dir
-  ;;
-
-  let install_paths roots package ~relative = Install.Paths.make ~relative ~package ~roots
-
-  let of_root name ~root ~relative =
-    let source_dir = relative root "source" in
-    let target_dir = relative root "target" in
-    let extra_sources = relative root "extra_source" in
-    let install_roots = lazy (install_roots ~target_dir ~relative) in
-    let install_paths = lazy (install_paths (Lazy.force install_roots) name ~relative) in
-    { source_dir
-    ; target_dir
-    ; extra_sources
-    ; name
-    ; install_paths
-    ; install_roots
-    ; prefix = target_dir
-    }
-  ;;
-
-  let with_install_root t target_dir =
-    let install_roots = lazy (install_roots ~target_dir ~relative:Path.relative) in
-    let install_paths =
-      lazy (install_paths (Lazy.force install_roots) t.name ~relative:Path.relative)
-    in
-    { t with target_dir; install_roots; install_paths; prefix = target_dir }
-  ;;
-
-  let extra_source t extra_source = Path.append_local t.extra_sources extra_source
-
-  let extra_source_build t extra_source =
-    Path.Build.append_local t.extra_sources extra_source
-  ;;
+  include Package_deps.Paths
 
   let make pkg_digest universe =
     let root =
@@ -267,28 +173,6 @@ module Paths = struct
     in
     of_root pkg_digest.name ~root
   ;;
-
-  let make_install_cookie target_dir ~relative = relative target_dir "cookie"
-
-  let install_cookie' target_dir =
-    make_install_cookie target_dir ~relative:Path.Build.relative
-  ;;
-
-  let install_cookie t = make_install_cookie t.target_dir ~relative:Path.relative
-
-  let install_file t =
-    Path.Build.relative
-      t.source_dir
-      (sprintf "%s.install" (Package.Name.to_string t.name))
-  ;;
-
-  let config_file t =
-    Path.Build.relative t.source_dir (sprintf "%s.config" (Package.Name.to_string t.name))
-  ;;
-
-  let install_paths t = Lazy.force t.install_paths
-  let install_roots t = Lazy.force t.install_roots
-  let target_dir t = t.target_dir
 end
 
 module Source_input = struct
@@ -304,54 +188,7 @@ module Source_input = struct
     }
 end
 
-module Install_cookie = struct
-  (* The install cookie represents a serialized representation of all the
-     installed artifacts and variables.
-
-     The install cookie of a package is the source of all data we must refer to
-     address a package's artifacts.
-
-     It is constructed after we've built and installed the packages. In this
-     sense, it is the "installation trace" that we must refer to so that we
-     don't have to know anything about the installation procedure.
-  *)
-
-  module Gen = struct
-    type 'files t =
-      { files : 'files
-      ; variables : Variable.t list
-      }
-
-    let repr files_repr =
-      Repr.record
-        "install-cookie"
-        [ Repr.field "files" files_repr ~get:(fun t -> t.files)
-        ; Repr.field "variables" (Repr.list Variable.repr) ~get:(fun t -> t.variables)
-        ]
-    ;;
-  end
-
-  type t = Path.t list Section.Map.t Gen.t
-
-  module Persistent = Persistent.Make (struct
-      type nonrec t = (Section.t * Path.t list) list Gen.t
-
-      let sharing = false
-      let name = "INSTALL-COOKIE"
-      let version = 4
-      let repr = Gen.repr (Repr.list (Repr.pair Section.repr (Repr.list Path.repr)))
-    end)
-
-  let load_exn f =
-    match Persistent.load f with
-    | Some f -> { f with files = Section.Map.of_list_exn f.files }
-    | None -> User_error.raise ~loc:(Loc.in_file f) [ Pp.text "unable to load" ]
-  ;;
-
-  let dump path (t : t) =
-    Persistent.dump path { t with files = Section.Map.to_list t.files }
-  ;;
-end
+module Install_cookie = Package_deps.Install_cookie
 
 module Value_list_env = struct
   (* A representation of an environment where each variable can hold a
@@ -1271,6 +1108,21 @@ module Action_expander = struct
       in
       { binaries; dep_info }
     ;;
+
+    let materialize context (view : Dependency_view.t) =
+      let open Action_builder.O in
+      let* () =
+        Action_builder.deps (Pkg.package_deps_of view.legacy)
+        >>> Install_layout.deps context view.mounted_names
+      in
+      let+ { binaries; dep_info } =
+        Action_builder.of_memo (of_dependency_view context view)
+      in
+      { Package_deps.env = Pkg.build_env_of_deps view.all |> Value_list_env.to_env
+      ; binaries
+      ; packages = dep_info
+      }
+    ;;
   end
 
   let expander context (pkg : Pkg.t) (dependencies : Dependency_view.t) =
@@ -1281,22 +1133,25 @@ module Action_expander = struct
           Pp.textf
             "Computing closure for package %S"
             (Package.Name.to_string pkg.info.name))
-        (fun () -> Artifacts_and_deps.of_dependency_view context dependencies)
+        (fun () ->
+           Artifacts_and_deps.materialize context dependencies
+           |> Action_builder.evaluate_and_collect_facts
+           >>| fst)
     in
     let env = Pkg.exported_value_env_with_deps pkg dependencies.all in
     let depends =
       Memo.Lazy.map
         ~name:"package-dependency-info"
         closure
-        ~f:(fun { Artifacts_and_deps.dep_info; _ } ->
+        ~f:(fun { Package_deps.packages; _ } ->
           Package.Name.Map.add_exn
-            dep_info
+            packages
             pkg.info.name
             (Pkg_info.variables pkg.info, pkg.paths))
       |> Memo.Lazy.force
     in
     let artifacts =
-      let+ { Artifacts_and_deps.binaries; _ } = Memo.Lazy.force closure in
+      let+ { Package_deps.binaries; _ } = Memo.Lazy.force closure in
       binaries
     in
     { Expander.paths = pkg.paths
@@ -2054,16 +1909,14 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
   in
   let open Action_builder.With_targets.O in
   (let dependencies_builder =
-     let deps =
-       let deps = Dep.Set.union source_deps (Pkg.package_deps_of dependencies.legacy) in
-       match pkg.depends_on_dune with
-       | false -> deps
-       | true -> Dep.Set.add deps (Lazy.force dune_dep)
-     in
-     let legacy = Action_builder.deps deps |> Action_builder.with_no_targets in
-     legacy
-     >>> (Install_layout.deps context_name dependencies.mounted_names
-          |> Action_builder.with_no_targets)
+     let open Action_builder.O in
+     Action_builder.deps source_deps
+     >>> (Action_expander.Artifacts_and_deps.materialize context_name dependencies
+          >>| ignore)
+     >>> (if pkg.depends_on_dune
+          then Action_builder.dep (Lazy.force dune_dep)
+          else Action_builder.return ())
+     |> Action_builder.with_no_targets
    in
    dependencies_builder
    >>> add_env (Pkg.exported_env_with_deps pkg dependencies.all) build_action)
