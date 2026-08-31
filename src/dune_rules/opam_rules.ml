@@ -192,8 +192,17 @@ let gen_rules context ~dir stanza =
         ; extra_sources = []
         }
       in
+      let* () = Action_expander.refresh_exported_env context dependencies in
       let+ () =
-        Package_rules.gen_rules context package ~source ~source_deps ~dependencies
+        Package_rules.gen_rules
+          context
+          stanza
+          ~paths:package.write_paths
+          ~variables:(Dune_pkg.Lock_dir.Pkg_info.variables package.info)
+          ~source
+          ~source_deps
+          ~dependencies:
+            (Action_expander.Artifacts_and_deps.materialize context dependencies)
       in
       package.paths.target_dir
     | Lock ->
