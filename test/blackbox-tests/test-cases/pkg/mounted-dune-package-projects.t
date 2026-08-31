@@ -237,3 +237,95 @@ lock directory.
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   mounted vendored project
+
+Each selected package view of a shared archive owns its own copy of a bundled
+auxiliary library.
+
+  $ mkdir ../shared-auxiliary-project
+  $ cd ../shared-auxiliary-project
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends left right))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (rule
+  >  (targets left.output right.output)
+  >  (action
+  >   (progn
+  >    (with-stdout-to left.output (run %{bin:left-tool}))
+  >    (with-stdout-to right.output (run %{bin:right-tool})))))
+  > EOF
+
+  $ mkdir -p shared/vendor/src
+  $ cat > shared/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name left))
+  > (package (name right))
+  > EOF
+  $ cat > shared/dune <<'EOF'
+  > (executable
+  >  (name left_tool)
+  >  (public_name left-tool)
+  >  (package left)
+  >  (libraries vendored_support))
+  > (executable
+  >  (name right_tool)
+  >  (public_name right-tool)
+  >  (package right)
+  >  (libraries vendored_support))
+  > EOF
+  $ echo 'let () = print_endline (Vendored_support.message ^ "/left")' > shared/left_tool.ml
+  $ echo 'let () = print_endline (Vendored_support.message ^ "/right")' > shared/right_tool.ml
+  $ cat > shared/vendor/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name vendored_support))
+  > EOF
+  $ cat > shared/vendor/src/dune <<'EOF'
+  > (library
+  >  (name vendored_support)
+  >  (public_name vendored_support)
+  >  (libraries unix))
+  > EOF
+  $ cat > shared/vendor/src/vendored_support.ml <<'EOF'
+  > let message =
+  >   let (_ : Unix.file_descr) = Unix.stdin in
+  >   "shared auxiliary"
+  > EOF
+  $ tar cf shared.tar shared
+  $ rm -rf shared
+
+  $ checksum=$(md5sum shared.tar | cut -f1 -d' ')
+  $ make_lockdir
+  $ make_lockpkg left <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/shared.tar)
+  >   (checksum md5=$checksum)))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+  $ make_lockpkg right <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/shared.tar)
+  >   (checksum md5=$checksum)))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
+  $ "$real_dune" build left.output right.output --display quiet
+  $ cat _build/default/left.output _build/default/right.output
+  shared auxiliary/left
+  shared auxiliary/right
+  $ left_root=$(echo _build/_default+lockfile/pkg/left.1.0-*)
+  $ right_root=$(echo _build/_default+lockfile/pkg/right.1.0-*)
+  $ test -f "$left_root/vendor/src/vendored_support.cmxa" && test -f "$right_root/vendor/src/vendored_support.cmxa" && echo separately-owned-auxiliary-artifacts
+  separately-owned-auxiliary-artifacts
