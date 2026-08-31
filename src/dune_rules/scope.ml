@@ -2,7 +2,8 @@ open Import
 open Memo.O
 
 type t =
-  { project : Dune_project.t
+  { loaded_project : Loaded_project.t
+  ; project : Dune_project.t
   ; source_root : Source_path.t
   ; db : Lib.DB.t
   ; public_libs : Lib.DB.t
@@ -47,6 +48,14 @@ module DB = struct
 
   let find_scope_by_project t project =
     List.find_exn t.by_project ~f:(fun scope -> Dune_project.equal project scope.project)
+  ;;
+
+  let find_scope_by_loaded_project t loaded_project =
+    let identity = Loaded_project.identity loaded_project in
+    List.find_exn t.by_project ~f:(fun scope ->
+      Loaded_project.Identity.equal
+        identity
+        (Loaded_project.identity scope.loaded_project))
   ;;
 
   module Found_or_redirect : sig
@@ -294,25 +303,29 @@ module DB = struct
 
   type redirect_to =
     | Project of
-        { project : Dune_project.t
+        { loaded_project : Loaded_project.t
         ; lib_id : Lib_id.Local.t
         ; enabled : Toggle.t Memo.t
         ; loc : Loc.t
         }
     | Name of (Loc.t * Lib_name.t)
 
+  type public_libs_kind =
+    | Global
+    | Package_owner
+
   (* Create a database from the public libraries defined in the stanzas *)
-  let public_libs =
+  let make_public_libs =
     let resolve_redirect_to t rt =
       match rt with
-      | Project { project; lib_id; enabled; _ } ->
+      | Project { loaded_project; lib_id; enabled; _ } ->
         let+ enabled =
           let+ toggle = enabled in
           Toggle.enabled toggle
         in
         if enabled
         then (
-          let scope = find_scope_by_project (Fdecl.get t) project in
+          let scope = find_scope_by_loaded_project (Fdecl.get t) loaded_project in
           Lib.DB.Resolve_result.redirect_by_id scope.db (Local lib_id))
         else Lib.DB.Resolve_result.not_found
       | Name name -> Memo.return (Lib.DB.Resolve_result.redirect_in_the_same_db name)
@@ -329,7 +342,7 @@ module DB = struct
             | None | Some [] | Some (_ :: _ :: _) ->
               Memo.return Lib.DB.Resolve_result.not_found))
     in
-    fun t ~installed_libs ~instrument_with stanzas ->
+    fun kind t ~installed_libs ~instrument_with stanzas ->
       let by_name, by_id, mounted_by_name =
         List.fold_left
           stanzas
@@ -342,7 +355,7 @@ module DB = struct
             ->
             let candidate =
               match stanza with
-              | Library ({ project; visibility = Public p; _ } as conf) ->
+              | Library ({ visibility = Public p; _ } as conf) ->
                 let lib_id = Library.to_lib_id ~src_dir conf in
                 let enabled =
                   Memo.lazy_ ~name:"library-enabled" (fun () ->
@@ -352,7 +365,7 @@ module DB = struct
                 in
                 Some
                   ( Public_lib.name p
-                  , Project { project; lib_id; enabled; loc = Public_lib.loc p }
+                  , Project { loaded_project; lib_id; enabled; loc = Public_lib.loc p }
                   , Some lib_id )
               | Library _ | Library_redirect _ -> None
               | Deprecated_library_name s ->
@@ -405,9 +418,12 @@ module DB = struct
           ()
       in
       let installed_libs =
-        if Lib_name.Map.is_empty mounted_by_name
-        then installed_libs
-        else Lib.DB.with_parent installed_libs ~parent:mounted_libs
+        match kind with
+        | Package_owner -> installed_libs
+        | Global ->
+          if Lib_name.Map.is_empty mounted_by_name
+          then installed_libs
+          else Lib.DB.with_parent installed_libs ~parent:mounted_libs
       in
       let resolve_lib_id lib_id = resolve_lib_id t by_id mounted_by_name lib_id in
       let resolve name =
@@ -424,7 +440,53 @@ module DB = struct
         ()
   ;;
 
+  let public_stanza_package = function
+    | Library_related_stanza.Library { visibility = Public public; _ } ->
+      Some (Public_lib.package public |> Package.name)
+    | Deprecated_library_name deprecated ->
+      let public, _ = deprecated.old_name in
+      Some (Public_lib.package public |> Package.name)
+    | Library { visibility = Private _; _ } | Library_redirect _ -> None
+  ;;
+
+  let globally_visible_stanza loaded_project stanza =
+    match Build_partition.purpose (Loaded_project.partition loaded_project) with
+    | Workspace -> true
+    | Mounted ->
+      (match public_stanza_package stanza with
+       | None -> true
+       | Some package ->
+         (match Loaded_project.visible_packages loaded_project with
+          | None -> false
+          | Some packages -> Package.Name.Set.mem packages package))
+  ;;
+
+  let localize_auxiliary_library loaded_project ~owner_package ~owner_project stanza =
+    if globally_visible_stanza loaded_project stanza
+    then stanza
+    else (
+      match stanza with
+      | Library_related_stanza.Library ({ visibility = Public _; _ } as library) ->
+        Library
+          { library with
+            visibility = Private (Some owner_package)
+          ; project = owner_project
+          }
+      | Library { visibility = Private _; _ }
+      | Library_redirect _ | Deprecated_library_name _ -> stanza)
+  ;;
+
+  let mounted_owner loaded_project =
+    match Loaded_project.package_owner loaded_project with
+    | Some owner -> owner
+    | None ->
+      Code_error.raise
+        "Mounted project has no package owner"
+        [ "project", Loaded_project.to_dyn loaded_project ]
+  ;;
+
   let scopes_by_dir
+        ~scope_db_ref
         ~lib_config
         ~loaded_projects
         ~public_libs
@@ -443,6 +505,63 @@ module DB = struct
       Path.Build.Map.of_list_map_exn loaded_projects ~f:(fun loaded_project ->
         Loaded_project.output_root loaded_project, loaded_project)
     in
+    let mounted_owners =
+      List.fold_left
+        loaded_projects
+        ~init:Path.Build.Map.empty
+        ~f:(fun owners loaded_project ->
+          let partition = Loaded_project.partition loaded_project in
+          match Build_partition.purpose partition with
+          | Workspace -> owners
+          | Mounted ->
+            let package, project = mounted_owner loaded_project in
+            let owner = Build_partition.output_root partition in
+            Path.Build.Map.update owners owner ~f:(function
+              | None -> Some (package, project)
+              | Some (previous, _) as previous_owner ->
+                if
+                  Package.Name.equal (Package.name previous) (Package.name package)
+                  && Source_path.equal (Package.dir previous) (Package.dir package)
+                then previous_owner
+                else
+                  Code_error.raise
+                    "Mounted artifact owner has inconsistent packages"
+                    [ "owner", Path.Build.to_dyn owner
+                    ; "first", Package.Id.to_dyn (Package.id previous)
+                    ; "second", Package.Id.to_dyn (Package.id package)
+                    ]))
+    in
+    let mounted_auxiliary_stanzas_by_owner =
+      List.filter_map stanzas ~f:(fun (loaded_project, dir, source_dir, stanza) ->
+        let partition = Loaded_project.partition loaded_project in
+        match Build_partition.purpose partition with
+        | Workspace -> None
+        | Mounted ->
+          if globally_visible_stanza loaded_project stanza
+          then None
+          else
+            Option.map (public_stanza_package stanza) ~f:(fun _ ->
+              ( Build_partition.output_root partition
+              , (loaded_project, dir, source_dir, stanza) )))
+      |> Path.Build.Map.of_list_multi
+    in
+    let mounted_public_libs_by_owner =
+      Path.Build.Map.mapi mounted_owners ~f:(fun owner (package, _) ->
+        let legacy_libs =
+          legacy_libraries context (Package.name package) ~parent:installed_libs
+        in
+        let parent = Lib.DB.with_parent public_libs ~parent:legacy_libs in
+        let stanzas =
+          Path.Build.Map.find mounted_auxiliary_stanzas_by_owner owner
+          |> Option.value ~default:[]
+        in
+        make_public_libs
+          Package_owner
+          scope_db_ref
+          ~installed_libs:parent
+          ~instrument_with
+          stanzas)
+    in
     let db_by_project =
       Path.Build.Map.merge
         projects_by_output_root
@@ -453,29 +572,31 @@ module DB = struct
           let stanzas = Option.value stanzas ~default:[] in
           Some (loaded_project, project, stanzas))
       |> Path.Build.Map.map ~f:(fun (loaded_project, project, stanzas) ->
+        let partition = Loaded_project.partition loaded_project in
+        let local_stanzas =
+          match Build_partition.purpose partition with
+          | Workspace -> stanzas
+          | Mounted ->
+            let owner_package, owner_project = mounted_owner loaded_project in
+            List.map stanzas ~f:(fun (dir, source_dir, stanza) ->
+              ( dir
+              , source_dir
+              , localize_auxiliary_library
+                  loaded_project
+                  ~owner_package
+                  ~owner_project
+                  stanza ))
+        in
         let public_libs =
-          match Build_partition.purpose (Loaded_project.partition loaded_project) with
+          match Build_partition.purpose partition with
           | Workspace -> public_libs
           | Mounted ->
-            let package =
-              match Loaded_project.visible_packages loaded_project with
-              | Some packages ->
-                (match Package.Name.Set.to_list packages with
-                 | [ package ] -> package
-                 | _ ->
-                   Code_error.raise
-                     "Mounted project does not have exactly one visible package"
-                     [ "project", Loaded_project.to_dyn loaded_project ])
-              | None ->
-                Code_error.raise
-                  "Mounted project has no visible package"
-                  [ "project", Loaded_project.to_dyn loaded_project ]
-            in
-            let legacy_libs = legacy_libraries context package ~parent:installed_libs in
-            Lib.DB.with_parent public_libs ~parent:legacy_libs
+            Path.Build.Map.find_exn
+              mounted_public_libs_by_owner
+              (Build_partition.output_root partition)
         in
         let db =
-          create_db_from_stanzas stanzas ~instrument_with ~public_libs ~lib_config
+          create_db_from_stanzas local_stanzas ~instrument_with ~public_libs ~lib_config
         in
         loaded_project, project, db, public_libs)
     in
@@ -491,7 +612,7 @@ module DB = struct
       let source_root = Loaded_project.source_root loaded_project in
       let rocq_db = Rocq_scope.find rocq_scopes ~project:loaded_project in
       let purpose = Loaded_project.partition loaded_project |> Build_partition.purpose in
-      { project; source_root; db; public_libs; rocq_db; root; purpose })
+      { loaded_project; project; source_root; db; public_libs; rocq_db; root; purpose })
   ;;
 
   let create ~installed_libs ~context ~loaded_projects stanzas rocq_stanzas =
@@ -509,9 +630,16 @@ module DB = struct
       | [] -> parent
       | _ :: _ -> Opam_rules.libraries context packages ~parent
     in
-    let public_libs = public_libs t ~instrument_with ~installed_libs stanzas in
+    let globally_visible_stanzas =
+      List.filter stanzas ~f:(fun (loaded_project, _, _, stanza) ->
+        globally_visible_stanza loaded_project stanza)
+    in
+    let public_libs =
+      make_public_libs Global t ~instrument_with ~installed_libs globally_visible_stanzas
+    in
     let scopes =
       scopes_by_dir
+        ~scope_db_ref:t
         ~lib_config
         ~loaded_projects
         ~public_libs

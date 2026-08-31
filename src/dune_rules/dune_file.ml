@@ -67,16 +67,6 @@ module Mask = struct
             Package.Name.Set.mem visible_pkgs name)
   ;;
 
-  let of_visible_packages = function
-    | None -> True
-    | Some visible_pkgs ->
-      Fun
-        (fun stanza ->
-          match Stanzas.stanza_package stanza with
-          | None -> true
-          | Some package -> Package.Name.Set.mem visible_pkgs (Package.Id.name package))
-  ;;
-
   let of_package_scope package_scope ~dir =
     if Package_scope.is_empty package_scope
     then True
@@ -511,7 +501,7 @@ module Eval = struct
     }
   ;;
 
-  let eval dune_files workspace_mask ~package_scope =
+  let eval dune_files workspace_mask =
     let workspace_mask = Mask.of_only_packages_mask workspace_mask in
     (* CR-someday rgrinberg: all this evaluation complexity is to share
        some work in multi context builds. Is it worth it? *)
@@ -519,22 +509,16 @@ module Eval = struct
       Appendable_list.to_list_rev dune_files
       |> Memo.parallel_map ~f:(fun (loaded_project, dir, dune_file) ->
         let project = Loaded_project.project loaded_project in
+        let package_scope = Loaded_project.package_scope loaded_project in
+        let scope_mask =
+          Mask.of_package_scope package_scope ~dir:(Source_tree.Rules.Dir.source_path dir)
+        in
         let mask =
           match Build_partition.purpose (Loaded_project.partition loaded_project) with
-          | Workspace ->
-            Mask.combine
-              workspace_mask
-              (Mask.of_package_scope
-                 package_scope
-                 ~dir:(Source_tree.Rules.Dir.source_path dir))
-          | Mounted -> Mask.True
+          | Workspace -> Mask.combine workspace_mask scope_mask
+          | Mounted -> scope_mask
         in
         let mask = Mask.combine mask (Mask.ignore_promote project) in
-        let mask =
-          Mask.combine
-            mask
-            (Mask.of_visible_packages (Loaded_project.visible_packages loaded_project))
-        in
         let eval = { loaded_project; source_dir = dir; project; mask } in
         context_independent ~eval dune_file)
       >>| List.partition_map ~f:(function

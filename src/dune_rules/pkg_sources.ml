@@ -136,7 +136,6 @@ let mount candidate source_root tree =
             project
             ~package
             ~version:candidate.lock_pkg.info.version
-          |> Dune_project.filter_packages ~f:(Package.Name.equal package)
         , source_dir ))
     in
     Memo.return
@@ -246,6 +245,11 @@ let load_mounted context =
       ~context:(Context_name.to_string context)
       ~mounted:(List.length mounted));
   mounted
+;;
+
+let selected_package_names context =
+  let+ candidates = candidates context in
+  List.map candidates ~f:Candidate.name |> Package.Name.Set.of_list
 ;;
 
 let mounted =
