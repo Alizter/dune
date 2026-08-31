@@ -77,6 +77,17 @@ module Mask = struct
           | Some package -> Package.Name.Set.mem visible_pkgs (Package.Id.name package))
   ;;
 
+  let of_package_scope package_scope ~dir =
+    if Package_scope.is_empty package_scope
+    then True
+    else
+      Fun
+        (fun stanza ->
+          match Stanzas.stanza_package stanza with
+          | None -> true
+          | Some package -> Package_scope.is_stanza_visible package_scope ~dir package)
+  ;;
+
   let is_promoted_rule =
     let is_promoted_mode version = function
       | Rule_mode.Promote { only = None; lifetime; _ } ->
@@ -500,7 +511,7 @@ module Eval = struct
     }
   ;;
 
-  let eval dune_files workspace_mask =
+  let eval dune_files workspace_mask ~package_scope =
     let workspace_mask = Mask.of_only_packages_mask workspace_mask in
     (* CR-someday rgrinberg: all this evaluation complexity is to share
        some work in multi context builds. Is it worth it? *)
@@ -510,7 +521,12 @@ module Eval = struct
         let project = Loaded_project.project loaded_project in
         let mask =
           match Build_partition.purpose (Loaded_project.partition loaded_project) with
-          | Workspace -> workspace_mask
+          | Workspace ->
+            Mask.combine
+              workspace_mask
+              (Mask.of_package_scope
+                 package_scope
+                 ~dir:(Source_tree.Rules.Dir.source_path dir))
           | Mounted -> Mask.True
         in
         let mask = Mask.combine mask (Mask.ignore_promote project) in

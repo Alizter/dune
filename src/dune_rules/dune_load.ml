@@ -14,10 +14,12 @@ type t =
   { dune_files :
       (Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t) Appendable_list.t
   ; packages : Package.t Package.Name.Map.t
+  ; packages_including_hidden : Package.t Package.Name.Map.t
   ; projects : Dune_project.t list
   ; project_dirs : Source_tree.Rules.Dir.t Source_path.Map.t
   ; projects_by_root : Dune_project.t Source_path.Map.t
   ; mask : Only_packages.t
+  ; package_scope : Package_scope.t
   }
 
 type status =
@@ -26,12 +28,15 @@ type status =
   ]
 
 module Projects_and_dune_files =
-  Monoid.Product
+  Monoid.Product3
     (Monoid.Appendable_list (struct
       type t = status * Dune_project.t * Source_tree.Rules.Dir.t
     end))
     (Monoid.Appendable_list (struct
          type t = Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t
+       end))
+    (Monoid.Appendable_list (struct
+         type t = Source_path.t * Dune_lang.Scope_stanza.t
        end))
 
 module Rules_source_tree_map_reduce =
@@ -50,7 +55,7 @@ let load () =
     | Vendored -> `Vendored
     | Normal | Data_only -> `Regular
   in
-  let* projects, dune_files =
+  let* projects, dune_files, scopes =
     let f dir : Projects_and_dune_files.t Memo.t =
       let path = Source_tree.Rules.Dir.source_path dir in
       let project = Source_tree.Rules.Dir.project dir in
@@ -59,12 +64,18 @@ let load () =
         then Appendable_list.singleton (status dir, project, dir)
         else Appendable_list.empty
       in
-      let dune_files =
+      let dune_files, scopes =
         match Source_tree.Rules.Dir.dune_file dir with
-        | None -> Appendable_list.empty
-        | Some d -> Appendable_list.singleton (dir, project, d)
+        | None -> Appendable_list.empty, Appendable_list.empty
+        | Some dune_file ->
+          let scopes =
+            match Source.Dune_file.scope dune_file with
+            | None -> Appendable_list.empty
+            | Some scope -> Appendable_list.singleton (path, scope)
+          in
+          Appendable_list.singleton (dir, project, dune_file), scopes
       in
-      Memo.return (projects, dune_files)
+      Memo.return (projects, dune_files, scopes)
     in
     let* root = Source_tree.root () in
     Rules_source_tree_map_reduce.map_reduce
@@ -74,58 +85,76 @@ let load () =
       ~f
   in
   let projects = Appendable_list.to_list_rev projects in
-  let+ all_packages, vendored_packages =
-    Memo.List.fold_left
-      projects
+  let* package_entries =
+    Memo.List.concat_map projects ~f:(fun (source_status, project, _) ->
+      Dune_project.including_hidden_packages project
+      |> Package.Name.Map.values
+      |> Memo.List.map ~f:(fun package ->
+        let+ enabled = Package_enabled.eval package in
+        package, (if enabled then `Enabled else `Disabled), source_status))
+  in
+  let package_scope =
+    Package_scope.create
+      ~scopes:(Appendable_list.to_list_rev scopes)
+      ~packages:(List.map package_entries ~f:(fun (package, _, _) -> package))
+  in
+  let package_entries =
+    if Package_scope.is_empty package_scope
+    then package_entries
+    else
+      List.filter package_entries ~f:(fun (package, _, _) ->
+        Package_scope.is_package_visible package_scope package)
+  in
+  let all_packages, vendored_packages =
+    List.fold_left
+      package_entries
       ~init:(Package.Name.Map.empty, Package.Name.Set.empty)
-      ~f:(fun (acc_packages, vendored) (status, (project : Dune_project.t), _) ->
-        let+ packages =
-          let packages = Dune_project.including_hidden_packages project in
-          let+ disabled =
-            Package.Name.Map.values packages
-            |> Memo.List.filter_map ~f:(fun package ->
-              let+ enabled = Package_enabled.eval package in
-              Option.some_if (not enabled) package)
-            >>| Package.Name.Map.of_list_map_exn ~f:(fun pkg -> Package.name pkg, ())
-          in
-          Package.Name.Map.merge packages disabled ~f:(fun _key package disabled ->
-            match package, disabled with
-            | Some p, Some () -> Some (p, `Disabled)
-            | Some p, None -> Some (p, `Enabled)
-            | None, None | None, Some _ -> assert false)
+      ~f:(fun (packages, vendored) (package, enabled, source_status) ->
+        let name = Package.name package in
+        let packages =
+          Package.Name.Map.update packages name ~f:(function
+            | None -> Some (package, enabled)
+            | Some (previous, _) ->
+              User_error.raise
+                [ Pp.textf
+                    "The package %S is defined more than once:"
+                    (Package.Name.to_string name)
+                ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc previous))
+                ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc package))
+                ])
         in
         let vendored =
-          match status with
+          match source_status with
           | `Regular -> vendored
-          | `Vendored ->
-            Package.Name.Set.of_keys packages |> Package.Name.Set.union vendored
+          | `Vendored -> Package.Name.Set.add vendored name
         in
-        let acc_packages =
-          Package.Name.Map.union acc_packages packages ~f:(fun name (a, _) (b, _) ->
-            User_error.raise
-              [ Pp.textf
-                  "The package %S is defined more than once:"
-                  (Package.Name.to_string name)
-              ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc a))
-              ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc b))
-              ])
-        in
-        acc_packages, vendored)
+        packages, vendored)
   in
+  let packages_including_hidden = Package.Name.Map.map all_packages ~f:fst in
   let mask = Only_packages.mask all_packages ~vendored:vendored_packages in
-  let packages =
-    Package.Name.Map.map ~f:fst all_packages |> Only_packages.filter_packages mask
-  in
+  let packages = Only_packages.filter_packages mask packages_including_hidden in
   let project_dirs =
     Source_path.Map.of_list_map_exn projects ~f:(fun (_, project, dir) ->
       Dune_project.root project, dir)
   in
-  let projects = List.rev_map projects ~f:(fun (_, project, _) -> project) in
+  let projects =
+    List.rev_map projects ~f:(fun (_, project, _) ->
+      Package_scope.filter_project package_scope project)
+  in
   let projects_by_root =
     Source_path.Map.of_list_map_exn projects ~f:(fun project ->
       Dune_project.root project, project)
   in
-  { dune_files; mask; packages; projects; project_dirs; projects_by_root }
+  Memo.return
+    { dune_files
+    ; mask
+    ; packages
+    ; packages_including_hidden
+    ; projects
+    ; project_dirs
+    ; projects_by_root
+    ; package_scope
+    }
 ;;
 
 let load =
@@ -219,7 +248,12 @@ let workspace_loaded =
               in
               loaded_project, source_dir, dune_file)
         in
-        let* eval = Dune_file.eval source_dune_files workspace.mask in
+        let* eval =
+          Dune_file.eval
+            source_dune_files
+            workspace.mask
+            ~package_scope:workspace.package_scope
+        in
         let+ dune_files = eval context_name in
         { dune_files; loaded_projects; mask = workspace.mask })
       |> Memo.Lazy.force)
@@ -308,7 +342,12 @@ let loaded =
             dune_files)
           >>| Appendable_list.concat
         in
-        let* eval = Dune_file.eval mounted_source_dune_files workspace.mask in
+        let* eval =
+          Dune_file.eval
+            mounted_source_dune_files
+            workspace.mask
+            ~package_scope:Package_scope.empty
+        in
         let+ mounted_dune_files = eval context_name in
         let dune_files =
           workspace.dune_files @ mounted_dune_files @ synthetic_dune_files
@@ -412,9 +451,19 @@ let mask () =
   mask
 ;;
 
+let package_scope () =
+  let+ { package_scope; _ } = load () in
+  package_scope
+;;
+
 let packages () =
   let+ { packages; _ } = load () in
   packages
+;;
+
+let packages_including_hidden () =
+  let+ { packages_including_hidden; _ } = load () in
+  packages_including_hidden
 ;;
 
 let dune_files context =
