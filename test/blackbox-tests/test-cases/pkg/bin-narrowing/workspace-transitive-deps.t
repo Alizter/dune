@@ -1,7 +1,5 @@
-Workspace-installed binaries (the local_bins in [Artifacts]) are narrowed when
-dune package management is enabled: a package's stanzas resolve any workspace
-package's binary present in its closure. The narrowing is only enabled when
-dune pkg management is enabled.
+Workspace-installed binaries (the local_bins in [Artifacts]) are narrowed to a
+package and its immediate dependencies when dune package management is enabled.
 
 Enable dune package management in the workspace file. We configure a mock opam
 repository to avoid trying to connect to the upstream repository:
@@ -10,9 +8,8 @@ repository to avoid trying to connect to the upstream repository:
   $ add_mock_repo_if_needed
   $ enable_pkg
 
-Three workspace packages forming a chain [p] -> [q] -> [r]. [q] installs
-[q-tool] and [r] installs [r-tool]. A sibling [s] installs [s-tool] and is not
-in [p]'s dependency closure.
+Three workspace packages form a chain [p] -> [q] -> [r]. [q] installs [q-tool]
+and [r] installs [r-tool]. A sibling [s] installs [s-tool].
 
   $ mkdir -p p q r s
   $ cat >q/q-tool.sh <<'EOF'
@@ -57,12 +54,12 @@ in [p]'s dependency closure.
   $ cat _build/default/p/q-avail
   true
 
-[r-tool] (transitive dep p -> q -> r) is available:
+[r-tool] (transitive dep p -> q -> r) is not implicitly available:
 
   $ cat _build/default/p/r-avail
-  true
+  false
 
-[s-tool] (sibling not in p's closure) is NOT available:
+[s-tool] (an undeclared sibling) is also not available:
 
   $ cat _build/default/p/s-avail
   false
