@@ -5,6 +5,7 @@ type t =
   ; packages : Package_name.Set.t
   }
 
+let make ~loc ~packages = { loc; packages }
 let loc t = t.loc
 let packages t = t.packages
 

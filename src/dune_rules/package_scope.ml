@@ -1,12 +1,15 @@
 open Import
 
-type t =
+type selection =
   { scopes : Dune_lang.Scope_stanza.t Source_path.Map.t
   ; package_dirs : Source_path.t Package.Id.Map.t
   }
 
-let empty = { scopes = Source_path.Map.empty; package_dirs = Package.Id.Map.empty }
-let is_empty t = Source_path.Map.is_empty t.scopes
+type t = selection list
+
+let empty = []
+let is_empty = List.is_empty
+let intersect a b = a @ b
 
 let package_dir package =
   match Package.exclusive_dir package with
@@ -14,10 +17,10 @@ let package_dir package =
   | None -> Package.dir package
 ;;
 
-let name_is_visible_at_dir t ~dir name =
+let name_is_visible_at_dir selection ~dir name =
   let rec loop dir =
     let visible_here =
-      match Source_path.Map.find t.scopes dir with
+      match Source_path.Map.find selection.scopes dir with
       | None -> true
       | Some scope -> Package.Name.Set.mem (Dune_lang.Scope_stanza.packages scope) name
     in
@@ -30,22 +33,26 @@ let name_is_visible_at_dir t ~dir name =
   loop dir
 ;;
 
-let package_id_dir t (package : Package.Id.t) =
-  Package.Id.Map.find t.package_dirs package |> Option.value ~default:package.dir
+let package_id_dir selection (package : Package.Id.t) =
+  Package.Id.Map.find selection.package_dirs package |> Option.value ~default:package.dir
 ;;
 
-let package_id_is_visible t package =
-  name_is_visible_at_dir t ~dir:(package_id_dir t package) (Package.Id.name package)
+let package_id_is_visible selection package =
+  name_is_visible_at_dir
+    selection
+    ~dir:(package_id_dir selection package)
+    (Package.Id.name package)
 ;;
 
 let is_package_visible t package =
-  is_empty t || package_id_is_visible t (Package.id package)
+  let package = Package.id package in
+  List.for_all t ~f:(fun selection -> package_id_is_visible selection package)
 ;;
 
 let is_stanza_visible t ~dir package =
-  is_empty t
-  || (package_id_is_visible t package
-      && name_is_visible_at_dir t ~dir (Package.Id.name package))
+  List.for_all t ~f:(fun selection ->
+    package_id_is_visible selection package
+    && name_is_visible_at_dir selection ~dir (Package.Id.name package))
 ;;
 
 let create ~scopes ~packages =
@@ -94,7 +101,7 @@ let create ~scopes ~packages =
               (List.map names ~f:Package.Name.to_string |> String.concat ~sep:", ")
           ; Pp.textf "Scope directory: %s" (Source_path.to_string_maybe_quoted scope_dir)
           ]);
-    { scopes; package_dirs })
+    [ { scopes; package_dirs } ])
 ;;
 
 let filter_project t project =
