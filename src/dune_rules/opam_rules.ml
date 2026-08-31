@@ -85,10 +85,17 @@ let closure (entries : entry Package.Name.Map.t) (roots : entry list) =
 ;;
 
 let dependency_entries entries (entry : entry) =
-  let name = Package.name entry.stanza.package in
-  closure entries [ entry ]
-  |> List.filter ~f:(fun (dependency : entry) ->
-    not (Package.Name.equal name (Package.name dependency.stanza.package)))
+  let (_ : entry list) = closure entries [ entry ] in
+  List.map (Package.depends entry.stanza.package) ~f:(fun dependency ->
+    match Package.Name.Map.find entries dependency.Package_dependency.name with
+    | Some entry -> entry
+    | None ->
+      User_error.raise
+        ~loc:entry.stanza.loc
+        [ Pp.textf
+            "Package %s is not provided by an opam stanza"
+            (Package.Name.to_string dependency.name)
+        ])
 ;;
 
 let selected_entries (entries : entry Package.Name.Map.t) selected =
