@@ -216,6 +216,16 @@ val source_rules : Pkg.t -> (Dep.Set.t * unit Memo.t) Memo.t
 
 val gen_rules
   :  Context_name.t
+  -> Opam_stanza.t
+  -> paths:Path.Build.t Paths.t
+  -> variables:Package_deps.package_variables
+  -> source:Source_input.t
+  -> source_deps:Dep.Set.t
+  -> dependencies:Package_deps.t Action_builder.t
+  -> unit Memo.t
+
+val gen_rules_legacy
+  :  Context_name.t
   -> Pkg.t
   -> source:Source_input.t
   -> source_deps:Dep.Set.t

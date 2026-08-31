@@ -196,11 +196,13 @@ module Value_list_env = struct
      string (in the style of the PATH variable). *)
   type t = Value.t list Env.Map.t
 
-  let global : t Lazy.t =
-    let parse_strings s = Bin.parse s |> List.map ~f:(fun s -> Value.String s) in
-    let of_env env : t = Env.to_map env |> Env.Map.map ~f:parse_strings in
-    lazy (of_env (Global.env ()))
+  let of_env env : t =
+    Env.to_map env
+    |> Env.Map.map ~f:(fun value ->
+      Bin.parse value |> List.map ~f:(fun value -> Value.String value))
   ;;
+
+  let global : t Lazy.t = lazy (of_env (Global.env ()))
 
   (* Concatenate a list of values in the style of lists found in
      environment variables, such as PATH *)
@@ -535,7 +537,7 @@ module Expander0 = struct
     ; depexts : Depexts.t list
     ; context : Context_name.t
     ; version : Package_version.t
-    ; env : Value.t list Env.Map.t
+    ; env : Value_list_env.t Memo.t
     }
 
   let expand_pform_fdecl
@@ -1013,13 +1015,14 @@ module Action_expander = struct
   and expand_withenv (expander : Expander.t) updates action =
     let* env, updates =
       let dir = expander.paths.source_dir in
+      let* env = expander.env in
       Memo.List.fold_left
-        ~init:(expander.env, [])
+        ~init:(env, [])
         updates
         ~f:(fun (env, updates) ({ Env_update.op = _; var; value } as update) ->
           let+ value =
             let+ value =
-              let expander = { expander with env } in
+              let expander = { expander with env = Memo.return env } in
               Expander.expand_pform_gen expander value ~mode:Single
             in
             Value.to_string ~dir value
@@ -1038,7 +1041,7 @@ module Action_expander = struct
           env, update :: updates)
     in
     let+ action =
-      let expander = { expander with env } in
+      let expander = { expander with env = Memo.return env } in
       expand action ~expander
     in
     List.fold_left updates ~init:action ~f:(fun action (k, v) ->
@@ -1125,6 +1128,56 @@ module Action_expander = struct
     ;;
   end
 
+  let base_env ~name ~version (paths : Path.t Paths.t) =
+    Env.Map.of_list_exn
+      [ Opam_switch.opam_switch_prefix_var_name, [ Value.Path paths.target_dir ]
+      ; Env.Var.of_string "CDPATH", [ Value.String "" ]
+      ; Env.Var.of_string "MAKELEVEL", [ Value.String "" ]
+      ; ( Env.Var.of_string "OPAM_PACKAGE_NAME"
+        , [ Value.String (Package.Name.to_string name) ] )
+      ; ( Env.Var.of_string "OPAM_PACKAGE_VERSION"
+        , [ Value.String (Package_version.to_string version) ] )
+      ; Env.Var.of_string "OPAMCLI", [ Value.String "2.0" ]
+      ; Env.Var.of_string "OPAMSWITCH", [ Value.String "dune" ]
+      ]
+  ;;
+
+  let value_env ~name ~version paths (dependencies : Package_deps.t) =
+    let package_env =
+      Value_list_env.of_env dependencies.env
+      |> Env.Map.superpose (base_env ~name ~version paths)
+    in
+    Value_list_env.extend_concat_path (Lazy.force Value_list_env.global) package_env
+  ;;
+
+  let expander_of_stanza context (stanza : Opam_stanza.t) ~paths ~variables dependencies =
+    let name = Package.name stanza.package in
+    let version =
+      Package.version stanza.package |> Option.value ~default:Pkg_info.default_version
+    in
+    let depends =
+      let+ { Package_deps.packages; _ } = dependencies in
+      Package.Name.Map.add_exn packages name (variables, paths)
+    in
+    let artifacts =
+      let+ { Package_deps.binaries; _ } = dependencies in
+      binaries
+    in
+    let env =
+      let+ dependencies = dependencies in
+      value_env ~name ~version paths dependencies
+    in
+    { Expander.paths
+    ; name
+    ; artifacts
+    ; context
+    ; depends
+    ; depexts = stanza.depexts
+    ; version
+    ; env
+    }
+  ;;
+
   let expander context (pkg : Pkg.t) (dependencies : Dependency_view.t) =
     let closure =
       Memo.lazy_
@@ -1161,23 +1214,11 @@ module Action_expander = struct
     ; depends
     ; depexts = pkg.depexts
     ; version = pkg.info.version
-    ; env
+    ; env = Memo.return env
     }
   ;;
 
   let sandbox = Sandbox_mode.Set.singleton Sandbox_mode.copy
-
-  let expand context (pkg : Pkg.t) dependencies action =
-    let+ action =
-      let expander = expander context pkg dependencies in
-      expand action ~expander >>| Action.chdir pkg.paths.source_dir
-    in
-    (* TODO copying is needed for build systems that aren't dune and those
-       with an explicit install step *)
-    Action.Full.make ~sandbox action
-    |> Action_builder.return
-    |> Action_builder.with_no_targets
-  ;;
 
   let dune_exe context =
     Which.which ~path:(Env_path.path Env.initial) Filename.dune
@@ -1187,21 +1228,26 @@ module Action_expander = struct
       Error (Action.Prog.Not_found.create ~loc:None ~context ~program:Filename.dune ())
   ;;
 
-  let build_command context (pkg : Pkg.t) dependencies =
-    Option.map pkg.build_command ~f:(function
-      | Action action -> expand context pkg dependencies action
+  let expand_stanza paths expander action =
+    let+ action = expand action ~expander >>| Action.chdir paths.Paths.source_dir in
+    Action.Full.make ~sandbox action
+    |> Action_builder.return
+    |> Action_builder.with_no_targets
+  ;;
+
+  let build_command_of_stanza context (stanza : Opam_stanza.t) paths expander =
+    Option.map stanza.build ~f:(function
+      | Action action -> expand_stanza paths expander action
       | Dune ->
-        (* CR-someday rgrinberg: respect [dune subst] settings. *)
         Command.run_dyn_prog
           (Action_builder.of_memo (dune_exe context))
-          ~dir:pkg.paths.source_dir
-          [ A "build"; A "-p"; A (Package.Name.to_string pkg.info.name) ]
+          ~dir:paths.Paths.source_dir
+          [ A "build"; A "-p"; A (Package.Name.to_string (Package.name stanza.package)) ]
         |> Memo.return)
   ;;
 
-  let install_command context (pkg : Pkg.t) dependencies =
-    Option.map pkg.install_command ~f:(fun action ->
-      expand context pkg dependencies action)
+  let install_command_of_stanza (stanza : Opam_stanza.t) paths expander =
+    Option.map stanza.install ~f:(expand_stanza paths expander)
   ;;
 
   let exported_env (expander : Expander.t) (env : _ Env_update.t) =
@@ -1659,10 +1705,6 @@ module Install_action = struct
   ;;
 end
 
-let add_env env action =
-  Action_builder.With_targets.map action ~f:(Action.Full.add_env env)
-;;
-
 let rule ?loc { Action_builder.With_targets.build; targets } =
   (* TODO this ignores the workspace file *)
   Rule.make ~info:(Rule.Info.of_loc_opt loc) ~targets build |> Rules.Produce.rule
@@ -1786,16 +1828,45 @@ let dune_dep =
   lazy (Sys.executable_name |> Path.External.of_string |> Path.external_ |> Dep.file)
 ;;
 
-let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
+let package_version package =
+  Package.version package |> Option.value ~default:Pkg_info.default_version
+;;
+
+let depends_on_dune package =
+  List.exists (Package.depends package) ~f:(fun dependency ->
+    Package.Name.equal dependency.Package_dependency.name Dune_dep.name)
+;;
+
+let build_rule
+      context_name
+      (stanza : Opam_stanza.t)
+      ~paths
+      ~variables
+      ~source
+      ~source_deps
+      ~dependencies
+  =
   let { Source_input.root; kind; files_dir; extra_sources } = source in
-  if not (Path.Build.equal root pkg.write_paths.source_dir)
+  if not (Path.Build.equal root paths.Paths.source_dir)
   then
     Code_error.raise
       "Opam package source input and package paths disagree"
       [ "source_input", Path.Build.to_dyn root
-      ; "package_source", Path.Build.to_dyn pkg.write_paths.source_dir
+      ; "package_source", Path.Build.to_dyn paths.source_dir
       ];
-  let* () = Action_expander.refresh_exported_env context_name dependencies in
+  let read_paths = Paths.map_path paths ~f:Path.build in
+  let dependencies = Action_builder.memoize "opam-package-dependencies" dependencies in
+  let materialized_dependencies =
+    Action_builder.evaluate_and_collect_facts dependencies >>| fst
+  in
+  let expander =
+    Action_expander.expander_of_stanza
+      context_name
+      stanza
+      ~paths:read_paths
+      ~variables
+      materialized_dependencies
+  in
   let+ build_action =
     let+ copy_action, build_action, install_action =
       let+ copy_action =
@@ -1841,32 +1912,24 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
           let dst = Path.Build.append_local root local in
           let action =
             Action.progn
-              [ (* If the package has no source directory (some
-                   low-level packages are exclusively made up of extra
-                   sources), the source directory is first created. *)
-                Action.mkdir root
-              ; (* It's possible for some extra sources to already be at
-                   the destination. If these files are write-protected
-                   then the copy action will fail if we don't first remove
-                   them. *)
-                Action.remove_tree dst
-              ; Action.copy src dst
-              ]
+              [ Action.mkdir root; Action.remove_tree dst; Action.copy src dst ]
           in
           let open Action_builder.O in
           Action_builder.with_no_targets
             (Action_builder.path src >>> Action_builder.return (Action.Full.make action)))
       and+ build_action =
-        match Action_expander.build_command context_name pkg dependencies with
+        match
+          Action_expander.build_command_of_stanza context_name stanza read_paths expander
+        with
         | None -> Memo.return []
         | Some build_command -> build_command >>| List.singleton
       and+ install_action =
-        match Action_expander.install_command context_name pkg dependencies with
+        match Action_expander.install_command_of_stanza stanza read_paths expander with
         | None -> Memo.return []
         | Some install_action ->
           let+ install_action = install_action in
           let mkdir_install_dirs =
-            let install_paths = Paths.install_paths pkg.write_paths in
+            let install_paths = Paths.install_paths paths in
             Install_action.installable_sections
             |> List.rev_map ~f:(fun section ->
               Install.Paths.get install_paths section |> Action.mkdir)
@@ -1879,10 +1942,10 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
       copy_action, build_action, install_action
     in
     let install_file_action =
-      let prefix_outside_build_dir = Path.as_outside_build_dir pkg.paths.prefix in
+      let prefix_outside_build_dir = Path.as_outside_build_dir read_paths.prefix in
       Install_action.action
-        pkg.write_paths
-        (match pkg.install_command with
+        paths
+        (match stanza.install with
          | None -> `No_install_action
          | Some _ -> `Has_install_action)
         ~prefix_outside_build_dir
@@ -1890,10 +1953,11 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
       |> Action_builder.return
       |> Action_builder.with_no_targets
     in
-    (* Action to print a "Building" message for the package if its
-       target directory is not yet created. *)
     let progress_building =
-      Pkg_build_progress.progress_action pkg.info.name pkg.info.version `Building
+      Pkg_build_progress.progress_action
+        (Package.name stanza.package)
+        (package_version stanza.package)
+        `Building
       |> Action.Full.make
       |> Action_builder.return
       |> Action_builder.with_no_targets
@@ -1907,19 +1971,28 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
     |> List.concat
     |> Action_builder.progn
   in
-  let open Action_builder.With_targets.O in
-  (let dependencies_builder =
-     let open Action_builder.O in
-     Action_builder.deps source_deps
-     >>> (Action_expander.Artifacts_and_deps.materialize context_name dependencies
-          >>| ignore)
-     >>> (if pkg.depends_on_dune
-          then Action_builder.dep (Lazy.force dune_dep)
-          else Action_builder.return ())
-     |> Action_builder.with_no_targets
-   in
-   dependencies_builder
-   >>> add_env (Pkg.exported_env_with_deps pkg dependencies.all) build_action)
+  let { Action_builder.With_targets.build; targets } = build_action in
+  let build =
+    let open Action_builder.O in
+    let* () = Action_builder.deps source_deps in
+    let* dependencies = dependencies in
+    let* () =
+      if depends_on_dune stanza.package
+      then Action_builder.dep (Lazy.force dune_dep)
+      else Action_builder.return ()
+    in
+    let+ action = build in
+    let env =
+      Action_expander.value_env
+        ~name:(Package.name stanza.package)
+        ~version:(package_version stanza.package)
+        read_paths
+        dependencies
+      |> Value_list_env.to_env
+    in
+    Action.Full.add_env env action
+  in
+  { Action_builder.With_targets.build; targets }
   |> Action_builder.With_targets.map ~f:(fun action ->
     let action =
       match kind with
@@ -1927,11 +2000,68 @@ let build_rule context_name ~source ~source_deps ~dependencies (pkg : Pkg.t) =
       | No_source -> Action.Full.add_sandbox Action_expander.sandbox action
     in
     Action.Full.disable_sandbox_policy action)
-  |> Action_builder.With_targets.add_directories
-       ~directory_targets:[ pkg.write_paths.target_dir ]
+  |> Action_builder.With_targets.add_directories ~directory_targets:[ paths.target_dir ]
 ;;
 
-let gen_rules context_name (pkg : Pkg.t) ~source ~source_deps ~dependencies =
-  let* build_rule = build_rule context_name pkg ~source ~source_deps ~dependencies in
-  rule ~loc:Loc.none (* TODO *) build_rule
+let gen_rules context_name stanza ~paths ~variables ~source ~source_deps ~dependencies =
+  let* build_rule =
+    build_rule context_name stanza ~paths ~variables ~source ~source_deps ~dependencies
+  in
+  rule ~loc:stanza.Opam_stanza.loc build_rule
+;;
+
+let stanza_of_pkg (pkg : Pkg.t) =
+  let depends =
+    List.map pkg.depends ~f:(fun (dependency : Pkg.t) ->
+      { Package_dependency.name = dependency.info.name; constraint_ = None })
+  in
+  let depends =
+    if pkg.depends_on_dune
+    then { Package_dependency.name = Dune_dep.name; constraint_ = None } :: depends
+    else depends
+  in
+  let package =
+    Package.create
+      ~name:pkg.info.name
+      ~loc:Loc.none
+      ~version:(Some pkg.info.version)
+      ~conflicts:[]
+      ~depends
+      ~depopts:[]
+      ~enabled_if:None
+      ~info:Package_info.empty
+      ~has_opam_file:(Exists false)
+      ~dir:(Source_path.build pkg.write_paths.source_dir)
+      ~sites:Site.Map.empty
+      ~allow_empty:true
+      ~synopsis:None
+      ~description:None
+      ~tags:[]
+      ~original_opam_file:None
+      ~deprecated_package_names:Package.Name.Map.empty
+      ~contents_basename:None
+  in
+  { Opam_stanza.loc = Loc.none
+  ; origin = Lock
+  ; package
+  ; build = pkg.build_command
+  ; install = pkg.install_command
+  ; depexts = pkg.depexts
+  ; exported_env = pkg.unexpanded_exported_env
+  }
+;;
+
+let gen_rules_legacy context_name (pkg : Pkg.t) ~source ~source_deps ~dependencies =
+  let* () = Action_expander.refresh_exported_env context_name dependencies in
+  let dependencies =
+    Action_expander.Artifacts_and_deps.materialize context_name dependencies
+  in
+  gen_rules
+    context_name
+    (stanza_of_pkg pkg)
+    ~paths:pkg.write_paths
+    ~variables:(Pkg_info.variables pkg.info)
+    ~source
+    ~source_deps
+    ~dependencies
 ;;

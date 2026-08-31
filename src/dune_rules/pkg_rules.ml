@@ -685,7 +685,7 @@ let gen_rules context_name (pkg : Pkg.t) =
           local, Paths.extra_source pkg.paths local)
     }
   in
-  Opam_package_rules.gen_rules context_name pkg ~source ~source_deps ~dependencies
+  Opam_package_rules.gen_rules_legacy context_name pkg ~source ~source_deps ~dependencies
 ;;
 
 module Gen_rules = Build_config.Gen_rules
@@ -890,6 +890,14 @@ let gen_opam_rules context ~dir package_name =
   let working_dir = Pkg_sources.Mounted.working_dir mounted in
   let* package = remap_opam_package context package in
   let* dependencies = dependency_view_for_package context package in
+  let stanza =
+    match Pkg_sources.Mounted.kind mounted with
+    | Dune ->
+      Code_error.raise
+        "Native package dispatched through synthetic opam rules"
+        [ "package", Package.Name.to_dyn package_name ]
+    | Opam stanza -> stanza
+  in
   let source_kind = Pkg_sources.Mounted.source_kind mounted in
   let source =
     { Opam_package_rules.Source_input.root = working_dir
@@ -908,7 +916,15 @@ let gen_opam_rules context ~dir package_name =
     | Primary_source -> Dep.Set.of_files [ Path.build working_dir ]
     | No_source -> Dep.Set.empty
   in
-  Opam_package_rules.gen_rules context package ~source ~source_deps ~dependencies
+  let* () = Action_expander.refresh_exported_env context dependencies in
+  Opam_package_rules.gen_rules
+    context
+    stanza
+    ~paths:package.write_paths
+    ~variables:(Pkg_info.variables package.info)
+    ~source
+    ~source_deps
+    ~dependencies:(Action_expander.Artifacts_and_deps.materialize context dependencies)
 ;;
 
 let setup_mounted_opam_package_rules context mounted ~dir ~components =
