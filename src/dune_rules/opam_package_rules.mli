@@ -1,17 +1,5 @@
 open Import
-
-module Variable : sig
-  type value = OpamVariable.variable_contents =
-    | B of bool
-    | S of string
-    | L of string list
-
-  type t = Package_variable_name.t * value
-
-  val repr : t Repr.t
-  val dune_value : value -> Value.t list
-  val of_values : dir:Path.t -> Value.t list -> value
-end
+module Variable = Package_deps.Variable
 
 module Package_universe : sig
   type t =
@@ -45,35 +33,13 @@ module Pkg_digest : sig
 end
 
 module Paths : sig
-  type 'a t =
-    { source_dir : 'a
-    ; target_dir : 'a
-    ; extra_sources : 'a
-    ; name : Package.Name.t
-    ; install_roots : 'a Install.Roots.t Lazy.t
-    ; install_paths : 'a Install.Paths.t Lazy.t
-    ; prefix : 'a
-    }
-
-  val map_path : 'a t -> f:('a -> 'b) -> 'b t
-  val of_root : Package.Name.t -> root:'a -> relative:('a -> string -> 'a) -> 'a t
-  val with_install_root : Path.t t -> Path.t -> Path.t t
+  include module type of Package_deps.Paths with type 'a t = 'a Package_deps.Paths.t
 
   val make
     :  Pkg_digest.t
     -> Package_universe.t
     -> relative:(Path.Build.t -> string -> Path.Build.t)
     -> Path.Build.t t
-
-  val extra_source : Path.t t -> Path.Local.t -> Path.t
-  val extra_source_build : Path.Build.t t -> Path.Local.t -> Path.Build.t
-  val install_cookie' : Path.Build.t -> Path.Build.t
-  val install_cookie : Path.t t -> Path.t
-  val install_file : Path.Build.t t -> Path.Build.t
-  val config_file : Path.Build.t t -> Path.Build.t
-  val install_paths : 'a t -> 'a Install.Paths.t
-  val install_roots : 'a t -> 'a Install.Roots.t
-  val target_dir : 'a t -> 'a
 end
 
 module Source_input : sig
@@ -92,19 +58,7 @@ module Source_input : sig
     }
 end
 
-module Install_cookie : sig
-  module Gen : sig
-    type 'files t =
-      { files : 'files
-      ; variables : Variable.t list
-      }
-  end
-
-  type t = Path.t list Section.Map.t Gen.t
-
-  val load_exn : Path.t -> t
-  val dump : Path.t -> t -> unit
-end
+module Install_cookie = Package_deps.Install_cookie
 
 module Value_list_env : sig
   type t = Value.t list Env.Map.t
@@ -208,6 +162,14 @@ module Action_expander : sig
     :  Expander.t
     -> String_with_vars.t Env_update.t
     -> string Env_update.t Memo.t
+
+  val exported_env_of_stanza
+    :  Context_name.t
+    -> Opam_stanza.t
+    -> paths:Path.t Paths.t
+    -> variables:Package_deps.package_variables
+    -> Package_deps.t
+    -> string Env_update.t list Memo.t
 
   val refresh_exported_env : Context_name.t -> Dependency_view.t -> unit Memo.t
 end

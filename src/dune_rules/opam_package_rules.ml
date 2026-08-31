@@ -1258,6 +1258,19 @@ module Action_expander = struct
     { env with value }
   ;;
 
+  let exported_env_of_stanza
+        context
+        (stanza : Opam_stanza.t)
+        ~paths
+        ~variables
+        dependencies
+    =
+    let expander =
+      expander_of_stanza context stanza ~paths ~variables (Memo.return dependencies)
+    in
+    Memo.parallel_map stanza.exported_env ~f:(exported_env expander)
+  ;;
+
   let refresh_exported_env context (dependencies : Dependency_view.t) =
     Memo.parallel_iter dependencies.all ~f:(fun (pkg : Pkg.t) ->
       let expander = expander context pkg dependencies in

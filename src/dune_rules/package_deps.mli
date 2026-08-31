@@ -55,6 +55,23 @@ module Install_cookie : sig
   val dump : Path.t -> t -> unit
 end
 
+module Value_list_env : sig
+  type t = Value.t list Env.Map.t
+
+  val global : t Lazy.t
+  val of_env : Env.t -> t
+  val string_of_env_values : Value.t list -> string
+  val to_env : t -> Env.t
+  val extend_concat_path : t -> t -> t
+  val add_path : t -> Env.Var.t -> Path.t -> t
+end
+
+module Env_update : sig
+  include module type of Dune_lang.Action.Env_update
+
+  val set : Value_list_env.t -> string t -> Value_list_env.t
+end
+
 type package_variables = Variable.value Package_variable_name.Map.t
 type concrete_paths = Path.t Paths.t
 
@@ -67,3 +84,11 @@ type t =
   }
 
 val empty : t
+
+val add_package
+  :  t
+  -> paths:concrete_paths
+  -> variables:package_variables
+  -> files:Path.t list Section.Map.t
+  -> exported_env:string Env_update.t list
+  -> t
