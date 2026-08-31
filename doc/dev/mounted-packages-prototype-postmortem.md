@@ -992,24 +992,31 @@ remains later in/out work.
 
 ### Represent package masks as unreleased scopes
 
-Add a real user-facing `scope` stanza guarded by `(using unreleased 0.1)`. The
-package-builder layer synthesizes the same value for each exact native package
-view. Decoded and synthetic forms share one representation and evaluator.
+A real user-facing `scope` stanza is guarded by `(using unreleased 0.1)`:
 
-This simplifies source mounting: build and decode one canonical source universe,
-then create cheap package scopes with independent artifact owners. Do not clone
-filtered `Dune_project.t` values, remount the source per package, or mutate the
-canonical package map.
+```lisp
+(scope
+ (packages foo bar))
+```
 
-PR #13337 is relevant prior art, not a fixed API. Its `dir` grammar, closest
-ancestor behavior, duplicate-scope composition, and library-focused filtering
-need not be copied. The package mask should apply coherently to all
-package-associated stanza classes. Nested auxiliary-project in/out semantics
-remain deferred.
+The stanza applies to its logical directory; `(subdir ...)` supplies explicit
+placement. Nested scopes intersect, duplicate scopes in one logical directory
+are rejected, and package selection happens before duplicate-package detection.
+The evaluator filters package-owned stanzas while retaining canonical package
+maps and unowned implementation stanzas.
 
-Like `opam`, `scope` has no released compatibility promise and is rejected
-without the unreleased extension. Synthetic package loading constructs its value
-directly rather than rewriting a source Dune file.
+The package-builder layer must still synthesize the same value for each exact
+native package view. That integration should build and decode one canonical
+source universe, then create cheap package scopes with independent artifact
+owners rather than remounting or cloning the canonical project per package.
+
+PR #13337 remains relevant prior art, but the implemented grammar omits its
+`dir` field, ordered-set package expression, closest-ancestor behavior,
+duplicate-scope composition, and library-only filtering. Nested auxiliary
+project in/out semantics remain deferred.
+
+Like `opam`, `scope` has no released compatibility promise. Mounted package
+loading does not yet synthesize or evaluate package scopes.
 
 ### Generate into an explicit artifact owner
 

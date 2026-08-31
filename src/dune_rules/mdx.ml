@@ -562,8 +562,13 @@ let gen_rules t ~sctx ~dir ~scope ~expander =
     match t.package with
     | None -> Memo.return true
     | Some package ->
-      let+ mask = Dune_load.mask () in
-      Only_packages.mem_all mask || Only_packages.mem mask (Package.name package)
+      let+ mask = Dune_load.mask ()
+      and+ package_scope = Dune_load.package_scope () in
+      (Only_packages.mem_all mask || Only_packages.mem mask (Package.name package))
+      && Package_scope.is_stanza_visible
+           package_scope
+           ~dir:(Scope.source_dir scope dir)
+           (Package.id package)
   in
   Memo.when_ do_it register_rules
 ;;

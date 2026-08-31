@@ -11,7 +11,7 @@ module Spec = struct
     ; env : Env.t Action_builder.t
     ; enabled_if : (Expander.t * Blang.t) list
     ; locks : Path.Set.t Action_builder.t
-    ; packages : Package.Name.Set.t
+    ; packages : Package.Id.Set.t
     ; timeout : (Loc.t * Time.Span.t) option
     ; conflict_markers : Cram_stanza.Conflict_markers.t
     ; setup_scripts : Path.t list
@@ -27,7 +27,7 @@ module Spec = struct
     ; deps = []
     ; sandbox = Action_builder.return Sandbox_config.needs_sandboxing
     ; env = Action_builder.return Env.empty
-    ; packages = Package.Name.Set.empty
+    ; packages = Package.Id.Set.empty
     ; timeout = None
     ; conflict_markers = Ignore
     ; setup_scripts = []
@@ -339,7 +339,7 @@ let spec_for_test ~stanzas ~dune_version test =
           let packages =
             match stanza.package with
             | None -> acc.packages
-            | Some (p : Package.t) -> Package.Name.Set.add acc.packages (Package.name p)
+            | Some package -> Package.Id.Set.add acc.packages (Package.id package)
           in
           let timeout =
             Option.merge
@@ -398,14 +398,25 @@ let spec_for_test ~stanzas ~dune_version test =
 let rules ~sctx ~dir tests project =
   let dune_version = Dune_project.dune_version project in
   let* stanzas = collect_stanzas ~dir
-  and* with_package_mask =
-    let+ mask = Dune_load.mask () >>| Only_packages.enumerate in
-    match
-      Dune_project.exclusive_package
-        project
-        ~dir:(Path.Build.drop_build_context_exn dir |> Source_path.workspace)
-      |> Option.map ~f:Package.Id.name
-    with
+  and* mask = Dune_load.mask () >>| Only_packages.enumerate
+  and* package_scope = Dune_load.package_scope () in
+  let source_dir dir = Path.Build.drop_build_context_exn dir |> Source_path.workspace in
+  (* Filter package-owned stanzas before merging their configuration. Dropping
+     the resulting test later would also discard matching unowned stanzas. *)
+  let stanzas =
+    List.filter stanzas ~f:(fun { dir; stanza; _ } ->
+      match stanza.package with
+      | None -> true
+      | Some package ->
+        Package_scope.is_stanza_visible
+          package_scope
+          ~dir:(source_dir dir)
+          (Package.id package))
+  in
+  let source_dir = source_dir dir in
+  let exclusive_package = Dune_project.exclusive_package project ~dir:source_dir in
+  let with_only_packages =
+    match Option.map exclusive_package ~f:Package.Id.name with
     | None ->
       (match mask with
        | `All -> fun _packages f -> f ()
@@ -433,6 +444,24 @@ let rules ~sctx ~dir tests project =
          if Package.Name.Set.mem only p
          then fun packages f -> with_validate_packages packages ~f
          else fun packages _f -> with_validate_packages packages ~f:Memo.return)
+  in
+  let with_package_mask package_ids f =
+    let packages =
+      Package.Id.Set.to_list package_ids
+      |> Package.Name.Set.of_list_map ~f:Package.Id.name
+    in
+    with_only_packages packages (fun () ->
+      let in_scope =
+        match exclusive_package with
+        | Some package ->
+          Package_scope.is_stanza_visible package_scope ~dir:source_dir package
+        | None ->
+          Package.Id.Set.is_empty package_ids
+          || Package.Id.Set.to_list package_ids
+             |> List.exists ~f:(fun package ->
+               Package_scope.is_stanza_visible package_scope ~dir:source_dir package)
+      in
+      Memo.when_ in_scope f)
   in
   Memo.parallel_iter tests ~f:(fun test ->
     let* spec = spec_for_test ~stanzas ~dune_version test in

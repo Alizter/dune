@@ -138,9 +138,11 @@ let stanza_package stanza =
      | Executables.T { install_conf = Some { package; _ }; _ }
      | Documentation.T { package; _ }
      | Opam_stanza.T { package; _ }
-     | Tests.T { package = Some package; _ } -> Some package
-     | Rocq_stanza.Theory.T { package = Some package; _ } -> Some package
+     | Tests.T { package = Some package; _ }
+     | Rocq_stanza.Theory.T { package = Some package; _ }
      | Melange_stanzas.Emit.T { package = Some package; _ } -> Some package
+     | Deprecated_library_name.T { old_name = public, _; _ } ->
+       Some (Public_lib.package public)
      | _ -> None)
     |> Option.map ~f:Package.id
   with

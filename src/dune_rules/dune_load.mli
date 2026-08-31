@@ -20,5 +20,11 @@ val find_project : dir:Path.Build.t -> Dune_project.t Memo.t
 val is_vendored : dir:Path.Build.t -> bool Memo.t
 val stanzas_in_dir : Path.Build.t -> Dune_file.t option Memo.t
 val mask : unit -> Only_packages.t Memo.t
+val package_scope : unit -> Package_scope.t Memo.t
 val packages : unit -> Package.t Package.Name.Map.t Memo.t
+
+(** Packages selected by [scope] stanzas before [enabled_if] and
+    [--only-packages] filtering. *)
+val packages_including_hidden : unit -> Package.t Package.Name.Map.t Memo.t
+
 val projects : unit -> Dune_project.t list Memo.t

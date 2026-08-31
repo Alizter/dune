@@ -67,6 +67,7 @@ module Oxcaml = Oxcaml
 module Modules_settings = Modules_settings
 module Stanza_pkg = Stanza_pkg
 module Package_mask = Package_mask
+module Scope_stanza = Scope_stanza
 module Unreleased = Unreleased
 
 (* CR-someday rgrinberg: perhaps wrap these under [Stanzas]? *)

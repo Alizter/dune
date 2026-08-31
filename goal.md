@@ -33,9 +33,9 @@ recorded action. The install-layout target and cookie are specific to that Opam
 boundary.
 
 An unreleased user-facing `opam` stanza exercises the same rule primitive as a
-synthetic lock package. Explicit package scopes over one canonical native decode
-remain planned work; the future `scope` stanza will also remain behind the
-unreleased language extension.
+synthetic lock package. An unreleased `scope` stanza independently exercises
+package selection in workspace source trees. Native package views do not yet
+synthesize those scopes over their canonical source decode.
 
 Workspace packages retain their existing behaviour.
 
@@ -304,32 +304,35 @@ variables, concrete paths, and build dependencies needed by the Opam action.
 
 ## Experimental scope stanza and package masks
 
-Package masking should use a second real stanza, `scope`, also guarded by
-`(using unreleased 0.1)`. Users can exercise masking directly, while the package
-builder synthesizes the same scope value for each exact native package view.
-Decoded and synthetic scopes must share one representation and evaluator.
+The user-facing package-selection foundation is an unreleased stanza:
 
-A scope is applied to the complete decoded source universe. It selects which
-package-associated stanzas belong to that view without changing source identity,
-builder selection, or artifact ownership. Several exact package nodes may
-therefore reuse one parsed source universe under independent scopes and output
-roots. Do not destructively replace the canonical project's package map.
+```lisp
+(scope
+ (packages foo bar))
+```
 
-This should simplify source mounting: build and decode each primary source
-once, then construct cheap package scopes over that canonical result. Package
-views no longer require remounting the source or cloning filtered
-`Dune_project.t` values. They also do not recover the selected package from a
-mounted-list lookup.
+It applies to its logical directory, so `(subdir ...)` provides explicit
+placement without a `dir` field. At most one scope may occur in a logical
+directory, and nested scopes intersect: a child cannot re-enable a package
+excluded by an ancestor.
 
-PR #13337 is useful prior art for a `(scope ...)` stanza, but is not the
-required API. In particular, this plan does not yet adopt its `dir` grammar,
-ancestor precedence, duplicate-stanza union rules, or library-only filtering.
-A package mask must eventually apply coherently to every package-associated
-stanza class; auxiliary-project in/out semantics remain deferred.
+Scopes filter active package definitions before duplicate-package detection and
+filter package-owned stanzas. Canonical package maps and unowned implementation
+stanzas remain available for decoding and private composition. Scope filtering
+intersects with package `enabled_if` and `--only-packages`; it is independent of
+`vendored_dirs`.
 
-Like `opam`, `scope` has no released compatibility promise. Synthetic package
-loading constructs its value directly rather than manufacturing or rewriting a
-Dune file.
+The package builder must later synthesize the same representation and evaluator
+for exact native package views. Several exact package nodes should then reuse
+one parsed source universe under independent scopes and output roots without
+remounting the source or cloning its canonical project.
+
+PR #13337 remains useful prior art, but this grammar omits its `dir` field,
+ordered-set package expression, closest-ancestor behavior, duplicate-stanza
+union, and library-only filtering. Auxiliary-project in/out semantics remain
+deferred.
+
+Like `opam`, `scope` has no released compatibility promise.
 
 ## Artifact ownership and dependency resolution
 
