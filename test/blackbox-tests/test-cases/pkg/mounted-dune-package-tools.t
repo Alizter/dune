@@ -202,3 +202,68 @@ compiler.
 
   $ build_pkg legacy-transition && echo binary-lookup-complete
   binary-lookup-complete
+
+A mounted package may bind a package-local build artifact into an env stanza's
+binary directory. The generated [.bin] directory belongs to the mounted output
+partition even though it has no corresponding physical source directory.
+
+  $ mkdir ../local-env-binary
+  $ cd ../local-env-binary
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends staged))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (libraries staged))
+  > EOF
+  $ echo 'let () = print_endline Staged.message' > main.ml
+
+  $ mkdir -p staged/stage1 staged/stage2
+  $ cat > staged/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name staged))
+  > EOF
+  $ cat > staged/stage1/dune <<'EOF'
+  > (executable (name generator))
+  > EOF
+  $ cat > staged/stage1/generator.ml <<'EOF'
+  > let () = print_endline "let message = \"mounted local binary\""
+  > EOF
+  $ cat > staged/stage2/dune <<'EOF'
+  > (env
+  >  (_
+  >   (binaries
+  >    (../stage1/generator.exe as staged-generator))))
+  > (rule
+  >  (with-stdout-to generated.ml
+  >   (run staged-generator)))
+  > (library
+  >  (name staged)
+  >  (public_name staged)
+  >  (modules staged generated))
+  > EOF
+  $ echo 'let message = Generated.message' > staged/stage2/staged.ml
+  $ tar cf staged.tar staged
+  $ rm -rf staged
+
+  $ make_lockdir
+  $ make_lockpkg staged <<EOF
+  > (version 1.0)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/staged.tar)
+  >   (checksum md5=$(md5sum staged.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
+  $ "$real_dune" build ./main.exe --display quiet
+  $ ./_build/default/main.exe
+  mounted local binary
