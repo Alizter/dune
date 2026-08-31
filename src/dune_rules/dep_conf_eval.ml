@@ -229,76 +229,6 @@ let add_sandbox_config acc (dep : Dep_conf.t) =
   | _ -> acc
 ;;
 
-let rec dir_contents ~loc d =
-  let open Memo.O in
-  Fs_memo.dir_contents d
-  >>= function
-  | Error e -> Unix_error.Detailed.raise e
-  | Ok contents ->
-    Fs_memo.Dir_contents.to_list contents
-    |> Memo.parallel_map ~f:(fun (entry, kind) ->
-      let path = Path.Outside_build_dir.relative_fname d entry in
-      match kind with
-      | Unix.S_REG -> Memo.return [ path ]
-      | S_DIR -> dir_contents ~loc path
-      | _ ->
-        User_error.raise
-          ~loc
-          [ Pp.text "Encountered a special file while expanding dependency." ])
-    >>| List.concat
-;;
-
-let package loc pkg_name (context : Build_context.t) ~dune_version =
-  Action_builder.of_memo
-    (let open Memo.O in
-     let* package_db = Package_db.create context.name in
-     Package_db.find_package package_db pkg_name)
-  >>= function
-  | Some (Build build) | Some (Opam build) -> build
-  | Some (Local _) ->
-    (* The named/unnamed paths skip [Package _] before reaching here so that
-       [combined_package_deps_builder] handles the whole package set at once.
-       This arm only fires from [unnamed_get_paths] (e.g.
-       [(public_headers (package foo))]) where a no-op is fine. *)
-    Action_builder.return ()
-  | Some (Installed pkg) ->
-    if dune_version < (2, 9)
-    then
-      Action_builder.fail
-        { fail =
-            (fun () ->
-              User_error.raise
-                ~loc
-                [ Pp.textf
-                    "Dependency on an installed package requires at least (lang dune 2.9)"
-                ])
-        }
-    else
-      (let open Memo.O in
-       Memo.parallel_map pkg.files ~f:(fun (s, l) ->
-         let dir = Section.Map.find_exn pkg.sections s in
-         Memo.parallel_map l ~f:(fun { kind; dst } ->
-           let path = Path.append_local dir (Install.Entry.Dst.local dst) in
-           match kind with
-           | File -> Memo.return [ path ]
-           | Directory ->
-             Path.as_outside_build_dir_exn path
-             |> dir_contents ~loc
-             >>| List.rev_map ~f:Path.outside_build_dir)
-         >>| List.concat)
-       >>| List.concat)
-      |> Action_builder.of_memo
-      >>= Action_builder.paths
-  | None ->
-    Action_builder.fail
-      { fail =
-          (fun () ->
-            User_error.raise
-              ~loc
-              [ Pp.textf "Package %s does not exist" (Package.Name.to_string pkg_name) ])
-      }
-;;
-
 let rec dep expander : Dep_conf.t -> _ = function
   | Include s ->
     (* TODO this is wrong. we shouldn't allow bindings here if we are in an
@@ -374,11 +304,10 @@ let rec dep expander : Dep_conf.t -> _ = function
   | Package p ->
     Other
       (let+ () =
-         let* pkg_name = expand_package_name expander p in
-         let context = Build_context.create ~name:(Expander.context expander) in
-         let loc = String_with_vars.loc p in
+         let* name = expand_package_name expander p in
+         let dependency = { Package_deps.loc = String_with_vars.loc p; name } in
          let dune_version = Expander.project expander |> Dune_project.dune_version in
-         package loc pkg_name context ~dune_version
+         Package_deps.depend (Expander.context expander) ~dune_version dependency
        in
        [])
   | Universe ->
@@ -394,42 +323,18 @@ let rec dep expander : Dep_conf.t -> _ = function
 
 and combined_package_deps_builder expander pkgs =
   let open Action_builder.O in
-  (* Evaluate all package dependencies against one layout so root-section
-     collisions are detected across the complete set. *)
-  let* host_name =
+  let* context =
     Action_builder.of_memo
       (let open Memo.O in
        Expander.host_context expander >>| Context.name)
   in
-  let context = Build_context.create ~name:host_name in
-  let* package_db = Action_builder.of_memo (Package_db.create context.name) in
-  let* classified =
+  let* dependencies =
     Action_builder.List.map pkgs ~f:(fun (swv, loc) ->
-      let* pkg = expand_package_name expander swv in
-      let+ found = Action_builder.of_memo (Package_db.find_package package_db pkg) in
-      loc, pkg, found)
-  in
-  let local_package_names =
-    List.filter_map classified ~f:(fun (_, _, found) ->
-      match found with
-      | Some (Package_db.Local package) -> Some (Package.name package)
-      | _ -> None)
-    |> Package.Name.Set.of_list
-  in
-  let* env =
-    if Package.Name.Set.is_empty local_package_names
-    then Action_builder.return Env.empty
-    else Install_layout.env context.name local_package_names
+      let+ name = expand_package_name expander swv in
+      { Package_deps.loc; name })
   in
   let dune_version = Expander.project expander |> Dune_project.dune_version in
-  let+ () =
-    Action_builder.List.iter classified ~f:(fun (loc, pkg_name, found) ->
-      match found with
-      | Some (Local _) -> Action_builder.return ()
-      | Some (Build build) | Some (Opam build) -> build
-      | Some (Installed _) | None -> package loc pkg_name context ~dune_version)
-  in
-  env
+  Package_deps.materialize context ~dune_version dependencies
 
 and named_paths_builder ~expander l =
   let builders, bindings, combined_packages_builder, bin_names, include_envs =
