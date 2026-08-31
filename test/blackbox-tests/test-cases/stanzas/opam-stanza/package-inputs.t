@@ -71,3 +71,60 @@ loaded capabilities and installs the observations as its own package outputs.
   library from producer
   $ cat "$consumer_share/variable.txt"
   variable from producer
+
+An Opam recipe can consume the same capabilities from any package provider in
+[Package_db], rather than requiring another user-authored Opam stanza.
+
+  $ mkdir lock-provider
+  $ cd lock-provider
+  $ mkdir consumer
+  $ cat >dune-workspace <<'EOF'
+  > (lang dune 3.22)
+  > (pkg enabled)
+  > EOF
+  $ cat >dune-project <<'EOF'
+  > (lang dune 3.22)
+  > (name consumer)
+  > (using unreleased 0.1)
+  > (package
+  >  (name consumer)
+  >  (dir consumer)
+  >  (depends locked))
+  > EOF
+  $ mkdir dune.lock
+  $ cat >dune.lock/lock.dune <<'EOF'
+  > (lang package 0.1)
+  > EOF
+  $ cat >dune.lock/locked.pkg <<'EOF'
+  > (version 2.0)
+  > (build
+  >  (write-file marker.txt "file from lock\n"))
+  > (install
+  >  (progn
+  >   (run mkdir -p %{share}/locked)
+  >   (run cp marker.txt %{share}/locked/marker.txt)))
+  > EOF
+
+  $ cat >consumer/dune <<'EOF'
+  > (opam
+  >  (package consumer)
+  >  (build
+  >   (progn
+  >    (system "cat %{pkg:locked:share}/marker.txt > result.txt")
+  >    (system "echo %{pkg:locked:version} >> result.txt")))
+  >  (install
+  >   (run cp result.txt %{share}/result.txt)))
+  > EOF
+
+  $ dune build consumer/.opam/consumer/target
+  File "consumer/dune", lines 1-8, characters 0-220:
+  1 | (opam
+  2 |  (package consumer)
+  3 |  (build
+  4 |   (progn
+  5 |    (system "cat %{pkg:locked:share}/marker.txt > result.txt")
+  6 |    (system "echo %{pkg:locked:version} >> result.txt")))
+  7 |  (install
+  8 |   (run cp result.txt %{share}/result.txt)))
+  Error: Package locked is not provided by an opam stanza
+  [1]
