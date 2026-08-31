@@ -1332,3 +1332,8 @@ let pkg_digest_of_project_dependency ctx package_name =
   let* _ = DB.of_ctx ctx ~allow_sharing:false in
   DB.project_pkg_digest ctx package_name
 ;;
+
+let artifact_root_of_project_dependency context package_name =
+  Pkg_sources.find_candidate context package_name
+  >>| Option.map ~f:Pkg_sources.Candidate.artifact_root
+;;

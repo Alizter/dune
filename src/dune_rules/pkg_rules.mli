@@ -93,3 +93,8 @@ val pkg_digest_of_project_dependency
   :  Context_name.t
   -> Package.Name.t
   -> Pkg_digest.t option Memo.t
+
+val artifact_root_of_project_dependency
+  :  Context_name.t
+  -> Package.Name.t
+  -> Path.Build.t option Memo.t

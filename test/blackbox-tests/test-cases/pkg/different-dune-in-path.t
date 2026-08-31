@@ -68,8 +68,8 @@ Make lockfiles for the packages.
   > (dev)
   > EOF
 
-Test that the direct Dune recipe is dispatched to the mounted build, while the
-shell-wrapped recipe retains its package target.
+Source classification mounts both packages. The recorded recipe shape does not
+change that selection.
   $ dune build x.exe
   $ test -f _build/_default+lockfile/pkg/foo.0.0.1-*/foo.cmxa
   $ test ! -e _build/_private/default/.pkg/foo.0.0.1-*
@@ -93,15 +93,11 @@ Dune and add our fake `dune` to the PATH.
   $ DUNE=$(which dune)
   $ fakepath=$PWD/.bin:$PATH
 
-Remember the legacy package digest, to not have to call nested Dunes:
+Call Dune with an absolute PATH as argv[0]. Neither mounted build launches the
+fake Dune, including the package whose ignored recipe wraps Dune in a shell:
 
-  $ bar_digest="$(dune pkg print-digest bar)"
-
-Call Dune with an absolute PATH as argv[0]. The mounted build does not launch the
-fake Dune; the shell-wrapped legacy recipe locates the Dune under test:
-
-  $ PATH=$fakepath $DUNE build x.exe
-  $ PATH=$fakepath $DUNE build "$pkg_root/$bar_digest/target/"
+  $ PATH=$fakepath $DUNE build @pkg-install
+  $ test -f _build/_default+lockfile/pkg/bar.0.0.1-*/bar.cmxa
 
 argv[0] is set by the calling program (like a shell or cram test runner) and
 could be wrong, hence it cannot always be trusted. In the examples above we
@@ -114,4 +110,5 @@ namely argv[0] = "dune". This is exactly what happens if `dune` is in the PATH
 and the user launches `dune` in a shell.
 
   $ dune clean
-  $ PATH=$fakepath dune_cmd exec-a "dune" $DUNE build "$pkg_root/$bar_digest/target/"
+  $ PATH=$fakepath dune_cmd exec-a "dune" $DUNE build @pkg-install
+  $ test -f _build/_default+lockfile/pkg/bar.0.0.1-*/bar.cmxa

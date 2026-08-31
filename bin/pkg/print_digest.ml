@@ -19,13 +19,15 @@ let term =
   in
   Scheduler_setup.go_with_rpc_server ~common ~config (fun () ->
     let open Fiber.O in
-    let+ pkg_digest_opt =
+    let+ artifact_root =
       Build.build_memo_exn (fun () ->
         let open Memo.O in
         let* lock_dir_active = Dune_rules.Lock_dir.lock_dir_active context_name in
         if lock_dir_active
         then
-          Dune_rules.Pkg_rules.pkg_digest_of_project_dependency context_name package_name
+          Dune_rules.Pkg_rules.artifact_root_of_project_dependency
+            context_name
+            package_name
         else
           User_error.raise
             [ Pp.textf
@@ -33,9 +35,11 @@ let term =
                 (Context_name.to_string context_name)
             ])
     in
-    match pkg_digest_opt with
-    | Some pkg_digest ->
-      print_endline (Dune_rules.Pkg_rules.Pkg_digest.to_string pkg_digest)
+    match artifact_root with
+    | Some artifact_root ->
+      let artifact = Path.Build.basename artifact_root |> Filename.to_string in
+      sprintf "%s/.opam/%s" artifact (Package_name.to_string package_name)
+      |> print_endline
     | None ->
       User_error.raise
         [ Pp.textf
@@ -45,7 +49,7 @@ let term =
 ;;
 
 let info =
-  let doc = "Print the digest of a package in the project's lockdir." in
+  let doc = "Print the artifact directory of a package in the project's lockdir." in
   Cmd.info "print-digest" ~doc
 ;;
 
