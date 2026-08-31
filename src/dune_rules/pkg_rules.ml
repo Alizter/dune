@@ -874,9 +874,35 @@ let resolve_pkg_dep context (loc, package_name) =
   Resolve.resolve db loc pkg_digest (Dependencies context)
 ;;
 
+let mounted_dependency_providers context (stanza : Opam_stanza.t) =
+  Memo.List.filter_map (Package.depends stanza.package) ~f:(fun dependency ->
+    let name = dependency.Package_dependency.name in
+    if Package.Name.equal name Dune_pkg.Dune_dep.name
+    then Memo.return None
+    else
+      Pkg_sources.find_mounted context name
+      >>| function
+      | None ->
+        User_error.raise
+          ~loc:stanza.loc
+          [ Pp.textf "Package %s does not exist" (Package.Name.to_string name) ]
+      | Some mounted ->
+        (match Pkg_sources.Mounted.kind mounted with
+         | Dune ->
+           let package =
+             Pkg_sources.Mounted.projects mounted
+             |> List.find_map ~f:(fun (project, _) ->
+               Package.Name.Map.find (Dune_project.including_hidden_packages project) name)
+             |> Option.value_exn
+           in
+           Some (Opam_package_rules.Dependency_provider.Local package)
+         | Opam stanza ->
+           let _, paths = opam_paths mounted name in
+           Some (Opam_package_rules.Dependency_provider.Opam { stanza; paths })))
+;;
+
 let gen_opam_rules context ~dir package_name =
-  let* package = resolve_pkg_dep context (Loc.none, package_name)
-  and* mounted = Pkg_sources.find_mounted context package_name in
+  let* mounted = Pkg_sources.find_mounted context package_name in
   let mounted = Option.value_exn mounted in
   let candidate = Pkg_sources.Mounted.candidate mounted in
   if not (Path.Build.equal dir (Pkg_sources.Candidate.artifact_root candidate))
@@ -888,8 +914,6 @@ let gen_opam_rules context ~dir package_name =
         , Pkg_sources.Candidate.artifact_root candidate |> Path.Build.to_dyn )
       ];
   let working_dir = Pkg_sources.Mounted.working_dir mounted in
-  let* package = remap_opam_package context package in
-  let* dependencies = dependency_view_for_package context package in
   let stanza =
     match Pkg_sources.Mounted.kind mounted with
     | Dune ->
@@ -898,6 +922,20 @@ let gen_opam_rules context ~dir package_name =
         [ "package", Package.Name.to_dyn package_name ]
     | Opam stanza -> stanza
   in
+  let lock_pkg = Pkg_sources.Candidate.lock_pkg candidate in
+  let* files_dir =
+    let* lock_dir_path = Lock_dir.get_path context >>| Option.value_exn
+    and* lock_dir = Lock_dir.get_exn context in
+    let version =
+      Option.some_if
+        (Dune_pkg.Lock_dir.uses_versioned_paths lock_dir)
+        lock_pkg.info.version
+    in
+    Dune_pkg.Lock_dir.Pkg.files_dir package_name version ~lock_dir:lock_dir_path
+    |> Path.as_in_build_dir_exn
+    |> Memo.return
+  in
+  let _, paths = opam_paths mounted package_name in
   let source_kind = Pkg_sources.Mounted.source_kind mounted in
   let source =
     { Opam_package_rules.Source_input.root = working_dir
@@ -905,9 +943,9 @@ let gen_opam_rules context ~dir package_name =
         (match source_kind with
          | Primary_source -> Directory
          | No_source -> No_source)
-    ; files_dir = Some package.files_dir
+    ; files_dir = Some files_dir
     ; extra_sources =
-        List.map package.info.extra_sources ~f:(fun (local, source) ->
+        List.map lock_pkg.info.extra_sources ~f:(fun (local, source) ->
           local, Fetch_rules.target source `File |> Path.build)
     }
   in
@@ -916,15 +954,21 @@ let gen_opam_rules context ~dir package_name =
     | Primary_source -> Dep.Set.of_files [ Path.build working_dir ]
     | No_source -> Dep.Set.empty
   in
-  let* () = Action_expander.refresh_exported_env context dependencies in
+  let dependencies =
+    let open Action_builder.O in
+    let* providers =
+      Action_builder.of_memo (mounted_dependency_providers context stanza)
+    in
+    Opam_package_rules.Dependency_provider.materialize context providers
+  in
   Opam_package_rules.gen_rules
     context
     stanza
-    ~paths:package.write_paths
-    ~variables:(Pkg_info.variables package.info)
+    ~paths
+    ~variables:(Package_deps.variables stanza.package)
     ~source
     ~source_deps
-    ~dependencies:(Action_expander.Artifacts_and_deps.materialize context dependencies)
+    ~dependencies
 ;;
 
 let setup_mounted_opam_package_rules context mounted ~dir ~components =
