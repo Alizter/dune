@@ -8,7 +8,6 @@ type t =
   { loc : Loc.t
   ; origin : origin
   ; package : Package.t
-  ; depends : (Loc.t * Package.Name.t) list
   ; build : Dune_pkg.Lock_dir.Build_command.t option
   ; install : Dune_lang.Action.t option
   ; depexts : Dune_pkg.Lock_dir.Depexts.t list
@@ -28,7 +27,6 @@ let decode =
   fields
   @@ let+ loc = loc
      and+ package = Stanza_pkg.field ~stanza:"opam"
-     and+ depends = field "depends" (repeat (located Package.Name.decode)) ~default:[]
      and+ build =
        field_o "build" package_action
        >>| Option.map ~f:(fun action -> Dune_pkg.Lock_dir.Build_command.Action action)
@@ -46,7 +44,7 @@ let decode =
          (package_decoder (repeat Dune_lang.Action.Env_update.decode))
          ~default:[]
      in
-     { loc; origin = User; package; depends; build; install; depexts; exported_env }
+     { loc; origin = User; package; build; install; depexts; exported_env }
 ;;
 
 let target_dir t ~dir =
