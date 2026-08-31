@@ -10,7 +10,6 @@ type t
 type any_package =
   | Local of Package.t
   | Installed of Dune_package.t
-  | Build of unit Action_builder.t
   | Opam of opam
 
 val create : Context_name.t -> t Memo.t

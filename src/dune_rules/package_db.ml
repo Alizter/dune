@@ -14,7 +14,6 @@ type t =
 type any_package =
   | Local of Package.t
   | Installed of Dune_package.t
-  | Build of unit Action_builder.t
   | Opam of opam
 
 let user_opam_paths (stanza : Opam_stanza.t) ~output_dir =
@@ -85,13 +84,9 @@ let find_package { context; user_opam_packages } pkg =
           let paths = mounted_opam_paths mounted stanza in
           Memo.return (Some (Opam { stanza; paths })))
      | None ->
-       Pkg_rules.lock_dir_active context
+       Lock_dir.lock_dir_active context
        >>= (function
-        | true ->
-          Pkg_rules.find_package context pkg
-          >>| (function
-           | None -> None
-           | Some b -> Some (Build b))
+        | true -> Memo.return None
         | false ->
           let* findlib = Findlib.create context in
           Findlib.find_root_package findlib pkg
@@ -112,7 +107,7 @@ let user_opam_packages t = t.user_opam_packages
 let section_of_any_package_site any_package pkg_name loc site =
   let sites =
     match any_package with
-    | Build _ | Opam _ ->
+    | Opam _ ->
       (* TODO We should be able to extract this information after the package
          is built *)
       Site.Map.empty

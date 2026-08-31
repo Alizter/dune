@@ -829,8 +829,6 @@ let expand_pkg_macro ~loc ({ context; _ } as t) macro_invocation =
         [ Pp.textf "Package %s does not exist" (Package.Name.to_string pkg_name) ]
     | Some (Installed pkg) -> resolve_installed_pkg_file ~loc pkg ~section ~file
     | Some (Local _) -> resolve_local_pkg_file ~loc ~context_name ~pkg_name ~section ~file
-    | Some (Build _) ->
-      Pkg_rules.resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file
     | Some (Opam _) ->
       (match visible_packages t with
        | Some visible when not (Package.Name.Set.mem visible pkg_name) ->
