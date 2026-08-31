@@ -32,6 +32,7 @@ module Mounted : sig
   val tree : t -> Source_tree.Rules.Build.t option
   val source_kind : t -> source_kind
   val kind : t -> kind
+  val package : t -> Package.t
   val is_dune : t -> bool
 end
 
