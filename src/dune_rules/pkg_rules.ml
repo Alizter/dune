@@ -711,54 +711,29 @@ let pkg_alias_disabled =
 
 let setup_pkg_install_alias =
   let build_packages_of_context ctx_name =
-    (* Fetching the package target implies that we will also fetch the extra
-       sources. *)
     let open Action_builder.O in
-    let* pkg_digests, native_names, opam_targets =
+    let* native_names, opam_targets =
       Action_builder.of_memo
         (let open Memo.O in
-         let* db = DB.of_ctx ctx_name ~allow_sharing:true
-         and* mounted = Pkg_sources.mounted ctx_name in
-         let mounted_names, native_names, opam_targets =
-           List.fold_left
-             mounted
-             ~init:(Package.Name.Set.empty, Package.Name.Set.empty, [])
-             ~f:(fun (mounted_names, native_names, opam_targets) mounted ->
-               let candidate = Pkg_sources.Mounted.candidate mounted in
-               let name = Pkg_sources.Candidate.name candidate in
-               let mounted_names = Package.Name.Set.add mounted_names name in
-               match Pkg_sources.Mounted.kind mounted with
-               | Dune ->
-                 mounted_names, Package.Name.Set.add native_names name, opam_targets
-               | Opam stanza ->
-                 let target =
-                   Opam_stanza.target_dir
-                     stanza
-                     ~dir:(Pkg_sources.Candidate.artifact_root candidate)
-                   |> Path.build
-                 in
-                 mounted_names, native_names, target :: opam_targets)
-         in
-         let* mounted_digests =
-           Memo.parallel_map (Package.Name.Set.to_list mounted_names) ~f:(fun name ->
-             DB.of_project_pkg ctx_name name >>| snd)
-         in
-         let mounted_digests = Pkg_digest.Set.of_list mounted_digests in
-         let pkg_digests =
-           Pkg_digest.Map.keys db.pkg_digest_table
-           |> List.filter ~f:(fun pkg_digest ->
-             not (Pkg_digest.Set.mem mounted_digests pkg_digest))
-         in
-         Memo.return (pkg_digests, native_names, opam_targets))
+         let+ mounted = Pkg_sources.mounted ctx_name in
+         List.fold_left
+           mounted
+           ~init:(Package.Name.Set.empty, [])
+           ~f:(fun (native_names, opam_targets) mounted ->
+             let candidate = Pkg_sources.Mounted.candidate mounted in
+             let name = Pkg_sources.Candidate.name candidate in
+             match Pkg_sources.Mounted.kind mounted with
+             | Dune -> Package.Name.Set.add native_names name, opam_targets
+             | Opam stanza ->
+               let target =
+                 Opam_stanza.target_dir
+                   stanza
+                   ~dir:(Pkg_sources.Candidate.artifact_root candidate)
+                 |> Path.build
+               in
+               native_names, target :: opam_targets))
     in
-    let* () =
-      List.map pkg_digests ~f:(fun pkg_digest ->
-        Paths.make ~relative:Path.Build.relative pkg_digest (Dependencies ctx_name)
-        |> Paths.target_dir
-        |> Path.build)
-      |> List.rev_append opam_targets
-      |> Action_builder.paths
-    in
+    let* () = Action_builder.paths opam_targets in
     if Package.Name.Set.is_empty native_names
     then Action_builder.return ()
     else Install_layout.deps ctx_name native_names
@@ -831,10 +806,8 @@ let setup_package_rules db ~package_universe ~dir ~pkg_digest : Gen_rules.result
 ;;
 
 let setup_rules ~components ~dir ctx =
-  (* Note that the path components in the following patterns must
-     correspond to the paths returned by [Paths.make]. The string
-     ".dev-tool" is hardcoded into several patterns, and must match
-     the value of [Pkg_dev_tool.install_path_base_dir_name]. *)
+  (* The string [.dev-tool] is hardcoded into several patterns and must match
+     [Pkg_dev_tool.install_path_base_dir_name]. *)
   assert (String.equal Pkg_dev_tool.install_path_base_dir_name ".dev-tool");
   match Context_name.is_default ctx, components with
   | true, [ ".dev-tool"; dev_tool_package_name ] ->
@@ -845,14 +818,20 @@ let setup_rules ~components ~dir ctx =
   | true, [ ".dev-tool" ] -> Gen_rules.make_empty ~dir Subdir_set.all |> Memo.return
   | _, [ ".pkg" ] -> Gen_rules.make_empty ~dir Subdir_set.all |> Memo.return
   | _, [ ".pkg"; pkg_digest_string ] ->
-    (* Only generate pkg rules if there is a lock dir for that context *)
-    let* lock_dir_active = Lock_dir.lock_dir_active ctx in
-    (match lock_dir_active with
-     | false -> Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
-     | true ->
-       let pkg_digest = Pkg_digest.of_string pkg_digest_string in
-       let* db = DB.of_ctx ctx ~allow_sharing:true in
-       setup_package_rules db ~package_universe:(Dependencies ctx) ~dir ~pkg_digest)
+    let pkg_digest = Pkg_digest.of_string pkg_digest_string in
+    let* mounted = Pkg_sources.find_mounted ctx pkg_digest.name in
+    let* is_project_package =
+      match mounted with
+      | None -> Memo.return false
+      | Some _ ->
+        let+ _, project_digest = DB.of_project_pkg ctx pkg_digest.name in
+        Pkg_digest.equal pkg_digest project_digest
+    in
+    if is_project_package
+    then Memo.return Gen_rules.no_rules
+    else
+      let* db = DB.of_ctx ctx ~allow_sharing:true in
+      setup_package_rules db ~package_universe:(Dependencies ctx) ~dir ~pkg_digest
   | _, ".pkg" :: _ :: _ ->
     Memo.return @@ Gen_rules.redirect_to_parent Gen_rules.Rules.empty
   | true, ".dev-tool" :: _ :: _ :: _ ->
@@ -863,7 +842,7 @@ let setup_rules ~components ~dir ctx =
       :: (if is_default then [ Filename.dev_tool_dir_basename ] else [])
     in
     let build_dir_only_sub_dirs =
-      Gen_rules.Build_only_sub_dirs.singleton ~dir @@ Subdir_set.of_list sub_dirs
+      Gen_rules.Build_only_sub_dirs.singleton ~dir (Subdir_set.of_list sub_dirs)
     in
     Memo.return @@ Gen_rules.make ~build_dir_only_sub_dirs (Memo.return Rules.empty)
   | _ -> Memo.return @@ Gen_rules.rules_here Gen_rules.Rules.empty
