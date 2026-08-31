@@ -4,7 +4,6 @@ open Import
 
 val gen_rules : Context_name.t -> dir:Path.Build.t -> Opam_stanza.t -> unit Memo.t
 val package_names : Context_name.t -> Package.Name.Set.t Memo.t
-val find_package : Context_name.t -> Package.Name.t -> unit Action_builder.t option Memo.t
 
 val resolve_installed_file
   :  Context_name.t

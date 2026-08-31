@@ -26,7 +26,9 @@ let rec dir_contents ~loc dir =
 ;;
 
 let depend_on_found { loc; name } ~dune_version = function
-  | Some (Package_db.Build build) | Some (Opam build) -> build
+  | Some (Package_db.Build build) -> build
+  | Some (Opam { paths; _ }) ->
+    Action_builder.dep (Dep.file (Path.build paths.target_dir))
   | Some (Local _) -> Action_builder.return ()
   | Some (Installed package) ->
     if dune_version < (2, 9)

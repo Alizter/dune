@@ -5,39 +5,11 @@ module Paths = Package_rules.Paths
 module Install_cookie = Package_rules.Install_cookie
 module Action_expander = Package_rules.Action_expander
 
-type entry =
-  { stanza : Opam_stanza.t
-  ; output_dir : Path.Build.t
-  }
+type entry = Package_db.opam
 
-let make_paths name output_dir stanza =
-  let target_dir = Opam_stanza.target_dir stanza ~dir:output_dir in
-  let root = Path.Build.parent_exn target_dir in
-  let paths = Paths.of_root name ~root ~relative:Path.Build.relative in
-  { paths with source_dir = output_dir; target_dir }
-;;
-
-let entries =
-  Per_context.create_by_name ~name:"opam-stanza-entries" (fun context ->
-    Memo.lazy_ ~name:"opam-stanza-entries" (fun () ->
-      let* dune_files = Dune_load.workspace_dune_files context in
-      let+ entries =
-        Memo.List.concat_map dune_files ~f:(fun dune_file ->
-          let+ stanzas = Dune_file.find_stanzas dune_file Opam_stanza.key in
-          List.map stanzas ~f:(fun (stanza : Opam_stanza.t) ->
-            ( Package.name stanza.package
-            , { stanza; output_dir = Dune_file.output_dir dune_file } )))
-      in
-      Package.Name.Map.of_list_reduce entries ~f:(fun first second ->
-        User_error.raise
-          ~loc:second.stanza.loc
-          [ Pp.textf
-              "Package %s has more than one opam stanza"
-              (Package.Name.to_string (Package.name second.stanza.package))
-          ; Pp.textf "The first stanza is at %s" (Loc.to_file_colon_line first.stanza.loc)
-          ]))
-    |> Memo.Lazy.force)
-  |> Staged.unstage
+let entries context =
+  let+ package_db = Package_db.create context in
+  Package_db.user_opam_packages package_db
 ;;
 
 let package_names context =
@@ -45,13 +17,10 @@ let package_names context =
   Package.Name.Map.keys entries |> Package.Name.Set.of_list
 ;;
 
-let write_paths { stanza; output_dir } =
-  make_paths (Package.name stanza.package) output_dir stanza
-;;
-
+let write_paths (entry : entry) = entry.paths
 let read_paths entry = write_paths entry |> Paths.map_path ~f:Path.build
 
-let package_variables { stanza; _ } =
+let package_variables ({ stanza; _ } : entry) =
   let name = Package.name stanza.package in
   let version =
     Package.version stanza.package
@@ -64,7 +33,7 @@ let package_variables { stanza; _ } =
     ]
 ;;
 
-let closure entries roots =
+let closure (entries : entry Package.Name.Map.t) (roots : entry list) =
   let rec visit ~loc name visiting visited ordered =
     if Package.Name.Set.mem visited name
     then visited, ordered
@@ -108,24 +77,24 @@ let closure entries roots =
     List.fold_left
       roots
       ~init:(Package.Name.Set.empty, [])
-      ~f:(fun (visited, ordered) entry ->
+      ~f:(fun (visited, ordered) (entry : entry) ->
         let name = Package.name entry.stanza.package in
         visit ~loc:entry.stanza.loc name Package.Name.Set.empty visited ordered)
   in
   List.rev ordered
 ;;
 
-let dependency_entries entries entry =
+let dependency_entries entries (entry : entry) =
   let name = Package.name entry.stanza.package in
   closure entries [ entry ]
-  |> List.filter ~f:(fun dependency ->
+  |> List.filter ~f:(fun (dependency : entry) ->
     not (Package.Name.equal name (Package.name dependency.stanza.package)))
 ;;
 
-let selected_entries entries selected =
+let selected_entries (entries : entry Package.Name.Map.t) selected =
   let roots =
     Package.Name.Map.values entries
-    |> List.filter ~f:(fun entry ->
+    |> List.filter ~f:(fun (entry : entry) ->
       match selected with
       | None -> true
       | Some selected -> Package.Name.Set.mem selected (Package.name entry.stanza.package))
@@ -133,7 +102,7 @@ let selected_entries entries selected =
   closure entries roots
 ;;
 
-let cookie entry =
+let cookie (entry : entry) =
   let open Action_builder.O in
   let paths = read_paths entry in
   let path = Paths.install_cookie paths in
@@ -141,12 +110,12 @@ let cookie entry =
   Install_cookie.load_exn path
 ;;
 
-let materialize context entries =
+let materialize context (entries : entry list) =
   let open Action_builder.O in
   Action_builder.List.fold_left
     entries
     ~init:Package_deps.empty
-    ~f:(fun materialized entry ->
+    ~f:(fun materialized (entry : entry) ->
       let paths = read_paths entry in
       let* () = Action_builder.dep (Dep.file paths.target_dir) in
       let cookie = Install_cookie.load_exn (Paths.install_cookie paths) in
@@ -208,22 +177,19 @@ let gen_rules context ~dir stanza =
   Rules.Produce.Alias.add_deps (Alias.make Alias0.all ~dir) (Action_builder.path target)
 ;;
 
-let find_package context name =
-  let+ entries = entries context in
-  Package.Name.Map.find entries name
-  |> Option.map ~f:(fun entry ->
-    let open Action_builder.O in
-    let+ _ = cookie entry in
-    ())
-;;
-
-let resolve_stanza_installed_file context name ~loc ~section ~file =
+let resolve_installed_file context name ~loc ~section ~file =
   let open Action_builder.O in
   let* entry =
     Action_builder.of_memo
       (let open Memo.O in
-       let+ entries = entries context in
-       Package.Name.Map.find_exn entries name)
+       let* package_db = Package_db.create context in
+       Package_db.find_package package_db name
+       >>| function
+       | Some (Opam entry) -> entry
+       | Some _ | None ->
+         Code_error.raise
+           "Opam installed-file lookup used for a non-Opam package"
+           [ "package", Package.Name.to_dyn name ])
   in
   let* ({ files; _ } : Install_cookie.t) = cookie entry in
   let paths = read_paths entry in
@@ -249,23 +215,6 @@ let resolve_stanza_installed_file context name ~loc ~section ~file =
           (Section.to_string section)
           (Package.Name.to_string name)
       ])
-;;
-
-let resolve_installed_file context name ~loc ~section ~file =
-  let open Action_builder.O in
-  let* mounted = Action_builder.of_memo (Pkg_sources.find_mounted context name) in
-  match mounted with
-  | Some mounted ->
-    (match Pkg_sources.Mounted.kind mounted with
-     | Opam _ ->
-       Pkg_rules.resolve_installed_file
-         ~loc
-         ~context_name:context
-         ~pkg_name:name
-         ~section
-         ~file
-     | Dune -> resolve_stanza_installed_file context name ~loc ~section ~file)
-  | None -> resolve_stanza_installed_file context name ~loc ~section ~file
 ;;
 
 let materialize_selected context selected =
