@@ -144,37 +144,37 @@ let materialize context (entries : entry list) =
 
 let gen_rules context ~dir stanza =
   let package_name = Package.name stanza.Opam_stanza.package in
-  let* target =
-    match stanza.origin with
-    | User ->
-      let* entries = entries context in
-      let entry = Package.Name.Map.find_exn entries package_name in
-      let write_paths = write_paths entry in
-      let read_paths = Paths.map_path write_paths ~f:Path.build in
-      let* source_deps, _source_files = Source_deps.files read_paths.source_dir in
-      let source =
-        { Package_rules.Source_input.root = write_paths.source_dir
-        ; kind = Directory
-        ; files_dir = None
-        ; extra_sources = []
-        }
-      in
-      let+ () =
-        Package_rules.gen_rules
-          context
-          stanza
-          ~paths:write_paths
-          ~variables:(package_variables entry)
-          ~source
-          ~source_deps
-          ~dependencies:(materialize context (dependency_entries entries entry))
-      in
-      read_paths.target_dir
-    | Lock ->
-      let+ () = Pkg_rules.gen_opam_rules context ~dir package_name in
-      Opam_stanza.target_dir stanza ~dir |> Path.build
+  (match stanza.origin with
+   | User -> ()
+   | Lock ->
+     Code_error.raise
+       "Lock package dispatched through user opam rules"
+       [ "package", Package.Name.to_dyn package_name ]);
+  let* entries = entries context in
+  let entry = Package.Name.Map.find_exn entries package_name in
+  let write_paths = write_paths entry in
+  let read_paths = Paths.map_path write_paths ~f:Path.build in
+  let* source_deps, _source_files = Source_deps.files read_paths.source_dir in
+  let source =
+    { Package_rules.Source_input.root = write_paths.source_dir
+    ; kind = Directory
+    ; files_dir = None
+    ; extra_sources = []
+    }
   in
-  Rules.Produce.Alias.add_deps (Alias.make Alias0.all ~dir) (Action_builder.path target)
+  let* () =
+    Package_rules.gen_rules
+      context
+      stanza
+      ~paths:write_paths
+      ~variables:(package_variables entry)
+      ~source
+      ~source_deps
+      ~dependencies:(materialize context (dependency_entries entries entry))
+  in
+  Rules.Produce.Alias.add_deps
+    (Alias.make Alias0.all ~dir)
+    (Action_builder.path read_paths.target_dir)
 ;;
 
 let resolve_installed_file context name ~loc ~section ~file =
