@@ -597,14 +597,8 @@ let gen_rules_standalone_or_root sctx ~dir ~project =
   Rules.union rules rules'
 ;;
 
-let gen_automatic_subdir_rules sctx ~dir ~nearest_src_dir ~src_dir =
-  (* There is always a source dir at the root, so we can't be at the root if
-     we are in this branch *)
-  match
-    match nearest_src_dir with
-    | None -> None
-    | Some _ -> Automatic_subdir.of_src_dir src_dir
-  with
+let gen_automatic_subdir_rules sctx ~dir ~has_nearest_source_dir ~src_dir =
+  match if has_nearest_source_dir then Automatic_subdir.of_src_dir src_dir else None with
   | None -> Memo.return Rules.empty
   | Some kind -> Rules.collect_unit (fun () -> Automatic_subdir.gen_rules ~sctx ~dir kind)
 ;;
@@ -632,6 +626,16 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
         | Some dir, _ -> Memo.return (Some dir)
         | None, None -> Memo.return None
         | None, Some src_dir -> Source_tree.find_dir (Path.Source.parent_exn src_dir)
+      in
+      let* has_nearest_source_dir =
+        match nearest_src_dir, mounted, source_tree_dir with
+        | Some _, _, _ | None, true, Some _ -> Memo.return true
+        | None, false, _ -> Memo.return false
+        | None, true, None ->
+          (match Path.Build.parent dir with
+           | None -> Memo.return false
+           | Some parent ->
+             Loaded_project.source_tree_dir loaded_project parent >>| Option.is_some)
       in
       let+ rules =
         let+ make_rules =
@@ -674,7 +678,7 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
           fun rules ->
             let rules =
               let+ automatic_subdir_rules =
-                gen_automatic_subdir_rules sctx ~dir ~nearest_src_dir ~src_dir
+                gen_automatic_subdir_rules sctx ~dir ~has_nearest_source_dir ~src_dir
               and+ project_metadata_rules =
                 if Path.Build.equal dir (Loaded_project.output_root loaded_project)
                 then gen_project_metadata_rules sctx loaded_project
