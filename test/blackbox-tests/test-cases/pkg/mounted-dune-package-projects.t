@@ -173,3 +173,67 @@ than the workspace-only engine source tree.
   nested-module-artifact
   $ test ! -e _build/_private/default/.pkg/grouped.1.0-* && echo no-old-package-rules
   no-old-package-rules
+
+A vendored project bundled in a mounted package remains visible to the owning
+package even though the vendored project's package is not selected from the
+lock directory.
+
+  $ mkdir vendored-project
+  $ cd vendored-project
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends bundle))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (libraries bundle))
+  > EOF
+  $ echo 'let () = print_endline Bundle.message' > main.ml
+
+  $ mkdir -p bundle/vendor/src
+  $ cat > bundle/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name bundle))
+  > EOF
+  $ cat > bundle/dune <<'EOF'
+  > (vendored_dirs vendor)
+  > (library
+  >  (name bundle)
+  >  (public_name bundle)
+  >  (libraries vendored_support))
+  > EOF
+  $ echo 'let message = Vendored_support.message' > bundle/bundle.ml
+  $ cat > bundle/vendor/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name vendored_support))
+  > EOF
+  $ cat > bundle/vendor/src/dune <<'EOF'
+  > (library
+  >  (name vendored_support)
+  >  (public_name vendored_support))
+  > EOF
+  $ echo 'let message = "mounted vendored project"' > bundle/vendor/src/vendored_support.ml
+  $ tar cf bundle.tar bundle
+  $ rm -rf bundle
+
+  $ make_lockdir
+  $ make_lockpkg bundle <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/bundle.tar)
+  >   (checksum md5=$(md5sum bundle.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
+  $ "$real_dune" build ./main.exe --display quiet
+  $ ./_build/default/main.exe
+  mounted vendored project
