@@ -35,6 +35,7 @@ module Mounted : sig
   val is_dune : t -> bool
 end
 
+val find_candidate : Context_name.t -> Package.Name.t -> Candidate.t option Memo.t
 val mounted : Context_name.t -> Mounted.t list Memo.t
 val selected_package_names : Context_name.t -> Package.Name.Set.t Memo.t
 val find_mounted : Context_name.t -> Package.Name.t -> Mounted.t option Memo.t

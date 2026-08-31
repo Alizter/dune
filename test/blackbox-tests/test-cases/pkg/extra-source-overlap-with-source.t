@@ -10,6 +10,7 @@ file in the package's source.
   >  (foo.txt
   >   (fetch
   >    (url file://$PWD/foo.txt))))
+  > (build (run cat foo.txt))
   > EOF
 
   $ mkdir -p foo-source
@@ -25,9 +26,8 @@ file in the package's source.
   >  (depends foo))
   > EOF
 
-  $ build_pkg foo
+The extra source overlays the immutable primary source inside the recipe's copy
+sandbox:
 
-Make sure that the package's source directory ends up with the version
-of foo.txt from extra_sources:
-  $ cat _build/_private/default/.pkg/$($dune pkg print-digest foo)/source/foo.txt
+  $ build_pkg foo
   from extra source
