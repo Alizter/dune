@@ -11,7 +11,6 @@ type t =
   { loc : Loc.t
   ; origin : origin
   ; package : Package.t
-  ; depends : (Loc.t * Package.Name.t) list
   ; build : Dune_pkg.Lock_dir.Build_command.t option
   ; install : Dune_lang.Action.t option
   ; depexts : Dune_pkg.Lock_dir.Depexts.t list

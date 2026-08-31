@@ -205,9 +205,6 @@ let make_opam candidate ~source_root ~source_kind ~tree =
     { Opam_stanza.loc = Loc.none
     ; origin = Lock
     ; package
-    ; depends =
-        List.map dependencies ~f:(fun { Dune_pkg.Lock_dir.Dependency.loc; name } ->
-          loc, name)
     ; build
     ; install
     ; depexts = candidate.lock_pkg.depexts

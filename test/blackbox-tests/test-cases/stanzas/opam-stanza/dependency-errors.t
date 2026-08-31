@@ -6,24 +6,20 @@ Invalid Opam stanza package graphs are rejected before rules are generated.
   > (lang dune 3.22)
   > (name test)
   > (using unreleased 0.1)
-  > (package (name a) (dir a))
-  > (package (name b) (dir b))
+  > (package (name a) (dir a) (depends b))
+  > (package (name b) (dir b) (depends a))
   > EOF
   $ cat >a/dune <<'EOF'
-  > (opam
-  >  (package a)
-  >  (depends b))
+  > (opam (package a))
   > EOF
   $ cat >b/dune <<'EOF'
-  > (opam
-  >  (package b)
-  >  (depends a))
+  > (opam (package b))
   > EOF
 
   $ dune build a/.opam/a/target
-  File "b/dune", line 3, characters 10-11:
-  3 |  (depends a))
-                ^
+  File "b/dune", line 1, characters 0-18:
+  1 | (opam (package b))
+      ^^^^^^^^^^^^^^^^^^
   Error: The following opam stanzas form a dependency cycle:
      a
   -> b
@@ -31,19 +27,24 @@ Invalid Opam stanza package graphs are rejected before rules are generated.
 
 A dependency must be provided by another Opam stanza.
 
+  $ cat >dune-project <<'EOF'
+  > (lang dune 3.22)
+  > (name test)
+  > (using unreleased 0.1)
+  > (package (name a) (dir a) (depends missing))
+  > (package (name b) (dir b))
+  > EOF
   $ cat >a/dune <<'EOF'
-  > (opam
-  >  (package a)
-  >  (depends missing))
+  > (opam (package a))
   > EOF
   $ cat >b/dune <<'EOF'
   > (opam
   >  (package b))
   > EOF
   $ dune build a/.opam/a/target
-  File "a/dune", line 3, characters 10-17:
-  3 |  (depends missing))
-                ^^^^^^^
+  File "a/dune", line 1, characters 0-18:
+  1 | (opam (package a))
+      ^^^^^^^^^^^^^^^^^^
   Error: Package missing is not provided by an opam stanza
   [1]
 

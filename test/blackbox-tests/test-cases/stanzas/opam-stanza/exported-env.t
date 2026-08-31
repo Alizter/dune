@@ -52,7 +52,6 @@ and are visible to both Opam-built and native dependants.
   $ cat >consumer/dune <<'EOF'
   > (opam
   >  (package consumer)
-  >  (depends base)
   >  (build
   >   (progn
   >    (system "echo FOO=$FOO > env.txt")

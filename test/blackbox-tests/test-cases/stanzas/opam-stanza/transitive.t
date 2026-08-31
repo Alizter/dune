@@ -34,7 +34,6 @@ siblings do not contribute binaries, variables, environments, or targets.
   $ cat >middle/dune <<'EOF'
   > (opam
   >  (package middle)
-  >  (depends leaf)
   >  (exported_env
   >   (= MIDDLE_ENV middle-environment)))
   > EOF
@@ -54,7 +53,6 @@ siblings do not contribute binaries, variables, environments, or targets.
   $ cat >top/dune <<'EOF'
   > (opam
   >  (package top)
-  >  (depends middle)
   >  (build
   >   (progn
   >    (system "leaf-tool > result.txt")

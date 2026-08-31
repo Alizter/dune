@@ -136,9 +136,12 @@ let packages =
                let stack = Package.Name.Set.add stack name in
                let* resolved, depends =
                  Memo.List.fold_left
-                   entry.stanza.depends
+                   (Package.depends entry.stanza.package)
                    ~init:(resolved, [])
                    ~f:(fun (resolved, depends) dependency ->
+                     let dependency =
+                       entry.stanza.loc, dependency.Package_dependency.name
+                     in
                      let+ resolved, package = resolve resolved stack dependency in
                      resolved, package :: depends)
                in
