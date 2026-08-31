@@ -195,6 +195,11 @@ module Action_expander : sig
       :  Context_name.t
       -> Dependency_view.t
       -> artifacts_and_deps Memo.t
+
+    val materialize
+      :  Context_name.t
+      -> Dependency_view.t
+      -> Package_deps.t Action_builder.t
   end
 
   val expander : Context_name.t -> Pkg.t -> Dependency_view.t -> Expander.t
