@@ -1219,13 +1219,14 @@ end = struct
   let projects_by_package =
     Memo.lazy_ ~name:"projects-by-package" (fun () ->
       let open Memo.O in
-      Dune_load.projects ()
-      >>| List.concat_map ~f:(fun project ->
-        Dune_project.including_hidden_packages project
-        |> Package.Name.Map.to_list_map ~f:(fun _ (pkg : Package.t) ->
-          let name = Package.name pkg in
-          name, project))
-      >>| Package.Name.Map.of_list_exn)
+      let+ projects = Dune_load.projects ()
+      and+ packages = Dune_load.packages_including_hidden () in
+      let projects_by_root =
+        Source_path.Map.of_list_map_exn projects ~f:(fun project ->
+          Dune_project.root project, project)
+      in
+      Package.Name.Map.map packages ~f:(fun package ->
+        Source_path.Map.find_exn projects_by_root (Package.dir package)))
   ;;
 
   module Resolved = struct

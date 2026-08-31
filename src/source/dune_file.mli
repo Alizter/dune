@@ -38,6 +38,7 @@ module Files : sig
 end
 
 val files : t -> Files.t
+val scope : t -> Dune_lang.Scope_stanza.t option
 
 (** Directories introduced via [(subdir ..)] *)
 val sub_dirnames : t -> Filename.Array.Set.t
