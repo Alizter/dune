@@ -539,11 +539,6 @@ let mask () =
   mask
 ;;
 
-let package_scope () =
-  let+ { package_scope; _ } = load () in
-  package_scope
-;;
-
 let packages () =
   let+ { packages; _ } = load () in
   packages

@@ -182,6 +182,8 @@ type prepared_stanza =
 
 type stanza =
   { dir : Path.Build.t
+  ; source_dir : Source_path.t
+  ; package_scope : Package_scope.t
   ; stanza : Cram_stanza.t
   ; prepared : prepared_stanza Memo.Lazy.t
   }
@@ -198,6 +200,9 @@ let stanzas_in_dir =
        >>= function
        | None -> Memo.return []
        | Some (d : Dune_file.t) ->
+         let loaded_project = Dune_file.loaded_dir d |> Loaded_dir.project in
+         let source_dir = Dune_file.source_dir d in
+         let package_scope = Loaded_project.package_scope loaded_project in
          let+ stanzas = Dune_file.find_stanzas d Cram_stanza.key in
          List.map stanzas ~f:(fun (stanza : Cram_stanza.t) ->
            let prepared =
@@ -224,7 +229,7 @@ let stanzas_in_dir =
                in
                { expander; deps })
            in
-           { dir; stanza; prepared }))
+           { dir; source_dir; package_scope; stanza; prepared }))
   |> Memo.exec
 ;;
 
@@ -261,7 +266,7 @@ let spec_for_test ~stanzas ~dune_version test =
     Memo.List.fold_left
       stanzas
       ~init
-      ~f:(fun (runtest_alias, (acc : Spec.t)) { dir; stanza; prepared } ->
+      ~f:(fun (runtest_alias, (acc : Spec.t)) { dir; stanza; prepared; _ } ->
         match
           match stanza.applies_to with
           | Whole_subtree -> true
@@ -399,22 +404,24 @@ let rules ~sctx ~dir tests project =
   let dune_version = Dune_project.dune_version project in
   let* stanzas = collect_stanzas ~dir
   and* mask = Dune_load.mask () >>| Only_packages.enumerate
-  and* package_scope = Dune_load.package_scope () in
-  let source_dir dir = Path.Build.drop_build_context_exn dir |> Source_path.workspace in
+  and* loaded_project = Dune_load.find_loaded_project ~dir in
   (* Filter package-owned stanzas before merging their configuration. Dropping
      the resulting test later would also discard matching unowned stanzas. *)
   let stanzas =
-    List.filter stanzas ~f:(fun { dir; stanza; _ } ->
+    List.filter stanzas ~f:(fun { source_dir; package_scope; stanza; _ } ->
       match stanza.package with
       | None -> true
       | Some package ->
-        Package_scope.is_stanza_visible
-          package_scope
-          ~dir:(source_dir dir)
-          (Package.id package))
+        Package_scope.is_stanza_visible package_scope ~dir:source_dir (Package.id package))
   in
-  let source_dir = source_dir dir in
+  let package_scope = Loaded_project.package_scope loaded_project in
+  let source_dir = Loaded_project.source_path loaded_project dir |> Option.value_exn in
   let exclusive_package = Dune_project.exclusive_package project ~dir:source_dir in
+  let mask =
+    match Build_partition.purpose (Loaded_project.partition loaded_project) with
+    | Workspace -> mask
+    | Mounted -> `All
+  in
   let with_only_packages =
     match Option.map exclusive_package ~f:Package.Id.name with
     | None ->
