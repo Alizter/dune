@@ -125,3 +125,66 @@ part of the primary source target.
   primary-source
   $ test ! -e "$source_root/from-files" && test ! -e "$source_root/extra.txt" && test ! -e "$source_root/built.txt" && echo source-unchanged
   source-unchanged
+
+A source may contain incidental Dune files without defining the selected lock
+package. It must remain an opaque Opam provider rather than disappearing from
+the package database. A source-less virtual package forwards the implementation
+capabilities represented by such a provider.
+
+  $ mkdir incidental-dune
+  $ cd incidental-dune
+  $ cat >dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat >dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends consumer)
+  >  (allow_empty))
+  > EOF
+  $ mkdir ../incidental-provider-source
+  $ cat >../incidental-provider-source/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name unrelated))
+  > EOF
+  $ cat >../incidental-provider-source/dune <<'EOF'
+  > (* -*- tuareg -*- *)
+  > let () = failwith "opaque source dune file was evaluated"
+  > EOF
+  $ make_lockdir
+  $ make_lockpkg implementation <<EOF
+  > (version 1.0)
+  > (source (copy $PWD/../incidental-provider-source))
+  > (build
+  >  (progn
+  >   (write-file implementation-tool "#!/bin/sh\necho opaque provider\n")
+  >   (run chmod +x implementation-tool)))
+  > (install
+  >  (progn
+  >   (run mkdir -p %{bin})
+  >   (run cp implementation-tool %{bin}/implementation-tool)))
+  > EOF
+  $ make_lockpkg virtual-provider <<'EOF'
+  > (version 1.0)
+  > (depends implementation)
+  > EOF
+  $ make_lockpkg consumer <<'EOF'
+  > (version 1.0)
+  > (depends virtual-provider)
+  > (build
+  >  (progn
+  >   (system "test '%{pkg:implementation:installed}' = false")
+  >   (system "implementation-tool > result")))
+  > (install
+  >  (progn
+  >   (run mkdir -p %{share}/consumer)
+  >   (run cp result %{share}/consumer/result)))
+  > EOF
+
+  $ build_pkg consumer
+  $ cat "$(get_build_pkg_dir consumer)/target/share/consumer/result"
+  opaque provider
+  $ test ! -d _build/_private/default/.pkg && echo no-virtual-package-fallback
+  no-virtual-package-fallback
