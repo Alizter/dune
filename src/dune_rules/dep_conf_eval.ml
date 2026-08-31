@@ -305,9 +305,9 @@ let rec dep expander : Dep_conf.t -> _ = function
     Other
       (let+ () =
          let* name = expand_package_name expander p in
-         let dependency = { Package_deps.loc = String_with_vars.loc p; name } in
+         let dependency = { Package_deps_eval.loc = String_with_vars.loc p; name } in
          let dune_version = Expander.project expander |> Dune_project.dune_version in
-         Package_deps.depend (Expander.context expander) ~dune_version dependency
+         Package_deps_eval.depend (Expander.context expander) ~dune_version dependency
        in
        [])
   | Universe ->
@@ -331,10 +331,11 @@ and combined_package_deps_builder expander pkgs =
   let* dependencies =
     Action_builder.List.map pkgs ~f:(fun (swv, loc) ->
       let+ name = expand_package_name expander swv in
-      { Package_deps.loc; name })
+      { Package_deps_eval.loc; name })
   in
   let dune_version = Expander.project expander |> Dune_project.dune_version in
-  Package_deps.materialize context ~dune_version dependencies
+  Package_deps_eval.materialize context ~dune_version dependencies
+  >>| fun materialized -> materialized.Package_deps.env
 
 and named_paths_builder ~expander l =
   let builders, bindings, combined_packages_builder, bin_names, include_envs =
