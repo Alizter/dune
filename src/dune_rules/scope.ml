@@ -255,11 +255,11 @@ module DB = struct
                then Memo.return None
                else
                  let* paths =
-                   Pkg_rules.Legacy_libraries.find_provider libraries package
+                   Pkg_rules.Opaque_libraries.find_provider libraries package
                  in
                  Memo.Option.bind paths ~f:db_if_available
              in
-             Pkg_rules.Legacy_libraries.find libraries package
+             Pkg_rules.Opaque_libraries.find libraries package
              >>= function
              | None -> find_provider ()
              | Some paths ->
@@ -285,7 +285,7 @@ module DB = struct
         ~resolve_lib_id:(fun lib_id -> resolve (Lib_id.name lib_id))
         ~all:(fun () ->
           let+ libraries = libraries in
-          Pkg_rules.Legacy_libraries.packages libraries
+          Pkg_rules.Opaque_libraries.packages libraries
           |> List.map ~f:Lib_name.of_package_name)
         ~instrument_with:(Context.instrument_with context)
         ()
@@ -294,10 +294,10 @@ module DB = struct
     db
   ;;
 
-  let legacy_libraries context package ~parent =
+  let opaque_libraries context package ~parent =
     dynamic_libraries
       context
-      (Pkg_rules.Legacy_libraries.for_package (Context.name context) package)
+      (Pkg_rules.Opaque_libraries.for_package (Context.name context) package)
       ~parent
   ;;
 
@@ -547,10 +547,10 @@ module DB = struct
     in
     let mounted_public_libs_by_owner =
       Path.Build.Map.mapi mounted_owners ~f:(fun owner (package, _) ->
-        let legacy_libs =
-          legacy_libraries context (Package.name package) ~parent:installed_libs
+        let opaque_libs =
+          opaque_libraries context (Package.name package) ~parent:installed_libs
         in
-        let parent = Lib.DB.with_parent public_libs ~parent:legacy_libs in
+        let parent = Lib.DB.with_parent public_libs ~parent:opaque_libs in
         let stanzas =
           Path.Build.Map.find mounted_auxiliary_stanzas_by_owner owner
           |> Option.value ~default:[]

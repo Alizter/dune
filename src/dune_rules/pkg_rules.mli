@@ -5,8 +5,8 @@ open Import
 (** Normal project dependencies are classified from their primary-source
     contents and built under the alternate package context. Native packages use
     ordinary Dune rules; synthetic Opam packages own an install target and
-    cookie. Legacy [.pkg] generation remains temporarily available for explicit
-    targets, and dev tools retain their separate [.dev-tool] route. *)
+    cookie. Project packages have no [.pkg] route; dev tools retain their
+    separate [.dev-tool] route and temporary dependency adapter. *)
 
 val setup_rules
   :  components:string list
@@ -28,8 +28,8 @@ val setup_mounted_opam_package_rules
 val ocaml_toolchain : Context_name.t -> Ocaml_toolchain.t Action_builder.t option Memo.t
 
 (** [which ~packages context program] looks [program] up among the binaries
-    installed by the dependency closure of [packages] in the lock directory.
-    [None] means the whole lock directory. *)
+    installed by [packages] in the lock directory. [None] means the whole lock
+    directory. *)
 val which
   :  packages:Package.Name.Set.t option
   -> Context_name.t
@@ -47,15 +47,14 @@ val package_binaries
   -> Path.t Filename.Map.t Memo.t
 
 (** [bin_path_env ~packages context] is an env holding only a PATH made of the
-    bin directories of the dependency closure of [packages] in the lock
-    directory. [None] means the whole lock directory. Empty when the context
-    has no lock directory. *)
+    bin directories of [packages] in the lock directory. [None] means the whole
+    lock directory. Empty when the context has no lock directory. *)
 val bin_path_env : packages:Package.Name.Set.t option -> Context_name.t -> Env.t Memo.t
 
 val exported_env : Context_name.t -> Env.t Memo.t
 val project_ocamlpath : Context_name.t -> Path.t list Memo.t
 
-module Legacy_libraries : sig
+module Opaque_libraries : sig
   type t
 
   val for_package : Context_name.t -> Package.Name.t -> t Memo.t
@@ -72,17 +71,6 @@ val setup_pkg_install_alias
   :  dir:Path.Build.t
   -> Context_name.t
   -> Build_config.Gen_rules.t
-
-module Pkg_digest : sig
-  type t
-
-  val to_string : t -> string
-end
-
-val pkg_digest_of_project_dependency
-  :  Context_name.t
-  -> Package.Name.t
-  -> Pkg_digest.t option Memo.t
 
 val artifact_root_of_project_dependency
   :  Context_name.t
