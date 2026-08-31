@@ -92,6 +92,12 @@ let candidates =
   |> Staged.unstage
 ;;
 
+let find_candidate context name =
+  let+ candidates = candidates context in
+  List.find candidates ~f:(fun candidate ->
+    Package.Name.equal name (Candidate.name candidate))
+;;
+
 let selected_recipe candidate =
   let* platform = Lock_dir.Sys_vars.solver_env in
   let lock_pkg = candidate.Candidate.lock_pkg in
