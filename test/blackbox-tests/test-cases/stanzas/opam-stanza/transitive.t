@@ -1,5 +1,7 @@
-Opam stanzas compose over the exact transitive package closure. Undeclared
-siblings do not contribute binaries, variables, environments, or targets.
+Opam stanzas compose over their immediate package dependencies. A dependency's
+target still builds its own dependencies, but their binaries, variables, and
+environments are not implicitly exposed to the consumer. Undeclared siblings
+are likewise hidden.
 
   $ unset DUNE_SOURCE_ROOT DUNE_SOURCEROOT DUNE_PROJECT_ROOT
   $ mkdir leaf middle top other
@@ -34,6 +36,15 @@ siblings do not contribute binaries, variables, environments, or targets.
   $ cat >middle/dune <<'EOF'
   > (opam
   >  (package middle)
+  >  (build
+  >   (progn
+  >    (system "leaf-tool > result.txt")
+  >    (system "echo %{pkg:leaf:message} >> result.txt")
+  >    (system "echo $LEAF_ENV >> result.txt")))
+  >  (install
+  >   (progn
+  >    (run mkdir -p %{share}/middle)
+  >    (run cp result.txt %{share}/middle/result.txt)))
   >  (exported_env
   >   (= MIDDLE_ENV middle-environment)))
   > EOF
@@ -55,9 +66,10 @@ siblings do not contribute binaries, variables, environments, or targets.
   >  (package top)
   >  (build
   >   (progn
-  >    (system "leaf-tool > result.txt")
-  >    (system "echo %{pkg:leaf:message} >> result.txt")
-  >    (system "echo $LEAF_ENV >> result.txt")
+  >    (system "cat %{pkg:middle:share}/result.txt > result.txt")
+  >    (system "echo %{pkg:leaf:installed} >> result.txt")
+  >    (system "if command -v leaf-tool >/dev/null; then echo leaf-visible; else echo leaf-hidden; fi >> result.txt")
+  >    (system "if test -n \"$LEAF_ENV\"; then echo leaf-env-visible; else echo leaf-env-hidden; fi >> result.txt")
   >    (system "echo $MIDDLE_ENV >> result.txt")
   >    (system "if command -v other-tool >/dev/null; then exit 1; fi")))
   >  (install
@@ -69,5 +81,8 @@ siblings do not contribute binaries, variables, environments, or targets.
   leaf-binary
   leaf-variable
   leaf-environment
+  false
+  leaf-hidden
+  leaf-env-hidden
   middle-environment
   $ test ! -e _build/default/other/.opam/other/target
