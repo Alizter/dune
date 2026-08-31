@@ -171,6 +171,14 @@ module Action_expander : sig
     -> Package_deps.t
     -> string Env_update.t list Memo.t
 
+  val filtered_depexts_of_stanza
+    :  Context_name.t
+    -> Opam_stanza.t
+    -> paths:Path.t Paths.t
+    -> variables:Package_deps.package_variables
+    -> Package_deps.t
+    -> string list Memo.t
+
   val refresh_exported_env : Context_name.t -> Dependency_view.t -> unit Memo.t
 end
 

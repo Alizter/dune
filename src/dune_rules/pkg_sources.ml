@@ -58,6 +58,7 @@ module Mounted = struct
     ; tree : Source_tree.Rules.Build.t option
     ; source_kind : source_kind
     ; kind : kind
+    ; package : Package.t
     }
 
   let candidate t = t.candidate
@@ -66,6 +67,7 @@ module Mounted = struct
   let tree t = t.tree
   let source_kind t = t.source_kind
   let kind t = t.kind
+  let package t = t.package
 
   let is_dune t =
     match t.kind with
@@ -122,49 +124,6 @@ module Build_source_tree = Source_tree.Rules.Build
 
 let load_source = Build_source_tree.load
 
-let mount candidate source_root tree =
-  let projects = Build_source_tree.projects tree in
-  let package = Candidate.name candidate in
-  let* represents_package =
-    Memo.List.exists projects ~f:(fun (project, _) ->
-      match
-        Package.Name.Map.find (Dune_project.including_hidden_packages project) package
-      with
-      | None -> Memo.return false
-      | Some package -> Package_enabled.eval package)
-  in
-  if not represents_package
-  then Memo.return None
-  else (
-    let projects =
-      List.map projects ~f:(fun (project, source_dir) ->
-        ( Dune_project.set_package_version
-            project
-            ~package
-            ~version:candidate.lock_pkg.info.version
-        , source_dir ))
-    in
-    Memo.return
-      (Some
-         { Mounted.candidate
-         ; source_root
-         ; projects
-         ; tree = Some tree
-         ; source_kind = Primary_source
-         ; kind = Dune
-         }))
-;;
-
-module Scan_dune_files = Source_tree.Rules.Dir.Make_map_reduce (Memo) (Monoid.Exists)
-
-let has_dune_file tree =
-  Scan_dune_files.map_reduce
-    (Build_source_tree.root tree)
-    ~traverse:Source_dir_status.Set.all
-    ~trace_event_name:"Package source classification"
-    ~f:(fun dir -> Memo.return (Option.is_some (Source_tree.Rules.Dir.dune_file dir)))
-;;
-
 let make_package candidate source_root dependencies =
   let { Lock_pkg.info; _ } = Candidate.lock_pkg candidate in
   let dir = Source_path.build source_root in
@@ -189,6 +148,51 @@ let make_package candidate source_root dependencies =
     ~original_opam_file:None
     ~deprecated_package_names:Package.Name.Map.empty
     ~contents_basename:None
+;;
+
+let mount candidate source_root tree dependencies =
+  let projects = Build_source_tree.projects tree in
+  let package = Candidate.name candidate in
+  let* represents_package =
+    Memo.List.exists projects ~f:(fun (project, _) ->
+      match
+        Package.Name.Map.find (Dune_project.including_hidden_packages project) package
+      with
+      | None -> Memo.return false
+      | Some package -> Package_enabled.eval package)
+  in
+  if not represents_package
+  then Memo.return None
+  else (
+    let projects =
+      List.map projects ~f:(fun (project, source_dir) ->
+        ( Dune_project.set_package_version
+            project
+            ~package
+            ~version:candidate.lock_pkg.info.version
+        , source_dir ))
+    in
+    let package = make_package candidate source_root dependencies in
+    Memo.return
+      (Some
+         { Mounted.candidate
+         ; source_root
+         ; projects
+         ; tree = Some tree
+         ; source_kind = Primary_source
+         ; kind = Dune
+         ; package
+         }))
+;;
+
+module Scan_dune_files = Source_tree.Rules.Dir.Make_map_reduce (Memo) (Monoid.Exists)
+
+let has_dune_file tree =
+  Scan_dune_files.map_reduce
+    (Build_source_tree.root tree)
+    ~traverse:Source_dir_status.Set.all
+    ~trace_event_name:"Package source classification"
+    ~f:(fun dir -> Memo.return (Option.is_some (Source_tree.Rules.Dir.dune_file dir)))
 ;;
 
 let make_opam candidate ~source_root ~source_kind ~tree =
@@ -216,7 +220,14 @@ let make_opam candidate ~source_root ~source_kind ~tree =
     ; exported_env = candidate.lock_pkg.exported_env
     }
   in
-  { Mounted.candidate; source_root; projects; tree; source_kind; kind = Opam stanza }
+  { Mounted.candidate
+  ; source_root
+  ; projects
+  ; tree
+  ; source_kind
+  ; kind = Opam stanza
+  ; package
+  }
   |> Memo.return
 ;;
 
@@ -226,7 +237,9 @@ let prepare candidate =
     let* tree = load_source source_root in
     let* has_dune_file = has_dune_file tree in
     if has_dune_file
-    then mount candidate source_root tree
+    then
+      let* _, _, dependencies = selected_recipe candidate in
+      mount candidate source_root tree dependencies
     else
       make_opam candidate ~source_root ~source_kind:Primary_source ~tree:(Some tree)
       >>| Option.some

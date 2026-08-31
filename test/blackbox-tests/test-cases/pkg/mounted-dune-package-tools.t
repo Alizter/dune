@@ -129,17 +129,16 @@ Mounted-package discovery itself runs once per context.
   > '
   [{"context":"default","count":1}]
 
-Package digest table construction runs once for the project lock directory.
+The project lock directory no longer constructs the legacy package digest
+table.
 
   $ dune trace cat | jq -s '
   > [ .[] | select(.cat == "pkg" and .name == "package-digest-table") ]
   > | {count: length, package_counts: map(.args.packages) | unique}
   > '
   {
-    "count": 1,
-    "package_counts": [
-      2
-    ]
+    "count": 0,
+    "package_counts": []
   }
 
 Looking up a system C compiler for a mounted package must not load binaries from
