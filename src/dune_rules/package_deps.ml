@@ -177,6 +177,88 @@ module Install_cookie = struct
   ;;
 end
 
+module Value_list_env = struct
+  type t = Value.t list Env.Map.t
+
+  let of_env env : t =
+    Env.to_map env
+    |> Env.Map.map ~f:(fun value ->
+      Bin.parse value |> List.map ~f:(fun value -> Value.String value))
+  ;;
+
+  let global : t Lazy.t = lazy (of_env (Global.env ()))
+
+  let string_of_env_values values =
+    List.map values ~f:(function
+      | Value.String value -> value
+      | Dir path | Path path -> Path.to_absolute_filename path)
+    |> Bin.encode_strings
+  ;;
+
+  let to_env (t : t) = Env.Map.map t ~f:string_of_env_values |> Env.of_map
+  let get_path t = Env.Map.find t Env_path.var
+
+  let extend_concat_path a b =
+    let extended = Env.Map.superpose b a in
+    let concatenated_path =
+      match get_path a, get_path b with
+      | None, None -> None
+      | Some path, None | None, Some path -> Some path
+      | Some a, Some b -> Some (b @ a)
+    in
+    match concatenated_path with
+    | None -> extended
+    | Some path -> Env.Map.set extended Env_path.var path
+  ;;
+
+  let add_path (t : t) var path : t =
+    Env.Map.update t var ~f:(fun paths ->
+      let paths = Option.value paths ~default:[] in
+      Some (Value.Dir path :: paths))
+  ;;
+end
+
+module Env_update = struct
+  include Dune_lang.Action.Env_update
+
+  let update kind ~new_v ~old_v ~f =
+    if new_v = ""
+    then old_v
+    else (
+      match kind with
+      | `Colon ->
+        let old_v =
+          match old_v with
+          | None | Some [] -> [ Value.String "" ]
+          | Some value -> value
+        in
+        Some (f ~old_v ~new_v)
+      | `Plus ->
+        (match old_v with
+         | None | Some [] -> Some [ Value.String new_v ]
+         | Some old_v -> Some (f ~old_v ~new_v)))
+  ;;
+
+  let append = update ~f:(fun ~old_v ~new_v -> old_v @ [ Value.String new_v ])
+  let prepend = update ~f:(fun ~old_v ~new_v -> Value.String new_v :: old_v)
+
+  let set env { op; var; value = new_v } =
+    Env.Map.update env var ~f:(fun old_v ->
+      let append = append ~new_v ~old_v in
+      let prepend = prepend ~new_v ~old_v in
+      match op with
+      | Eq ->
+        if new_v = ""
+        then if Sys.win32 then None else Some [ String "" ]
+        else Some [ Value.String new_v ]
+      | PlusEq -> prepend `Plus
+      | ColonEq -> prepend `Colon
+      | EqPlus -> append `Plus
+      | EqColon -> append `Colon
+      | EqPlusEq -> Code_error.raise "Unsupported package environment update" [])
+  ;;
+end
+
 type package_variables = Variable.value Package_variable_name.Map.t
 type concrete_paths = Path.t Paths.t
 
@@ -202,4 +284,32 @@ type t =
 
 let empty =
   { env = Env.empty; binaries = Filename.Map.empty; packages = Package.Name.Map.empty }
+;;
+
+let add_package t ~paths ~variables ~files ~exported_env =
+  let env =
+    let roots = Paths.install_roots paths in
+    let env =
+      let init =
+        Value_list_env.add_path (Value_list_env.of_env t.env) Env_path.var roots.bin
+      in
+      Install.Roots.to_env_without_path roots ~relative:Path.relative
+      |> List.fold_left ~init ~f:(fun env (var, path) ->
+        Value_list_env.add_path env var path)
+    in
+    List.fold_left exported_env ~init:env ~f:Env_update.set |> Value_list_env.to_env
+  in
+  let binaries =
+    Section.Map.Multi.find files Bin
+    |> List.fold_left ~init:t.binaries ~f:(fun binaries path ->
+      let name =
+        Path.basename path
+        |> Filename.to_string
+        |> Bin.strip_exe
+        |> Filename.of_string_exn
+      in
+      Filename.Map.set binaries name path)
+  in
+  let packages = Package.Name.Map.set t.packages paths.name (variables, paths) in
+  { env; binaries; packages }
 ;;
