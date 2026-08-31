@@ -25,7 +25,7 @@ Invalid Opam stanza package graphs are rejected before rules are generated.
   -> b
   [1]
 
-A dependency must be provided by another Opam stanza.
+A dependency must be provided by the package database.
 
   $ cat >dune-project <<'EOF'
   > (lang dune 3.22)
@@ -45,7 +45,7 @@ A dependency must be provided by another Opam stanza.
   File "a/dune", line 1, characters 0-18:
   1 | (opam (package a))
       ^^^^^^^^^^^^^^^^^^
-  Error: Package missing is not provided by an opam stanza
+  Error: Package missing does not exist
   [1]
 
 There is only one opaque recipe owner for each package.

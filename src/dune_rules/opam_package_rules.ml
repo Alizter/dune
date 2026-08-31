@@ -1281,6 +1281,63 @@ module Action_expander = struct
   ;;
 end
 
+module Dependency_provider = struct
+  type t =
+    | Local of Package.t
+    | Opam of
+        { stanza : Opam_stanza.t
+        ; paths : Path.Build.t Paths.t
+        }
+
+  let materialize context providers =
+    let open Action_builder.O in
+    let local_package_names =
+      List.filter_map providers ~f:(function
+        | Local package -> Some (Package.name package)
+        | Opam _ -> None)
+      |> Package.Name.Set.of_list
+    in
+    let* env =
+      if Package.Name.Set.is_empty local_package_names
+      then Action_builder.return Env.empty
+      else Install_layout.env context local_package_names
+    in
+    let* binaries =
+      if Package.Name.Set.is_empty local_package_names
+      then Action_builder.return Filename.Map.empty
+      else Action_builder.of_memo (Install_layout.binaries context local_package_names)
+    in
+    let packages =
+      let install_root = Install_layout.root context local_package_names |> Path.build in
+      List.fold_left providers ~init:Package.Name.Map.empty ~f:(fun packages -> function
+        | Local package ->
+          Package.Name.Map.set
+            packages
+            (Package.name package)
+            (Package_deps.variables package, Paths.of_local_package package ~install_root)
+        | Opam _ -> packages)
+    in
+    let materialized = { Package_deps.env; binaries; packages } in
+    Action_builder.List.fold_left providers ~init:materialized ~f:(fun acc -> function
+      | Local _ -> Action_builder.return acc
+      | Opam { stanza; paths } ->
+        let paths = Paths.map_path paths ~f:Path.build in
+        let* () = Action_builder.dep (Dep.file paths.target_dir) in
+        let cookie = Paths.install_cookie paths |> Install_cookie.load_exn in
+        let variables =
+          Package_variable_name.Map.superpose
+            (Package_variable_name.Map.of_list_exn cookie.variables)
+            (Package_deps.variables stanza.package)
+        in
+        let* exported_env =
+          Action_builder.of_memo
+            (Action_expander.exported_env_of_stanza context stanza ~paths ~variables acc)
+        in
+        Package_deps.add_package acc ~paths ~variables ~files:cookie.files ~exported_env
+        |> Action_builder.return)
+  ;;
+end
+
 module Install_action = struct
   (* The install action does the following:
 

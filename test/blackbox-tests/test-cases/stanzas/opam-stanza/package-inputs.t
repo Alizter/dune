@@ -117,14 +117,8 @@ An Opam recipe can consume the same capabilities from any package provider in
   > EOF
 
   $ dune build consumer/.opam/consumer/target
-  File "consumer/dune", lines 1-8, characters 0-220:
-  1 | (opam
-  2 |  (package consumer)
-  3 |  (build
-  4 |   (progn
-  5 |    (system "cat %{pkg:locked:share}/marker.txt > result.txt")
-  6 |    (system "echo %{pkg:locked:version} >> result.txt")))
-  7 |  (install
-  8 |   (run cp result.txt %{share}/result.txt)))
-  Error: Package locked is not provided by an opam stanza
-  [1]
+  $ cat _build/default/consumer/.opam/consumer/target/share/result.txt
+  file from lock
+  2.0
+  $ test ! -d _build/_private/default/.pkg && echo no-legacy-package-route
+  no-legacy-package-route
