@@ -29,10 +29,10 @@ Install_cookie.load_exn runs eagerly during dep evaluation.
   $ dune rules --deps _build/default/output 2>&1 | sanitize_pkg_digest lockpkg.0.0.1
   ((File
     (In_build_dir
-     _build/_private/default/.pkg/lockpkg.0.0.1-DIGEST_HASH/target/cookie))
+     _build/_default+lockfile/pkg/lockpkg.0.0.1-DIGEST_HASH/.opam/lockpkg/target/cookie))
    (File
     (In_build_dir
-     _build/_private/default/.pkg/lockpkg.0.0.1-DIGEST_HASH/target/share/lockpkg/data.txt)))
+     _build/_default+lockfile/pkg/lockpkg.0.0.1-DIGEST_HASH/.opam/lockpkg/target/share/lockpkg/data.txt)))
 
 Requesting a file that doesn't exist in the lock-file package is rejected:
 
