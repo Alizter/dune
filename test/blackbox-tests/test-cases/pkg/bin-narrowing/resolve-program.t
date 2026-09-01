@@ -4,9 +4,8 @@ Several stanzas resolve their tool binaries via [Super_context.resolve_program]
 [(cinaps ...)], [(mdx ...)], etc.
 
 [Artifacts.binary]'s default [Context.which] step falls through to
-[Pkg_rules.which], which scans the narrowed lockdir dependency closure's binary
-index. So a binary installed by any package in the dependency closure of a
-stanza's owning package is discoverable from it.
+[Pkg_rules.which], which scans the narrowed binary index. A binary installed by
+an immediate dependency of a stanza's owning package is discoverable from it.
 
   $ make_lockdir
 
@@ -92,16 +91,16 @@ The rules depend on the ocamllex and menhir binaries from the tool_provider
 lockdir package:
 
   $ dune rules --format=json foo.ml | jq_dune '.[] | ruleDepFilePaths' | censor
-  "_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target/bin/ocamllex"
+  "_build/_default+lockfile/pkg/tool_provider.0.0.1-$DIGEST/.opam/tool_provider/target/bin/ocamllex"
   "_build/default/foo.mll"
   $ dune rules --format=json bar.ml | jq_dune '.[] | ruleDepFilePaths' | censor
-  "_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target/bin/menhir"
+  "_build/_default+lockfile/pkg/tool_provider.0.0.1-$DIGEST/.opam/tool_provider/target/bin/menhir"
   "_build/default/bar.mly"
 
 The tool_provider bin directory is added to $PATH:
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target/bin
+  $PWD/_build/_default+lockfile/pkg/tool_provider.0.0.1-$DIGEST/.opam/tool_provider/target/bin
 
 With a package defined in the project, *without a dir field*, the behavior is the
 same.
@@ -123,7 +122,7 @@ same.
   1
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target/bin
+  $PWD/_build/_default+lockfile/pkg/tool_provider.0.0.1-$DIGEST/.opam/tool_provider/target/bin
 
 With a package defined in the project, *with a dir field, but no dependencies*,
 the tools are not resolved, and [tool_provider]'s bin directory is no longer added
@@ -174,4 +173,4 @@ With a package defined in the project, *with a dir field, and explicit depends o
   1
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target/bin
+  $PWD/_build/_default+lockfile/pkg/tool_provider.0.0.1-$DIGEST/.opam/tool_provider/target/bin

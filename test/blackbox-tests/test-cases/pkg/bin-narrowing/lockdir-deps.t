@@ -72,7 +72,7 @@ declaring any package dependencies:
 The rule depends on the binary from the provider lockdir package:
 
   $ dune rules --format=json @test | jq_dune '.[] | ruleDepFilePaths' | censor
-  "_build/_private/default/.pkg/provider.0.0.1-$DIGEST/target/bin/mybin"
+  "_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST/.opam/provider/target/bin/mybin"
 
 All the packages' bin directories are added to $PATH:
 
@@ -80,8 +80,8 @@ All the packages' bin directories are added to $PATH:
   from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/provider.0.0.1-$DIGEST1/target/bin
-  $PWD/_build/_private/default/.pkg/check-env.0.0.1-$DIGEST2/target/bin
+  $PWD/_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST1/.opam/provider/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST2/.opam/check-env/target/bin
 
 With a package defined in the project, *without a dir field*, the behavior is
 the same.
@@ -105,8 +105,8 @@ All the packages' bin directories are added to $PATH:
   from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/provider.0.0.1-$DIGEST1/target/bin
-  $PWD/_build/_private/default/.pkg/check-env.0.0.1-$DIGEST2/target/bin
+  $PWD/_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST1/.opam/provider/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST2/.opam/check-env/target/bin
 
 With a package defined in the project, *with a dir field, but no dependencies*,
 the program mybin is not found in PATH or via the bin pform, since the rule for
@@ -141,8 +141,9 @@ disabled.
 
 
 With a package defined in the project, *with a dir field, and explicit depends
-on only [check-env]*, the program mybin is not found via the bin pform or on
-the PATH.
+on only [check-env]*, [mybin] is not found via the package-owned bin pform or
+its ambient PATH. The rule-local [(deps (package provider))] still makes it
+available to that rule's system action.
 
 
   $ make_dune_project 3.24
@@ -156,15 +157,6 @@ the PATH.
 
   $ dune clean
   $ dune build @all 2>&1 | dune_cmd subst '.*/bin/sh([:0-9 ]|line)*:' '$SH:' | dune_cmd subst 'command not found' 'not found'
-  File "dune", lines 11-17, characters 0-203:
-  11 | (rule
-  12 |  (alias test-sys)
-  13 |  (enabled_if %{bin-available:check-env})
-  14 |  (deps (package provider))
-  15 |  ; Check that the binary can be found on PATH
-  16 |  (action
-  17 |    (with-stdout-to system-mybin-output (system mybin))))
-  $SH: mybin: not found
   File "dune", line 10, characters 37-49:
   10 |    (with-stdout-to mybin-output (run %{bin:mybin}))))
                                             ^^^^^^^^^^^^
@@ -177,14 +169,14 @@ the PATH.
   cat: _build/default/mybin-output: No such file or directory
   [1]
 
-The PATH is correctly filtered and [mybin] is not found on the PATH:
+The package's ambient PATH remains filtered, while the rule-local package
+dependency supplies [mybin] to [system]:
 
   $ cat _build/default/system-mybin-output
-  cat: _build/default/system-mybin-output: No such file or directory
-  [1]
+  from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/check-env.0.0.1-$DIGEST/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST/.opam/check-env/target/bin
 
 With a package defined in the project, *with a dir field, and explicit depends
 on only [provider]*, the rules for building [mybin] are disabled since the
@@ -243,5 +235,5 @@ The bin directories of all the packages we depend on are added to $PATH:
   from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/provider.0.0.1-$DIGEST1/target/bin
-  $PWD/_build/_private/default/.pkg/check-env.0.0.1-$DIGEST2/target/bin
+  $PWD/_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST1/.opam/provider/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST2/.opam/check-env/target/bin
