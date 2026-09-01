@@ -11,9 +11,22 @@ module Mounted_layer = struct
         { logical : Path.Build.t
         ; backing : Path.Build.t
         }
+    | Contents of
+        { logical : Path.Build.t
+        ; contents : string
+        ; executable : bool
+        ; dependencies : Path.t list
+        }
+    | Delete of { logical : Path.Build.t }
 
   let directory ~logical_root ~backing_root = Directory { logical_root; backing_root }
   let file ~logical ~backing = File { logical; backing }
+
+  let contents ~logical ~contents ~executable ~dependencies =
+    Contents { logical; contents; executable; dependencies }
+  ;;
+
+  let delete ~logical = Delete { logical }
 
   let equal a b =
     match a, b with
@@ -23,7 +36,23 @@ module Mounted_layer = struct
       && Path.Build.equal backing_root backing_root'
     | File { logical; backing }, File { logical = logical'; backing = backing' } ->
       Path.Build.equal logical logical' && Path.Build.equal backing backing'
-    | Directory _, File _ | File _, Directory _ -> false
+    | ( Contents { logical; contents; executable; dependencies }
+      , Contents
+          { logical = logical'
+          ; contents = contents'
+          ; executable = executable'
+          ; dependencies = dependencies'
+          } ) ->
+      Path.Build.equal logical logical'
+      && String.equal contents contents'
+      && Bool.equal executable executable'
+      && List.equal Path.equal dependencies dependencies'
+    | Delete { logical }, Delete { logical = logical' } ->
+      Path.Build.equal logical logical'
+    | Directory _, (File _ | Contents _ | Delete _)
+    | File _, (Directory _ | Contents _ | Delete _)
+    | Contents _, (Directory _ | File _ | Delete _)
+    | Delete _, (Directory _ | File _ | Contents _) -> false
   ;;
 
   let hash = function
@@ -35,6 +64,13 @@ module Mounted_layer = struct
         (0, logical_root, backing_root)
     | File { logical; backing } ->
       Tuple.T3.hash Int.hash Path.Build.hash Path.Build.hash (1, logical, backing)
+    | Contents { logical; contents; executable; dependencies } ->
+      Tuple.T3.hash
+        Int.hash
+        Path.Build.hash
+        (Tuple.T3.hash String.hash Bool.hash (List.hash Path.hash))
+        (2, logical, (contents, executable, dependencies))
+    | Delete { logical } -> Tuple.T2.hash Int.hash Path.Build.hash (3, logical)
   ;;
 
   let to_dyn = function
@@ -52,12 +88,27 @@ module Mounted_layer = struct
         [ Dyn.record
             [ "logical", Path.Build.to_dyn logical; "backing", Path.Build.to_dyn backing ]
         ]
+    | Contents { logical; contents = _; executable; dependencies } ->
+      Dyn.variant
+        "Contents"
+        [ Dyn.record
+            [ "logical", Path.Build.to_dyn logical
+            ; "executable", Dyn.bool executable
+            ; "dependencies", Dyn.list Path.to_dyn dependencies
+            ]
+        ]
+    | Delete { logical } -> Dyn.variant "Delete" [ Path.Build.to_dyn logical ]
   ;;
 
   type resolution =
     | Candidate of
         { path : Path.Build.t
         ; blockers : Path.Build.t list
+        }
+    | Inline of
+        { contents : string
+        ; executable : bool
+        ; dependencies : Path.t list
         }
     | Blocked
     | Unrelated
@@ -89,6 +140,18 @@ module Mounted_layer = struct
       else if Path.is_descendant (Path.build logical) ~of_:(Path.build layer_logical)
       then Blocked
       else Unrelated
+    | Contents { logical = layer_logical; contents; executable; dependencies } ->
+      if Path.Build.equal logical layer_logical
+      then Inline { contents; executable; dependencies }
+      else if Path.is_descendant (Path.build logical) ~of_:(Path.build layer_logical)
+      then Blocked
+      else Unrelated
+    | Delete { logical = layer_logical } ->
+      if
+        Path.Build.equal logical layer_logical
+        || Path.is_descendant (Path.build logical) ~of_:(Path.build layer_logical)
+      then Blocked
+      else Unrelated
   ;;
 end
 
@@ -115,17 +178,29 @@ module File = struct
     | Mounted { logical; _ } -> Path.build logical
   ;;
 
-  let find_backing_path { logical; layers } =
+  type contents =
+    { contents : string
+    ; executable : bool
+    ; dependencies : Path.t list
+    }
+
+  type materialization =
+    | Copy of Path.t
+    | Write of contents
+
+  let find_materialization { logical; layers } =
     let rec loop = function
       | [] -> Memo.return None
       | layer :: layers ->
         (match Mounted_layer.resolve_file layer logical with
          | Blocked -> Memo.return None
          | Unrelated -> loop layers
+         | Inline { contents; executable; dependencies } ->
+           Memo.return (Some (Write { contents; executable; dependencies }))
          | Candidate { path; blockers } ->
            let* exists = Build_system.file_exists (Path.build path) in
            if exists
-           then Memo.return (Some (Path.build path))
+           then Memo.return (Some (Copy (Path.build path)))
            else
              let* blocked =
                Memo.List.exists blockers ~f:(fun path ->
@@ -136,18 +211,30 @@ module File = struct
     loop (List.rev layers)
   ;;
 
-  let backing_path = function
-    | Workspace path -> Memo.return (Path.source path)
-    | Mounted mounted ->
-      find_backing_path mounted
-      >>| (function
-       | Some path -> path
-       | None ->
-         Code_error.raise
-           "Mounted source file has no backing input"
-           [ "file", Path.Build.to_dyn mounted.logical
-           ; "layers", Dyn.list Mounted_layer.to_dyn mounted.layers
-           ])
+  let materialization = function
+    | Workspace path -> Memo.return (Some (Copy (Path.source path)))
+    | Mounted mounted -> find_materialization mounted
+  ;;
+
+  let backing_path_opt t =
+    materialization t
+    >>| function
+    | Some (Copy path) -> Some path
+    | Some (Write _) | None -> None
+  ;;
+
+  let backing_path t =
+    materialization t
+    >>| function
+    | Some (Copy path) -> path
+    | Some (Write _) ->
+      Code_error.raise
+        "Generated mounted source file has no immutable backing path"
+        [ "file", Source_path.to_dyn (source_path t) ]
+    | None ->
+      Code_error.raise
+        "Mounted source file has no backing input"
+        [ "file", Source_path.to_dyn (source_path t) ]
   ;;
 
   let as_workspace = function
@@ -165,17 +252,34 @@ module File = struct
         ~layers
   ;;
 
-  let read = function
+  let executable path =
+    match Path.Untracked.stat path with
+    | Error _ -> false
+    | Ok { st_perm; _ } ->
+      Permissions.test_any Permissions.execute (Permissions.Mode.of_int st_perm)
+  ;;
+
+  let read_with_perm = function
     | Workspace path ->
-      let path = Path.Outside_build_dir.In_source_dir path in
-      let* exists = Fs_memo.file_exists path in
-      if exists then Fs_memo.file_contents path >>| Option.some else Memo.return None
-    | Mounted mounted ->
-      find_backing_path mounted
+      let outside = Path.Outside_build_dir.In_source_dir path in
+      let* exists = Fs_memo.file_exists outside in
+      if not exists
+      then Memo.return None
+      else
+        let+ contents = Fs_memo.file_contents outside in
+        let path = Path.source path in
+        Some { contents; executable = executable path; dependencies = [ path ] }
+    | Mounted _ as t ->
+      materialization t
       >>= (function
        | None -> Memo.return None
-       | Some path -> Build_system.read_file path >>| Option.some)
+       | Some (Write contents) -> Memo.return (Some contents)
+       | Some (Copy path) ->
+         let+ contents = Build_system.read_file path in
+         Some { contents; executable = executable path; dependencies = [ path ] })
   ;;
+
+  let read t = read_with_perm t >>| Option.map ~f:(fun { contents; _ } -> contents)
 
   let equal a b =
     match a, b with

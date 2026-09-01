@@ -124,8 +124,391 @@ let selected_recipe candidate =
 ;;
 
 module Mounted_source_tree = Source_tree.Rules.Mounted
+module Source_substs = Dune_pkg.Substs.Make (Memo)
+module Package_action = Dune_lang.Action
 
-let load_source candidate backing_root =
+type source_transformation =
+  | Substitute of String_with_vars.t * String_with_vars.t
+  | Patch of String_with_vars.t
+
+type 'a transformation_result =
+  | Supported of 'a
+  | Unsupported
+
+type variable_resolution =
+  | Resolved of OpamVariable.variable_contents option
+  | Requires_package_build
+
+let find_candidate_in candidates name =
+  List.find candidates ~f:(fun candidate ->
+    Package.Name.equal (Candidate.name candidate) name)
+;;
+
+let resolve_package_variable
+      candidates
+      candidate
+      { Dune_pkg.Package_variable.scope; name }
+  =
+  let package =
+    match scope with
+    | Self -> Candidate.name candidate
+    | Package package -> package
+  in
+  match find_candidate_in candidates package with
+  | None ->
+    let value =
+      match Dune_lang.Package_variable_name.to_string name with
+      | "installed" -> Some (OpamVariable.B false)
+      | "enable" -> Some (S "disable")
+      | "pinned" -> Some (B false)
+      | _ -> None
+    in
+    Resolved value
+  | Some package ->
+    let variables =
+      Dune_pkg.Lock_dir.Pkg_info.variables package.Candidate.lock_pkg.info
+    in
+    (match Dune_lang.Package_variable_name.Map.find variables name with
+     | Some value -> Resolved (Some value)
+     | None ->
+       (match Dune_lang.Package_variable_name.to_string name with
+        | "installed" -> Resolved (Some (B true))
+        | "enable" -> Resolved (Some (S "enable"))
+        | "pinned" -> Resolved (Some (B false))
+        | "build-id" -> Resolved (Some (S "d00ed00ed00ed00ed00ed00ed00ed00e"))
+        | _ -> Requires_package_build))
+;;
+
+let rec action_contains_source_transformation = function
+  | Package_action.Patch _ | Substitute _ -> true
+  | Progn actions | Concurrent actions | Pipe (_, actions) ->
+    List.exists actions ~f:action_contains_source_transformation
+  | With_accepted_exit_codes (_, action)
+  | Chdir (_, action)
+  | Setenv (_, _, action)
+  | Redirect_out (_, _, _, action)
+  | Redirect_in (_, _, action)
+  | Ignore (_, action)
+  | No_infer action
+  | Withenv (_, action)
+  | When (_, action) -> action_contains_source_transformation action
+  | _ -> false
+;;
+
+let rec flatten_progn = function
+  | Package_action.Progn actions -> List.concat_map actions ~f:flatten_progn
+  | Withenv (_, action) -> flatten_progn action
+  | action -> [ action ]
+;;
+
+let values_of_variable = function
+  | OpamVariable.B value -> [ Value.String (Bool.to_string value) ]
+  | S value -> [ Value.String value ]
+  | L values -> List.map values ~f:(fun value -> Value.String value)
+;;
+
+let solver_variable solver_env name =
+  Dune_pkg.Solver_env.get solver_env name
+  |> Option.map ~f:Dune_pkg.Variable_value.to_opam_variable_contents
+;;
+
+let solver_values solver_env name =
+  solver_variable solver_env name
+  |> Option.map ~f:values_of_variable
+  |> Option.value ~default:[ Value.String "" ]
+;;
+
+let resolve_global_variable solver_env name =
+  match Dune_lang.Package_variable_name.to_string name with
+  | "switch" -> Resolved (Some (OpamVariable.S "dune"))
+  | "jobs" -> Resolved (Some (S (Int.to_string !Clflags.concurrency)))
+  | "user" -> Resolved (Some (S (Unix.getlogin ())))
+  | "group" ->
+    let group = Unix.getgid () |> Unix.getgrgid in
+    Resolved (Some (S group.gr_name))
+  | "build"
+  | "prefix"
+  | "lib"
+  | "libexec"
+  | "bin"
+  | "sbin"
+  | "toplevel"
+  | "share"
+  | "etc"
+  | "doc"
+  | "stublibs"
+  | "man" -> Requires_package_build
+  | _ ->
+    (match solver_variable solver_env name with
+     | Some value -> Resolved (Some value)
+     | None -> Requires_package_build)
+;;
+
+let expand_context_variable solver_env unsupported (variable : Pform.Var.Pkg.t) =
+  let open Pform.Var.Pkg in
+  match variable with
+  | Switch -> [ Value.String "dune" ]
+  | Os Pform.Var.Os.Os -> solver_values solver_env Dune_lang.Package_variable_name.os
+  | Os Os_version -> solver_values solver_env Dune_lang.Package_variable_name.os_version
+  | Os Os_distribution ->
+    solver_values solver_env Dune_lang.Package_variable_name.os_distribution
+  | Os Os_family -> solver_values solver_env Dune_lang.Package_variable_name.os_family
+  | Arch -> solver_values solver_env Dune_lang.Package_variable_name.arch
+  | Sys_ocaml_version ->
+    solver_values solver_env Dune_lang.Package_variable_name.sys_ocaml_version
+  | Jobs -> [ Value.String (Int.to_string !Clflags.concurrency) ]
+  | User -> [ Value.String (Unix.getlogin ()) ]
+  | Group ->
+    let group = Unix.getgid () |> Unix.getgrgid in
+    [ Value.String group.gr_name ]
+  | Build | Prefix | Section_dir _ ->
+    unsupported := true;
+    [ Value.String "" ]
+;;
+
+let expand_condition_pform candidates candidate solver_env unsupported ~source = function
+  | Pform.Var (Pkg variable) ->
+    expand_context_variable solver_env unsupported variable |> Result.ok |> Memo.return
+  | Macro ({ macro = Pkg | Pkg_self; _ } as invocation) ->
+    let loc = Dune_sexp.Template.Pform.loc source in
+    let variable =
+      match Dune_pkg.Package_variable.of_macro_invocation ~loc invocation with
+      | Ok variable -> variable
+      | Error `Unexpected_macro -> Code_error.raise "Unexpected package variable macro" []
+    in
+    (match resolve_package_variable candidates candidate variable with
+     | Resolved (Some value) -> values_of_variable value |> Result.ok |> Memo.return
+     | Resolved None -> Memo.return (Error (`Undefined_pkg_var variable.name))
+     | Requires_package_build ->
+       unsupported := true;
+       Memo.return (Ok [ Value.String "" ]))
+  | _ ->
+    unsupported := true;
+    Memo.return (Ok [ Value.String "" ])
+;;
+
+let eval_source_condition candidates candidate solver_env condition =
+  let unsupported = ref false in
+  let expand sw =
+    String_expander.Memo.expand_result_deferred_concat
+      sw
+      ~mode:Many
+      ~f:(expand_condition_pform candidates candidate solver_env unsupported)
+  in
+  let+ enabled =
+    Slang_expand.eval_blang
+      condition
+      ~dir:(Path.build (Candidate.artifact_root candidate))
+      ~f:expand
+  in
+  if !unsupported then None else Some enabled
+;;
+
+let source_transformations candidates candidate solver_env = function
+  | None | Some Dune_pkg.Lock_dir.Build_command.Dune -> Memo.return (Supported [])
+  | Some (Action action) ->
+    let rec loop transformations = function
+      | Package_action.Substitute (source, target) :: actions ->
+        (match String_with_vars.text_only source, String_with_vars.text_only target with
+         | Some _, Some _ -> loop (Substitute (source, target) :: transformations) actions
+         | None, _ | _, None -> Memo.return Unsupported)
+      | Patch path :: actions ->
+        (match String_with_vars.text_only path with
+         | Some _ -> loop (Patch path :: transformations) actions
+         | None -> Memo.return Unsupported)
+      | Package_action.When (condition, action) :: actions
+        when action_contains_source_transformation action ->
+        let condition = Slang.Blang.remove_locs condition |> Slang.simplify_blang in
+        eval_source_condition candidates candidate solver_env condition
+        >>= (function
+         | None -> Memo.return Unsupported
+         | Some true -> loop transformations (flatten_progn action @ actions)
+         | Some false -> loop transformations actions)
+      | action :: actions ->
+        if
+          action_contains_source_transformation action
+          || List.exists actions ~f:action_contains_source_transformation
+        then Memo.return Unsupported
+        else Memo.return (Supported (List.rev transformations))
+      | [] -> Memo.return (Supported (List.rev transformations))
+    in
+    loop [] (flatten_progn action)
+;;
+
+let local_path path =
+  String_with_vars.text_only path
+  |> Option.map ~f:(Path.Local.parse_string_exn ~loc:(String_with_vars.loc path))
+;;
+
+let logical_path candidate path =
+  Path.Build.append_local (Candidate.artifact_root candidate) path
+;;
+
+let read_source_file candidate layers path =
+  Mounted_source_tree.read_file ~logical:(logical_path candidate path) ~layers
+;;
+
+let merge_dependencies contents =
+  List.concat_map contents ~f:(fun { Source_tree.Rules.File.dependencies; _ } ->
+    dependencies)
+  |> Path.Set.of_list
+  |> Path.Set.to_list
+;;
+
+let apply_patch candidate layers path =
+  let loc = String_with_vars.loc path in
+  let path = Option.value_exn (local_path path) in
+  let logical = logical_path candidate path in
+  let* patch_contents = read_source_file candidate layers path in
+  let patch_contents =
+    match patch_contents with
+    | Some contents -> contents
+    | None ->
+      User_error.raise
+        ~loc
+        [ Pp.textf "Patch file %S does not exist" (Path.Local.to_string path) ]
+  in
+  let patches =
+    Dune_patch.File_patch.parse
+      ~loc
+      ~patch_file:(Path.build logical)
+      patch_contents.contents
+  in
+  Memo.List.fold_left patches ~init:layers ~f:(fun layers patch ->
+    let source = Dune_patch.File_patch.source patch in
+    let target = Dune_patch.File_patch.target patch in
+    let* source_contents =
+      match source with
+      | None -> Memo.return None
+      | Some source -> read_source_file candidate layers source
+    in
+    let* target_contents =
+      match target with
+      | None -> Memo.return None
+      | Some target -> read_source_file candidate layers target
+    in
+    let dependencies =
+      merge_dependencies
+        (patch_contents :: List.filter_opt [ source_contents; target_contents ])
+    in
+    let contents =
+      Dune_patch.File_patch.apply
+        patch
+        (Option.map source_contents ~f:(fun { contents; _ } -> contents))
+    in
+    let executable =
+      let contents =
+        if Dune_patch.File_patch.preserves_source_mode patch
+        then source_contents
+        else target_contents
+      in
+      match contents with
+      | None -> false
+      | Some { executable; _ } -> executable
+    in
+    let layers =
+      match source with
+      | Some source when Dune_patch.File_patch.removes_source patch ->
+        layers
+        @ [ Mounted_source_tree.Layer.delete ~logical:(logical_path candidate source) ]
+      | Some _ | None -> layers
+    in
+    let layers =
+      match target, contents with
+      | Some target, Some contents ->
+        layers
+        @ [ Mounted_source_tree.Layer.contents
+              ~logical:(logical_path candidate target)
+              ~contents
+              ~executable
+              ~dependencies
+          ]
+      | Some target, None ->
+        layers
+        @ [ Mounted_source_tree.Layer.delete ~logical:(logical_path candidate target) ]
+      | None, None -> layers
+      | None, Some _ ->
+        Code_error.raise
+          "Patch produced contents without a target"
+          [ "patch", Dune_patch.File_patch.to_dyn patch ]
+    in
+    Memo.return layers)
+;;
+
+let substitution_env candidates candidate solver_env unsupported = function
+  | Dune_pkg.Substs.Variable.Global name ->
+    (match resolve_global_variable solver_env name with
+     | Resolved value -> Memo.return value
+     | Requires_package_build ->
+       unsupported := true;
+       Memo.return None)
+  | Package variable ->
+    (match resolve_package_variable candidates candidate variable with
+     | Resolved value -> Memo.return value
+     | Requires_package_build ->
+       unsupported := true;
+       Memo.return None)
+;;
+
+let apply_substitution candidates candidate solver_env layers source target =
+  let loc = String_with_vars.loc source in
+  let source = Option.value_exn (local_path source) in
+  let target = Option.value_exn (local_path target) in
+  let* source_contents = read_source_file candidate layers source in
+  let source_contents =
+    match source_contents with
+    | Some contents -> contents
+    | None ->
+      User_error.raise
+        ~loc
+        [ Pp.textf "Substitution input %S does not exist" (Path.Local.to_string source) ]
+  in
+  let* target_contents = read_source_file candidate layers target in
+  let executable =
+    match target_contents with
+    | None -> false
+    | Some { executable; _ } -> executable
+  in
+  let dependencies =
+    merge_dependencies (source_contents :: Option.to_list target_contents)
+  in
+  let unsupported = ref false in
+  let+ contents =
+    Source_substs.subst_contents
+      (substitution_env candidates candidate solver_env unsupported)
+      (Candidate.name candidate)
+      ~src:(Path.build (logical_path candidate source))
+      source_contents.contents
+  in
+  if !unsupported
+  then Unsupported
+  else
+    Supported
+      (layers
+       @ [ Mounted_source_tree.Layer.contents
+             ~logical:(logical_path candidate target)
+             ~contents
+             ~executable
+             ~dependencies
+         ])
+;;
+
+let apply_source_transformations candidates candidate solver_env layers transformations =
+  let rec loop layers = function
+    | [] -> Memo.return (Supported layers)
+    | Substitute (source, target) :: transformations ->
+      apply_substitution candidates candidate solver_env layers source target
+      >>= (function
+       | Unsupported -> Memo.return Unsupported
+       | Supported layers -> loop layers transformations)
+    | Patch path :: transformations ->
+      let* layers = apply_patch candidate layers path in
+      loop layers transformations
+  in
+  loop layers transformations
+;;
+
+let load_source candidates candidate backing_root =
   let logical_root = Candidate.artifact_root candidate in
   let layers =
     Mounted_source_tree.Layer.directory ~logical_root ~backing_root
@@ -139,7 +522,16 @@ let load_source candidate backing_root =
              ~logical:(Path.Build.append_local logical_root local)
              ~backing:(Fetch_rules.target source `File))
   in
-  Mounted_source_tree.load ~logical_root ~layers
+  let* build, _, _ = selected_recipe candidate in
+  let* solver_env = Lock_dir.Sys_vars.solver_env in
+  let* transformations = source_transformations candidates candidate solver_env build in
+  match transformations with
+  | Unsupported -> Memo.return None
+  | Supported transformations ->
+    apply_source_transformations candidates candidate solver_env layers transformations
+    >>= (function
+     | Unsupported -> Memo.return None
+     | Supported layers -> Mounted_source_tree.load ~logical_root ~layers >>| Option.some)
 ;;
 
 let make_package candidate source_root dependencies =
@@ -239,22 +631,25 @@ let make_opam candidate ~source_root ~source_kind =
   |> Memo.return
 ;;
 
-let prepare candidate =
+let prepare candidates candidate =
   match Candidate.source_root candidate with
   | Some source_root ->
     let make_opaque_opam () =
       make_opam candidate ~source_root ~source_kind:Primary_source >>| Option.some
     in
-    let* tree = load_source candidate source_root in
-    let* has_dune_file = has_dune_file tree in
-    if has_dune_file
-    then
-      let* _, _, dependencies = selected_recipe candidate in
-      mount candidate source_root tree dependencies
-      >>= function
-      | Some mounted -> Memo.return (Some mounted)
-      | None -> make_opaque_opam ()
-    else make_opaque_opam ()
+    let* tree = load_source candidates candidate source_root in
+    (match tree with
+     | None -> make_opaque_opam ()
+     | Some tree ->
+       let* has_dune_file = has_dune_file tree in
+       if has_dune_file
+       then
+         let* _, _, dependencies = selected_recipe candidate in
+         mount candidate source_root tree dependencies
+         >>= function
+         | Some mounted -> Memo.return (Some mounted)
+         | None -> make_opaque_opam ()
+       else make_opaque_opam ())
   | None ->
     let source_root =
       Path.Build.L.relative
@@ -266,8 +661,9 @@ let prepare candidate =
 
 let load_mounted context =
   let start = Time.now () in
+  let* candidates = candidates context in
   let+ mounted =
-    candidates context >>= Memo.parallel_map ~f:prepare >>| List.filter_opt
+    Memo.parallel_map candidates ~f:(prepare candidates) >>| List.filter_opt
   in
   Dune_trace.emit Pkg (fun () ->
     Dune_trace.Event.mounted_packages_load
@@ -301,12 +697,33 @@ let find_mounted context name =
 ;;
 
 let source_copy_rule ~dir ~source_dir filename =
-  let* src =
-    Source_tree.Rules.Dir.file source_dir filename |> Source_tree.Rules.File.backing_path
-  in
+  let file = Source_tree.Rules.Dir.file source_dir filename in
+  let* materialization = Source_tree.Rules.File.materialization file in
   let dst = Path.Build.relative_fname dir filename in
-  let { Action_builder.With_targets.build; targets } = Action_builder.copy ~src ~dst in
-  Rule.make ~info:(Rule.Info.Source_file_copy src) ~targets build |> Memo.return
+  match materialization with
+  | None ->
+    Code_error.raise
+      "Mounted source file selected without materialization"
+      [ "file", Source_tree.Rules.File.source_path file |> Source_path.to_dyn ]
+  | Some (Copy src) ->
+    let { Action_builder.With_targets.build; targets } = Action_builder.copy ~src ~dst in
+    Rule.make ~info:(Rule.Info.Source_file_copy src) ~targets build |> Memo.return
+  | Some (Write { contents; executable; dependencies }) ->
+    let perm =
+      if executable
+      then Dune_lang.Action.File_perm.Executable
+      else Dune_lang.Action.File_perm.Normal
+    in
+    let { Action_builder.With_targets.build; targets } =
+      Action_builder.write_file ~perm dst contents
+    in
+    let build =
+      let open Action_builder.O in
+      let* () = Action_builder.paths dependencies in
+      build
+    in
+    let source = Source_tree.Rules.File.path file in
+    Rule.make ~info:(Rule.Info.Source_file_copy source) ~targets build |> Memo.return
 ;;
 
 let add_artifact_source_rules ~dir ~source_dir rules =
