@@ -269,34 +269,56 @@ auxiliary library.
   > (package (name right))
   > EOF
   $ cat > shared/dune <<'EOF'
+  > (library
+  >  (name left)
+  >  (public_name left)
+  >  (modules left)
+  >  (libraries vendored_support))
+  > (library
+  >  (name right)
+  >  (public_name right)
+  >  (modules right)
+  >  (libraries vendored_support))
   > (executable
   >  (name left_tool)
   >  (public_name left-tool)
   >  (package left)
+  >  (modules left_tool)
   >  (libraries vendored_support))
   > (executable
   >  (name right_tool)
   >  (public_name right-tool)
   >  (package right)
+  >  (modules right_tool)
   >  (libraries vendored_support))
   > EOF
+  $ echo 'let message = Vendored_support.message' > shared/left.ml
+  $ echo 'let message = Vendored_support.message' > shared/right.ml
   $ echo 'let () = print_endline (Vendored_support.message ^ "/left")' > shared/left_tool.ml
   $ echo 'let () = print_endline (Vendored_support.message ^ "/right")' > shared/right_tool.ml
   $ cat > shared/vendor/dune-project <<'EOF'
   > (lang dune 3.20)
   > (package (name vendored_support))
+  > (package (name unused_support))
   > EOF
   $ cat > shared/vendor/src/dune <<'EOF'
   > (library
   >  (name vendored_support)
   >  (public_name vendored_support)
+  >  (modules vendored_support)
   >  (libraries unix))
+  > (library
+  >  (name unused_support)
+  >  (public_name unused_support)
+  >  (modules unused_support)
+  >  (libraries unavailable))
   > EOF
   $ cat > shared/vendor/src/vendored_support.ml <<'EOF'
   > let message =
   >   let (_ : Unix.file_descr) = Unix.stdin in
   >   "shared auxiliary"
   > EOF
+  $ echo 'let unused = ()' > shared/vendor/src/unused_support.ml
   $ tar cf shared.tar shared
   $ rm -rf shared
 
@@ -329,3 +351,21 @@ auxiliary library.
   $ right_root=_build/_default+lockfile/pkg/right
   $ test -f "$left_root/vendor/src/vendored_support.cmxa" && test -f "$right_root/vendor/src/vendored_support.cmxa" && echo separately-owned-auxiliary-artifacts
   separately-owned-auxiliary-artifacts
+
+Selected libraries' metadata includes the owner-local auxiliary library it
+requires, so external build systems can resolve the private findlib package.
+
+  $ "$real_dune" build "$left_root/META.left" --display quiet
+  $ grep -c 'package "__private__"' "$left_root/META.left"
+  1
+  $ grep -c 'package "vendored_support"' "$left_root/META.left"
+  1
+  $ grep 'requires = "left.__private__.vendored_support"' "$left_root/META.left"
+  requires = "left.__private__.vendored_support"
+  $ grep -c unused_support "$left_root/META.left" || true
+  0
+  $ "$real_dune" build @pkg-install --display quiet
+  $ left_layout=$(echo _build/install/default/.packages/*/lib/left)
+  $ right_layout=$(echo _build/install/default/.packages/*/lib/right)
+  $ test -L "$left_layout/__private__/vendored_support/vendored_support.cmxa" && test -L "$right_layout/__private__/vendored_support/vendored_support.cmxa" && echo private-layout-artifacts
+  private-layout-artifacts
