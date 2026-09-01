@@ -99,6 +99,7 @@
   pkg-extract-fail.t
   mounted-dune-package.t
   mounted-dune-package-autolock.t
+  mounted-dune-package-builtin-redirect.t
   mounted-dune-package-copy-files.t
   mounted-dune-package-http.t
   mounted-dune-package-ppx.t
