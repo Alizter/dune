@@ -71,16 +71,16 @@ Section variables expanded via (system) produce relative paths:
   > EOF
 
   $ build_pkg system-consumer 2>&1 | censor
-  ../../dep.0.0.1-$DIGEST/target/lib/dep
-  ../../dep.0.0.1-$DIGEST/target/lib/dep
-  ../../dep.0.0.1-$DIGEST/target/bin
-  ../../dep.0.0.1-$DIGEST/target/sbin
-  ../../dep.0.0.1-$DIGEST/target/share/dep
-  ../../dep.0.0.1-$DIGEST/target/etc/dep
-  ../../dep.0.0.1-$DIGEST/target/doc/dep
-  ../../dep.0.0.1-$DIGEST/target/man
-  ../../dep.0.0.1-$DIGEST/target/lib/toplevel
-  ../../dep.0.0.1-$DIGEST/target/lib/stublibs
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/lib/dep
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/lib/dep
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/bin
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/sbin
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/share/dep
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/etc/dep
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/doc/dep
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/man
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/lib/toplevel
+  ../../../../dep.0.0.1-$DIGEST/.opam/dep/target/lib/stublibs
   lib-data
   libexec-data
   bin-data
@@ -124,16 +124,16 @@ These currently expand to absolute paths instead of relative ones:
   > EOF
 
   $ build_pkg run-consumer 2>&1 | censor | dune_cmd subst '/[^ ]*/cat:' 'cat:'
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/bin
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/sbin
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/share/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/etc/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/doc/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/man
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/toplevel
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/stublibs
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/lib/dep
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/lib/dep
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/bin
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/sbin
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/share/dep
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/etc/dep
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/doc/dep
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/man
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/lib/toplevel
+  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/dep.0.0.1-$DIGEST2/.opam/dep/target/lib/stublibs
   lib-data
   libexec-data
   bin-data
