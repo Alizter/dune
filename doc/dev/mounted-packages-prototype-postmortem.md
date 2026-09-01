@@ -1259,34 +1259,27 @@ not reasons to discard the target-backed model.
 
 ## Recommended next steps
 
-The target-backed native route, source-backed and source-less synthetic Opam
-routes, alternate-context cookies, and real `ocaml-re` and `ocaml-cohttp` builds
-are complete. Continue with this narrower TODO:
+The live progress and ordered work list are maintained in
+[`goal.md`](../../goal.md#current-todo). Since this retrospective was written,
+the implementation has completed the package-name-only root cutover, canonical
+`Package.depends` and `Package_db` graph, concrete `Package_deps`
+materialization, unreleased scopes over canonical projects, direct capability
+visibility, owner-private metadata closure, and recursive mounted
+`(source_tree ...)` materialization. Normal project dependencies now bypass
+`.pkg`, and the complete `ocaml-cohttp` test target passes.
 
-1. Replace the mechanically extracted package runtime in
-   `Opam_package_rules`:
-   - retain `Opam_stanza.t` as the recipe;
-   - use `Package.depends` rather than `Opam_stanza.depends`;
-   - resolve package names through `Package_db`, without recursive `Pkg.t`
-     values;
-   - extract the package-set materializer behind `(deps (package ...))` and
-     return its environment, binaries, variables, and concrete paths as an
-     `Action_builder` result;
-   - remove `Dependency_view`, mutable exported-environment refresh,
-     `Package_universe`, and fake user-stanza digests.
-2. Adapt temporary `.pkg` and `.dev-tool` callers to that materialized result,
-   preserving `.dev-tool` routing.
-3. Remove normal dependency `.pkg` rule generation and migrate package tests to
-   alternate-context package targets.
-4. Design raw-source to transformed-source ownership for native packages that
-   require patches, substitutions, lock `files/`, or extra sources.
-5. Define the unreleased `scope` stanza and replace filtered project copies with
-   views over one canonical decode.
-6. Add VCS, refresh/retry, stale-removal, watch, cross-lock identity, ownership,
-   and promotion regressions without restoring manifests or source claims.
-7. Compare successful clean and warm real-package workloads after the
-   architectural cutovers, then decide whether scheduling or materialization
-   needs optimization.
+The remaining architectural work is narrower:
+
+1. apply lock overlays, patches, and substitutions directly to native per-file
+   ownership before classification and loading, without introducing a second
+   source root;
+2. delete the residual normal `.pkg/<digest>` dispatcher and confine any legacy
+   recursive package runtime to `.dev-tool`;
+3. complete logical diagnostic excerpts and path spelling;
+4. rewrite the superseded source/artifact-separation sections of this
+   retrospective and `goal.md`, and decide the fate of `dune pkg print-digest`;
+5. finish acquisition, ownership, clean-build, performance, and independent
+   review coverage.
 
 ## Bottom line
 

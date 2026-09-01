@@ -465,40 +465,69 @@ as a scaffold.
 
 ## Current TODO
 
-The native and synthetic Opam vertical paths, including explicit source-less
-packages, are implemented. `ocaml-re` and `ocaml-cohttp` are clean. Continue in
-this order:
+The normal selected-package cutover is substantially complete. The current
+stack has:
 
-1. Replace the mechanically extracted package runtime in
-   `Opam_package_rules` before removing `.pkg`:
-   - keep `Opam_stanza.t` as the recipe;
-   - remove its duplicate dependency list and use `Package.depends`;
-   - look dependencies up by name through `Package_db` rather than constructing
-     a recursive `Pkg.t` graph;
-   - extract the package-set materializer behind `(deps (package ...))` so its
-     `Action_builder` result records build dependencies and returns the action
-     environment, binaries, package variables, and concrete paths;
-   - preserve immediate-only semantics for ordinary rule dependencies, while
-     materializing the transitive package closure for an Opam build;
-   - remove `Dependency_view`, mutable exported-environment refresh,
-     `Package_universe`, and the fake digest used by user-authored Opam stanzas.
-2. Adapt the temporary legacy `.pkg` and `.dev-tool` callers to that concrete
-   package-dependency result. Keep `.dev-tool` routing and ownership unchanged.
-3. Remove normal `Package_universe.Dependencies` `.pkg` rule generation and
-   migrate package tests to the alternate package targets.
-4. Design a separate raw-source to transformed-source phase before applying
-   patches, substitutions, lock `files/`, or extra sources to native packages.
-5. Define the unreleased `scope` stanza and replace per-package filtered project
-   copies with views over one canonical decode.
-6. Add the remaining VCS, refresh, retry, stale-removal, watch, cross-lock, and
-   promotion coverage.
-7. Re-run the real package graphs and compare successful clean and warm
-   workloads after each architectural cutover.
+- package-name-only roots at `_build/<context>+lockfile/pkg/<name>`;
+- one logical native source and artifact hierarchy, backed by immutable
+  `_fetch` inputs and populated by fine-grained source rules;
+- native-versus-opaque selection based on whether the decoded projects define
+  the selected package, with explicit source-less Opam packages;
+- `Package.depends`, `Package_db`, and `Package_deps` as the normal dependency
+  graph, lookup, and materialized capability representations;
+- direct-only capabilities, explicit virtual/compiler forwarding, transitive
+  build ordering, and transitive installed-library resolution;
+- canonical decoded projects with unreleased package scopes and owner-local
+  auxiliary libraries;
+- normal project dependencies bypassing `.pkg` rules while `.dev-tool` remains
+  unchanged;
+- logical includes, globs, relative paths, diagnostics, `copy_files`, and
+  recursive `(source_tree ...)` dependencies over mounted inputs;
+- consistent owner-private install artifacts, `META`, and `dune-package`
+  metadata; and
+- successful real-package validation through `ocaml-re` and the complete
+  `ocaml-cohttp` test target.
 
-Do not replace the recursive package graph with another graph-shaped type or
-rename `Package_universe` into another owner sum. Package identity remains in
-the package database; the Opam rule consumes only one recipe and a concrete
-materialized dependency set.
+Continue with the remaining work in this order:
+
+1. Apply native source transformations before classification and loading:
+   - combine primary source, lock `files/`, ordered extra sources, patches, and
+     substitutions directly through per-file ownership and rules under the one
+     package root;
+   - keep `_fetch` immutable and do not add a prepared root, manifest, shadow
+     tree, or other second source representation;
+   - add regressions for overlay order, topology changes, unchanged `_fetch`
+     inputs, symlinks, and source/generated coexistence.
+2. Remove the residual normal `.pkg/<digest>` dispatcher:
+   - prove that normal selected packages have no remaining callers;
+   - delete `Package_universe.Dependencies` routing;
+   - isolate or remove the remaining recursive `Pkg.t`, `Pkg_digest`,
+     `Dependency_view`, and `gen_rules_legacy` machinery used by `.dev-tool`;
+   - preserve `.dev-tool` ownership and opaque `.opam/<name>/target` directory
+     targets.
+3. Complete logical diagnostics:
+   - provide source excerpts and carets for first-load mounted stanza errors;
+   - correct the remaining `../_default+lockfile/pkg/...` compiler path
+     spelling without remapping only locations.
+4. Retire misleading compatibility surfaces and stale design text:
+   - decide whether `dune pkg print-digest` is removed, renamed, or retained as
+     a compatibility alias now that package roots contain no digest;
+   - rewrite the earlier sections of this document and the prototype
+     retrospective to describe the single logical source/artifact hierarchy
+     rather than the superseded source/artifact-separation model.
+5. Audit acquisition and ownership behavior, including VCS sources, failed
+   fetch retry, refresh and stale removal, watch invalidation, symlinks,
+   cross-lock identity, and promotion suppression.
+6. Run fresh clean and warm `ocaml-re` and `ocaml-cohttp` workloads, remeasure
+   retained indexes and the rule graph, complete focused package suites, and
+   separate unrelated full-suite or environment failures from regressions.
+7. Perform independent correctness, architecture, test-coverage, and
+   performance reviews before preparing the final PR and changelog entry.
+
+When deleting the residual legacy runtime, do not replace it with another
+recursive graph-shaped type or rename `Package_universe` into another owner
+sum. Package identity remains in `Package_db`; an Opam rule consumes one
+`Opam_stanza.t` recipe and a concrete `Package_deps.t` result.
 
 ## Verification
 
