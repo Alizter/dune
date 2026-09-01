@@ -47,7 +47,7 @@ module Rules : sig
 
     val source_path : t -> Source_path.t
     val path : t -> Path.t
-    val backing_path : t -> Path.t
+    val backing_path : t -> Path.t Memo.t
     val relative : t -> Loc.t -> string -> t
     val read : t -> string option Memo.t
     val equal : t -> t -> bool
@@ -91,11 +91,18 @@ module Rules : sig
   end
 
   module Mounted : sig
+    module Layer : sig
+      type t
+
+      val directory : logical_root:Path.Build.t -> backing_root:Path.Build.t -> t
+      val file : logical:Path.Build.t -> backing:Path.Build.t -> t
+    end
+
     type t
 
-    (** Load a logical mounted tree whose immutable contents are backed by a
-        build-system directory target. *)
-    val load : logical_root:Path.Build.t -> backing_root:Path.Build.t -> t Memo.t
+    (** Load a logical mounted tree from ordered immutable input layers. Later
+        layers replace earlier files at the same logical path. *)
+    val load : logical_root:Path.Build.t -> layers:Layer.t list -> t Memo.t
 
     (** The logical mounted root. *)
     val source_root : t -> Path.Build.t
