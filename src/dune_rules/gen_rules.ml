@@ -912,9 +912,9 @@ let mounted_context ~resolver ~dir components =
      with
      | None -> Memo.return Gen_rules.unknown_context
      | Some mounted ->
-       (match Pkg_sources.Mounted.source_kind mounted with
-        | Primary_source -> gen_rules resolver (Super_context.find_exn resolver) ~dir rest
-        | No_source ->
+       (match Pkg_sources.Mounted.kind mounted with
+        | Dune -> gen_rules resolver (Super_context.find_exn resolver) ~dir rest
+        | Opam _ ->
           Pkg_rules.setup_mounted_opam_package_rules
             resolver
             mounted
