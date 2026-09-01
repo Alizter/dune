@@ -374,7 +374,7 @@ module Script = struct
         ~suffix:(Filename.Extension.to_filename Filename.Extension.ml)
     in
     generated_dune_file |> Path.build |> Path.parent |> Option.iter ~f:Path.mkdir_p;
-    let plugin = Source_tree.Rules.File.backing_path file in
+    let* plugin = Source_tree.Rules.File.backing_path file in
     let exec_dir = Source_tree.Rules.Dir.backing_path eval.source_dir in
     let* context = Context.DB.get context in
     let* ocaml = Context.ocaml context in

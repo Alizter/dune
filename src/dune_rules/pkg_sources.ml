@@ -9,15 +9,17 @@ module Candidate = struct
   type t =
     { lock_pkg : Lock_pkg.t
     ; source_root : Path.Build.t option
+    ; files_dir : Path.Build.t
     ; artifact_root : Path.Build.t
     }
 
   let name t = t.lock_pkg.info.name
   let source_root t = t.source_root
   let lock_pkg t = t.lock_pkg
+  let files_dir t = t.files_dir
   let artifact_root t = t.artifact_root
 
-  let make context (lock_pkg : Lock_pkg.t) =
+  let make context (lock_pkg : Lock_pkg.t) ~files_dir =
     let mounted_context = Context_name.build_dir (Mounted_context.make context) in
     let source_root =
       Option.map lock_pkg.info.source ~f:(fun source ->
@@ -28,7 +30,7 @@ module Candidate = struct
         mounted_context
         [ artifact_dir_basename; Package.Name.to_string lock_pkg.info.name ]
     in
-    { lock_pkg; source_root; artifact_root }
+    { lock_pkg; source_root; files_dir; artifact_root }
   ;;
 end
 
@@ -72,10 +74,21 @@ let load_candidates context =
   then Memo.return []
   else
     let* lock_dir = Lock_dir.get_exn context
+    and* lock_dir_path = Lock_dir.get_path context >>| Option.value_exn
     and* platform = Lock_dir.Sys_vars.solver_env in
     Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform
     |> Package.Name.Map.values
-    |> List.map ~f:(Candidate.make context)
+    |> List.map ~f:(fun (lock_pkg : Lock_pkg.t) ->
+      let version =
+        Option.some_if
+          (Dune_pkg.Lock_dir.uses_versioned_paths lock_dir)
+          lock_pkg.info.version
+      in
+      let files_dir =
+        Dune_pkg.Lock_dir.Pkg.files_dir lock_pkg.info.name version ~lock_dir:lock_dir_path
+        |> Path.as_in_build_dir_exn
+      in
+      Candidate.make context lock_pkg ~files_dir)
     |> Memo.return
 ;;
 
@@ -113,7 +126,20 @@ let selected_recipe candidate =
 module Mounted_source_tree = Source_tree.Rules.Mounted
 
 let load_source candidate backing_root =
-  Mounted_source_tree.load ~logical_root:(Candidate.artifact_root candidate) ~backing_root
+  let logical_root = Candidate.artifact_root candidate in
+  let layers =
+    Mounted_source_tree.Layer.directory ~logical_root ~backing_root
+    :: Mounted_source_tree.Layer.directory
+         ~logical_root
+         ~backing_root:(Candidate.files_dir candidate)
+    :: List.map
+         (Candidate.lock_pkg candidate).info.extra_sources
+         ~f:(fun (local, source) ->
+           Mounted_source_tree.Layer.file
+             ~logical:(Path.Build.append_local logical_root local)
+             ~backing:(Fetch_rules.target source `File))
+  in
+  Mounted_source_tree.load ~logical_root ~layers
 ;;
 
 let make_package candidate source_root dependencies =
@@ -275,12 +301,12 @@ let find_mounted context name =
 ;;
 
 let source_copy_rule ~dir ~source_dir filename =
-  let src =
+  let* src =
     Source_tree.Rules.Dir.file source_dir filename |> Source_tree.Rules.File.backing_path
   in
   let dst = Path.Build.relative_fname dir filename in
   let { Action_builder.With_targets.build; targets } = Action_builder.copy ~src ~dst in
-  Rule.make ~info:(Rule.Info.Source_file_copy src) ~targets build
+  Rule.make ~info:(Rule.Info.Source_file_copy src) ~targets build |> Memo.return
 ;;
 
 let add_artifact_source_rules ~dir ~source_dir rules =
@@ -310,12 +336,11 @@ let add_artifact_source_rules ~dir ~source_dir rules =
           | Promote _ -> Rule.set_mode rule Standard
           | Standard | Fallback | Ignore_source_files -> rule)
       in
-      let source_rules =
-        Filename.Array.Set.to_list_map selected.source_filenames ~f:(fun filename ->
-          source_copy_rule ~dir ~source_dir filename)
-        |> Rules.of_rules
+      let* source_rules =
+        Filename.Array.Set.to_list selected.source_filenames
+        |> Memo.List.map ~f:(fun filename -> source_copy_rule ~dir ~source_dir filename)
       in
-      Memo.return (Rules.union source_rules generated_rules)
+      Memo.return (Rules.union (Rules.of_rules source_rules) generated_rules)
     in
     { generated with rules })
 ;;

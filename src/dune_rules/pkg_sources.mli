@@ -7,6 +7,7 @@ module Candidate : sig
 
   val name : t -> Package.Name.t
   val lock_pkg : t -> Dune_pkg.Lock_dir.Pkg.t
+  val files_dir : t -> Path.Build.t
   val artifact_root : t -> Path.Build.t
 end
 
