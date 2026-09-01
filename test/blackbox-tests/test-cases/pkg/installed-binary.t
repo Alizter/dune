@@ -43,19 +43,19 @@ Test that installed binaries are visible in dependent packages
   { files =
       [ (LIB,
          [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/lib/test/libxxx"
+             "_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target/lib/test/libxxx"
          ])
       ; (LIB_ROOT,
          [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/lib/lib_rootxxx"
+             "_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target/lib/lib_rootxxx"
          ])
       ; (BIN,
          [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/bin/foo"
+             "_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target/bin/foo"
          ])
       ; (SHARE_ROOT,
          [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/share/lib_rootxxx"
+             "_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target/share/lib_rootxxx"
          ])
       ]
   ; variables = []
