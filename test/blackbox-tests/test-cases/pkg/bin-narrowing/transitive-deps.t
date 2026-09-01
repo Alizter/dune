@@ -99,13 +99,13 @@ narrowing kicks in):
 The directly declared provider and its build prerequisite were built:
 
   $ dune trace cat | jq 'select(.cat == "process" and .name == "finish" and .args.target_dirs[]?) | .args.target_dirs[]' | sort -u | censor
-  "_build/_default+lockfile/pkg/direct.0.0.1-$DIGEST1/.opam/direct/target"
-  "_build/_default+lockfile/pkg/transitive.0.0.1-$DIGEST2/.opam/transitive/target"
+  "_build/_default+lockfile/pkg/direct/.opam/direct/target"
+  "_build/_default+lockfile/pkg/transitive/.opam/transitive/target"
 
 Only its bin directory is added to $PATH:
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_default+lockfile/pkg/direct.0.0.1-$DIGEST/.opam/direct/target/bin
+  $PWD/_build/_default+lockfile/pkg/direct/.opam/direct/target/bin
 
 Capability narrowing does not remove the transitive build ordering retained by
 the direct provider target. It does avoid pulling in an unrelated package:

@@ -30,8 +30,7 @@ Testing install actions
   $ show_pkg_cookie test
   { files =
       [ (LIB_ROOT,
-         [ In_build_dir
-             "_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target/lib/xxx"
+         [ In_build_dir "_default+lockfile/pkg/test/.opam/test/target/lib/xxx"
          ])
       ]
   ; variables = []

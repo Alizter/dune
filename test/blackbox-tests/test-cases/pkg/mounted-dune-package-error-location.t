@@ -1,5 +1,5 @@
 A compilation error in a native locked package reports the location of the
-materialized source in the mounted package context.
+materialized source in the package-name-only mounted hierarchy.
 
   $ cat > dune-workspace <<'EOF'
   > (lang dune 3.20)
@@ -46,10 +46,15 @@ materialized source in the mounted package context.
   > (source (copy $PWD/broken-source))
   > EOF
 
-  $ dune build ./main.exe 2>&1 | sanitize_pkg_digest broken.1.0
-  File "../_default+lockfile/pkg/broken.1.0-DIGEST_HASH/broken.ml", line 2, characters 0-0:
+  $ dune build ./main.exe 2>&1
+  File "../_default+lockfile/pkg/broken/broken.ml", line 2, characters 0-0:
   Error: Syntax error
   [1]
+
+The package name is its complete address within the selected lock context.
+
+  $ find _build/_default+lockfile/pkg -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+  broken
 
 A missing library is reported from the package's authored dune file.
 
@@ -75,13 +80,10 @@ A missing library is reported from the package's authored dune file.
   > (source (copy $PWD/missing-library-source))
   > EOF
 
-  $ dune build ./main.exe 2>&1 | sanitize_pkg_digest broken.1.0 | censor
-  File "_build/_fetch/url/$DIGEST/dir/dune", line 4, characters 12-26:
-  4 |  (libraries does-not-exist))
-                  ^^^^^^^^^^^^^^
+  $ dune build ./main.exe 2>&1 | censor
+  File "_build/_default+lockfile/pkg/broken/dune", line 4, characters 12-26:
   Error: Library "does-not-exist" not found.
-  -> required by library "broken" in
-     _build/_default+lockfile/pkg/broken.1.0-DIGEST_HASH
+  -> required by library "broken" in _build/_default+lockfile/pkg/broken
   -> required by executable main in dune:3
   -> required by _build/default/.main.eobjs/native/dune__exe__Main.cmx
   -> required by _build/default/main.exe

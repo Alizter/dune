@@ -30,7 +30,7 @@ The standard opam recipe contains dynamic package/job arguments and conditional
 `dune subst`, `@runtest`, and `@doc` pieces. Its only unconditional executable
 is `dune build`, so source inspection dispatches it to the mounted pipeline:
 
-  $ mounted_root=$(echo _build/_default+lockfile/pkg/foo.0.0.1-*)
+  $ mounted_root=_build/_default+lockfile/pkg/foo
   $ test -f "$mounted_root/foo.cmxa" && echo mounted-dune-route
   mounted-dune-route
   $ test ! -e _build/_private/default/.pkg/foo.0.0.1-* && echo no-legacy-package-rules

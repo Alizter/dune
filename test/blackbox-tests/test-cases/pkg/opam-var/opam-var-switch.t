@@ -49,15 +49,15 @@ opam-var-unsupported.t
 
   $ build_pkg testpkg 2>&1 | censor
   dune
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/source
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/lib
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/lib
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/bin
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/sbin
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/share
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/doc
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/etc
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/man
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/lib/toplevel
-  $PWD/_build/.sandbox/$DIGEST1/_default+lockfile/pkg/testpkg.0.0.1-$DIGEST2/.opam/testpkg/target/lib/stublibs
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/source
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/lib
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/lib
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/bin
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/sbin
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/share
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/doc
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/etc
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/man
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/lib/toplevel
+  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/testpkg/.opam/testpkg/target/lib/stublibs

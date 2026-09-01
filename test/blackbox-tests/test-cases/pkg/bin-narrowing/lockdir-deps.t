@@ -72,7 +72,7 @@ declaring any package dependencies:
 The rule depends on the binary from the provider lockdir package:
 
   $ dune rules --format=json @test | jq_dune '.[] | ruleDepFilePaths' | censor
-  "_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST/.opam/provider/target/bin/mybin"
+  "_build/_default+lockfile/pkg/provider/.opam/provider/target/bin/mybin"
 
 All the packages' bin directories are added to $PATH:
 
@@ -80,8 +80,8 @@ All the packages' bin directories are added to $PATH:
   from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST1/.opam/provider/target/bin
-  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST2/.opam/check-env/target/bin
+  $PWD/_build/_default+lockfile/pkg/provider/.opam/provider/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env/.opam/check-env/target/bin
 
 With a package defined in the project, *without a dir field*, the behavior is
 the same.
@@ -105,8 +105,8 @@ All the packages' bin directories are added to $PATH:
   from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST1/.opam/provider/target/bin
-  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST2/.opam/check-env/target/bin
+  $PWD/_build/_default+lockfile/pkg/provider/.opam/provider/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env/.opam/check-env/target/bin
 
 With a package defined in the project, *with a dir field, but no dependencies*,
 the program mybin is not found in PATH or via the bin pform, since the rule for
@@ -176,7 +176,7 @@ dependency supplies [mybin] to [system]:
   from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST/.opam/check-env/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env/.opam/check-env/target/bin
 
 With a package defined in the project, *with a dir field, and explicit depends
 on only [provider]*, the rules for building [mybin] are disabled since the
@@ -235,5 +235,5 @@ The bin directories of all the packages we depend on are added to $PATH:
   from provider
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_default+lockfile/pkg/provider.0.0.1-$DIGEST1/.opam/provider/target/bin
-  $PWD/_build/_default+lockfile/pkg/check-env.0.0.1-$DIGEST2/.opam/check-env/target/bin
+  $PWD/_build/_default+lockfile/pkg/provider/.opam/provider/target/bin
+  $PWD/_build/_default+lockfile/pkg/check-env/.opam/check-env/target/bin

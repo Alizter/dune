@@ -34,7 +34,7 @@ Test that we can set variables
   abool: true
   astring: foobar
   somestrings: foo bar
-  share path: ../../../../test.0.0.1-$DIGEST/.opam/test/target/share/test
+  share path: ../../../../test/.opam/test/target/share/test
   version: 1.2.3
 
   $ show_pkg_cookie test
@@ -65,6 +65,5 @@ Now we demonstrate we get a proper error from invalid .config files:
            ^^
   Error parsing test.config
   Reason: Parse error
-  -> required by
-     _build/_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target
+  -> required by _build/_default+lockfile/pkg/test/.opam/test/target
   [1]

@@ -26,14 +26,7 @@ default_repo_path() {
 # dirs within the alternate package context.
 get_build_pkg_dir() {
   local package_name=$1
-  local digest
-  digest=$($dune pkg print-digest "$package_name")
-  local status=$?
-  if [ "$status" -eq "0" ]; then
-    echo "$pkg_root/$digest"
-  else
-    return 1
-  fi
+  echo "$pkg_root/$package_name/.opam/$package_name"
 }
 
 build_pkg() {

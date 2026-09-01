@@ -61,7 +61,7 @@ executed by a nested Dune process.
   $ PATH="$fake_bin:$PATH" "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   mounted autolock
-  $ mounted_root=$(echo _build/_default+lockfile/pkg/autofoo.0.0.1-*)
+  $ mounted_root=_build/_default+lockfile/pkg/autofoo
   $ test -f "$mounted_root/autofoo.cmxa" && echo mounted-first-build
   mounted-first-build
   $ test ! -e nested-dune && echo no-nested-dune
