@@ -588,6 +588,11 @@ module Rules = struct
     let root t = t.root
     let projects t = t.projects
 
+    let read_file ~logical ~layers =
+      Source_tree_file.File.mounted ~logical ~layers
+      |> Source_tree_file.File.read_with_perm
+    ;;
+
     let directory_contents ~logical_path layers =
       let* entries, physical =
         Memo.List.fold_left
@@ -622,7 +627,7 @@ module Rules = struct
                           Filename.Map.set entries sub_dir `Directory)
                     in
                     entries, true))
-            | Layer.File { logical; _ } ->
+            | Layer.File { logical; _ } | Layer.Contents { logical; _ } ->
               (match
                  Path.drop_prefix (Path.build logical) ~prefix:(Path.build logical_path)
                with
@@ -635,7 +640,25 @@ module Rules = struct
                       [ "path", Path.Build.to_dyn logical ]
                   | Some (basename, rest) ->
                     let kind = if Path.Local.is_root rest then `File else `Directory in
-                    Memo.return (Filename.Map.set entries basename kind, true))))
+                    Memo.return (Filename.Map.set entries basename kind, true)))
+            | Layer.Delete { logical } ->
+              (match
+                 Path.drop_prefix (Path.build logical) ~prefix:(Path.build logical_path)
+               with
+               | None -> Memo.return (entries, physical)
+               | Some local ->
+                 (match Path.Local.split_first_component local with
+                  | None ->
+                    Code_error.raise
+                      "Mounted file deletion targets a directory"
+                      [ "path", Path.Build.to_dyn logical ]
+                  | Some (basename, rest) ->
+                    let entries =
+                      if Path.Local.is_root rest
+                      then Filename.Map.remove entries basename
+                      else entries
+                    in
+                    Memo.return (entries, physical))))
       in
       let files, sub_dirs =
         Filename.Map.foldi
@@ -655,7 +678,7 @@ module Rules = struct
         List.find_map layers ~f:(function
           | Layer.Directory { logical_root = layer_root; backing_root }
             when Path.Build.equal logical_root layer_root -> Some backing_root
-          | Directory _ | File _ -> None)
+          | Directory _ | File _ | Contents _ | Delete _ -> None)
         |> Option.value_exn
       in
       let rec traverse
