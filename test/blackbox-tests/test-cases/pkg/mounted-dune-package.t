@@ -43,7 +43,7 @@ nested Dune command is run.
   > let () = print_endline Consumer.message
   > EOF
 
-  $ mkdir -p foo/src
+  $ mkdir -p foo/src/nested
   $ cat > foo/dune-project <<'EOF'
   > (lang dune 3.23)
   > (name foo)
@@ -64,7 +64,7 @@ nested Dune command is run.
   >  (deps (source_tree %{project_root}/src))
   >  (action
   >   (with-stdout-to %{target}
-  >    (run sh -c "test \"$DUNE_PROJECT_ROOT\" = \"$PWD\" && echo 'let message = \"project-root\"'"))))
+  >    (run sh -c "test \"$DUNE_PROJECT_ROOT\" = \"$PWD\" && src/nested/generate.sh"))))
   > (rule
   >  (alias runtest)
   >  (action (run false)))
@@ -77,6 +77,13 @@ nested Dune command is run.
   $ cat > foo/src/foo.ml <<'EOF'
   > let message = "symlink-source"
   > EOF
+  $ echo source-tree > foo/src/nested/input
+  $ cat > foo/src/nested/generate.sh <<'EOF'
+  > #!/bin/sh
+  > test "$(cat src/nested/input)" = source-tree
+  > echo 'let message = "project-root"'
+  > EOF
+  $ chmod +x foo/src/nested/generate.sh
   $ ln -s src/foo.ml foo/foo.ml
   $ cat > foo/generated.ml <<'EOF'
   > let message = "source-generated"
