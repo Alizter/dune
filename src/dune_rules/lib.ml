@@ -1396,6 +1396,19 @@ end = struct
                   else (
                     let req_by = Dep_stack.to_required_by stack in
                     Error.overlap ~in_workspace:lib'.info ~installed:(lib.info, req_by))
+                | Status.Not_found ->
+                  (match Lib_info.status lib.info with
+                   | Installed | Installed_private ->
+                     (* A mounted library can carry an installed dependency
+                        resolved in its owner scope. With no library of that
+                        name in the consumer scope, there is no overlap. *)
+                     Resolve.Memo.return ()
+                   | Public _ | Private _ ->
+                     Code_error.raise
+                       "Unexpected find result"
+                       [ "found", Status.to_dyn Status.Not_found
+                       ; "lib.name", Lib_name.to_dyn lib.name
+                       ])
                 | found ->
                   Code_error.raise
                     "Unexpected find result"

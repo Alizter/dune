@@ -1066,19 +1066,27 @@ module DB = struct
         in
         if authored_for_package && supported then Some (Lib.Local.to_lib lib) else None)
     in
-    let* ocaml_closure =
-      Lib.closure
-        (roots Compilation_mode.Ocaml)
-        ~linking:false
-        ~for_:Compilation_mode.Ocaml
-      |> Resolve.Memo.read_memo
-    and* melange_closure =
-      Lib.closure
-        (roots Compilation_mode.Melange)
-        ~linking:false
-        ~for_:Compilation_mode.Melange
-      |> Resolve.Memo.read_memo
+    let dependency_closure for_ =
+      let rec loop seen = function
+        | [] -> Memo.return seen
+        | lib :: rest ->
+          if Lib.Set.mem seen lib
+          then loop seen rest
+          else
+            let* dependencies =
+              Lib.Parameterised.requires lib ~for_
+              |> Resolve.Memo.lift
+              |> Resolve.Memo.read_memo
+            in
+            loop (Lib.Set.add seen lib) (List.rev_append dependencies rest)
+      in
+      (* Alternative implementations are independent metadata entries, so this
+         is dependency reachability rather than one virtual-library closure. *)
+      let+ closure = loop Lib.Set.empty (roots for_) in
+      Lib.Set.to_list closure
     in
+    let* ocaml_closure = dependency_closure Compilation_mode.Ocaml
+    and* melange_closure = dependency_closure Compilation_mode.Melange in
     let closure =
       Lib.Set.union (Lib.Set.of_list ocaml_closure) (Lib.Set.of_list melange_closure)
     in
