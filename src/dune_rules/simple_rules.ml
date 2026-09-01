@@ -253,11 +253,21 @@ let copy_files sctx ~dir ~expander ~src_dir (def : Copy_files.t) =
     | Some src_in_src ->
       Path.Build.append_source (Context.build_dir context) src_in_src |> Path.build
   in
+  let* mounted_source_dir =
+    match Path.as_in_build_dir src_in_build with
+    | None -> Memo.return None
+    | Some src_in_build ->
+      let* loaded_project = Dune_load.find_loaded_project ~dir in
+      (match Loaded_project.partition loaded_project |> Build_partition.purpose with
+       | Workspace -> Memo.return None
+       | Mounted -> Loaded_project.source_tree_dir loaded_project src_in_build)
+  in
   let* exists_or_generated =
-    match src_in_src with
-    | In_build_dir dir -> Build_system.build_dir (Path.build dir) >>| fun () -> true
-    | External ext -> Fs_memo.dir_exists (External ext)
-    | In_source_tree src_in_src ->
+    match mounted_source_dir, src_in_src with
+    | Some _, _ -> Memo.return true
+    | None, In_build_dir dir -> Build_system.build_dir (Path.build dir) >>| fun () -> true
+    | None, External ext -> Fs_memo.dir_exists (External ext)
+    | None, In_source_tree src_in_src ->
       Source_tree.find_dir src_in_src
       >>= (function
        | Some _ -> Memo.return true
@@ -279,12 +289,23 @@ let copy_files sctx ~dir ~expander ~src_dir (def : Copy_files.t) =
   (* add rules *)
   let* only_sources = Expander.eval_blang expander def.only_sources in
   let* files =
-    let dir =
-      match only_sources with
-      | true -> src_in_src
-      | false -> src_in_build
-    in
-    Build_system.eval_pred (File_selector.of_glob ~dir glob)
+    match mounted_source_dir with
+    | Some source_dir when Path.is_descendant src_in_build ~of_:(Path.build dir) ->
+      (* Loading rules for a descendant first loads the rules for [dir], which
+         are currently being computed. The mounted source view is independent
+         of rule generation, so use it to discover authored matches. *)
+      Source_tree.Rules.Dir.filenames source_dir
+      |> Filename_set.create ~dir:src_in_build ~filter:(fun ~basename ->
+        Glob.test glob (Filename.to_string basename))
+      |> Memo.return
+    | Some source_dir when only_sources ->
+      Source_tree.Rules.Dir.filenames source_dir
+      |> Filename_set.create ~dir:src_in_src ~filter:(fun ~basename ->
+        Glob.test glob (Filename.to_string basename))
+      |> Memo.return
+    | Some _ | None ->
+      let dir = if only_sources then src_in_src else src_in_build in
+      Build_system.eval_pred (File_selector.of_glob ~dir glob)
   in
   if def.syntax_version >= (3, 17) && Filename_set.is_empty files
   then User_error.raise ~loc [ Pp.textf "Does not match any files" ];

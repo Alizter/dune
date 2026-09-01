@@ -48,11 +48,5 @@ logical source directory must not recurse through rule generation for its parent
   > EOF
 
   $ dune build ./main.exe --display quiet
-  Error: Dependency cycle between:
-     Computing directory contents of _build/_default+lockfile/pkg/foo
-  -> required by _build/default/.merlin-conf/exe-main
-  -> required by _build/default/main.exe
-  [1]
   $ ./_build/default/main.exe
-  ./_build/default/main.exe: No such file or directory
-  [127]
+  copied
