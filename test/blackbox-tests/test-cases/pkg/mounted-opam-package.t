@@ -82,7 +82,7 @@ keeps the native-to-Opam edge in the ordinary package dependency graph.
 The synthetic stanza owns the same target layout as a user-authored opam
 stanza, rooted beneath the exact package artifact directory.
 
-  $ artifact_root=$(echo _build/_default+lockfile/pkg/opaque.1.0-*)
+  $ artifact_root=_build/_default+lockfile/pkg/opaque
   $ target="$artifact_root/.opam/opaque/target"
   $ cat "$target/share/opaque/built.txt"
   primary
@@ -90,7 +90,7 @@ stanza, rooted beneath the exact package artifact directory.
   extra
   $ test -f "$target/cookie" && echo cookie
   cookie
-  $ native_root=$(echo _build/_default+lockfile/pkg/native.1.0-*)
+  $ native_root=_build/_default+lockfile/pkg/native
   $ cat "$native_root/from-opaque.txt"
   primary
   files
@@ -99,7 +99,7 @@ stanza, rooted beneath the exact package artifact directory.
 A source-less package starts with an empty sandbox working directory and uses
 the same synthetic target and cookie protocol without a fetch target.
 
-  $ source_less_root=$(echo _build/_default+lockfile/pkg/source-less.1.0-*)
+  $ source_less_root=_build/_default+lockfile/pkg/source-less
   $ source_less_target="$source_less_root/.opam/source-less/target"
   $ cat "$source_less_target/share/source-less/built.txt"
   source-less-files
@@ -108,7 +108,7 @@ the same synthetic target and cookie protocol without a fetch target.
   source-less-cookie
   $ test ! -e "$source_less_root/.opam/source-less/source" && echo no-primary-source-target
   no-primary-source-target
-  $ transition_root=$(echo _build/_default+lockfile/pkg/transition.1.0-*)
+  $ transition_root=_build/_default+lockfile/pkg/transition
   $ test -f "$transition_root/.opam/transition/target/cookie" && echo empty-transition-cookie
   empty-transition-cookie
   $ test ! -e "$transition_root/.opam/transition/source" && echo no-transition-source-target

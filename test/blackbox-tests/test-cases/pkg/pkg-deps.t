@@ -23,9 +23,9 @@ We should be able to specify (package ..) deps on locally built packages.
   >  (deps (package foo)))
   > EOF
 
-  $ dune build @foo 2>&1 | sanitize_pkg_digest foo.0.0.1 | censor
-  $PWD/_build/_default+lockfile/pkg/foo.0.0.1-DIGEST_HASH/.opam/foo/target/bin/foo
-  ../_default+lockfile/pkg/foo.0.0.1-DIGEST_HASH/.opam/foo/target/bin/foo
+  $ dune build @foo 2>&1 | censor
+  $PWD/_build/_default+lockfile/pkg/foo/.opam/foo/target/bin/foo
+  ../_default+lockfile/pkg/foo/.opam/foo/target/bin/foo
 
 Now we define the external package using a dune project:
 
@@ -47,6 +47,6 @@ Now we define the external package using a dune project:
   > (source (copy $PWD/external_sources))
   > (build (run dune build @install --promote-install-files))
   > EOF
-  $ dune build @foo 2>&1 | sanitize_pkg_digest foo.0.0.1 | censor
+  $ dune build @foo 2>&1 | censor
   $PWD/_build/install/default/.packages/$DIGEST/bin/foo
-  ../_default+lockfile/pkg/foo.0.0.1-DIGEST_HASH/foo.exe
+  ../_default+lockfile/pkg/foo/foo.exe

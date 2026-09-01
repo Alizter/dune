@@ -30,7 +30,7 @@ for the mounted route after the archive has been inspected:
   $ dune exec bar
   Hello over HTTP
 
-  $ mounted_root=$(echo _build/_default+lockfile/pkg/foo.0.0.1-*)
+  $ mounted_root=_build/_default+lockfile/pkg/foo
   $ test -f "$mounted_root/foo.cmxa" && echo mounted-http-package
   mounted-http-package
   $ test ! -d _build/_private/default/.pkg/foo.0.0.1-* && echo no-old-package-rules

@@ -210,7 +210,7 @@ include paths retain source-tree ownership.
 Static source metadata, including the source include reached from the generated
 include, is read directly from the loaded source.
 
-  $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
+  $ foo_root=_build/_default+lockfile/pkg/foo
   $ test ! -e "$foo_root/lib/libraries.inc" && echo static-include-not-materialized
   static-include-not-materialized
   $ test ! -e "$foo_root/lib/dynamic-source.inc" && echo dynamic-source-not-materialized
@@ -220,7 +220,7 @@ The package objects and synthesized PPX executable use the mounted artifact
 root. The PPX retains its mounted resolver and does not instantiate the old
 package pipeline.
 
-  $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
+  $ foo_root=_build/_default+lockfile/pkg/foo
   $ test -f "$foo_root/lib/.foo.objs/native/foo.cmx" && echo mounted-library-artifact
   mounted-library-artifact
   $ test -n "$(find "$foo_root/.ppx" -name ppx.exe -print -quit)" && echo mounted-resolver-ppx

@@ -12,5 +12,5 @@ install and build commands.
   > | dune_cmd subst "$PWD" PWD \
   > | dune_cmd subst '\.sandbox/[^/]*/_default\+lockfile' '.sandbox/SANDBOX/_default+lockfile' \
   > | censor
-  [build] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target/lib
-  [install] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/_default+lockfile/pkg/test.0.0.1-$DIGEST/.opam/test/target/lib
+  [build] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/_default+lockfile/pkg/test/.opam/test/target/lib
+  [install] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/_default+lockfile/pkg/test/.opam/test/target/lib
