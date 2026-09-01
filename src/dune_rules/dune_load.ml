@@ -326,6 +326,7 @@ let loaded =
         and* context = Context.DB.get context_name
         and* mounted = Pkg_sources.mounted context_name
         and* selected_package_names = Pkg_sources.selected_package_names context_name in
+        let mounted = List.filter mounted ~f:Pkg_sources.Mounted.is_dune in
         let* mounted =
           Memo.List.filter_map mounted ~f:(fun mounted ->
             match Pkg_sources.Mounted.tree mounted with
@@ -366,13 +367,7 @@ let loaded =
               let* loaded_projects =
                 Memo.List.map projects ~f:(fun ((project, _) as project_with_root) ->
                   let* synthetic_scope =
-                    match Pkg_sources.Mounted.kind mounted with
-                    | Dune ->
-                      mounted_project_package_scope
-                        ~selected_package_names
-                        mounted
-                        project
-                    | Opam _ -> Memo.return Package_scope.empty
+                    mounted_project_package_scope ~selected_package_names mounted project
                   in
                   let package_scope =
                     Package_scope.intersect source_package_scope synthetic_scope
@@ -413,20 +408,6 @@ let loaded =
           workspace.loaded_projects
           @ List.concat_map mounted ~f:(fun (_, projects, _, _) -> projects)
         in
-        let synthetic_dune_files =
-          List.filter_map mounted ~f:(fun (mounted, projects, _, _) ->
-            match Pkg_sources.Mounted.kind mounted with
-            | Dune -> None
-            | Opam stanza ->
-              let loaded_project = List.hd projects in
-              Some
-                (Dune_file.create_synthetic
-                   ~project:loaded_project
-                   ~source_dir:
-                     (Pkg_sources.Mounted.working_dir mounted |> Source_path.build)
-                   ~stanzas:
-                     [ Opam_stanza.make_stanza stanza (Some (Package.id stanza.package)) ]))
-        in
         let projects_by_output_root =
           Path.Build.Map.of_list_map_exn loaded_projects ~f:(fun project ->
             Loaded_project.output_root project, project)
@@ -437,9 +418,7 @@ let loaded =
         in
         let* eval = Dune_file.eval mounted_source_dune_files workspace.mask in
         let+ mounted_dune_files = eval context_name in
-        let dune_files =
-          workspace.dune_files @ mounted_dune_files @ synthetic_dune_files
-        in
+        let dune_files = workspace.dune_files @ mounted_dune_files in
         { dune_files
         ; loaded_projects
         ; projects_by_output_root
