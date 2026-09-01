@@ -8,7 +8,6 @@ let artifact_dir_basename = "pkg"
 module Candidate = struct
   type t =
     { lock_pkg : Lock_pkg.t
-    ; identity_digest : Dune_digest.t
     ; source_root : Path.Build.t option
     ; artifact_root : Path.Build.t
     }
@@ -17,28 +16,19 @@ module Candidate = struct
   let source_root t = t.source_root
   let lock_pkg t = t.lock_pkg
   let artifact_root t = t.artifact_root
-  let identity_digest t = t.identity_digest
 
-  let make context lock_pkg =
-    let identity_digest =
-      Dune_digest.Feed.compute_digest Lock_pkg.digest_feed (Lock_pkg.remove_locs lock_pkg)
-    in
-    let id =
-      sprintf
-        "%s.%s-%s"
-        (Package.Name.to_string lock_pkg.info.name)
-        (Package_version.to_string lock_pkg.info.version)
-        (Dune_digest.to_string identity_digest)
-    in
+  let make context (lock_pkg : Lock_pkg.t) =
     let mounted_context = Context_name.build_dir (Mounted_context.make context) in
     let source_root =
       Option.map lock_pkg.info.source ~f:(fun source ->
         Fetch_rules.target source `Directory)
     in
     let artifact_root =
-      Path.Build.L.relative mounted_context [ artifact_dir_basename; id ]
+      Path.Build.L.relative
+        mounted_context
+        [ artifact_dir_basename; Package.Name.to_string lock_pkg.info.name ]
     in
-    { lock_pkg; identity_digest; source_root; artifact_root }
+    { lock_pkg; source_root; artifact_root }
   ;;
 end
 
@@ -55,7 +45,7 @@ module Mounted = struct
     { candidate : Candidate.t
     ; source_root : Path.Build.t
     ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
-    ; tree : Source_tree.Rules.Build.t option
+    ; tree : Source_tree.Rules.Mounted.t option
     ; source_kind : source_kind
     ; kind : kind
     ; package : Package.t
@@ -83,7 +73,7 @@ let load_candidates context =
   else
     let* lock_dir = Lock_dir.get_exn context
     and* platform = Lock_dir.Sys_vars.solver_env in
-    Dune_pkg.Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.packages ~platform
+    Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform
     |> Package.Name.Map.values
     |> List.map ~f:(Candidate.make context)
     |> Memo.return
@@ -120,9 +110,11 @@ let selected_recipe candidate =
   Memo.return (build, install, dependencies)
 ;;
 
-module Build_source_tree = Source_tree.Rules.Build
+module Mounted_source_tree = Source_tree.Rules.Mounted
 
-let load_source = Build_source_tree.load
+let load_source candidate backing_root =
+  Mounted_source_tree.load ~logical_root:(Candidate.artifact_root candidate) ~backing_root
+;;
 
 let make_package candidate source_root dependencies =
   let { Lock_pkg.info; _ } = Candidate.lock_pkg candidate in
@@ -151,7 +143,7 @@ let make_package candidate source_root dependencies =
 ;;
 
 let mount candidate source_root tree dependencies =
-  let projects = Build_source_tree.projects tree in
+  let projects = Mounted_source_tree.projects tree in
   let package = Candidate.name candidate in
   let* represents_package =
     Memo.List.exists projects ~f:(fun (project, _) ->
@@ -172,7 +164,9 @@ let mount candidate source_root tree dependencies =
             ~version:candidate.lock_pkg.info.version
         , source_dir ))
     in
-    let package = make_package candidate source_root dependencies in
+    let package =
+      make_package candidate (Candidate.artifact_root candidate) dependencies
+    in
     Memo.return
       (Some
          { Mounted.candidate
@@ -189,7 +183,7 @@ module Scan_dune_files = Source_tree.Rules.Dir.Make_map_reduce (Memo) (Monoid.Ex
 
 let has_dune_file tree =
   Scan_dune_files.map_reduce
-    (Build_source_tree.root tree)
+    (Mounted_source_tree.root tree)
     ~traverse:Source_dir_status.Set.all
     ~trace_event_name:"Package source classification"
     ~f:(fun dir -> Memo.return (Option.is_some (Source_tree.Rules.Dir.dune_file dir)))
@@ -225,7 +219,7 @@ let prepare candidate =
     let make_opaque_opam () =
       make_opam candidate ~source_root ~source_kind:Primary_source >>| Option.some
     in
-    let* tree = load_source source_root in
+    let* tree = load_source candidate source_root in
     let* has_dune_file = has_dune_file tree in
     if has_dune_file
     then
@@ -282,7 +276,7 @@ let find_mounted context name =
 
 let source_copy_rule ~dir ~source_dir filename =
   let src =
-    Source_tree.Rules.Dir.file source_dir filename |> Source_tree.Rules.File.path
+    Source_tree.Rules.Dir.file source_dir filename |> Source_tree.Rules.File.backing_path
   in
   let dst = Path.Build.relative_fname dir filename in
   let { Action_builder.With_targets.build; targets } = Action_builder.copy ~src ~dst in
