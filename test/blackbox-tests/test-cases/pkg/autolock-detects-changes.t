@@ -41,7 +41,7 @@ Create a project that depends on foo:
 Build with auto-locking. The Dune recipe is dispatched to the mounted build in
 the same invocation:
   $ dune exec --display short bar >/dev/null 2>&1
-  $ test -d _build/_default+lockfile/pkg/foo.0.0.1-*
+  $ test -d _build/_default+lockfile/pkg/foo
 
   $ dune exec bar
   Hello from foo version 0.0.1!
@@ -86,7 +86,7 @@ Now add a newer version of foo to the repository:
 Build again - auto-locking should detect the new version and rebuild:
 
   $ dune exec --display short bar >/dev/null 2>&1
-  $ test -d _build/_default+lockfile/pkg/foo.0.0.2-*
+  $ test -d _build/_default+lockfile/pkg/foo
 
   $ dune exec bar
   Hello from foo 0.0.2!

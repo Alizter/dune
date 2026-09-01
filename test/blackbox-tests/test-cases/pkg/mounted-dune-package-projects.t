@@ -108,8 +108,8 @@ directory.
   no-external-source-store
   $ test "$(find _build/_default+lockfile/pkg -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 2 && echo two-artifact-roots
   two-artifact-roots
-  $ foo_root=$(echo _build/_default+lockfile/pkg/foo.1.0-*)
-  $ bar_root=$(echo _build/_default+lockfile/pkg/bar.1.0-*)
+  $ foo_root=_build/_default+lockfile/pkg/foo
+  $ bar_root=_build/_default+lockfile/pkg/bar
   $ test -f "$foo_root/foo.cmxa" && test -f "$bar_root/sub/bar.cmxa" && echo nested-artifacts
   nested-artifacts
   $ test ! -e "$foo_root/sub/bar.cmxa" && test ! -e "$bar_root/foo.cmxa" && echo package-masks
@@ -168,7 +168,7 @@ than the workspace-only engine source tree.
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   mounted include_subdirs
-  $ grouped_root=$(echo _build/_default+lockfile/pkg/grouped.1.0-*)
+  $ grouped_root=_build/_default+lockfile/pkg/grouped
   $ test -n "$(find "$grouped_root/src/.grouped.objs" -name '*Message*.cmx' -print -quit)" && echo nested-module-artifact
   nested-module-artifact
   $ test ! -e _build/_private/default/.pkg/grouped.1.0-* && echo no-old-package-rules
@@ -325,7 +325,7 @@ auxiliary library.
   $ cat _build/default/left.output _build/default/right.output
   shared auxiliary/left
   shared auxiliary/right
-  $ left_root=$(echo _build/_default+lockfile/pkg/left.1.0-*)
-  $ right_root=$(echo _build/_default+lockfile/pkg/right.1.0-*)
+  $ left_root=_build/_default+lockfile/pkg/left
+  $ right_root=_build/_default+lockfile/pkg/right
   $ test -f "$left_root/vendor/src/vendored_support.cmxa" && test -f "$right_root/vendor/src/vendored_support.cmxa" && echo separately-owned-auxiliary-artifacts
   separately-owned-auxiliary-artifacts

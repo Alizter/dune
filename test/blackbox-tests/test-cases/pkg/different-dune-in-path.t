@@ -71,7 +71,7 @@ Make lockfiles for the packages.
 Source classification mounts both packages. The recorded recipe shape does not
 change that selection.
   $ dune build x.exe
-  $ test -f _build/_default+lockfile/pkg/foo.0.0.1-*/foo.cmxa
+  $ test -f _build/_default+lockfile/pkg/foo/foo.cmxa
   $ test ! -e _build/_private/default/.pkg/foo.0.0.1-*
 
 Make a fake dune exe:
@@ -97,7 +97,7 @@ Call Dune with an absolute PATH as argv[0]. Neither mounted build launches the
 fake Dune, including the package whose ignored recipe wraps Dune in a shell:
 
   $ PATH=$fakepath $DUNE build @pkg-install
-  $ test -f _build/_default+lockfile/pkg/bar.0.0.1-*/bar.cmxa
+  $ test -f _build/_default+lockfile/pkg/bar/bar.cmxa
 
 argv[0] is set by the calling program (like a shell or cram test runner) and
 could be wrong, hence it cannot always be trusted. In the examples above we
@@ -111,4 +111,4 @@ and the user launches `dune` in a shell.
 
   $ dune clean
   $ PATH=$fakepath dune_cmd exec-a "dune" $DUNE build @pkg-install
-  $ test -f _build/_default+lockfile/pkg/bar.0.0.1-*/bar.cmxa
+  $ test -f _build/_default+lockfile/pkg/bar/bar.cmxa
