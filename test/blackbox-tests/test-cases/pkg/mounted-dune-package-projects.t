@@ -369,3 +369,216 @@ requires, so external build systems can resolve the private findlib package.
   $ right_layout=$(echo _build/install/default/.packages/*/lib/right)
   $ test -L "$left_layout/__private__/vendored_support/vendored_support.cmxa" && test -L "$right_layout/__private__/vendored_support/vendored_support.cmxa" && echo private-layout-artifacts
   private-layout-artifacts
+
+Alternative implementations of one selected virtual library are independent
+metadata entries, not implementations to link together.
+
+  $ mkdir ../virtual-implementations
+  $ cd ../virtual-implementations
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends virtuals)
+  >  (allow_empty))
+  > EOF
+
+  $ mkdir -p virtuals/src virtuals/native virtuals/portable
+  $ cat > virtuals/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name virtuals))
+  > EOF
+  $ cat > virtuals/src/dune <<'EOF'
+  > (library
+  >  (name virtuals)
+  >  (public_name virtuals)
+  >  (modules api)
+  >  (virtual_modules api)
+  >  (default_implementation virtuals.native))
+  > EOF
+  $ echo 'val message : string' > virtuals/src/api.mli
+  $ cat > virtuals/native/dune <<'EOF'
+  > (library
+  >  (name virtuals_native)
+  >  (public_name virtuals.native)
+  >  (implements virtuals)
+  >  (modules api))
+  > EOF
+  $ echo 'let message = "native"' > virtuals/native/api.ml
+  $ cat > virtuals/portable/dune <<'EOF'
+  > (library
+  >  (name virtuals_portable)
+  >  (public_name virtuals.portable)
+  >  (implements virtuals)
+  >  (modules api))
+  > EOF
+  $ echo 'let message = "portable"' > virtuals/portable/api.ml
+  $ tar cf virtuals.tar virtuals
+  $ rm -rf virtuals
+
+  $ make_lockdir
+  $ make_lockpkg virtuals <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/virtuals.tar)
+  >   (checksum md5=$(md5sum virtuals.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+
+  $ virtuals_root=_build/_default+lockfile/pkg/virtuals
+  $ "$real_dune" build "$virtuals_root/META.virtuals" --display quiet
+  $ grep '^package' "$virtuals_root/META.virtuals"
+  package "native" (
+  package "portable" (
+
+A native library can carry an opaque dependency resolved in its owner scope.
+Using that native library while loading another mounted package must retain the
+resolved transitive library rather than treating its absence from the consumer
+scope as an internal error.
+
+  $ mkdir ../transitive-opaque-libraries
+  $ cd ../transitive-opaque-libraries
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.20)
+  > (pkg enabled)
+  > EOF
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package
+  >  (name main)
+  >  (depends consumer provider opaque-wrapper))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (modes js)
+  >  (libraries opaque-wrapper))
+  > EOF
+  $ echo 'let () = ()' > main.ml
+
+  $ mkdir opaque-support
+  $ cat > opaque-support/opaque_support.ml <<'EOF'
+  > let message = "opaque support"
+  > EOF
+  $ cat > opaque-support/META <<'EOF'
+  > description = "opaque support"
+  > version = "1.0"
+  > archive(byte) = "opaque_support.cma"
+  > archive(native) = "opaque_support.cmxa"
+  > EOF
+
+  $ mkdir provider
+  $ cat > provider/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name provider))
+  > EOF
+  $ cat > provider/dune <<'EOF'
+  > (library
+  >  (name provider)
+  >  (public_name provider)
+  >  (libraries opaque-support))
+  > EOF
+  $ echo 'let message = Opaque_support.message' > provider/provider.ml
+  $ tar cf provider.tar provider
+  $ rm -rf provider
+
+  $ mkdir consumer
+  $ cat > consumer/dune-project <<'EOF'
+  > (lang dune 3.20)
+  > (package (name consumer))
+  > EOF
+  $ cat > consumer/dune <<'EOF'
+  > (library
+  >  (name consumer)
+  >  (public_name consumer)
+  >  (modules consumer))
+  > (test
+  >  (name consumer_test)
+  >  (modules consumer_test)
+  >  (libraries consumer provider))
+  > EOF
+  $ echo 'let message = "consumer"' > consumer/consumer.ml
+  $ echo 'let () = ()' > consumer/consumer_test.ml
+  $ tar cf consumer.tar consumer
+  $ rm -rf consumer
+
+  $ mkdir opaque-wrapper
+  $ echo 'let () = ()' > opaque-wrapper/opaque_wrapper.ml
+  $ cat > opaque-wrapper/META <<'EOF'
+  > description = "opaque wrapper"
+  > version = "1.0"
+  > requires = "provider"
+  > archive(byte) = "opaque_wrapper.cma"
+  > archive(native) = "opaque_wrapper.cmxa"
+  > EOF
+
+  $ make_lockdir
+  $ make_lockpkg opaque-support <<EOF
+  > (version 1.0)
+  > (source (copy $PWD/opaque-support))
+  > (build
+  >  (progn
+  >   (run ocamlc -g -a -o opaque_support.cma opaque_support.ml)
+  >   (run ocamlopt -g -a -o opaque_support.cmxa opaque_support.ml)))
+  > (install
+  >  (progn
+  >   (run mkdir -p %{lib}/opaque-support)
+  >   (run cp META %{lib}/opaque-support/META)
+  >   (run cp opaque_support.cmi %{lib}/opaque-support/opaque_support.cmi)
+  >   (run cp opaque_support.cma %{lib}/opaque-support/opaque_support.cma)
+  >   (run cp opaque_support.cmxa %{lib}/opaque-support/opaque_support.cmxa)
+  >   (run cp opaque_support.a %{lib}/opaque-support/opaque_support.a)))
+  > EOF
+  $ make_lockpkg provider <<EOF
+  > (version 1.0)
+  > (depends dune opaque-support)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/provider.tar)
+  >   (checksum md5=$(md5sum provider.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+  $ make_lockpkg consumer <<EOF
+  > (version 1.0)
+  > (depends dune)
+  > (source
+  >  (fetch
+  >   (url file://$PWD/consumer.tar)
+  >   (checksum md5=$(md5sum consumer.tar | cut -f1 -d' '))))
+  > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
+  > EOF
+  $ make_lockpkg opaque-wrapper <<EOF
+  > (version 1.0)
+  > (depends provider)
+  > (source (copy $PWD/opaque-wrapper))
+  > (build
+  >  (progn
+  >   (run ocamlc -g -a -o opaque_wrapper.cma opaque_wrapper.ml)
+  >   (run ocamlopt -g -a -o opaque_wrapper.cmxa opaque_wrapper.ml)))
+  > (install
+  >  (progn
+  >   (run mkdir -p %{lib}/opaque-wrapper)
+  >   (run cp META %{lib}/opaque-wrapper/META)
+  >   (run cp opaque_wrapper.cmi %{lib}/opaque-wrapper/opaque_wrapper.cmi)
+  >   (run cp opaque_wrapper.cma %{lib}/opaque-wrapper/opaque_wrapper.cma)
+  >   (run cp opaque_wrapper.cmxa %{lib}/opaque-wrapper/opaque_wrapper.cmxa)
+  >   (run cp opaque_wrapper.a %{lib}/opaque-wrapper/opaque_wrapper.a)))
+  > EOF
+
+  $ consumer_root=_build/_default+lockfile/pkg/consumer
+  $ "$real_dune" build "$consumer_root/consumer.cmxa" --display quiet
+  $ test -f "$consumer_root/consumer.cmxa" && echo transitive-opaque-library
+  transitive-opaque-library
+
+Separate js_of_ocaml compilation of an opaque archive resolves its native
+mounted dependencies through the workspace library scope.
+
+  $ "$real_dune" build ./main.bc.js --display quiet
+  $ test -f _build/default/main.bc.js && echo mounted-jsoo-dependency
+  mounted-jsoo-dependency
