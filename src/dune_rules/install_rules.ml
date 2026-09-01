@@ -168,6 +168,7 @@ module Stanzas_to_entries : sig
     :  Super_context.t
     -> Loaded_project.t
     -> scope:Scope.t option
+    -> metadata_libraries:Lib.Local.t list
     -> Package.t
     -> Install.Entry.Sourced.Unexpanded.t list Memo.t
 end = struct
@@ -854,46 +855,99 @@ end = struct
           -> Install.Entry.Unexpanded.compare a.entry b.entry))
   ;;
 
-  let entries_for_loaded_package sctx loaded_project ~scope pkg =
+  let entries_for_loaded_package sctx loaded_project ~scope ~metadata_libraries pkg =
     let context = Super_context.context sctx in
     let ctx = Context.build_context context in
     let pkg_name = Package.name pkg in
+    let mounted_owner = Loaded_project.package_owner loaded_project in
+    let same_package_project stanza_project =
+      match mounted_owner with
+      | None ->
+        Loaded_project.Identity.equal
+          (Loaded_project.identity stanza_project)
+          (Loaded_project.identity loaded_project)
+      | Some _ ->
+        let package_root =
+          Loaded_project.partition loaded_project |> Build_partition.output_root
+        in
+        let stanza_package_root =
+          Loaded_project.partition stanza_project |> Build_partition.output_root
+        in
+        Path.Build.equal package_root stanza_package_root
+    in
+    let library_ids libraries =
+      List.map libraries ~f:(fun library ->
+        Lib.Local.info library |> Lib_info.lib_id |> Lib_id.to_local_exn)
+      |> Lib_id.Local.Set.of_list
+    in
+    let* mounted_libraries =
+      match mounted_owner, metadata_libraries with
+      | None, _ -> Memo.return None
+      | Some _, Some libraries -> Memo.return (Some (library_ids libraries))
+      | Some _, None ->
+        let+ entries, _ =
+          Scope.DB.lib_entries_of_loaded_project ctx.name loaded_project pkg_name
+        in
+        let { Scope.DB.Lib_entry.Set.libraries; _ } = entries in
+        Some (library_ids libraries)
+    in
+    let localize_auxiliary_library stanza ~source_dir =
+      match mounted_owner, mounted_libraries, Stanza.repr stanza with
+      | Some _, Some libraries, Library.T library
+        when not
+               (Lib_id.Local.Set.mem
+                  libraries
+                  (Library.to_lib_id ~src_dir:source_dir library)) -> None
+      | ( Some (owner_package, owner_project)
+        , Some _
+        , Library.T ({ visibility = Public public; _ } as library) )
+        when not (Package.Name.equal (Public_lib.package public |> Package.name) pkg_name)
+        ->
+        Library.make_stanza
+          { library with
+            visibility = Private (Some owner_package)
+          ; project = owner_project
+          }
+          (Some (Package.id owner_package))
+        |> Option.some
+      | _, _, _ -> Some stanza
+    in
     let* metadata_files = package_metadata_files sctx loaded_project pkg in
     let* stanzas = Dune_load.dune_files ctx.name in
     let* package_db = Package_db.create ctx.name in
     let entries =
       Dune_file.fold_static_stanzas stanzas ~init:[] ~f:(fun dune_file stanza acc ->
         let stanza_project = Dune_file.loaded_dir dune_file |> Loaded_dir.project in
-        if
-          not
-            (Loaded_project.Identity.equal
-               (Loaded_project.identity stanza_project)
-               (Loaded_project.identity loaded_project))
+        if not (same_package_project stanza_project)
         then acc
         else (
-          match Stanzas.stanza_package stanza with
+          let source_dir = Dune_file.source_dir dune_file in
+          match localize_auxiliary_library stanza ~source_dir with
           | None -> acc
-          | Some package when not (Package.Name.equal (Package.Id.name package) pkg_name)
-            -> acc
-          | Some _ ->
-            let dir = Dune_file.output_dir dune_file in
-            let named_entries =
-              let* expander = Super_context.expander sctx ~dir
-              and* scope =
-                match scope with
-                | None -> Scope.DB.find_by_dir dir
-                | Some scope -> Memo.return scope
-              in
-              stanza_to_entries
-                ~package_db
-                ~sctx
-                ~dir
-                ~source_dir:(Dune_file.source_dir dune_file)
-                ~scope
-                ~expander
-                stanza
-            in
-            named_entries :: acc))
+          | Some stanza ->
+            (match Stanzas.stanza_package stanza with
+             | None -> acc
+             | Some package
+               when not (Package.Name.equal (Package.Id.name package) pkg_name) -> acc
+             | Some _ ->
+               let dir = Dune_file.output_dir dune_file in
+               let named_entries =
+                 let* expander = Super_context.expander sctx ~dir
+                 and* scope =
+                   match scope with
+                   | None -> Scope.DB.find_by_dir dir
+                   | Some scope -> Memo.return scope
+                 in
+                 stanza_to_entries
+                   ~package_db
+                   ~sctx
+                   ~dir
+                   ~source_dir
+                   ~scope
+                   ~expander
+                   stanza
+               in
+               named_entries :: acc)))
     in
     let+ entries = Memo.all_concurrently entries in
     List.fold_left entries ~init:metadata_files ~f:(fun acc named_entries ->
@@ -929,15 +983,26 @@ end = struct
            >>= function
            | None -> Memo.return []
            | Some (loaded_project, pkg) ->
-             entries_for_loaded_package sctx loaded_project ~scope:None pkg)
+             entries_for_loaded_package
+               sctx
+               loaded_project
+               ~scope:None
+               ~metadata_libraries:None
+               pkg)
     in
     fun sctx package -> Memo.exec memo (sctx, package)
   ;;
 
-  let entries_for_package sctx loaded_project ~scope pkg =
+  let entries_for_package sctx loaded_project ~scope ~metadata_libraries pkg =
     match scope with
     | None -> entries_for_package_without_scope sctx (Package.name pkg)
-    | Some scope -> entries_for_loaded_package sctx loaded_project ~scope:(Some scope) pkg
+    | Some scope ->
+      entries_for_loaded_package
+        sctx
+        loaded_project
+        ~scope:(Some scope)
+        ~metadata_libraries:(Some metadata_libraries)
+        pkg
   ;;
 end
 
@@ -1083,7 +1148,12 @@ end = struct
     in
     let+ files =
       let+ entries =
-        Stanzas_to_entries.entries_for_package sctx loaded_project ~scope pkg
+        Stanzas_to_entries.entries_for_package
+          sctx
+          loaded_project
+          ~scope
+          ~metadata_libraries:libraries
+          pkg
       in
       List.map entries ~f:(fun (e : Install.Entry.Sourced.Unexpanded.t) ->
         let kind =
@@ -1447,7 +1517,12 @@ let install_entries sctx package =
   >>= function
   | None -> Memo.return []
   | Some (loaded_project, pkg) ->
-    Stanzas_to_entries.entries_for_package sctx loaded_project ~scope:None pkg
+    Stanzas_to_entries.entries_for_package
+      sctx
+      loaded_project
+      ~scope:None
+      ~metadata_libraries:[]
+      pkg
 ;;
 
 let () =
