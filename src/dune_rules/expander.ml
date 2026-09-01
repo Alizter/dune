@@ -801,32 +801,20 @@ let resolve_local_pkg_file ~loc ~context_name ~pkg_name ~section ~file =
 (* CR-someday punchagan: Dependency filters such as [{with-test}] are not
    interpreted here, so a dependency is visible whatever its filter says. *)
 let package_dependencies t =
-  let open Memo.O in
-  match Dune_project.exclusive_package t.project ~dir:t.source_dir with
-  | None -> Memo.return None
-  | Some pkg_id ->
-    let+ packages =
-      match t.source_dir with
-      | Workspace _ -> Dune_load.packages ()
-      | Build _ -> Memo.return (Dune_project.packages t.project)
-    in
-    (* A name that is not a workspace package is a lock directory package. It
-       is a leaf of this walk; its own dependencies are added by
-       [Pkg.top_closure] over the lock directory's graph. *)
-    let rec loop acc name =
-      if Package.Name.Set.mem acc name
-      then acc
-      else (
-        let acc = Package.Name.Set.add acc name in
-        match Package.Name.Map.find packages name with
-        | None -> acc
-        | Some pkg ->
-          List.fold_left
-            (Package.depends pkg @ Package.depopts pkg)
-            ~init:acc
-            ~f:(fun acc (dep : Package_dependency.t) -> loop acc dep.name))
-    in
-    Some (loop Package.Name.Set.empty (Package.Id.name pkg_id))
+  Memo.return
+    (match Dune_project.exclusive_package t.project ~dir:t.source_dir with
+     | None -> None
+     | Some pkg_id ->
+       let package = Package.Id.name pkg_id in
+       let packages = Dune_project.packages t.project in
+       let dependencies =
+         Package.Name.Map.find packages package
+         |> Option.to_list
+         |> List.concat_map ~f:(fun package ->
+           Package.depends package @ Package.depopts package)
+         |> List.map ~f:(fun dependency -> dependency.Package_dependency.name)
+       in
+       Some (Package.Name.Set.of_list (package :: dependencies)))
 ;;
 
 let visible_packages t =
