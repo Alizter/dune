@@ -43,12 +43,25 @@ val root : unit -> Dir.t Memo.t
     dispatching on generic paths. *)
 module Rules : sig
   module File : sig
+    type contents =
+      { contents : string
+      ; executable : bool
+      ; dependencies : Path.t list
+      }
+
+    type materialization =
+      | Copy of Path.t
+      | Write of contents
+
     type t
 
     val source_path : t -> Source_path.t
     val path : t -> Path.t
+    val backing_path_opt : t -> Path.t option Memo.t
     val backing_path : t -> Path.t Memo.t
     val relative : t -> Loc.t -> string -> t
+    val materialization : t -> materialization option Memo.t
+    val read_with_perm : t -> contents option Memo.t
     val read : t -> string option Memo.t
     val equal : t -> t -> bool
     val diagnostic_name : t -> string
@@ -96,9 +109,23 @@ module Rules : sig
 
       val directory : logical_root:Path.Build.t -> backing_root:Path.Build.t -> t
       val file : logical:Path.Build.t -> backing:Path.Build.t -> t
+
+      val contents
+        :  logical:Path.Build.t
+        -> contents:string
+        -> executable:bool
+        -> dependencies:Path.t list
+        -> t
+
+      val delete : logical:Path.Build.t -> t
     end
 
     type t
+
+    val read_file
+      :  logical:Path.Build.t
+      -> layers:Layer.t list
+      -> File.contents option Memo.t
 
     (** Load a logical mounted tree from ordered immutable input layers. Later
         layers replace earlier files at the same logical path. *)
