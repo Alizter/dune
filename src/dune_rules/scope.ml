@@ -431,13 +431,16 @@ module DB = struct
         | None -> Memo.return []
         | Some rt -> Memo.List.map ~f:(resolve_redirect_to t) rt
       in
-      Lib.DB.create
-        ~parent:(Some installed_libs)
-        ~resolve
-        ~resolve_lib_id
-        ~all:(fun () -> Lib_name.Map.keys by_name |> Memo.return)
-        ~instrument_with
-        ()
+      let db =
+        Lib.DB.create
+          ~parent:(Some installed_libs)
+          ~resolve
+          ~resolve_lib_id
+          ~all:(fun () -> Lib_name.Map.keys by_name |> Memo.return)
+          ~instrument_with
+          ()
+      in
+      db, installed_libs
   ;;
 
   let public_stanza_package = function
@@ -555,12 +558,15 @@ module DB = struct
           Path.Build.Map.find mounted_auxiliary_stanzas_by_owner owner
           |> Option.value ~default:[]
         in
-        make_public_libs
-          Package_owner
-          scope_db_ref
-          ~installed_libs:parent
-          ~instrument_with
-          stanzas)
+        let public_libs, _ =
+          make_public_libs
+            Package_owner
+            scope_db_ref
+            ~installed_libs:parent
+            ~instrument_with
+            stanzas
+        in
+        public_libs)
     in
     let db_by_project =
       Path.Build.Map.merge
@@ -634,16 +640,18 @@ module DB = struct
       List.filter stanzas ~f:(fun (loaded_project, _, _, stanza) ->
         globally_visible_stanza loaded_project stanza)
     in
-    let public_libs =
+    let public_libs, installed_libs_with_mounted =
       make_public_libs Global t ~instrument_with ~installed_libs globally_visible_stanzas
     in
+    (* Built-in redirects from the installed database may resolve to a mounted
+       public library. Preserve that parent in owner-local scopes. *)
     let scopes =
       scopes_by_dir
         ~scope_db_ref:t
         ~lib_config
         ~loaded_projects
         ~public_libs
-        ~installed_libs
+        ~installed_libs:installed_libs_with_mounted
         ~instrument_with
         context
         stanzas
