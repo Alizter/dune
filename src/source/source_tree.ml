@@ -428,6 +428,7 @@ module Rules = struct
     type loaded =
       { logical_path : Path.Build.t
       ; backing_path : Path.Build.t
+      ; layers : Source_tree_file.Mounted_layer.t list
       ; relative_dir : Path.Local.t
       ; status : Source_dir_status.t
       ; files : Filename.Array.Set.t
@@ -451,6 +452,7 @@ module Rules = struct
     let make_loaded
           ~logical_path
           ~backing_path
+          ~layers
           ~relative_dir
           ~status
           ~files
@@ -460,6 +462,7 @@ module Rules = struct
       =
       { logical_path
       ; backing_path
+      ; layers
       ; relative_dir
       ; status
       ; files
@@ -488,10 +491,8 @@ module Rules = struct
       match t with
       | Source dir ->
         Path.Source.relative_fname (Workspace_dir.path dir) filename |> File.workspace
-      | Mounted { logical_path; backing_path; _ } ->
-        File.mounted
-          ~logical:(Path.Build.relative_fname logical_path filename)
-          ~backing:(Path.Build.relative_fname backing_path filename)
+      | Mounted { logical_path; layers; _ } ->
+        File.mounted ~logical:(Path.Build.relative_fname logical_path filename) ~layers
     ;;
 
     let relative_dir = function
@@ -575,6 +576,8 @@ module Rules = struct
   end
 
   module Mounted = struct
+    module Layer = Source_tree_file.Mounted_layer
+
     type t =
       { logical_root : Path.Build.t
       ; root : Dir.t
@@ -585,21 +588,87 @@ module Rules = struct
     let root t = t.root
     let projects t = t.projects
 
-    let load_impl (logical_root, backing_root) =
+    let directory_contents ~logical_path layers =
+      let* entries, physical =
+        Memo.List.fold_left
+          layers
+          ~init:(Filename.Map.empty, false)
+          ~f:(fun (entries, physical) layer ->
+            match layer with
+            | Layer.Directory { logical_root; backing_root } ->
+              (match
+                 Path.drop_prefix
+                   (Path.build logical_path)
+                   ~prefix:(Path.build logical_root)
+               with
+               | None -> Memo.return (entries, physical)
+               | Some local ->
+                 let backing_path = Path.Build.append_local backing_root local in
+                 let+ contents =
+                   Build_system.directory_target_contents_opt ~dir:backing_path
+                 in
+                 (match contents with
+                  | None -> entries, physical
+                  | Some (files, sub_dirs) ->
+                    let entries =
+                      Filename.Array.Set.fold files ~init:entries ~f:(fun file entries ->
+                        Filename.Map.set entries file `File)
+                    in
+                    let entries =
+                      Filename.Array.Set.fold
+                        sub_dirs
+                        ~init:entries
+                        ~f:(fun sub_dir entries ->
+                          Filename.Map.set entries sub_dir `Directory)
+                    in
+                    entries, true))
+            | Layer.File { logical; _ } ->
+              (match
+                 Path.drop_prefix (Path.build logical) ~prefix:(Path.build logical_path)
+               with
+               | None -> Memo.return (entries, physical)
+               | Some local ->
+                 (match Path.Local.split_first_component local with
+                  | None ->
+                    Code_error.raise
+                      "Mounted file layer replaces a directory"
+                      [ "path", Path.Build.to_dyn logical ]
+                  | Some (basename, rest) ->
+                    let kind = if Path.Local.is_root rest then `File else `Directory in
+                    Memo.return (Filename.Map.set entries basename kind, true))))
+      in
+      let files, sub_dirs =
+        Filename.Map.foldi
+          entries
+          ~init:([], [])
+          ~f:(fun filename kind (files, sub_dirs) ->
+            match kind with
+            | `File -> filename :: files, sub_dirs
+            | `Directory -> files, filename :: sub_dirs)
+      in
+      Memo.return
+        (Filename.Array.Set.of_list files, Filename.Array.Set.of_list sub_dirs, physical)
+    ;;
+
+    let load_impl (logical_root, layers) =
+      let backing_root =
+        List.find_map layers ~f:(function
+          | Layer.Directory { logical_root = layer_root; backing_root }
+            when Path.Build.equal logical_root layer_root -> Some backing_root
+          | Directory _ | File _ -> None)
+        |> Option.value_exn
+      in
       let rec traverse
                 ~logical_path
-                ~backing_path
                 ~relative_dir
                 ~status
                 ~parent_dune_file
                 ~parent_project
-                ~physical
         =
-        let* files, physical_subdirs =
-          if physical
-          then Build_system.directory_target_contents ~dir:backing_path
-          else Memo.return (Filename.Array.Set.empty, Filename.Array.Set.empty)
+        let* files, physical_subdirs, physical =
+          directory_contents ~logical_path layers
         in
+        let backing_path = Path.Build.append_local backing_root relative_dir in
         let source_path = Source_path.build logical_path in
         let* loaded_project =
           match status, physical with
@@ -609,9 +678,11 @@ module Rules = struct
               ~read:(fun path ->
                 match Source_path.descendant path ~of_:source_path with
                 | Some local ->
-                  Path.Build.append_local backing_path local
-                  |> Path.build
-                  |> Build_system.read_file
+                  Source_tree_file.File.mounted
+                    ~logical:(Path.Build.append_local logical_path local)
+                    ~layers
+                  |> Source_tree_file.File.read
+                  >>| Option.value_exn
                 | None ->
                   Code_error.raise
                     "Mounted project requested a source outside its logical root"
@@ -638,7 +709,10 @@ module Rules = struct
         let* dune_file =
           Dune_file.load
             ~dir:
-              (Source_tree_file.Dir.mounted ~logical:logical_path ~backing:backing_path)
+              (Source_tree_file.Dir.mounted
+                 ~logical:logical_path
+                 ~backing:backing_path
+                 ~layers)
             status
             project
             ~files
@@ -684,12 +758,10 @@ module Rules = struct
               let+ child, child_projects =
                 traverse
                   ~logical_path:(Path.Build.relative_fname logical_path basename)
-                  ~backing_path:(Path.Build.relative_fname backing_path basename)
                   ~relative_dir:(Path.Local.relative_fname relative_dir basename)
                   ~status:child_status
                   ~parent_dune_file:dune_file
                   ~parent_project:(Some project)
-                  ~physical:(Filename.Array.Set.mem physical_subdirs basename)
               in
               Some (basename, child, child_projects))
         in
@@ -703,6 +775,7 @@ module Rules = struct
           Dir.make_loaded
             ~logical_path
             ~backing_path
+            ~layers
             ~relative_dir
             ~status
             ~files:visible_files
@@ -718,27 +791,25 @@ module Rules = struct
       let+ root, projects =
         traverse
           ~logical_path:logical_root
-          ~backing_path:backing_root
           ~relative_dir:Path.Local.root
           ~status:Source_dir_status.Vendored
           ~parent_dune_file:None
           ~parent_project:None
-          ~physical:true
       in
       { logical_root; root = Dir.Mounted root; projects }
     ;;
 
     let load =
       let module Input = struct
-        type t = Path.Build.t * Path.Build.t
+        type t = Path.Build.t * Layer.t list
 
-        let equal = Tuple.T2.equal Path.Build.equal Path.Build.equal
-        let hash = Tuple.T2.hash Path.Build.hash Path.Build.hash
-        let to_dyn = Tuple.T2.to_dyn Path.Build.to_dyn Path.Build.to_dyn
+        let equal = Tuple.T2.equal Path.Build.equal (List.equal Layer.equal)
+        let hash = Tuple.T2.hash Path.Build.hash (List.hash Layer.hash)
+        let to_dyn = Tuple.T2.to_dyn Path.Build.to_dyn (Dyn.list Layer.to_dyn)
       end
       in
       let memo = Memo.create "mounted-source-tree" ~input:(module Input) load_impl in
-      fun ~logical_root ~backing_root -> Memo.exec memo (logical_root, backing_root)
+      fun ~logical_root ~layers -> Memo.exec memo (logical_root, layers)
     ;;
   end
 end

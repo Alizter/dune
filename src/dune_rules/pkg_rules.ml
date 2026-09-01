@@ -1079,18 +1079,7 @@ let gen_opam_rules context ~dir package_name =
     | Opam stanza -> stanza
   in
   let lock_pkg = Pkg_sources.Candidate.lock_pkg candidate in
-  let* files_dir =
-    let* lock_dir_path = Lock_dir.get_path context >>| Option.value_exn
-    and* lock_dir = Lock_dir.get_exn context in
-    let version =
-      Option.some_if
-        (Dune_pkg.Lock_dir.uses_versioned_paths lock_dir)
-        lock_pkg.info.version
-    in
-    Dune_pkg.Lock_dir.Pkg.files_dir package_name version ~lock_dir:lock_dir_path
-    |> Path.as_in_build_dir_exn
-    |> Memo.return
-  in
+  let files_dir = Pkg_sources.Candidate.files_dir candidate in
   let _, paths = opam_paths mounted package_name in
   let source_kind = Pkg_sources.Mounted.source_kind mounted in
   let source =
