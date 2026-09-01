@@ -195,21 +195,9 @@ let has_dune_file tree =
     ~f:(fun dir -> Memo.return (Option.is_some (Source_tree.Rules.Dir.dune_file dir)))
 ;;
 
-let make_opam candidate ~source_root ~source_kind ~tree =
+let make_opam candidate ~source_root ~source_kind =
   let* build, install, dependencies = selected_recipe candidate in
   let package = make_package candidate source_root dependencies in
-  let projects, tree =
-    match tree with
-    | Some tree ->
-      let project =
-        Dune_project.anonymous
-          ~dir:(Source_path.build source_root)
-          Package_info.empty
-          (Package.Name.Map.singleton (Package.name package) package)
-      in
-      [ project, Build_source_tree.root tree ], Some tree
-    | None -> [], None
-  in
   let stanza =
     { Opam_stanza.loc = Loc.none
     ; origin = Lock
@@ -222,8 +210,8 @@ let make_opam candidate ~source_root ~source_kind ~tree =
   in
   { Mounted.candidate
   ; source_root
-  ; projects
-  ; tree
+  ; projects = []
+  ; tree = None
   ; source_kind
   ; kind = Opam stanza
   ; package
@@ -234,22 +222,26 @@ let make_opam candidate ~source_root ~source_kind ~tree =
 let prepare candidate =
   match Candidate.source_root candidate with
   | Some source_root ->
+    let make_opaque_opam () =
+      make_opam candidate ~source_root ~source_kind:Primary_source >>| Option.some
+    in
     let* tree = load_source source_root in
     let* has_dune_file = has_dune_file tree in
     if has_dune_file
     then
       let* _, _, dependencies = selected_recipe candidate in
       mount candidate source_root tree dependencies
-    else
-      make_opam candidate ~source_root ~source_kind:Primary_source ~tree:(Some tree)
-      >>| Option.some
+      >>= function
+      | Some mounted -> Memo.return (Some mounted)
+      | None -> make_opaque_opam ()
+    else make_opaque_opam ()
   | None ->
     let source_root =
       Path.Build.L.relative
         (Candidate.artifact_root candidate)
         [ ".opam"; Candidate.name candidate |> Package.Name.to_string; "source" ]
     in
-    make_opam candidate ~source_root ~source_kind:No_source ~tree:None >>| Option.some
+    make_opam candidate ~source_root ~source_kind:No_source >>| Option.some
 ;;
 
 let load_mounted context =
