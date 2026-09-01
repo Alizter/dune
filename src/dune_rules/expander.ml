@@ -758,24 +758,15 @@ let visible_packages t =
   match Dune_project.exclusive_package t.project ~dir:t.source_dir with
   | None -> None
   | Some pkg_id ->
+    let package = Package.Id.name pkg_id in
     let packages = Dune_project.packages t.project in
-    (* A name that is not a workspace package is a lock directory package. It
-       is a leaf of this walk; its own dependencies are added by
-       [Pkg.top_closure] over the lock directory's graph. *)
-    let rec loop acc name =
-      if Package.Name.Set.mem acc name
-      then acc
-      else (
-        let acc = Package.Name.Set.add acc name in
-        match Package.Name.Map.find packages name with
-        | None -> acc
-        | Some pkg ->
-          List.fold_left
-            (Package.depends pkg)
-            ~init:acc
-            ~f:(fun acc (dep : Package_dependency.t) -> loop acc dep.name))
+    let dependencies =
+      Package.Name.Map.find packages package
+      |> Option.to_list
+      |> List.concat_map ~f:Package.depends
+      |> List.map ~f:(fun dependency -> dependency.Package_dependency.name)
     in
-    Some (loop Package.Name.Set.empty (Package.Id.name pkg_id))
+    Some (Package.Name.Set.of_list (package :: dependencies))
 ;;
 
 let expand_pkg_macro ~loc ({ context; _ } as t) macro_invocation =
