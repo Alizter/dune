@@ -409,8 +409,13 @@ end = struct
       let b =
         let dir = Path.build env.dir in
         let loc = loc sw in
+        let program_dep_registered_by_expansion =
+          match String_with_vars.pform_only sw with
+          | Some (Macro { macro = Bin; _ }) -> true
+          | _ -> false
+        in
         let* prog, args = Expander.expand env sw ~mode:At_least_one in
-        let+ prog =
+        let+ prog, runtime_deps =
           match prog with
           | Value.Dir p ->
             User_error.raise
@@ -419,11 +424,11 @@ end = struct
                   "%s is a directory and cannot be used as an executable"
                   (Path.to_string_maybe_quoted p)
               ]
-          | Path p -> Action_builder.return (Ok p)
+          | Path p -> Action_builder.return (Ok p, Path.Set.empty)
           | String s ->
             (match Filename.analyze_program_name s with
              | Relative_to_current_dir | Absolute ->
-               Action_builder.return (Ok (Path.relative dir s))
+               Action_builder.return (Ok (Path.relative dir s), Path.Set.empty)
              | In_path ->
                let dir = env.dir in
                let where =
@@ -431,23 +436,42 @@ end = struct
                  then Artifacts.Original_path
                  else Install_dir
                in
-               Action_builder.of_memo
-               @@
-               let open Memo.O in
-               let* artifacts = Expander.artifacts env.expander in
-               let hint =
-                 match s with
-                 | "refmt" -> Some "opam install reason"
-                 | "rescript_syntax" -> Some "opam install rescript-syntax"
-                 | _ -> None
+               let+ { Artifacts.Program.prog; runtime_deps } =
+                 Action_builder.of_memo
+                 @@
+                 let open Memo.O in
+                 let* artifacts = Expander.artifacts env.expander in
+                 let hint =
+                   match s with
+                   | "refmt" -> Some "opam install reason"
+                   | "rescript_syntax" -> Some "opam install rescript-syntax"
+                   | _ -> None
+                 in
+                 Artifacts.binary_with_runtime_deps
+                   ?hint
+                   ~loc:(Some loc)
+                   ~where
+                   ~dir
+                   artifacts
+                   s
                in
-               Artifacts.binary ?hint ~loc:(Some loc) ~where ~dir artifacts s)
+               prog, runtime_deps)
         in
         let args = Value.L.to_strings ~dir args in
         match prog with
         | Ok prog ->
           let dep, prog, args = Expander.map_exe ~force_host env.expander prog args in
-          Ok prog, args, [ dep ]
+          let runtime_deps = Path.Set.to_list runtime_deps in
+          let deps =
+            if program_dep_registered_by_expansion
+            then runtime_deps
+            else if
+              List.exists runtime_deps ~f:(fun runtime_dep ->
+                Path.equal runtime_dep dep || Path.is_descendant dep ~of_:runtime_dep)
+            then runtime_deps
+            else dep :: runtime_deps
+          in
+          Ok prog, args, deps
         | Error _ as v -> v, args, []
       in
       register_deps b env acc ~f:(function _, _, deps -> deps)

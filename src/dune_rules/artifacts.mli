@@ -14,6 +14,13 @@ type where =
   | Install_dir
   | Original_path
 
+module Program : sig
+  type t =
+    { prog : Action.Prog.t
+    ; runtime_deps : Path.Set.t
+    }
+end
+
 (** Force the computation of the internal list of binaries. This is exposed as
     some error checking is only performed during this computation and some
     errors will go unreported unless this computation takes place. *)
@@ -38,6 +45,15 @@ val binary
   -> loc:Loc.t option
   -> string
   -> Action.Prog.t Memo.t
+
+val binary_with_runtime_deps
+  :  t
+  -> ?hint:string
+  -> ?where:where
+  -> dir:Path.Build.t
+  -> loc:Loc.t option
+  -> string
+  -> Program.t Memo.t
 
 (** Return the installed filename when the selected binary is from a local
     package. *)

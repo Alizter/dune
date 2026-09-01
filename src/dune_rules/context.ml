@@ -65,6 +65,13 @@ module Env_nodes = struct
   ;;
 end
 
+module Resolved_program = struct
+  type t =
+    { path : Path.t
+    ; runtime_deps : Path.Set.t
+    }
+end
+
 type builder =
   { profile : Profile.t
   ; merlin : bool
@@ -89,7 +96,7 @@ and t =
   ; default_ocamlpath : Path.t list Memo.Lazy.t
   ; build_context : Build_context.t
   ; builder : builder
-  ; which : Filename.t -> Path.t option Memo.t
+  ; which : Filename.t -> Resolved_program.t option Memo.t
   }
 
 let default_target_exec ~target_exec toolchain =
@@ -200,7 +207,13 @@ let cms_cmt_dependency t = t.builder.cms_cmt_dependency
 let equal x y = Context_name.equal x.builder.name y.builder.name
 let hash t = Context_name.hash t.builder.name
 let build_context t = t.build_context
-let which t fname = t.which fname
+let which_with_runtime_deps t fname = t.which fname
+
+let which t fname =
+  let+ resolved = which_with_runtime_deps t fname in
+  Option.map resolved ~f:(fun { Resolved_program.path; _ } -> path)
+;;
+
 let name t = t.builder.name
 let path t = t.builder.path
 let installed_env t = t.builder.env
@@ -425,7 +438,12 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
       in
       { builder with env }
   in
-  let which_outside_lockdir = Which.which ~path:builder.path in
+  let which_outside_lockdir_path = Which.which ~path:builder.path in
+  let which_outside_lockdir prog =
+    let+ path = which_outside_lockdir_path prog in
+    Option.map path ~f:(fun path ->
+      { Resolved_program.path; runtime_deps = Path.Set.empty })
+  in
   let which =
     match kind with
     | Default | Opam _ -> which_outside_lockdir
@@ -441,8 +459,13 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
           (fun () ->
              which prog
              >>= function
-             | Some p -> Memo.return (Some p)
-             | None -> Which.which ~path:builder.path prog)
+             | Some (path, runtime_deps) ->
+               Memo.return (Some { Resolved_program.path; runtime_deps })
+             | None -> which_outside_lockdir prog)
+  in
+  let which_path prog =
+    let+ resolved = which prog in
+    Option.map resolved ~f:(fun { Resolved_program.path; _ } -> path)
   in
   let ocamlpath =
     Memo.lazy_
@@ -467,7 +490,11 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
          let findlib_toolchain =
            Option.map builder.findlib_toolchain ~f:Context_name.to_string
          in
-         Findlib_config.discover_from_env ~env ~which ~ocamlpath ~findlib_toolchain)
+         Findlib_config.discover_from_env
+           ~env
+           ~which:which_path
+           ~ocamlpath
+           ~findlib_toolchain)
   in
   let ocaml_and_build_env_kind =
     Memo.Lazy.create
@@ -486,7 +513,7 @@ let create (builder : Builder.t) ~(kind : Kind.t) =
                  builder.name
                  env
                  findlib
-                 ~which:which_outside_lockdir
+                 ~which:which_outside_lockdir_path
              in
              toolchain, kind
            in

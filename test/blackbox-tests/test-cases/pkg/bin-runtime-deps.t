@@ -43,8 +43,5 @@ Change only runtime data in the package's .files directory.
   two
   $ cmp mybin.before "$provider_target/bin/mybin"
 
-CR-someday alizter: This should print "two". The consuming rule depends only on
-the unchanged executable, rather than its package runtime dependencies.
-
   $ cat _build/default/out
-  one
+  two

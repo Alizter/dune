@@ -1138,7 +1138,7 @@ module Action_expander = struct
 
   module Artifacts_and_deps = struct
     type artifacts_and_deps =
-      { binaries : Path.t Filename.Map.t
+      { binaries : (Path.t * Path.Set.t) Filename.Map.t
       ; dep_info :
           (OpamVariable.variable_contents Package_variable_name.Map.t * Path.t Paths.t)
             Package.Name.Map.t
@@ -1156,6 +1156,12 @@ module Action_expander = struct
           cookies
           ~init:empty
           ~f:(fun { binaries; dep_info } ((pkg : Pkg.t), (cookie : Install_cookie.t)) ->
+            let runtime_deps =
+              Pkg.deps_closure pkg
+              |> List.fold_left
+                   ~init:(Path.Set.singleton pkg.paths.target_dir)
+                   ~f:(fun deps (pkg : Pkg.t) -> Path.Set.add deps pkg.paths.target_dir)
+            in
             let binaries =
               Section.Map.Multi.find cookie.files Bin
               |> List.fold_left ~init:binaries ~f:(fun acc bin ->
@@ -1163,7 +1169,7 @@ module Action_expander = struct
                   acc
                   (Filename.of_string_exn
                      (Bin.strip_exe (Path.basename bin |> Filename.to_string)))
-                  bin)
+                  (bin, runtime_deps))
             in
             let dep_info =
               let variables =
@@ -1201,7 +1207,7 @@ module Action_expander = struct
     in
     let artifacts =
       let+ { Artifacts_and_deps.binaries; _ } = Memo.Lazy.force closure in
-      binaries
+      Filename.Map.map binaries ~f:fst
     in
     { Expander.paths = pkg.paths
     ; name = pkg.info.name

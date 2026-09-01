@@ -817,17 +817,24 @@ let expand_pform_macro
     Need_full_expander
       (fun t ->
         With
-          (let* prog =
+          (let* { Artifacts.Program.prog; runtime_deps } =
              Action_builder.of_memo
                (let open Memo.O in
                 let* artifacts_host = t.artifacts_host in
-                Artifacts.binary
+                Artifacts.binary_with_runtime_deps
                   ~loc:(Some (Dune_lang.Template.Pform.loc source))
                   ~dir:t.dir
                   artifacts_host
                   s)
            in
-           dep (Action.Prog.ok_exn prog)))
+           let prog = Action.Prog.ok_exn prog in
+           if
+             Path.Set.exists runtime_deps ~f:(fun runtime_dep ->
+               Path.equal runtime_dep prog || Path.is_descendant prog ~of_:runtime_dep)
+           then
+             let+ () = Action_builder.path_set runtime_deps in
+             path prog
+           else dep prog))
   | Lib { lib_exec; lib_private } ->
     Need_full_expander
       (fun t ->

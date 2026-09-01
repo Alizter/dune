@@ -16,6 +16,13 @@ type where =
   | Install_dir
   | Original_path
 
+module Program = struct
+  type t =
+    { prog : Action.Prog.t
+    ; runtime_deps : Path.Set.t
+    }
+end
+
 type path =
   | Resolved of
       { binding : File_binding.Expanded.t
@@ -50,7 +57,12 @@ let local_binaries { local_bins; _ } =
 
 let analyze_binary t ~dir name =
   match Filename.analyze_program_name name with
-  | Absolute -> Memo.return (`Resolved (Path.of_filename_relative_to_initial_cwd name))
+  | Absolute ->
+    Memo.return
+      (`Resolved
+          { Context.Resolved_program.path = Path.of_filename_relative_to_initial_cwd name
+          ; runtime_deps = Path.Set.empty
+          })
   | (In_path | Relative_to_current_dir) as kind ->
     let* local_bins = Memo.Lazy.force t.local_bins in
     let lookup_name =
@@ -66,13 +78,18 @@ let analyze_binary t ~dir name =
       match lookup_name with
       | None -> Memo.return `None
       | Some lookup_name ->
-        Context.which t.context lookup_name
+        Context.which_with_runtime_deps t.context lookup_name
         >>| (function
          | None -> `None
-         | Some path -> `Resolved path)
+         | Some program -> `Resolved program)
     in
     (match Option.bind lookup_name ~f:(Filename.Map.find local_bins) with
-     | Some (Resolved p) -> Memo.return (`Resolved (Path.build p.path))
+     | Some (Resolved p) ->
+       Memo.return
+         (`Resolved
+             { Context.Resolved_program.path = Path.build p.path
+             ; runtime_deps = Path.Set.empty
+             })
      | None -> which ()
      | Some (Origin origins) ->
        Memo.parallel_map origins ~f:(fun origin ->
@@ -96,35 +113,46 @@ let analyze_binary t ~dir name =
             ]))
 ;;
 
-let binary t ?hint ?(where = Original_path) ~dir ~loc name =
+let binary_with_runtime_deps t ?hint ?(where = Original_path) ~dir ~loc name =
   analyze_binary t ~dir name
   >>= function
-  | `Resolved path -> Memo.return @@ Ok path
+  | `Resolved { path; runtime_deps } ->
+    Memo.return { Program.prog = Ok path; runtime_deps }
   | `None ->
     let context = Context.name t.context in
     Memo.return
-    @@ Error
-         (Action.Prog.Not_found.create
-            ~program:(Filename.of_string_exn name)
-            ?hint
-            ~context
-            ~loc
-            ())
+      { Program.prog =
+          Error
+            (Action.Prog.Not_found.create
+               ~program:(Filename.of_string_exn name)
+               ?hint
+               ~context
+               ~loc
+               ())
+      ; runtime_deps = Path.Set.empty
+      }
   | `Origin { dir; binding; dst; enabled_if = _; package = _ } ->
-    (match where with
-     | Install_dir ->
-       let install_dir = Install.Context.bin_dir ~context:(Context.name t.context) in
-       Memo.return @@ Ok (Path.build @@ Path.Build.append_local install_dir dst)
-     | Original_path ->
-       let+ expanded =
-         let* expander = Expander0.get ~dir in
-         File_binding_expand.expand
-           binding
-           ~dir
-           ~f:(Expander0.expand_str_and_build_deps expander)
-       in
-       let src = File_binding.Expanded.src expanded in
-       Ok (Path.build src))
+    let+ path =
+      match where with
+      | Install_dir ->
+        let install_dir = Install.Context.bin_dir ~context:(Context.name t.context) in
+        Memo.return (Path.build @@ Path.Build.append_local install_dir dst)
+      | Original_path ->
+        let+ expanded =
+          let* expander = Expander0.get ~dir in
+          File_binding_expand.expand
+            binding
+            ~dir
+            ~f:(Expander0.expand_str_and_build_deps expander)
+        in
+        File_binding.Expanded.src expanded |> Path.build
+    in
+    { Program.prog = Ok path; runtime_deps = Path.Set.empty }
+;;
+
+let binary t ?hint ?where ~dir ~loc name =
+  let+ { Program.prog; _ } = binary_with_runtime_deps t ?hint ?where ~dir ~loc name in
+  prog
 ;;
 
 let local_binary_install_name t ~dir name =

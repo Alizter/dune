@@ -35,6 +35,13 @@ module Env_nodes : sig
     }
 end
 
+module Resolved_program : sig
+  type t =
+    { path : Path.t
+    ; runtime_deps : Path.Set.t
+    }
+end
+
 (** A context contains some basic things that are required to build just
     about anything. Note that accessing many fields is possible without
     initializing the context. This should be favored whenever this can break a
@@ -58,6 +65,7 @@ val to_dyn : t -> Dyn.t
 val to_dyn_concise : t -> Dyn.t
 val name : t -> Context_name.t
 val which : t -> Filename.t -> Path.t option Memo.t
+val which_with_runtime_deps : t -> Filename.t -> Resolved_program.t option Memo.t
 
 (** By default Dune builds and installs dynamically linked foreign
     archives (usually named [dll*.so]). It is possible to disable this by
