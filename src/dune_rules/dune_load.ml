@@ -51,7 +51,7 @@ module Mounted_source =
          type t = Source_path.t * Dune_lang.Scope_stanza.t
        end))
 
-module Build_source_tree_map_reduce =
+module Mounted_source_tree_map_reduce =
   Source_tree.Rules.Dir.Make_map_reduce (Memo) (Mounted_source)
 
 let load () =
@@ -245,7 +245,7 @@ let mounted_project_package_scope ~selected_package_names mounted project =
 let mounted_loaded_project context mounted ~package_view (project, source_tree_root) =
   let candidate = Pkg_sources.Mounted.candidate mounted in
   let package_source_root =
-    Pkg_sources.Mounted.working_dir mounted |> Source_path.build
+    Pkg_sources.Candidate.artifact_root candidate |> Source_path.build
   in
   let source_root = Dune_project.root project in
   let project_root =
@@ -260,7 +260,6 @@ let mounted_loaded_project context mounted ~package_view (project, source_tree_r
     ~project
     ~identity:
       (Loaded_project.Identity.mounted
-         ~lock:(Pkg_sources.Candidate.identity_digest candidate)
          ~package:(Pkg_sources.Candidate.name candidate)
          ~project_root)
     ~source_root
@@ -351,8 +350,8 @@ let loaded =
                 Memo.return (dune_files, scopes)
               in
               let* source_dune_files, scopes =
-                Build_source_tree_map_reduce.map_reduce
-                  (Source_tree.Rules.Build.root tree)
+                Mounted_source_tree_map_reduce.map_reduce
+                  (Source_tree.Rules.Mounted.root tree)
                   ~traverse:Source_dir_status.Set.all
                   ~trace_event_name:"Loaded source tree"
                   ~f

@@ -4,13 +4,7 @@ module Identity : sig
   type t
 
   val workspace : Path.Source.t -> t
-
-  val mounted
-    :  lock:Dune_digest.t
-    -> package:Package.Name.t
-    -> project_root:Path.Local.t
-    -> t
-
+  val mounted : package:Package.Name.t -> project_root:Path.Local.t -> t
   val equal : t -> t -> bool
   val repr : t Repr.t
   val digest : t -> Dune_digest.t

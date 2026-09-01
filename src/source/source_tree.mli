@@ -47,6 +47,7 @@ module Rules : sig
 
     val source_path : t -> Source_path.t
     val path : t -> Path.t
+    val backing_path : t -> Path.t
     val relative : t -> Loc.t -> string -> t
     val read : t -> string option Memo.t
     val equal : t -> t -> bool
@@ -60,7 +61,13 @@ module Rules : sig
 
     val source : Dir.t -> t
     val source_path : t -> Source_path.t
+
+    (** The logical directory used by source semantics. *)
     val path : t -> Path.t
+
+    (** The directory from which source contents are enumerated. *)
+    val backing_path : t -> Path.t
+
     val file : t -> Filename.t -> File.t
     val relative_dir : t -> Path.Local.t
     val filenames : t -> Filename.Array.Set.t
@@ -83,14 +90,16 @@ module Rules : sig
     end
   end
 
-  module Build : sig
+  module Mounted : sig
     type t
 
-    (** Load a tree whose root is a build-system directory target. Topology and
-        file contents are obtained through [Build_system]. *)
-    val load : Path.Build.t -> t Memo.t
+    (** Load a logical mounted tree whose immutable contents are backed by a
+        build-system directory target. *)
+    val load : logical_root:Path.Build.t -> backing_root:Path.Build.t -> t Memo.t
 
+    (** The logical mounted root. *)
     val source_root : t -> Path.Build.t
+
     val root : t -> Dir.t
     val projects : t -> (Dune_project.t * Dir.t) list
   end

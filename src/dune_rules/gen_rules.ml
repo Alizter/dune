@@ -900,26 +900,23 @@ let mounted_context ~resolver ~dir components =
     |> Filename.Set.of_list
     |> Subdir_set.of_set
     |> Gen_rules.make_empty ~dir
-  | component :: id :: rest when String.equal component Pkg_sources.artifact_dir_basename
-    ->
-    let* mounted = Pkg_sources.mounted resolver in
-    (match
-       List.find mounted ~f:(fun mounted ->
-         let artifact_root =
-           Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.artifact_root
-         in
-         String.equal id (Path.Build.basename artifact_root |> Filename.to_string))
-     with
+  | component :: package :: rest
+    when String.equal component Pkg_sources.artifact_dir_basename ->
+    (match Package.Name.of_string_opt package with
      | None -> Memo.return Gen_rules.unknown_context
-     | Some mounted ->
-       (match Pkg_sources.Mounted.kind mounted with
-        | Dune -> gen_rules resolver (Super_context.find_exn resolver) ~dir rest
-        | Opam _ ->
-          Pkg_rules.setup_mounted_opam_package_rules
-            resolver
-            mounted
-            ~dir
-            ~components:rest))
+     | Some package ->
+       Pkg_sources.find_mounted resolver package
+       >>= (function
+        | None -> Memo.return Gen_rules.unknown_context
+        | Some mounted ->
+          (match Pkg_sources.Mounted.kind mounted with
+           | Dune -> gen_rules resolver (Super_context.find_exn resolver) ~dir rest
+           | Opam _ ->
+             Pkg_rules.setup_mounted_opam_package_rules
+               resolver
+               mounted
+               ~dir
+               ~components:rest)))
   | _ -> Memo.return Gen_rules.unknown_context
 ;;
 

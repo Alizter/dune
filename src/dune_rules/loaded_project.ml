@@ -4,26 +4,23 @@ module Identity = struct
   type t =
     | Workspace of Path.Source.t
     | Mounted of
-        { lock : Dune_digest.t
-        ; package : Package.Name.t
+        { package : Package.Name.t
         ; project_root : Path.Local.t
         }
 
   let workspace root = Workspace root
-  let mounted ~lock ~package ~project_root = Mounted { lock; package; project_root }
+  let mounted ~package ~project_root = Mounted { package; project_root }
 
   let equal a b =
     match a, b with
     | Workspace a, Workspace b -> Path.Source.equal a b
     | Mounted a, Mounted b ->
-      Dune_digest.equal a.lock b.lock
-      && Package.Name.equal a.package b.package
+      Package.Name.equal a.package b.package
       && Path.Local.equal a.project_root b.project_root
     | Workspace _, Mounted _ | Mounted _, Workspace _ -> false
   ;;
 
   let repr =
-    let digest_repr = Repr.view Repr.string ~to_:Dune_digest.to_string in
     Repr.variant
       "loaded-project-identity"
       [ Repr.case "Workspace" Path.Source.repr ~proj:(function
@@ -31,10 +28,10 @@ module Identity = struct
           | Mounted _ -> None)
       ; Repr.case
           "Mounted"
-          (Repr.T3.repr digest_repr Package.Name.repr Path.Local.repr)
+          Repr.(pair Package.Name.repr Path.Local.repr)
           ~proj:(function
-          | Mounted { lock; package; project_root } -> Some (lock, package, project_root)
-          | Workspace _ -> None)
+            | Mounted { package; project_root } -> Some (package, project_root)
+            | Workspace _ -> None)
       ]
   ;;
 
@@ -42,12 +39,11 @@ module Identity = struct
 
   let to_dyn = function
     | Workspace root -> Dyn.variant "Workspace" [ Path.Source.to_dyn root ]
-    | Mounted { lock; package; project_root } ->
+    | Mounted { package; project_root } ->
       Dyn.variant
         "Mounted"
         [ Dyn.record
-            [ "lock", Dune_digest.to_dyn lock
-            ; "package", Package.Name.to_dyn package
+            [ "package", Package.Name.to_dyn package
             ; "project_root", Path.Local.to_dyn project_root
             ]
         ]

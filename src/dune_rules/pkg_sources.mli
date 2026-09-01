@@ -8,7 +8,6 @@ module Candidate : sig
   val name : t -> Package.Name.t
   val lock_pkg : t -> Dune_pkg.Lock_dir.Pkg.t
   val artifact_root : t -> Path.Build.t
-  val identity_digest : t -> Dune_digest.t
 end
 
 module Mounted : sig
@@ -29,7 +28,7 @@ module Mounted : sig
   val working_dir : t -> Path.Build.t
 
   val projects : t -> (Dune_project.t * Source_tree.Rules.Dir.t) list
-  val tree : t -> Source_tree.Rules.Build.t option
+  val tree : t -> Source_tree.Rules.Mounted.t option
   val source_kind : t -> source_kind
   val kind : t -> kind
   val package : t -> Package.t

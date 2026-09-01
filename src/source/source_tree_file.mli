@@ -4,9 +4,15 @@ module File : sig
   type t
 
   val workspace : Path.Source.t -> t
-  val build : Path.Build.t -> t
+  val mounted : logical:Path.Build.t -> backing:Path.Build.t -> t
   val source_path : t -> Source_path.t
+
+  (** The logical path used by source semantics and diagnostics. *)
   val path : t -> Path.t
+
+  (** The immutable input from which the file is read. *)
+  val backing_path : t -> Path.t
+
   val as_workspace : t -> Path.Source.t option
   val relative : t -> Loc.t -> string -> t
   val read : t -> string option Memo.t
@@ -19,9 +25,15 @@ module Dir : sig
   type t
 
   val workspace : Path.Source.t -> t
-  val build : Path.Build.t -> t
+  val mounted : logical:Path.Build.t -> backing:Path.Build.t -> t
   val source_path : t -> Source_path.t
+
+  (** The logical path used by source semantics. *)
   val path : t -> Path.t
+
+  (** The immutable directory from which contents are enumerated. *)
+  val backing_path : t -> Path.t
+
   val basename : t -> Filename.t
   val file : t -> Filename.t -> File.t
 end
