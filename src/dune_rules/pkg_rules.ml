@@ -460,6 +460,25 @@ module Mounted_packages = struct
       |> Option.value_exn
   ;;
 
+  let provider mounted =
+    match Pkg_sources.Mounted.kind mounted with
+    | Dune -> Opam_package_rules.Dependency_provider.Local (local_package mounted)
+    | Opam stanza ->
+      let name = Package.name stanza.package in
+      let _, paths = opam_paths mounted name in
+      Opam_package_rules.Dependency_provider.Opam { stanza; paths }
+  ;;
+
+  let forwards_capabilities mounted =
+    let name = Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.name in
+    if Dune_pkg.Dev_tool.is_compiler_package name
+    then true
+    else (
+      match Pkg_sources.Mounted.source_kind mounted, Pkg_sources.Mounted.kind mounted with
+      | No_source, Opam { build = None; install = None; _ } -> true
+      | (Primary_source | No_source), (Dune | Opam _) -> false)
+  ;;
+
   let dependencies mounted =
     Package.depends (package mounted)
     |> List.filter_map ~f:(fun dependency ->
@@ -484,7 +503,7 @@ module Mounted_packages = struct
     | Some packages -> Package.Name.Set.to_list packages |> List.filter_map ~f:(find t)
   ;;
 
-  let closure t roots =
+  let closure_if t roots ~follow =
     let rec visit name (visited, ordered) =
       if Package.Name.Set.mem visited name
       then visited, ordered
@@ -494,10 +513,13 @@ module Mounted_packages = struct
         | Some mounted ->
           let visited = Package.Name.Set.add visited name in
           let visited, ordered =
-            List.fold_left
-              (dependencies mounted)
-              ~init:(visited, ordered)
-              ~f:(fun acc name -> visit name acc)
+            if follow mounted
+            then
+              List.fold_left
+                (dependencies mounted)
+                ~init:(visited, ordered)
+                ~f:(fun acc name -> visit name acc)
+            else visited, ordered
           in
           visited, mounted :: ordered)
     in
@@ -507,18 +529,25 @@ module Mounted_packages = struct
     |> List.rev
   ;;
 
-  let provider mounted =
-    match Pkg_sources.Mounted.kind mounted with
-    | Dune -> Opam_package_rules.Dependency_provider.Local (local_package mounted)
-    | Opam stanza ->
-      let name = Package.name stanza.package in
-      let _, paths = opam_paths mounted name in
-      Opam_package_rules.Dependency_provider.Opam { stanza; paths }
-  ;;
+  let closure t roots = closure_if t roots ~follow:(Fun.const true)
+  let capability_closure t roots = closure_if t roots ~follow:forwards_capabilities
 
-  let materialize context mounted =
-    List.map mounted ~f:provider
-    |> Opam_package_rules.Dependency_provider.materialize context
+  let materialize_capabilities context packages direct =
+    let open Action_builder.O in
+    let direct_names =
+      List.map direct ~f:(fun mounted -> Package.name (package mounted))
+    in
+    let direct_name_set = Package.Name.Set.of_list direct_names in
+    let all = capability_closure packages direct_names in
+    let+ all =
+      List.map all ~f:provider
+      |> Opam_package_rules.Dependency_provider.materialize context
+    in
+    let packages =
+      Package.Name.Map.filteri all.packages ~f:(fun name _ ->
+        Package.Name.Set.mem direct_name_set name)
+    in
+    { all with packages }
   ;;
 
   let binaries context mounted =
@@ -1010,31 +1039,22 @@ let setup_rules ~components ~dir ctx =
   | _ -> Memo.return @@ Gen_rules.rules_here Gen_rules.Rules.empty
 ;;
 
-let mounted_dependency_providers context (stanza : Opam_stanza.t) =
-  Memo.List.filter_map (Package.depends stanza.package) ~f:(fun dependency ->
-    let name = dependency.Package_dependency.name in
-    if Package.Name.equal name Dune_pkg.Dune_dep.name
-    then Memo.return None
-    else
-      Pkg_sources.find_mounted context name
-      >>| function
-      | None ->
-        User_error.raise
-          ~loc:stanza.loc
-          [ Pp.textf "Package %s does not exist" (Package.Name.to_string name) ]
-      | Some mounted ->
-        (match Pkg_sources.Mounted.kind mounted with
-         | Dune ->
-           let package =
-             Pkg_sources.Mounted.projects mounted
-             |> List.find_map ~f:(fun (project, _) ->
-               Package.Name.Map.find (Dune_project.including_hidden_packages project) name)
-             |> Option.value_exn
-           in
-           Some (Opam_package_rules.Dependency_provider.Local package)
-         | Opam stanza ->
-           let _, paths = opam_paths mounted name in
-           Some (Opam_package_rules.Dependency_provider.Opam { stanza; paths })))
+let mounted_dependencies context (stanza : Opam_stanza.t) =
+  let+ packages = Mounted_packages.create context in
+  let dependencies =
+    List.filter_map (Package.depends stanza.package) ~f:(fun dependency ->
+      let name = dependency.Package_dependency.name in
+      if Package.Name.equal name Dune_pkg.Dune_dep.name
+      then None
+      else (
+        match Mounted_packages.find packages name with
+        | Some mounted -> Some mounted
+        | None ->
+          User_error.raise
+            ~loc:stanza.loc
+            [ Pp.textf "Package %s does not exist" (Package.Name.to_string name) ]))
+  in
+  packages, dependencies
 ;;
 
 let gen_opam_rules context ~dir package_name =
@@ -1092,10 +1112,10 @@ let gen_opam_rules context ~dir package_name =
   in
   let dependencies =
     let open Action_builder.O in
-    let* providers =
-      Action_builder.of_memo (mounted_dependency_providers context stanza)
+    let* packages, dependencies =
+      Action_builder.of_memo (mounted_dependencies context stanza)
     in
-    Opam_package_rules.Dependency_provider.materialize context providers
+    Mounted_packages.materialize_capabilities context packages dependencies
   in
   Opam_package_rules.gen_rules
     context
@@ -1162,7 +1182,7 @@ let binaries_for_package context package =
        let dependencies =
          Mounted_packages.find_exn packages package
          |> Mounted_packages.dependencies
-         |> List.map ~f:(Mounted_packages.find_exn packages)
+         |> Mounted_packages.capability_closure packages
        in
        Mounted_packages.binaries context dependencies)
 ;;
@@ -1182,7 +1202,7 @@ let ocaml_toolchain context =
     let toolchain =
       let open Action_builder.O in
       let* { Package_deps.env; binaries; _ } =
-        Mounted_packages.materialize context closure
+        Mounted_packages.materialize_capabilities context packages closure
       in
       let env = Env.extend_env (Global.env ()) env in
       let binaries = Filename.Map.values binaries |> Path.Set.of_list in
@@ -1380,9 +1400,13 @@ let bin_path_env ~(packages : Package.Name.Set.t option) context =
   | false -> Memo.return Env.empty
   | true ->
     let* mounted = Mounted_packages.create context in
-    let+ materialized =
-      Mounted_packages.selected mounted packages |> Mounted_packages.environment context
+    let selected = Mounted_packages.selected mounted packages in
+    let capabilities =
+      List.map selected ~f:(fun package ->
+        Mounted_packages.package package |> Package.name)
+      |> Mounted_packages.capability_closure mounted
     in
+    let+ materialized = Mounted_packages.environment context capabilities in
     (match Env.get materialized.env Env_path.var with
      | None -> Env.empty
      | Some value -> Env.add Env.empty ~var:Env_path.var ~value)
@@ -1395,7 +1419,7 @@ let all_filtered_depexts context =
     let package = Mounted_packages.package mounted in
     let dependencies =
       Mounted_packages.dependencies mounted
-      |> List.map ~f:(Mounted_packages.find_exn packages)
+      |> Mounted_packages.capability_closure packages
     in
     let* dependencies = Mounted_packages.environment context dependencies in
     let stanza, paths =
