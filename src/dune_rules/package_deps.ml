@@ -277,31 +277,34 @@ let variables package =
 ;;
 
 type t =
-  { env : Env.t
+  { value_env : Value_list_env.t
   ; binaries : Path.t Filename.Map.t
   ; packages : (package_variables * concrete_paths) Package.Name.Map.t
   }
 
 let empty =
-  { env = Env.empty; binaries = Filename.Map.empty; packages = Package.Name.Map.empty }
+  { value_env = Env.Map.empty
+  ; binaries = Filename.Map.empty
+  ; packages = Package.Name.Map.empty
+  }
 ;;
 
-let add_package t ~paths ~variables ~files ~exported_env =
-  let env =
+let env { value_env; _ } = Value_list_env.to_env value_env
+
+let add_package { value_env; binaries; packages } ~paths ~variables ~files ~exported_env =
+  let value_env =
     let roots = Paths.install_roots paths in
-    let env =
-      let init =
-        Value_list_env.add_path (Value_list_env.of_env t.env) Env_path.var roots.bin
-      in
+    let init = Value_list_env.add_path value_env Env_path.var roots.bin in
+    let value_env =
       Install.Roots.to_env_without_path roots ~relative:Path.relative
       |> List.fold_left ~init ~f:(fun env (var, path) ->
         Value_list_env.add_path env var path)
     in
-    List.fold_left exported_env ~init:env ~f:Env_update.set |> Value_list_env.to_env
+    List.fold_left exported_env ~init:value_env ~f:Env_update.set
   in
   let binaries =
     Section.Map.Multi.find files Bin
-    |> List.fold_left ~init:t.binaries ~f:(fun binaries path ->
+    |> List.fold_left ~init:binaries ~f:(fun binaries path ->
       let name =
         Path.basename path
         |> Filename.to_string
@@ -310,6 +313,6 @@ let add_package t ~paths ~variables ~files ~exported_env =
       in
       Filename.Map.set binaries name path)
   in
-  let packages = Package.Name.Map.set t.packages paths.name (variables, paths) in
-  { env; binaries; packages }
+  let packages = Package.Name.Map.set packages paths.name (variables, paths) in
+  { value_env; binaries; packages }
 ;;

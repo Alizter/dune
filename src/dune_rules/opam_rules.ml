@@ -226,7 +226,7 @@ let binaries context ~packages:selected =
 
 let exported_env context ~packages:selected =
   let+ materialized = materialize_selected context selected in
-  materialized.Package_deps.env
+  Package_deps.env materialized
 ;;
 
 let libraries context package_names ~parent =

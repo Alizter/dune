@@ -334,8 +334,7 @@ and combined_package_deps_builder expander pkgs =
       { Package_deps_eval.loc; name })
   in
   let dune_version = Expander.project expander |> Dune_project.dune_version in
-  Package_deps_eval.materialize context ~dune_version dependencies
-  >>| fun materialized -> materialized.Package_deps.env
+  Package_deps_eval.materialize context ~dune_version dependencies >>| Package_deps.env
 
 and named_paths_builder ~expander l =
   let builders, bindings, combined_packages_builder, bin_names, include_envs =
