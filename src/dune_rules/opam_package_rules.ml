@@ -17,49 +17,31 @@ end
 module Variable = Package_deps.Variable
 
 module Package_universe = struct
-  (* A type of group of packages that are co-installed. Multiple different
-     versions of a package may be co-installed into the same universe.
-
-     Note that a dev tool universe just contains the package for the dev tool
-     itself and not its dependencies, which are installed into the
-     [Dependencies _] universe for the default context so they may be
-     shared with the project's dependencies. *)
   type t =
-    | Dependencies of Context_name.t
     | Dev_tool of Dune_pkg.Dev_tool.t
+    | Dev_tool_dependency of Dune_pkg.Dev_tool.t
 
   let equal a b =
     match a, b with
-    | Dependencies a, Dependencies b -> Context_name.equal a b
-    | Dev_tool a, Dev_tool b -> Dune_pkg.Dev_tool.equal a b
-    | _ -> false
+    | Dev_tool a, Dev_tool b | Dev_tool_dependency a, Dev_tool_dependency b ->
+      Dune_pkg.Dev_tool.equal a b
+    | Dev_tool _, Dev_tool_dependency _ | Dev_tool_dependency _, Dev_tool _ -> false
   ;;
 
-  let hash t =
-    match t with
-    | Dependencies context_name ->
-      Tuple.T2.hash Int.hash Context_name.hash (0, context_name)
-    | Dev_tool dev_tool -> Tuple.T2.hash Int.hash Dune_pkg.Dev_tool.hash (1, dev_tool)
+  let hash = function
+    | Dev_tool dev_tool -> Tuple.T2.hash Int.hash Dune_pkg.Dev_tool.hash (0, dev_tool)
+    | Dev_tool_dependency dev_tool ->
+      Tuple.T2.hash Int.hash Dune_pkg.Dev_tool.hash (1, dev_tool)
   ;;
 
-  let context_name = function
-    | Dependencies context_name -> context_name
-    | Dev_tool _ ->
-      (* Dev tools can only be built in the default context. *)
-      Context_name.default
+  let context_name (Dev_tool _ | Dev_tool_dependency _) = Context_name.default
+
+  let lock_dir_path (Dev_tool dev_tool | Dev_tool_dependency dev_tool) =
+    Lock_dir.dev_tool_lock_dir dev_tool |> Option.some |> Memo.return
   ;;
 
-  let lock_dir_path t =
-    match t with
-    | Dependencies ctx -> Lock_dir.get_path ctx
-    | Dev_tool dev_tool ->
-      Lock_dir.dev_tool_lock_dir dev_tool |> Option.some |> Memo.return
-  ;;
-
-  let lock_dir t =
-    match t with
-    | Dependencies ctx -> Lock_dir.get_exn ctx
-    | Dev_tool dev_tool -> Lock_dir.of_dev_tool dev_tool
+  let lock_dir (Dev_tool dev_tool | Dev_tool_dependency dev_tool) =
+    Lock_dir.of_dev_tool dev_tool
   ;;
 end
 
@@ -165,11 +147,14 @@ module Paths = struct
   let make pkg_digest universe =
     let root =
       match (universe : Package_universe.t) with
-      | Dependencies ctx ->
-        Path.Build.L.relative
-          Private_context.t.build_dir
-          [ Context_name.to_string ctx; ".pkg"; Pkg_digest.to_string pkg_digest ]
       | Dev_tool dev_tool -> Pkg_dev_tool.universe_install_path dev_tool
+      | Dev_tool_dependency dev_tool ->
+        Path.Build.L.relative
+          (Pkg_dev_tool.universe_install_path dev_tool |> Path.Build.parent_exn)
+          [ ".pkg"
+          ; Dune_pkg.Dev_tool.package_name dev_tool |> Package.Name.to_string
+          ; Pkg_digest.to_string pkg_digest
+          ]
     in
     of_root pkg_digest.name ~root
   ;;
@@ -2132,7 +2117,7 @@ let stanza_of_pkg (pkg : Pkg.t) =
   }
 ;;
 
-let gen_rules_legacy context_name (pkg : Pkg.t) ~source ~source_deps ~dependencies =
+let gen_dev_tool_rules context_name (pkg : Pkg.t) ~source ~source_deps ~dependencies =
   let* () = Action_expander.refresh_exported_env context_name dependencies in
   let dependencies =
     Action_expander.Artifacts_and_deps.materialize context_name dependencies

@@ -3,8 +3,8 @@ module Variable = Package_deps.Variable
 
 module Package_universe : sig
   type t =
-    | Dependencies of Context_name.t
     | Dev_tool of Dune_pkg.Dev_tool.t
+    | Dev_tool_dependency of Dune_pkg.Dev_tool.t
 
   val equal : t -> t -> bool
   val hash : t -> int
@@ -205,7 +205,7 @@ val gen_rules
   -> dependencies:Package_deps.t Action_builder.t
   -> unit Memo.t
 
-val gen_rules_legacy
+val gen_dev_tool_rules
   :  Context_name.t
   -> Pkg.t
   -> source:Source_input.t
