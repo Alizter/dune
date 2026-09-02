@@ -18,8 +18,28 @@ exact event counts or counter values.
 
   $ unset OCAML_RUNTIME_EVENTS_DIR
   $ export OCAMLRUNPARAM=s=32k
-  $ export DUNE_TRACE=runtime
+  $ export DUNE_TRACE=+runtime
   $ dune build @runtest
+
+A subsequent null build must not save the workspace cache. In particular, the
+runtime event ring buffer must not temporarily modify the source directory and
+mark the filesystem memo dirty.
+
+  $ dune build @runtest
+  $ dune trace cat | jq -s '
+  >   [ .[]
+  >   | select(.cat == "persistent"
+  >            and .name == "db"
+  >            and .args.module == "WORKSPACE-CACHE"
+  >            and .args.operation == "save")
+  >   ]
+  > | length
+  > '
+  0
+
+The runtime removes its ring buffer when the process exits.
+
+  $ find _build/.runtime-events -type f -name '*.events'
 
   $ dune trace cat | jq -s '
   >   [ .[] | select(.cat == "runtime") ]
