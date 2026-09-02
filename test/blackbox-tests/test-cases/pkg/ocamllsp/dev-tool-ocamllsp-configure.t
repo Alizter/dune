@@ -42,3 +42,11 @@ Installing ocamllsp picks the right version of ocamlbuild
   - ocaml-compiler.5.2.0
   - ocaml-lsp-server.0.0.1
   - ocamlbuild.0.0.2
+
+Dev-tool dependencies stay inside the dev-tool universe rather than reviving the
+normal project `.pkg` dispatcher:
+
+  $ test ! -d _build/_private/default/.pkg && echo no-normal-pkg-universe
+  no-normal-pkg-universe
+  $ test -n "$(find _build/_private/default/.dev-tool/.pkg/ocaml-lsp-server -maxdepth 1 -type d -name 'ocamlbuild.*' -print -quit)" && echo contained-dev-tool-dependency
+  contained-dev-tool-dependency
