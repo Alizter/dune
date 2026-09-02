@@ -928,10 +928,11 @@ let ocaml_toolchain context =
     let closure = Mounted_packages.closure packages [ ocaml ] in
     let toolchain =
       let open Action_builder.O in
-      let* { Package_deps.env; binaries; _ } =
+      let* materialized =
         Mounted_packages.materialize_capabilities context packages closure
       in
-      let env = Env.extend_env (Global.env ()) env in
+      let env = Env.extend_env (Global.env ()) (Package_deps.env materialized) in
+      let { Package_deps.binaries; _ } = materialized in
       let binaries = Filename.Map.values binaries |> Path.Set.of_list in
       let path = Env_path.path (Global.env ()) in
       Action_builder.of_memo @@ Ocaml_toolchain.of_binaries ~path context env binaries
@@ -1109,8 +1110,8 @@ let exported_env context =
   @@ fun () ->
   let* mounted = Mounted_packages.create context in
   let packages = Package.Name.Map.keys mounted |> Mounted_packages.closure mounted in
-  let+ { Package_deps.env; _ } = Mounted_packages.environment context packages in
-  env
+  let+ materialized = Mounted_packages.environment context packages in
+  Package_deps.env materialized
 ;;
 
 let bin_path_env ~(packages : Package.Name.Set.t option) context =
@@ -1132,7 +1133,7 @@ let bin_path_env ~(packages : Package.Name.Set.t option) context =
       |> Mounted_packages.capability_closure mounted
     in
     let+ materialized = Mounted_packages.environment context capabilities in
-    (match Env.get materialized.env Env_path.var with
+    (match Env.get (Package_deps.env materialized) Env_path.var with
      | None -> Env.empty
      | Some value -> Env.add Env.empty ~var:Env_path.var ~value)
 ;;
