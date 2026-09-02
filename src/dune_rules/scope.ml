@@ -995,15 +995,7 @@ module DB = struct
       Loaded_project.partition loaded_project |> Build_partition.output_root
     in
     let* stanzas = Dune_load.dune_files ctx
-    and* loaded_projects = Dune_load.loaded_projects ctx
-    and* context = Context.DB.get ctx in
-    let* installed_libs =
-      let* paths = Context.default_ocamlpath context in
-      Lib.DB.of_paths context ~paths
-    in
-    let* scopes, _ =
-      create_from_stanzas_internal ~installed_libs ~loaded_projects ~context:ctx stanzas
-    in
+    and* scopes, _ = mounted_scopes ctx in
     let* libraries, deprecated_library_names =
       Dune_file.Memo_fold.fold_static_stanzas
         stanzas
