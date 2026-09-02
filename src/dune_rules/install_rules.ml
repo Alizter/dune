@@ -855,26 +855,33 @@ end = struct
           -> Install.Entry.Unexpanded.compare a.entry b.entry))
   ;;
 
+  let mounted_package_stanzas_by_output_root =
+    Per_context.create_by_name ~name:"mounted-install-stanzas" (fun context ->
+      Memo.lazy_ ~name:"mounted-install-stanzas" (fun () ->
+        let+ stanzas = Dune_load.dune_files context in
+        Dune_file.fold_static_stanzas
+          stanzas
+          ~init:Path.Build.Map.empty
+          ~f:(fun dune_file stanza stanzas ->
+            let stanza_project = Dune_file.loaded_dir dune_file |> Loaded_dir.project in
+            match
+              Loaded_project.package_owner stanza_project, Stanzas.stanza_package stanza
+            with
+            | Some _, Some _ ->
+              let output_root =
+                Loaded_project.partition stanza_project |> Build_partition.output_root
+              in
+              Path.Build.Map.add_multi stanzas output_root (dune_file, stanza)
+            | None, _ | _, None -> stanzas))
+      |> Memo.Lazy.force)
+    |> Staged.unstage
+  ;;
+
   let entries_for_loaded_package sctx loaded_project ~scope ~metadata_libraries pkg =
     let context = Super_context.context sctx in
     let ctx = Context.build_context context in
     let pkg_name = Package.name pkg in
     let mounted_owner = Loaded_project.package_owner loaded_project in
-    let same_package_project stanza_project =
-      match mounted_owner with
-      | None ->
-        Loaded_project.Identity.equal
-          (Loaded_project.identity stanza_project)
-          (Loaded_project.identity loaded_project)
-      | Some _ ->
-        let package_root =
-          Loaded_project.partition loaded_project |> Build_partition.output_root
-        in
-        let stanza_package_root =
-          Loaded_project.partition stanza_project |> Build_partition.output_root
-        in
-        Path.Build.equal package_root stanza_package_root
-    in
     let library_ids libraries =
       List.map libraries ~f:(fun library ->
         Lib.Local.info library |> Lib_info.lib_id |> Lib_id.to_local_exn)
@@ -913,41 +920,55 @@ end = struct
       | _, _, _ -> Some stanza
     in
     let* metadata_files = package_metadata_files sctx loaded_project pkg in
-    let* stanzas = Dune_load.dune_files ctx.name in
+    let* stanzas =
+      match mounted_owner with
+      | None ->
+        let+ stanzas = Dune_load.dune_files ctx.name in
+        `Workspace stanzas
+      | Some _ ->
+        let output_root =
+          Loaded_project.partition loaded_project |> Build_partition.output_root
+        in
+        let+ stanzas = mounted_package_stanzas_by_output_root ctx.name in
+        `Mounted (Path.Build.Map.find stanzas output_root |> Option.value ~default:[])
+    in
     let* package_db = Package_db.create ctx.name in
+    let add_stanza_entry acc dune_file stanza =
+      let source_dir = Dune_file.source_dir dune_file in
+      match localize_auxiliary_library stanza ~source_dir with
+      | None -> acc
+      | Some stanza ->
+        (match Stanzas.stanza_package stanza with
+         | None -> acc
+         | Some package when not (Package.Name.equal (Package.Id.name package) pkg_name)
+           -> acc
+         | Some _ ->
+           let dir = Dune_file.output_dir dune_file in
+           let named_entries =
+             let* expander = Super_context.expander sctx ~dir
+             and* scope =
+               match scope with
+               | None -> Scope.DB.find_by_dir dir
+               | Some scope -> Memo.return scope
+             in
+             stanza_to_entries ~package_db ~sctx ~dir ~source_dir ~scope ~expander stanza
+           in
+           named_entries :: acc)
+    in
     let entries =
-      Dune_file.fold_static_stanzas stanzas ~init:[] ~f:(fun dune_file stanza acc ->
-        let stanza_project = Dune_file.loaded_dir dune_file |> Loaded_dir.project in
-        if not (same_package_project stanza_project)
-        then acc
-        else (
-          let source_dir = Dune_file.source_dir dune_file in
-          match localize_auxiliary_library stanza ~source_dir with
-          | None -> acc
-          | Some stanza ->
-            (match Stanzas.stanza_package stanza with
-             | None -> acc
-             | Some package
-               when not (Package.Name.equal (Package.Id.name package) pkg_name) -> acc
-             | Some _ ->
-               let dir = Dune_file.output_dir dune_file in
-               let named_entries =
-                 let* expander = Super_context.expander sctx ~dir
-                 and* scope =
-                   match scope with
-                   | None -> Scope.DB.find_by_dir dir
-                   | Some scope -> Memo.return scope
-                 in
-                 stanza_to_entries
-                   ~package_db
-                   ~sctx
-                   ~dir
-                   ~source_dir
-                   ~scope
-                   ~expander
-                   stanza
-               in
-               named_entries :: acc)))
+      match stanzas with
+      | `Workspace stanzas ->
+        Dune_file.fold_static_stanzas stanzas ~init:[] ~f:(fun dune_file stanza acc ->
+          let stanza_project = Dune_file.loaded_dir dune_file |> Loaded_dir.project in
+          if
+            Loaded_project.Identity.equal
+              (Loaded_project.identity stanza_project)
+              (Loaded_project.identity loaded_project)
+          then add_stanza_entry acc dune_file stanza
+          else acc)
+      | `Mounted stanzas ->
+        List.fold_left stanzas ~init:[] ~f:(fun acc (dune_file, stanza) ->
+          add_stanza_entry acc dune_file stanza)
     in
     let+ entries = Memo.all_concurrently entries in
     List.fold_left entries ~init:metadata_files ~f:(fun acc named_entries ->
