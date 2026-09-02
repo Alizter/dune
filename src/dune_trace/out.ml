@@ -8,6 +8,7 @@ type runtime_clock =
 type runtime =
   { callbacks : Runtime.Callbacks.t
   ; cursor : Runtime.cursor
+  ; cleanup_dir : string option
   }
 
 type t =
@@ -68,6 +69,15 @@ let close t =
       Fd.close t.fd))
 ;;
 
+let prepare_runtime_shutdown t =
+  Option.iter t.runtime ~f:(fun { cleanup_dir; _ } ->
+    Runtime.pause ();
+    (* The runtime keeps a relative path to the ring buffer and removes it after
+       OCaml exit handlers finish. Leave the process in that directory now that
+       Dune's trace-dependent exit handlers have run. *)
+    Option.iter cleanup_dir ~f:Unix.chdir)
+;;
+
 let to_buffer t sexp =
   let rec loop = function
     | Csexp.Atom str ->
@@ -104,7 +114,7 @@ let flush t =
 ;;
 
 let emit_runtime t =
-  Option.iter t.runtime ~f:(fun { callbacks; cursor } ->
+  Option.iter t.runtime ~f:(fun { callbacks; cursor; _ } ->
     (* Avoid recording allocations done while consuming runtime events. *)
     Runtime.pause ();
     Exn.protect ~finally:Runtime.resume ~f:(fun () ->
@@ -134,12 +144,30 @@ let finish t event =
 ;;
 
 let setup_runtime ~events_dir =
-  Option.iter events_dir ~f:(fun path ->
+  let start () =
+    Runtime.start ();
+    Runtime.pause ();
+    let cursor = Runtime.create_cursor None in
+    let cleanup_dir =
+      match Runtime.path () with
+      | Some path when Filename.is_relative path -> Some (Unix.getcwd ())
+      | None | Some _ -> None
+    in
+    cursor, cleanup_dir
+  in
+  match Runtime.path (), events_dir with
+  | Some _, _ | None, None -> start ()
+  | None, Some path ->
+    (* [OCAML_RUNTIME_EVENTS_DIR] is cached before OCaml code starts. Starting
+       runtime events from this directory is therefore necessary when tracing
+       enables them later. The cursor must be opened before restoring [cwd]. *)
     let dir = Path.relative (Path.parent_exn path) ".runtime-events" in
     Path.mkdir_p dir;
-    Unix.putenv "OCAML_RUNTIME_EVENTS_DIR" (Path.to_absolute_filename dir));
-  Runtime.start ();
-  Runtime.pause ()
+    let dir = Path.to_absolute_filename dir in
+    Unix.putenv "OCAML_RUNTIME_EVENTS_DIR" dir;
+    let cwd = Unix.getcwd () in
+    Unix.chdir dir;
+    Exn.protect ~f:start ~finally:(fun () -> Unix.chdir cwd)
 ;;
 
 let runtime_callbacks =
@@ -182,13 +210,17 @@ let runtime_callbacks =
 let create how =
   let cats = Category.enabled () in
   let runtime_enabled = Category.Set.mem cats Runtime in
-  if runtime_enabled
-  then
-    setup_runtime
-      ~events_dir:
-        (match how with
-         | `Fd _ -> None
-         | `Path path -> Some path);
+  let runtime_cursor =
+    if runtime_enabled
+    then
+      Some
+        (setup_runtime
+           ~events_dir:
+             (match how with
+              | `Fd _ -> None
+              | `Path path -> Some path))
+    else None
+  in
   let fd =
     match how with
     | `Fd fd -> fd
@@ -205,11 +237,11 @@ let create how =
     lazy { fd; cats; buf; mutex = Mutex.create (); alloc; runtime = Lazy.force runtime }
   and runtime =
     lazy
-      (match runtime_enabled with
-       | false -> None
-       | true ->
+      (match runtime_cursor with
+       | None -> None
+       | Some (cursor, cleanup_dir) ->
          let callbacks = runtime_callbacks t in
-         Some { callbacks; cursor = Runtime.create_cursor None })
+         Some { callbacks; cursor; cleanup_dir })
   in
   let t = Lazy.force t in
   if runtime_enabled then Runtime.resume ();
