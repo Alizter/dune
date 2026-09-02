@@ -1106,7 +1106,7 @@ module Action_expander = struct
       let+ { binaries; dep_info } =
         Action_builder.of_memo (of_dependency_view context view)
       in
-      { Package_deps.env = Pkg.build_env_of_deps view.all |> Value_list_env.to_env
+      { Package_deps.value_env = Pkg.build_env_of_deps view.all
       ; binaries
       ; packages = dep_info
       }
@@ -1128,10 +1128,8 @@ module Action_expander = struct
   ;;
 
   let value_env ~name ~version paths (dependencies : Package_deps.t) =
-    let package_env =
-      Value_list_env.of_env dependencies.env
-      |> Env.Map.superpose (base_env ~name ~version paths)
-    in
+    let { Package_deps.value_env; _ } = dependencies in
+    let package_env = value_env |> Env.Map.superpose (base_env ~name ~version paths) in
     Value_list_env.extend_concat_path (Lazy.force Value_list_env.global) package_env
   ;;
 
@@ -1313,7 +1311,12 @@ module Dependency_provider = struct
             (Package_deps.variables package, Paths.of_local_package package ~install_root)
         | Opam _ -> packages)
     in
-    let materialized = { Package_deps.env; binaries; packages } in
+    let materialized =
+      { Package_deps.value_env = Package_deps.Value_list_env.of_env env
+      ; binaries
+      ; packages
+      }
+    in
     Action_builder.List.fold_left providers ~init:materialized ~f:(fun acc -> function
       | Local _ -> Action_builder.return acc
       | Opam { stanza; paths } ->

@@ -78,12 +78,13 @@ type concrete_paths = Path.t Paths.t
 val variables : Package.t -> package_variables
 
 type t =
-  { env : Env.t
+  { value_env : Value_list_env.t
   ; binaries : Path.t Filename.Map.t
   ; packages : (package_variables * concrete_paths) Package.Name.Map.t
   }
 
 val empty : t
+val env : t -> Env.t
 
 val add_package
   :  t
