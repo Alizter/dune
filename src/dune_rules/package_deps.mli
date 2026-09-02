@@ -64,6 +64,7 @@ module Value_list_env : sig
   val to_env : t -> Env.t
   val extend_concat_path : t -> t -> t
   val add_path : t -> Env.Var.t -> Path.t -> t
+  val add_install_roots : t -> Path.t Install.Roots.t -> t
 end
 
 module Env_update : sig
