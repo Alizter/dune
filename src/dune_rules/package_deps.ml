@@ -216,6 +216,12 @@ module Value_list_env = struct
       let paths = Option.value paths ~default:[] in
       Some (Value.Dir path :: paths))
   ;;
+
+  let add_install_roots t roots =
+    let init = add_path t Env_path.var roots.Install.Roots.bin in
+    Install.Roots.to_env_without_path roots ~relative:Path.relative
+    |> List.fold_left ~init ~f:(fun env (var, path) -> add_path env var path)
+  ;;
 end
 
 module Env_update = struct
@@ -294,12 +300,7 @@ let env { value_env; _ } = Value_list_env.to_env value_env
 let add_package { value_env; binaries; packages } ~paths ~variables ~files ~exported_env =
   let value_env =
     let roots = Paths.install_roots paths in
-    let init = Value_list_env.add_path value_env Env_path.var roots.bin in
-    let value_env =
-      Install.Roots.to_env_without_path roots ~relative:Path.relative
-      |> List.fold_left ~init ~f:(fun env (var, path) ->
-        Value_list_env.add_path env var path)
-    in
+    let value_env = Value_list_env.add_install_roots value_env roots in
     List.fold_left exported_env ~init:value_env ~f:Env_update.set
   in
   let binaries =
