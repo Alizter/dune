@@ -45,7 +45,8 @@ let at_exit =
       let alloc_summary = capture_alloc_profile `Exit in
       Option.iter (Out.alloc out) ~f:Alloc.stop;
       Option.iter alloc_summary ~f:(Out.emit out);
-      Out.close out
+      Out.close out;
+      Out.prepare_runtime_shutdown out
     | Some { out; ownership = Owned path } ->
       Out.emit_runtime out;
       let alloc_summary = capture_alloc_profile `Exit in
@@ -63,7 +64,8 @@ let at_exit =
              (Temp.temp_dir ~parent_dir:dir ~prefix:"dune" ~suffix:"trace")
              "trace.csexp"
          in
-         Io.copy_file ~src:path ~dst ()))
+         Io.copy_file ~src:path ~dst ());
+      Out.prepare_runtime_shutdown out)
 ;;
 
 let set_global_impl ~ownership out =

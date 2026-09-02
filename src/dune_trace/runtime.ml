@@ -39,6 +39,7 @@ include struct
   let runtime_counter_name () = ""
   let runtime_phase_name () = ""
   let start () = ()
+  let path () = None
   let pause () = ()
   let resume () = ()
   let create_cursor _ = ()
