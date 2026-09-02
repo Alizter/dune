@@ -212,11 +212,32 @@ let resolve_installed_file context name ~loc ~section ~file =
       ])
 ;;
 
-let materialize_selected context selected =
-  let* entries = entries context in
-  materialize context (selected_entries entries selected)
-  |> Action_builder.evaluate_and_collect_facts
-  >>| fst
+module Materialize_key = struct
+  type t = Context_name.t * Package.Name.Set.t option
+
+  let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn (Dyn.option Package.Name.Set.to_dyn)
+  let equal = Tuple.T2.equal Context_name.equal (Option.equal Package.Name.Set.equal)
+
+  let hash =
+    let set_hash packages =
+      List.hash Package.Name.hash (Package.Name.Set.to_list packages)
+    in
+    Tuple.T2.hash Context_name.hash (Option.hash set_hash)
+  ;;
+end
+
+let materialize_selected =
+  let memo =
+    Memo.create
+      "opam-stanza-materialized-packages"
+      ~input:(module Materialize_key)
+      (fun (context, selected) ->
+         let* entries = entries context in
+         materialize context (selected_entries entries selected)
+         |> Action_builder.evaluate_and_collect_facts
+         >>| fst)
+  in
+  fun context selected -> Memo.exec memo (context, selected)
 ;;
 
 let binaries context ~packages:selected =
