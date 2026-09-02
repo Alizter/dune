@@ -10,12 +10,14 @@ Neither package enters the legacy package rules.
   > (lang dune 3.20)
   > (package
   >  (name main)
-  >  (depends foo))
+  >  (depends foo tool))
   > EOF
   $ cat > dune <<'EOF'
   > (executable
   >  (name main)
   >  (libraries foo))
+  > (rule
+  >  (with-stdout-to native-path (bash "printf '%s\\n' \"$PATH\"")))
   > EOF
   $ cat > main.ml <<'EOF'
   > let () = print_endline Foo.message
@@ -93,9 +95,15 @@ Neither package enters the legacy package rules.
   > EOF
 
   $ real_dune="$(command -v dune)"
-  $ PATH="$PWD/bin:$PATH" "$real_dune" build ./main.exe --display quiet
+  $ PATH="$PWD/bin:$PATH" "$real_dune" build ./main.exe native-path --display quiet
   $ ./_build/default/main.exe
   from-mounted-tool:from-user-path
+
+The native packages share one install layout, so its bin directory appears
+once in the package environment rather than once per package:
+
+  $ tr : '\n' < _build/default/native-path | grep -F -c "$PWD/_build/install/default/.packages/"
+  1
 
 The lock's implicit Dune marker dispatches [tool] natively, while [foo] uses a
 translated [dune build] action. Both tools and generated files belong to their
