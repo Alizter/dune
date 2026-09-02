@@ -333,6 +333,42 @@ module Mounted_packages = struct
     { all with packages }
   ;;
 
+  module Opaque_binary_key = struct
+    type t = Context_name.t * Package.Name.t
+
+    let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn Package.Name.to_dyn
+    let equal = Tuple.T2.equal Context_name.equal Package.Name.equal
+    let hash = Tuple.T2.hash Context_name.hash Package.Name.hash
+  end
+
+  let opaque_binaries =
+    Memo.create
+      "mounted-opaque-package-binaries"
+      ~input:(module Opaque_binary_key)
+      (fun (context, name) ->
+         let* mounted = create context in
+         let package = find_exn mounted name in
+         match Pkg_sources.Mounted.kind package with
+         | Dune ->
+           Code_error.raise
+             "Opaque package binaries requested for a native package"
+             [ "package", Package.Name.to_dyn name ]
+         | Opam _ ->
+           let paths, _ = opam_paths package name in
+           let* () = Build_system.build_file (Paths.install_cookie paths) in
+           let cookie = Paths.install_cookie paths |> Install_cookie.load_exn in
+           Section.Map.Multi.find cookie.files Bin
+           |> List.fold_left ~init:Filename.Map.empty ~f:(fun binaries path ->
+             let name =
+               Path.basename path
+               |> Filename.to_string
+               |> Bin.strip_exe
+               |> Filename.of_string_exn
+             in
+             Filename.Map.set binaries name path)
+           |> Memo.return)
+  ;;
+
   let binaries context mounted =
     let native_names =
       List.filter_map mounted ~f:(fun mounted ->
@@ -350,19 +386,9 @@ module Mounted_packages = struct
       match Pkg_sources.Mounted.kind mounted with
       | Dune -> Memo.return binaries
       | Opam stanza ->
-        let paths, _ = opam_paths mounted (Package.name stanza.package) in
-        let* () = Build_system.build_file (Paths.install_cookie paths) in
-        let cookie = Paths.install_cookie paths |> Install_cookie.load_exn in
-        Section.Map.Multi.find cookie.files Bin
-        |> List.fold_left ~init:binaries ~f:(fun binaries path ->
-          let name =
-            Path.basename path
-            |> Filename.to_string
-            |> Bin.strip_exe
-            |> Filename.of_string_exn
-          in
-          Filename.Map.set binaries name path)
-        |> Memo.return)
+        let name = Package.name stanza.package in
+        let+ opaque = Memo.exec opaque_binaries (context, name) in
+        Filename.Map.union binaries opaque ~f:(fun _name _previous opaque -> Some opaque))
   ;;
 
   let environment context mounted =
