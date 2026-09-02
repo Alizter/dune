@@ -980,26 +980,22 @@ let describe_packages = function
     |> String.concat ~sep:", "
 ;;
 
+module Context_packages_key = struct
+  type t = Context_name.t * Package.Name.Set.t option
+
+  let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn (Dyn.option Package.Name.Set.to_dyn)
+  let equal = Tuple.T2.equal Context_name.equal (Option.equal Package.Name.Set.equal)
+
+  let hash =
+    let set_hash s = List.hash Package.Name.hash (Package.Name.Set.to_list s) in
+    Tuple.T2.hash Context_name.hash (Option.hash set_hash)
+  ;;
+end
+
 let lock_dir_binaries =
   Memo.create
     "lock-directory-binaries"
-    ~input:
-      (module struct
-        type t = Context_name.t * Package.Name.Set.t option
-
-        let to_dyn =
-          Tuple.T2.to_dyn Context_name.to_dyn (Dyn.option Package.Name.Set.to_dyn)
-        ;;
-
-        let equal =
-          Tuple.T2.equal Context_name.equal (Option.equal Package.Name.Set.equal)
-        ;;
-
-        let hash =
-          let set_hash s = List.hash Package.Name.hash (Package.Name.Set.to_list s) in
-          Tuple.T2.hash Context_name.hash (Option.hash set_hash)
-        ;;
-      end)
+    ~input:(module Context_packages_key)
     ~human_readable_description:(fun (context, packages) ->
       Some
         (Pp.textf
@@ -1140,29 +1136,35 @@ let exported_env context =
   Package_deps.env materialized
 ;;
 
-let bin_path_env ~(packages : Package.Name.Set.t option) context =
-  Memo.push_stack_frame ~human_readable_description:(fun () ->
-    Pp.textf
-      "lock directory PATH of %s for context %S"
-      (describe_packages packages)
-      (Context_name.to_string context))
-  @@ fun () ->
-  lock_dir_active context
-  >>= function
-  | false -> Memo.return Env.empty
-  | true ->
-    let* mounted = Mounted_packages.create context in
-    let selected = Mounted_packages.selected mounted packages in
-    let capabilities =
-      List.map selected ~f:(fun package ->
-        Mounted_packages.package package |> Package.name)
-      |> Mounted_packages.capability_closure mounted
-    in
-    let+ materialized = Mounted_packages.environment context capabilities in
-    (match Env.get (Package_deps.env materialized) Env_path.var with
-     | None -> Env.empty
-     | Some value -> Env.add Env.empty ~var:Env_path.var ~value)
+let lock_dir_bin_path_env =
+  Memo.create
+    "lock-directory-path-environment"
+    ~input:(module Context_packages_key)
+    ~human_readable_description:(fun (context, packages) ->
+      Some
+        (Pp.textf
+           "lock directory PATH of %s for context %S"
+           (describe_packages packages)
+           (Context_name.to_string context)))
+    (fun (context, packages) ->
+       lock_dir_active context
+       >>= function
+       | false -> Memo.return Env.empty
+       | true ->
+         let* mounted = Mounted_packages.create context in
+         let selected = Mounted_packages.selected mounted packages in
+         let capabilities =
+           List.map selected ~f:(fun package ->
+             Mounted_packages.package package |> Package.name)
+           |> Mounted_packages.capability_closure mounted
+         in
+         let+ materialized = Mounted_packages.environment context capabilities in
+         (match Env.get (Package_deps.env materialized) Env_path.var with
+          | None -> Env.empty
+          | Some value -> Env.add Env.empty ~var:Env_path.var ~value))
 ;;
+
+let bin_path_env ~packages context = Memo.exec lock_dir_bin_path_env (context, packages)
 
 let all_filtered_depexts context =
   let* packages = Mounted_packages.create context in
