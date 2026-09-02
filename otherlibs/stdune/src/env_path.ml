@@ -8,7 +8,16 @@ let cons ?(var = var) env ~dir =
    variable in [env], preserving their order *)
 let cons_multi env ~dirs =
   Env.update env ~var ~f:(fun init ->
-    List.fold_right dirs ~init ~f:(fun dir acc -> Some (Bin.cons_path dir ~_PATH:acc)))
+    match dirs with
+    | [] -> init
+    | _ :: _ ->
+      let dirs = List.map dirs ~f:Path.to_absolute_filename in
+      let entries =
+        match init with
+        | None -> dirs
+        | Some init -> dirs @ [ init ]
+      in
+      Some (Bin.encode_strings entries))
 ;;
 
 let path env =
