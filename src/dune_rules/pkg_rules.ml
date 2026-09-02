@@ -374,10 +374,26 @@ module Mounted_packages = struct
       |> Package.Name.Set.of_list
     in
     let install_root = Install_layout.root context native_names |> Path.build in
-    Memo.List.fold_left mounted ~init:Package_deps.empty ~f:(fun acc mounted ->
+    let init =
+      let value_env =
+        if Package.Name.Set.is_empty native_names
+        then Env.Map.empty
+        else (
+          let roots =
+            Install.Roots.opam_from_prefix install_root ~relative:Path.relative
+          in
+          Package_deps.Value_list_env.add_install_roots Env.Map.empty roots)
+      in
+      { Package_deps.value_env
+      ; binaries = Filename.Map.empty
+      ; packages = Package.Name.Map.empty
+      }
+    in
+    Memo.List.fold_left mounted ~init ~f:(fun acc mounted ->
       let package = package mounted in
+      let kind = Pkg_sources.Mounted.kind mounted in
       let stanza, paths =
-        match Pkg_sources.Mounted.kind mounted with
+        match kind with
         | Opam stanza ->
           let paths, _ = opam_paths mounted (Package.name package) in
           stanza, paths
@@ -404,12 +420,22 @@ module Mounted_packages = struct
           ~variables
           acc
       in
-      Package_deps.add_package
-        acc
-        ~paths
-        ~variables
-        ~files:Section.Map.empty
-        ~exported_env)
+      match kind with
+      | Opam _ ->
+        Package_deps.add_package
+          acc
+          ~paths
+          ~variables
+          ~files:Section.Map.empty
+          ~exported_env
+      | Dune ->
+        let { Package_deps.value_env; binaries; packages } = acc in
+        let value_env =
+          List.fold_left exported_env ~init:value_env ~f:Package_deps.Env_update.set
+        in
+        let { Package_deps.Paths.name; _ } = paths in
+        let packages = Package.Name.Map.set packages name (variables, paths) in
+        { Package_deps.value_env; binaries; packages })
   ;;
 end
 
