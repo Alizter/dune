@@ -990,59 +990,91 @@ module DB = struct
       | Some libs -> check_duplicate_lib_entries libs
   ;;
 
+  module Indexed_library_stanza = struct
+    type t =
+      | Library of Dune_file.t * Library.t
+      | Deprecated_library_name of Deprecated_library_name.t
+  end
+
+  let library_stanzas_by_package_root =
+    Per_context.create_by_name ~name:"library-stanzas-by-package-root" (fun ctx ->
+      Memo.lazy_ ~name:"library-stanzas-by-package-root" (fun () ->
+        let* stanzas = Dune_load.dune_files ctx in
+        let+ stanzas =
+          Dune_file.Memo_fold.fold_static_stanzas
+            stanzas
+            ~init:[]
+            ~f:(fun dune_file stanza stanzas ->
+              let indexed =
+                match Stanza.repr stanza with
+                | Library.T library ->
+                  Some (Indexed_library_stanza.Library (dune_file, library))
+                | Deprecated_library_name.T deprecated ->
+                  Some (Indexed_library_stanza.Deprecated_library_name deprecated)
+                | _ -> None
+              in
+              match indexed with
+              | None -> Memo.return stanzas
+              | Some indexed ->
+                let package_root =
+                  Dune_file.loaded_dir dune_file
+                  |> Loaded_dir.project
+                  |> Loaded_project.partition
+                  |> Build_partition.output_root
+                in
+                Memo.return ((package_root, indexed) :: stanzas))
+        in
+        Path.Build.Map.of_list_multi stanzas)
+      |> Memo.Lazy.force)
+    |> Staged.unstage
+  ;;
+
   let lib_entries_of_loaded_project ctx loaded_project pkg_name =
     let package_root =
       Loaded_project.partition loaded_project |> Build_partition.output_root
     in
-    let* stanzas = Dune_load.dune_files ctx
+    let* stanzas_by_package_root = library_stanzas_by_package_root ctx
     and* scopes, _ = mounted_scopes ctx in
+    let stanzas =
+      Path.Build.Map.find stanzas_by_package_root package_root |> Option.value ~default:[]
+    in
     let* libraries, deprecated_library_names =
-      Dune_file.Memo_fold.fold_static_stanzas
+      Memo.List.fold_left
         stanzas
         ~init:([], [])
-        ~f:(fun d stanza ((libraries, deprecated_library_names) as acc) ->
-          let stanza_project = Dune_file.loaded_dir d |> Loaded_dir.project in
-          let stanza_package_root =
-            Loaded_project.partition stanza_project |> Build_partition.output_root
-          in
-          if not (Path.Build.equal package_root stanza_package_root)
-          then Memo.return acc
-          else (
-            match Stanza.repr stanza with
-            | Library.T ({ enabled_if; _ } as lib) ->
-              let src_dir = Dune_file.source_dir d in
-              let lib_dir = Dune_file.output_dir d in
-              let* enabled =
-                let* expander = Expander0.get ~dir:lib_dir in
-                Expander0.eval_blang expander enabled_if
-              in
-              if not enabled
-              then Memo.return acc
-              else (
-                let scope = find_scope_by_dir scopes lib_dir in
-                Lib.DB.find_lib_id (libs scope) (Local (Library.to_lib_id ~src_dir lib))
-                >>| function
-                | None -> acc
-                | Some resolved ->
-                  let resolved = Lib.Local.of_lib_exn resolved in
-                  (match Lib_info.package (Lib.Local.info resolved) with
-                   | Some package when Package.Name.equal package pkg_name ->
-                     let authored_for_package =
-                       match Library.package lib with
-                       | None -> false
-                       | Some package ->
-                         Package.Name.equal (Package.name package) pkg_name
-                     in
-                     ( (authored_for_package, resolved) :: libraries
-                     , deprecated_library_names )
-                   | None | Some _ -> acc))
-            | Deprecated_library_name.T
-                ({ old_name = old_public_name, _; _ } as deprecated) ->
-              let package = Public_lib.package old_public_name |> Package.name in
-              if Package.Name.equal package pkg_name
-              then Memo.return (libraries, deprecated :: deprecated_library_names)
-              else Memo.return acc
-            | _ -> Memo.return acc))
+        ~f:(fun (libraries, deprecated_library_names) stanza ->
+          match (stanza : Indexed_library_stanza.t) with
+          | Indexed_library_stanza.Library (d, ({ enabled_if; _ } as lib)) ->
+            let src_dir = Dune_file.source_dir d in
+            let lib_dir = Dune_file.output_dir d in
+            let* enabled =
+              let* expander = Expander0.get ~dir:lib_dir in
+              Expander0.eval_blang expander enabled_if
+            in
+            if not enabled
+            then Memo.return (libraries, deprecated_library_names)
+            else (
+              let scope = find_scope_by_dir scopes lib_dir in
+              Lib.DB.find_lib_id (libs scope) (Local (Library.to_lib_id ~src_dir lib))
+              >>| function
+              | None -> libraries, deprecated_library_names
+              | Some resolved ->
+                let resolved = Lib.Local.of_lib_exn resolved in
+                (match Lib_info.package (Lib.Local.info resolved) with
+                 | Some package when Package.Name.equal package pkg_name ->
+                   let authored_for_package =
+                     match Library.package lib with
+                     | None -> false
+                     | Some package -> Package.Name.equal (Package.name package) pkg_name
+                   in
+                   (authored_for_package, resolved) :: libraries, deprecated_library_names
+                 | None | Some _ -> libraries, deprecated_library_names))
+          | Indexed_library_stanza.Deprecated_library_name
+              ({ old_name = old_public_name, _; _ } as deprecated) ->
+            let package = Public_lib.package old_public_name |> Package.name in
+            if Package.Name.equal package pkg_name
+            then Memo.return (libraries, deprecated :: deprecated_library_names)
+            else Memo.return (libraries, deprecated_library_names))
     in
     (* Mounted scopes make unselected public libraries owner-local. Only the
        ones required by selected-package libraries belong in its install
