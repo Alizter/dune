@@ -201,6 +201,337 @@ nodes for workspace packages.
 - The broad auxiliary-project in/out design was narrowed to the owner-private
   closure required for correctness.
 
+## Branch feature inventory
+
+This section inventories behavior present in the final branch. Some items are
+user-visible package behavior, while others are enabling rules infrastructure
+or prototype-only interfaces. The smaller fixes are listed separately below so
+they are not lost inside the main architectural story.
+
+### Mapping to the in-and-out issue
+
+The latest prototype checklist in issue #8652 named seven pieces. Their status
+on this branch is:
+
+1. **Load sources directly in an adjacent context: implemented.** Native package
+   projects are loaded into the `+lockfile` output partition while sharing the
+   owning workspace context's compiler and resolver.
+2. **Add an Opam stanza: implemented.** The unreleased stanza and synthetic
+   lock-package form use the same rule generator.
+3. **Add a scope stanza: implemented.** The unreleased package-selection stanza
+   is also used to construct mounted package views.
+4. **Move legacy package rules to the Opam stanza: implemented for normal
+   selected packages.** The old recursive implementation remains only for
+   `.dev-tool`.
+5. **Load Dune packages directly and apply scopes: implemented.** Selected
+   package projects generate normal fine-grained rules and retain only their
+   owner-local auxiliary closure.
+6. **Allow lockdirs to express in-and-out edges: implemented as a prototype.**
+   Both hand-written/current lockdirs and solver-generated
+   repository-to-workspace edges can be consumed. The persisted workspace
+   boundary and complete mixed cycle validation remain production work.
+7. **Remove package toolchains: not implemented.** The prototype demonstrated
+   direct loading of compiler packages, but the existing package-toolchain
+   machinery was not removed and should not be counted as a branch feature.
+
+The branch also implements several prerequisites from the older #8652
+checklist: package-scoped binary lookup, package-scoped `PATH`, narrowed
+`resolve_program`, dependency-specific workspace install layouts, and
+transitive locked/workspace ordering.
+
+### Source and native-loading features
+
+- A `Source_path` representation distinguishes real workspace input from
+  build-backed package input without turning fetched files into
+  `Path.Source.t` values.
+- `Source_tree.Rules` provides dependency-recording directory traversal, file
+  reads, includes, diagnostics, and materialization for both source kinds.
+- `Loaded_project`, `Loaded_dir`, and `Build_partition` separate project
+  identity, relative source location, resolver context, and artifact owner.
+- Lock packages are prepared in a sibling `+lockfile` partition rather than a
+  second semantic workspace context.
+- Normal package roots are stable and package-name-only:
+  `_build/<context>+lockfile/pkg/<name>`.
+- Primary archives and extra sources remain immutable, reusable `_fetch`
+  targets.
+- Logical package trees combine primary source, lock `files/`, and ordered
+  extra-source layers.
+- Native patches and substitutions are evaluated as exact content and deletion
+  layers when their inputs and conditions are statically available.
+- Unsupported build-dependent transformations conservatively select the opaque
+  builder.
+- Native classification uses the transformed source view and verifies that an
+  enabled decoded project defines the selected package.
+- Native rules replace the complete recorded Opam recipe; no nested Dune builds
+  a native package.
+- Authored package files are materialized by individual copy or write rules,
+  including executable permission and exact backing dependencies.
+- Source/generated/fallback precedence is shared with normal rule selection.
+- Mounted promotion is contained in the build hierarchy and cannot modify
+  immutable backing input.
+- Exact package artifact paths can be requested directly without first building
+  a workspace alias.
+- Local archive and HTTP acquisition, one-invocation autolock, and lock-change
+  watch invalidation are exercised by mounted-package tests.
+- Shared archives and nested projects can be decoded once and used by separately
+  owned package views.
+- Mounted projects retain vendored warning and recursive-alias behavior rather
+  than behaving like another workspace root.
+
+### Opaque package and Opam-stanza features
+
+- An unreleased `(opam ...)` stanza exposes the opaque package rule primitive
+  for focused tests without making a stable language promise.
+- The stanza carries build and install actions, depexts, exported environment
+  updates, and one canonical `Package.t` owner.
+- Opam actions execute in a writable copy sandbox and cannot mutate their source
+  input.
+- Source-backed opaque packages apply primary source, lock `files/`, and ordered
+  extra-source overlays in the package sandbox.
+- Source-less packages start from an empty working directory and do not receive
+  a fabricated fetch target or loaded project.
+- Generated `.install` and `.config` files are interpreted by the shared package
+  implementation.
+- Each opaque package owns one install-layout directory target and an install
+  cookie recording installed files and package variables.
+- Libraries and binaries discovered from the cookie become providers without
+  needing duplicate declarations in the stanza.
+- Synthetic lock packages and user-authored Opam stanzas use the same rule and
+  dependency-materialization path.
+- Opaque sources stay out of ordinary mounted `Dune_load`, including packages
+  that merely contain an incidental unrelated Dune project.
+
+### Scope and package in/out features
+
+- An unreleased `(scope (packages ...))` stanza selects package-owned interfaces
+  for its logical directory and intentionally has no `dir` field.
+- Scope placement follows ordinary Dune files, static includes, and `(subdir
+  ...)` placement.
+- Nested scopes intersect; a child cannot re-enable a package excluded by an
+  ancestor.
+- Scope filtering runs before duplicate-package detection and before
+  `--only-packages` selection.
+- Scopes do not override a package's `enabled_if` result.
+- Duplicate package names in one scope, duplicate scope stanzas in one logical
+  directory, and names not defined beneath the scope are diagnosed.
+- Package ownership is applied to libraries, executables, deprecated library
+  names, Cram stanzas, MDX stanzas, and generated package metadata.
+- Package-owned interfaces are filtered while unowned private implementation
+  stanzas remain available.
+- Mounted synthetic scopes intersect with source-authored scopes rather than
+  replacing them.
+- Multiple selected packages from one source retain independent artifact
+  owners.
+- Auxiliary libraries needed to implement a selected package remain visible
+  inside that owner but are not exported globally.
+- Private auxiliary archives and metadata required by public libraries are
+  included in the owner's install metadata closure.
+
+### Dependency and capability features
+
+- `Package.depends` and `Package_db` form the canonical package graph for both
+  native and opaque normal packages.
+- `Package_deps` materializes concrete paths, environments, binaries, package
+  variables, install roots, and build dependencies from that graph.
+- The user-authored Opam path no longer constructs a recursive package runtime.
+- Normal project dependencies no longer use the legacy package database as a
+  fallback.
+- Immediate package edges control capability visibility. Undeclared siblings
+  and transitive package binaries, variables, and exported environments remain
+  hidden.
+- The required transitive closure still supplies build ordering and installed
+  library metadata.
+- Virtual/system packages forward the concrete provider capabilities they are
+  intended to expose.
+- Findlib library lookup can resolve the actual `META` or `dune-package`
+  provider when its lock package name differs from the requested library name.
+- Workspace and lockdir binaries are both narrowed to the owning package's
+  declared dependency plan.
+- `%{bin:...}`, `%{bin-available:...}`, and
+  `Super_context.resolve_program` use the narrowed artifacts.
+- Tools invoked later by bare name receive the same package-scoped binary
+  precedence through `PATH`.
+- Environment-defined binaries without a package owner retain their existing
+  ambient behavior.
+- Workspace binaries shadow lockdir binaries when the workspace dependency is
+  the selected direct provider.
+- Ambient `PATH` remains the fallback when no declared package supplies a
+  program.
+- Path-like exported environments are retained as lists until final
+  serialization, preserving precedence without repeated splitting and joining.
+
+### Dune rule-family coverage
+
+The source and ownership migration supports these rule families in mounted
+projects:
+
+- public, private, wrapped, unwrapped, virtual, and implementation libraries;
+- deprecated and built-in library redirects;
+- ordinary executables, public executables, local `env` binaries, and staged
+  `.binaries` directories;
+- PPX libraries, PPX drivers, replacement drivers, and mounted/workspace PPX
+  consumers;
+- `include_subdirs` groups;
+- static include stanzas, generated dynamic includes, and OCaml-syntax Dune
+  files;
+- `copy_files`, source globs, and recursive `(source_tree ...)` dependencies;
+- ordinary rules, generated files, fallback rules, aliases, and contained
+  promotion;
+- Cram, MDX, Cinaps, odoc, and OCaml index/Merlin integration;
+- foreign rules and configurator metadata;
+- JavaScript and Melange library lookup;
+- Rocq source and scope handling;
+- install stanzas, sites, section-relative paths, `META`, `dune-package`, and
+  relocation metadata; and
+- external `ocamlfind` and Opam/Topkg-style consumers of installed layouts.
+
+Not every family has an equally small standalone regression, but all required
+ownership paths were exercised while building the external package graphs.
+
+### Mixed workspace and lockdir features
+
+- A locked package can compile and link against a directly declared workspace
+  library.
+- It can run a public executable installed by a workspace package.
+- It can depend on multiple workspace packages or an `allow_empty` workspace
+  package.
+- Alternating graphs such as locked -> workspace -> locked retain correct build
+  ordering.
+- Workspace install layouts, binaries, and exported paths are materialized for
+  the locked consumer without exposing the complete workspace install tree.
+- Direct workspace capabilities take precedence over equivalent lockdir paths.
+- Lock generation no longer rejects repository packages solely because they
+  select a workspace package.
+- Generated mixed lockdirs retain those dependency names without serializing
+  fake workspace package files.
+- The project build path has a dedicated unchecked structural loader so it can
+  apply active-workspace validation, while generic on-disk lockdir validation
+  remains closed-world and strict.
+- Workspace source edits do not require relocking under the current live model.
+  A future solver-metadata boundary is needed before that behavior is a complete
+  product contract.
+
+### Install and metadata features
+
+- Native packages generate ordinary fine-grained install entries rather than an
+  opaque package cookie.
+- Installed metadata preserves selected lock versions.
+- Private-library archives needed by an exported public library are retained
+  without globally exporting the private library.
+- Install entries are indexed and evaluated by loaded owner and package,
+  avoiding cross-package ownership and metadata cycles.
+- Mounted packages retain `META`, `dune-package`, relocation, site, and
+  `Install_layout` information needed by internal and external consumers.
+- Mounted packages do not acquire workspace install aliases or ownership merely
+  because their metadata participates in an install layout.
+- Opaque packages keep their existing cookie-backed directory target boundary.
+
+### Incrementality, tracing, and performance features
+
+- Mounted loading and sandbox dependency materialization have dedicated trace
+  events.
+- Mounted discovery is memoized once per context rather than reevaluating one
+  supplied memo computation for each lookup.
+- Package digest lookup retains name/digest indexes instead of rebuilding full
+  closure tables repeatedly.
+- Concatenated `PATH` construction is linear.
+- Package environments retain list-valued path entries and serialize them once.
+- Native layout roots are added once per environment rather than once per
+  dependency traversal.
+- Selected lock-package paths are memoized.
+- Opaque package materialization and opaque binary maps are shared.
+- Mounted scope databases are reused.
+- Mounted library and install stanzas are indexed by artifact owner.
+- Rich tracing no longer creates runtime-event files in the source tree or
+  forces `_build/.db` to be rewritten on a cache-stable null build.
+
+## Smaller correctness fixes found along the way
+
+These fixes are worth tracking independently from the mounted-package feature.
+Some are generally useful; others close subtle mounted ownership holes.
+
+### Source loading and rule selection
+
+- **Includes use the owning source tree** (`a303763b2f5e`). Static and dynamic
+  includes no longer assume that every included Dune file is workspace-backed.
+- **Parent-relative workspace globs remain workspace-relative**
+  (`1a52443f894e`). Adding mounted source directories initially changed ordinary
+  `../stuff/*.txt` behavior; workspace expanders now retain their existing
+  source-tree lookup.
+- **Mounted `copy_files` enumerates authored logical inputs directly**
+  (`48608fc3bd8a`). This avoids recursive parent rule generation without
+  changing ordinary `copy_files` semantics for generated files.
+- **Recursive mounted `source_tree` dependencies materialize their files**
+  (`7edd32c9fecf`). Depending on topology alone was insufficient for sandboxed
+  actions that read descendants.
+- **Built-in library redirects retain mounted artifact targets**
+  (`a5563dc4644e`). Redirect resolution no longer falls back to a path that
+  loses the selected package owner.
+- **Opaque Opam sources are not loaded as native projects** (`52d79e195edd`). An
+  incidental Dune file can no longer leak unrelated project stanzas into the
+  workspace graph.
+- **Compile-command generation is workspace-root-only** (`249d901f047a`).
+  Mounted roots also have an empty component list, so that list alone cannot
+  identify the workspace root. The explicit mounted guard removed the
+  `re/private_re` directory-content cycle.
+
+### Library, PPX, and executable ownership
+
+- **Mounted-to-legacy lookup preserves the consumer's resolver boundary**
+  (`3806f6f17a73`). Library lookup no longer sees unrelated package branches.
+- **Legacy libraries are resolved by their actual metadata provider**
+  (`866388ff6f7a`). This covers virtual packages such as `base-bytes`, where the
+  package name and findlib provider differ.
+- **Mounted PPX drivers stay in the package partition** (`47ddbe4502b7`) and are
+  subsequently **owned by the mounted consumer** (`713ca3062362`). This prevents
+  driver artifacts and dependency sets from leaking into the workspace
+  partition.
+- **Mounted `include_subdirs` groups use mounted directory status**
+  (`d928de5dc92a`) instead of reconstructing workspace directories.
+- **Staged binaries use the directory's narrowed artifacts** (`e9f2edddf2c5`).
+  `%{bin:x}` and a bare `x` invoked through the staged `.binaries` directory now
+  select the same executable.
+- **Mounted automatic `.bin` directories receive their symlink rules**
+  (`a0fc402789ac`). Build-backed source directories were previously omitted from
+  automatic local-binary subdirectory generation.
+- **Context-wide C compiler probing stays on the base path** (`cd9a837104e1`).
+  Package binary narrowing applies to package actions without accidentally
+  narrowing global compiler detection.
+
+### Capability and metadata boundaries
+
+- **Opam and workspace consumers see only direct package capabilities**
+  (`f297150d6d34`, `916425aeca85`). Transitive ordering no longer implies
+  transitive binary, variable, or environment visibility.
+- **Virtual packages forward their selected concrete capabilities**
+  (`51a18456c8e2`) rather than disappearing when legacy adapters are removed.
+- **Install entries are computed per loaded package** (`d839b13cab25`).
+  Filtering by loaded-project identity avoids cross-owner metadata and
+  workspace install cycles while allowing metadata and layouts to share the
+  result.
+- **Required auxiliary libraries are exported into owner metadata**
+  (`06ef15b4ff81`) without becoming globally public.
+- **Mounted library closure boundaries are retained** (`97775cdd4a55`),
+  including JavaScript lookup, instead of expanding every private library from
+  a shared source.
+- **Selected lock versions appear in generated package metadata.** Source
+  project versions no longer override the version chosen by the lock.
+
+### Build hygiene and host-tool fixes
+
+- **Runtime-event traces no longer modify the source tree** (`1f1326a52e2e`).
+  This prevents rich tracing from invalidating the filesystem memo and rewriting
+  the workspace cache on a null build.
+- **The Dune source rules that run `%{ocaml}` declare `%{ocaml_where}`**
+  (`283eeae6bb78`). They set action-local `OCAMLLIB`, so a relocatable selected
+  compiler sees its stdlib in a sandbox without adding a global package-binary
+  runtime-closure mechanism.
+- **A fake or different `dune` earlier on `PATH` cannot capture native package
+  builds.** Native packages use the current process; only explicitly opaque
+  recipes may invoke another Dune.
+- **Mounted compiler and error paths use the stable package-name hierarchy.**
+  Source checks reject `_fetch` as the intended native diagnostic identity.
+
 ## What worked as planned
 
 ### Current-process loading is viable
