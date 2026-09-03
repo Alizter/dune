@@ -106,13 +106,5 @@ command collection is inspecting the destination library.
   > EOF
 
   $ dune build ./main.exe --display quiet
-  Error: Dependency cycle between:
-     Computing directory contents of
-     _build/_default+lockfile/pkg/bar/lib_test/expect/private_bar
-  -> { dir = In_build_dir "_default+lockfile/pkg/bar/lib"
-     ; predicate = Element (Glob "*.ml")
-     ; only_generated_files = false
-     }
-  -> Computing directory contents of
-     _build/_default+lockfile/pkg/bar/lib_test/expect/private_bar
-  [1]
+  $ ./_build/default/main.exe
+  copied from sibling
