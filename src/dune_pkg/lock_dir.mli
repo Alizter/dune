@@ -173,6 +173,9 @@ module Make_load (Io : sig
     val readdir_with_kinds : Path.t -> (Filename.t * Unix.file_kind) list t
     val with_lexbuf_from_file : Path.t -> f:(Lexing.lexbuf -> 'a) -> 'a t
   end) : sig
+  (** Load without requiring dependencies to be closed within the lock directory. *)
+  val load_unchecked : Path.t -> t Io.t
+
   val load : Path.t -> (t, User_message.t) result Io.t
   val load_exn : Path.t -> t Io.t
 end
