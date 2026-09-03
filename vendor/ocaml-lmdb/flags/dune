@@ -1,4 +1,8 @@
 (rule
- (with-stdout-to
-  c_flags.sexp
-  (run %{ocaml} %{dep:gen_c_flags.ml} %{ocaml-config:ccomp_type})))
+ (deps
+  %{ocaml_where})
+ (action
+  (with-stdout-to
+   c_flags.sexp
+   (setenv OCAMLLIB %{ocaml_where}
+    (run %{ocaml} %{dep:gen_c_flags.ml} %{ocaml-config:ccomp_type})))))
