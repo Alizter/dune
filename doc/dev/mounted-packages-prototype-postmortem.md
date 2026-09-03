@@ -1,1297 +1,659 @@
-# Retrospective: building locked Dune packages in one process
+# Final retrospective: building locked Dune packages in one process
 
-- Status: prototype retrospective
-- Current bookmark: `prototype/flatten-dune`
-- Current continuation reviewed: `d665bf60da52`
-- Earlier design record: [`goal.md`](../../goal.md)
+- Status: prototype complete; production design still required
+- Final implementation reviewed: `283eeae6bb78`
+- Historical design record: [`goal.md`](../../goal.md)
 - Historical archive:
   `prototype/flatten-dune-archive-2026-08-24T1337Z`
 
-This document records what the target-backed mounted-package prototype taught
-us. It compares the current implementation with the earlier prototype tracks,
-audits their behavioral tests, and gives broad implementation guidance for a
-future production feature.
+This document compares the completed prototype with its original plan. It
+records which ideas survived contact with real package graphs, which ones were
+changed, and which mechanisms were deliberately avoided or removed.
 
-It is not a claim that the current implementation is ready to merge. The
-prototype still contains broad type migrations, mounted-specific branches, and
-interfaces that should be simplified. The implementation guide therefore
-records boundaries and sequencing rather than prescribing the current code as
-the final design.
+The prototype is evidence that the product direction works. It is not a claim
+that this 286-file implementation should be merged as one production change.
+Its value is the set of validated invariants, reduced regressions, performance
+measurements, and rejected designs that a smaller implementation can start
+from.
 
-## Executive summary
+## Executive conclusion
 
-The product goal is viable. Dune can load locked package sources and generate
-their rules in the current process instead of running a nested Dune for each
-package. The current prototype successfully builds both `ocaml-re` and
-`ocaml-cohttp`, including large PPX, compiler, legacy-package, binary, install,
-and provider graphs. These successful builds were local prototype observations;
-their traces and shell environments are not checked into the repository.
+The core thesis worked: Dune can load selected lock-package projects and
+produce their rules in the current process. Native packages do not need a
+nested Dune invocation, an opaque package build, or a digest-addressed `.pkg`
+root. Native and opaque packages can coexist in one dependency graph, and
+locked packages can also depend on live workspace packages.
 
-The central architectural improvement over the earlier implementation tracks is
-that a fetched source remains a build-backed source:
+The final normal package address is:
 
 ```text
-source owner:   _build/_fetch/.../dir
-artifact owner: _build/_default+lockfile/pkg/<package-and-digest>/...
+_build/<context>+lockfile/pkg/<package-name>
 ```
 
-It does not masquerade as a workspace `Path.Source.t`. The ordinary engine
-source tree remains workspace-only. A separate rules-side `Source_tree.Rules`
-view loads real `Path.Build.t` directory targets and gives rule generation a
-uniform directory and file API.
+That path is both the logical source hierarchy seen by native rule generation
+and the artifact hierarchy for the package. Authored bytes remain backed by
+immutable `_build/_fetch` targets. Fine-grained source rules materialize only
+the selected files into the package hierarchy. No source directory target owns
+the package root, so generated rules can own neighboring targets normally.
 
-This removes the earlier prototypes' defining liabilities:
+This differs from the original plan, which proposed one immutable prepared
+source directory target separate from the artifact root. The useful part of
+that separation survived as a **logical/backing** distinction. The extra
+physical source-tree representation did not.
 
-- virtual `pkg/...` workspace paths;
-- `Source_tree.real_path` redirection;
-- source and artifact co-location;
-- source-claim rules and source manifests;
-- a process-global mutable mount registry;
-- package-driven exceptions in engine lookup, copying, cleanup, selectors, and
-  promotion;
-- reconstruction of artifact ownership from source paths and context names.
-
-The continuation has since replaced recipe-shape routing with source-content
-classification and added source-backed and source-less synthetic Opam packages.
-Lock `files/` and ordered extra sources are applied in the Opam copy sandbox,
-and normal selected dependencies build under the alternate package context.
-The highest-value remaining work is:
-
-1. replace the mechanically extracted recursive package runtime with
-   `Package.depends`, `Package_db`, and the materializer behind
-   `(deps (package ...))`;
-2. remove normal `.pkg` ownership after that dependency refactor;
-3. define transformed-source ownership for native packages needing recipe
-   preparation;
-4. restore source refresh, stale-file removal, failed-fetch retry, and reuse;
-5. add VCS, lock-selected compiler, and cross-lock identity regressions;
-6. add the experimental scope/masking model and complete formatting, warning,
-   version, and promotion coverage;
-7. defer auxiliary nested-project visibility beyond explicit package masks to
-   the later in/out design.
-
-The old virtual `pkg/` workspace collision tests remain inapplicable because
-there is no virtual workspace overlay. Builder selection now depends only on
-primary-source contents, with explicit no-source selecting Opam; recipe shape,
-dependency metadata, and install actions do not select a builder.
-
-## Scope of the comparison
-
-The comparison covered these snapshots:
-
-- `prototype/flatten-dune/main` at `8a395ee93d43`;
-- `prototype/flatten-dune/fresh` at `371fe553c417`;
-- `prototype/flatten-dune/exp3` at `a3a7f32dbcfa`;
-- `prototype/flatten-dune-archive-2026-08-24T1337Z` at
-  `4c5109f8ff61`;
-- current `prototype/flatten-dune` at `acb207429700`.
-
-`prototype/flatten-dune/plan` was reviewed as a design-only predecessor rather
-than an implementation snapshot. The historical
-`review/flatten-dune-prototypes` bookmark was used as supporting review
-evidence, not counted as another implementation.
-
-The early tracks branch from older upstream revisions, so raw line counts are
-not directly comparable. The audit compared each prototype with its own common
-ancestor and inspected the bodies of its added cram tests. A matching filename
-was not treated as proof of equivalent behavior, and a renamed test was not
-treated as missing when the same scenario was demonstrably covered elsewhere.
-
-The comparison itself was static. It did not build the historical revisions.
-The successful `ocaml-re` and `ocaml-cohttp` builds are evidence from the
-current prototype work, not from rerunning every archived snapshot.
-
-## The problem
-
-A locked package is normally built by package rules:
-
-1. fetch or copy its source;
-2. create a private package sandbox;
-3. execute the translated opam recipe, often by launching another Dune;
-4. install the result into a private package layout;
-5. expose that installed result to consumers.
-
-For a package already described by Dune files, this duplicates Dune's project
-loading, dependency resolution, scheduling, and rule generation. It also gives
-nested Dune processes independent job schedulers and requires dependency
-closures to be materialized into package sandboxes.
-
-The mounted-package approach replaces the complete recorded recipe for selected
-packages with native loading and rule generation in the current process. Other
-packages remain **legacy** packages and retain existing package rules.
-
-The required mixed graph is therefore not merely:
+The resulting flow is:
 
 ```text
-workspace -> mounted package
+selected lock package, keyed by name
+  -> immutable acquisition under _build/_fetch
+  -> ordered logical source layers at pkg/<name>
+  -> statically extractable patches and substitutions
+  -> classify the resulting source view
+     -> selected package represented: native fine-grained Dune rules
+     -> otherwise: opaque Opam rule and owned install-layout target
 ```
 
-It may contain all of these edges:
+The most important result is not any individual path layout. It is that all of
+the following held together on realistic graphs:
+
+- build-backed source loading;
+- ordinary fine-grained native rules;
+- opaque Opam boundaries;
+- package-local artifact ownership;
+- direct capability visibility and transitive build ordering;
+- private-library and install metadata;
+- PPXs, binaries, generated files, includes, globs, and source traversal;
+- mixed workspace and lock-package edges; and
+- null-build performance within a usable range.
+
+## Final invariants
+
+The prototype ended with the following invariants.
+
+### One normal package root
+
+A selected normal package has exactly one stable root:
 
 ```text
-workspace -> mounted
-workspace -> legacy
-mounted   -> mounted
-mounted   -> legacy
-legacy    -> mounted
+_build/<context>+lockfile/pkg/<name>
 ```
 
-Libraries, public executables, PPX drivers, package variables, install metadata,
-compiler tools, and exported environments must all respect the same dependency
-visibility boundary.
+The selected lock universe guarantees one package per name. Version remains
+metadata. A source checksum identifies acquisition data under `_build/_fetch`;
+it is not part of the package's normal build address.
 
-## The current model
+Normal project builds no longer route through `.pkg/<digest>`. The recursive
+legacy package runtime remains only for `.dev-tool`, where it is a separate
+compatibility concern.
 
-The current prototype's end-to-end dependency flow is:
+### Logical source, immutable backing
+
+Mounted files carry a canonical logical path under `pkg/<name>` and one or more
+immutable backing layers. The layer model has four operations:
 
 ```text
-workspace-only source view
-  -> read or generate the lock
-  -> retain complete translated package actions
-  -> derive lock-only candidates and fetch targets
-  -> load eligible build-backed projects through Source_tree.Rules
-  -> classify and mask mounted projects
-  -> infer all other packages as legacy by absence
-  -> generate mounted rules into explicit artifact roots
-  -> expose scoped libraries, binaries, PPXs, and install layouts
-  -> run old package rules only for packages not classified as mounted
+Directory   map a backing hierarchy into the logical hierarchy
+File        map one backing file to one logical path
+Contents    own transformed bytes at one logical path
+Delete      hide a logical path and its descendants
 ```
 
-Inferring `Legacy` by absence is prototype debt. A production design should
-retain the same two-stage dependency order but produce an explicit classified
-route after source inspection.
+Primary source, lock `files/`, and ordered extra sources are represented by the
+first two forms. Only `Contents` and `Delete` represent transformed bytes and
+deletions. Later layers win.
 
-The fetch rule must be available before loading the project contained in its
-target. It must therefore be derivable from lock data alone. Otherwise loading a
-mounted `dune-project` would create a rule-generation cycle:
+Rules load, enumerate, and diagnose the logical hierarchy. Reads depend on the
+actual backing input. Materialization uses per-file copy or write rules and
+preserves executable permission. There is no prepared root, shadow tree,
+manifest, snapshot, source provider, or whole-source directory target beneath
+the package root.
+
+### Fine-grained native rules and an opaque fallback
+
+A package is native only when the transformed source view contains Dune files
+and its decoded projects define the selected package. Incidental Dune files in
+an otherwise opaque source do not make an unrelated selected package native.
+
+Static source transformations are extracted conservatively. Literal patches,
+substitutions, and statically decidable conditions extend the source layers.
+When a source-affecting operation needs build-time package data or unsupported
+action structure, the package remains opaque. It is not partially transformed
+and then loaded natively.
+
+An opaque package remains a data-only boundary. Its source does not enter
+`Dune_load`; one Opam rule owns its install-layout directory target and cookie.
+It may invoke Dune or another build system internally. Native packages receive
+neither that wrapper nor that cookie.
+
+### Canonical package graph
+
+`Package.t`, `Package.depends`, and `Package_db` are authoritative. The Opam
+stanza consumes a concrete `Package_deps.t` materialization rather than storing
+a second recursive package graph.
+
+Capabilities such as binaries, package variables, and exported environments
+are visible through direct declared dependencies. Build ordering and installed
+library resolution can use the required transitive closure. Virtual packages
+and the selected compiler use explicit forwarding rather than accidental
+global visibility.
+
+Auxiliary libraries remain private to their owning mounted package. Only the
+selected package and the private closure needed to implement it are exported.
+
+### Workspace and lock packages can alternate
+
+The prototype supports both directions across the workspace boundary. For
+example, this graph builds:
 
 ```text
-Dune_load
-  -> read mounted dune-project
-  -> build source target
-  -> generate source-target rules
-  -> Dune_load
+locked consumer -> workspace library -> locked base
 ```
 
-The current `_fetch` namespace provides the independent source ownership needed
-to break this cycle.
+Generated mixed lockdirs retain repository-to-workspace names without creating
+fake `.pkg` files or `pkg/<name>` roots for workspace packages. Workspace path
+and binary entries take precedence where the locked consumer directly depends
+on the workspace package.
 
-## What worked well
+This implementation is deliberately live-workspace and name-bound. It does not
+yet record a workspace version or solver-metadata fingerprint in the lockdir.
+That limitation is production debt, not a reason to add fake lock-package
+nodes for workspace packages.
 
-### Path and ownership invariants were corrected
+## Outcome of the original plan
 
-The current prototype preserves the existing meanings of path kinds:
+### Kept
 
-- `Path.Source.t` is watched, user-owned workspace input and may be promoted;
-- `Path.Build.t` is graph-produced data and is never a source promotion
-  destination;
-- `Path.External.t` is external input that may be watched but must not be
-  modified by build rules.
+- Build selected Dune packages in the current process. This is the central
+  successful result.
+- Keep `Path.Source.t` for real workspace input only. Build-backed input belongs
+  behind a rules-side source API.
+- Keep the engine package-agnostic. Generic source selection and dependency
+  operations were sufficient.
+- Use a separate rules-side source-tree view. It became the main ownership
+  boundary for logical and backing files.
+- Fall back to an opaque Opam boundary for non-Dune and source-less packages.
+- Expose one Opam stanza primitive. Synthetic and unreleased authored stanzas
+  share the same rule path.
+- Use canonical `Package.depends` and `Package_db`. This removed the normal
+  recursive legacy package graph.
+- Add package scopes over canonical decoded projects. They preserve owner-local
+  auxiliary code while providing selected-package views.
+- Remove normal `.pkg` routing. Only `.dev-tool` retains the legacy recursive
+  route.
 
-A fetched source directory is a real build directory target. Generated objects,
-metadata, and install entries have another owner. This makes cleanup,
-invalidation, promotion, and direct artifact targets ordinary rule-graph
-operations rather than mounted exceptions.
+### Changed or refined
 
-### The engine remained package-agnostic
+- Separate physical source and artifact roots became immutable `_fetch` backing
+  plus one fine-grained logical package hierarchy.
+- Exact or digest-addressed output identity became package-name identity inside
+  one selected lock universe. Version and digest are metadata.
+- "Any Dune file means native" became "a Dune project represents the selected
+  package".
+- A second transformed source root became direct `Contents` and `Delete` layers
+  for static transformations, with opaque fallback for unsupported cases.
+- Preserving workspace behavior expanded into supporting locked-to-workspace
+  edges and generated mixed lockdirs.
 
-The early prototypes added a virtual-to-real source callback to engine
-configuration. Engine source copying, source lookup, selectors, fallback rules,
-dependency recording, and cleanup then had to recognize pseudo-sources.
+### Avoided or narrowed
 
-The current engine additions are generic capabilities:
+- A whole prepared directory target was avoided because it conflicts with
+  fine-grained generated ownership and adds another source representation.
+- The broad auxiliary-project in/out design was narrowed to the owner-private
+  closure required for correctness.
 
-- build and enumerate a directory target;
-- read files produced by build rules;
-- apply one source/generated/fallback selection policy;
-- allow source-copy rules to depend on a general path.
+## What worked as planned
 
-The engine receives no package identity, mounted registry, or reverse source
-mapping. Its normal `Source_tree` projection remains workspace-only.
+### Current-process loading is viable
 
-### Source and artifact ownership became explicit
+Native packages are ordinary loaded Dune projects with explicit output
+ownership. Their libraries, executables, PPXs, generated files, aliases, and
+install metadata are generated by the top-level Dune process. Native-to-native
+edges compose directly rather than crossing an installed-package boundary.
 
-`Loaded_project` carries the values that callers previously reconstructed:
+This remained true even for large staged PPX graphs and packages with nested
+projects. The architecture therefore passed the most important feasibility
+test: native package rules do not need a second scheduler or a nested package
+Dune.
 
-- stable project identity;
-- source root;
-- rules-side source-tree root;
-- build partition and resolver;
-- explicit output root;
-- visible package mask.
+### Path kinds retained their meaning
 
-`Loaded_dir` adds the project-relative directory and its output directory.
-`Build_partition` distinguishes the resolver/toolchain from the physical output
-root and whether implicit workspace targets apply.
+The prototype did not give fetched files virtual workspace identities.
+Workspace paths remain watched, user-owned, and promotable. Fetch and package
+paths remain build-owned and are not promotion destinations. External paths
+remain external inputs.
 
-This was broad, but it was a coherent migration. It fixed assumptions in
-library objects, scopes, PPX drivers, binaries, install entries, diagnostics,
-Merlin, and generated-source handling instead of adding another path remapping
-layer.
+This avoided the earlier prototypes' most expensive mistake: once a fetched
+file pretends to be a `Path.Source.t`, copying, selectors, fallback handling,
+cleanup, promotion, and diagnostics all need mounted-package exceptions.
 
-### Real projects drove integration work
+### The source abstraction was the correct seam
 
-Small fixtures found ownership and routing errors. `ocaml-re` and
-`ocaml-cohttp` found the interactions between them:
+Rules that need topology or bytes use `Source_tree.Rules.Dir` and
+`Source_tree.Rules.File`. A mounted file decides how to enumerate, read,
+materialize, and diagnose itself. Consumers do not infer source ownership from
+a generic `Path.Build.t` shape.
 
-- staged PPXs and cross-package PPX ownership;
-- `include_subdirs` groups over build-backed directories;
-- generated files and ordinary includes;
-- package providers whose names differ from their findlib libraries;
-- package-scoped binaries and ambient compiler tools;
-- parent-relative install globs;
-- workspace and package install-metadata cycles;
-- large mounted and legacy dependency closures.
+This abstraction supported ordinary includes, dynamic includes, OCaml-syntax
+Dune files, `copy_files`, recursive `(source_tree ...)`, module discovery, and
+source/generated/fallback selection. Mounted `copy_files` was fixed locally;
+ordinary `copy_files` still sees generated files unless `(only_sources)` is
+requested.
 
-Successfully building both projects is the strongest result of the prototype.
-It does not prove that every edge case is covered, but it demonstrates that the
-architecture can support a realistic lock universe.
+### Explicit artifact ownership scaled
 
-### Focused regressions and separate commits helped
+`Build_partition`, loaded projects, loaded directories, scopes, objects,
+install entries, PPX drivers, and local binaries carry an explicit output
+owner. This was a broad migration, but it was more reliable than recovering an
+owner from a source path or context-name suffix.
 
-Many difficult failures were first reduced to cram tests. Regression changes
-were kept before their fixes, and incomplete vendored-project work was isolated
-on a detached revision rather than folded into a working stack.
+Mounted packages retain install entries needed by `dune-package`, relocation,
+`Install_layout`, external `ocamlfind`, and Opam/Topkg consumers. They do not
+gain workspace install aliases or workspace ownership.
 
-This made it possible to recover from failed architectural experiments without
-losing the useful implementation or its evidence.
+### Builder unification worked
 
-### Profiling found genuine algorithmic problems
+The synthetic Opam stanza proved useful as a real rule primitive rather than a
+second package universe. Source-backed and source-less opaque packages use the
+same action expansion, sandbox, install layout, and cookie model. Native
+consumers can use opaque libraries and binaries; opaque consumers can receive
+native install layouts and environments.
 
-Two important findings were independent of the source architecture:
+The package dependency refactor was especially successful. Moving from the
+mechanically extracted recursive runtime to `Package.depends`, `Package_db`,
+and `Package_deps` made capability visibility explicit and allowed normal
+`.pkg` dispatch to be removed.
 
-- `Per_context.create_by_name` memoizes lookup but does not by itself memoize
-  evaluation of a supplied `Memo.t`. Wrapping mounted discovery in
-  `Memo.Lazy` reduced repeated loading substantially.
-- Package digest lookup rebuilt complete closure digest tables for thousands of
-  consumers. Retaining a name and digest index reduced the affected large null
-  build from roughly two minutes to a few seconds.
+### Scopes solved the practical ownership problem
 
-These were real null-build and rule-generation costs. They should not be
-confused with the cost of a clean package build. The timings in this section
-are local, unarchived observations; the repository retains multiplicity tests,
-not benchmark artifacts.
+The unreleased scope stanza and synthetic mounted scopes operate over canonical
+decoded projects. They prevent every package found in a shared source from
+becoming globally visible, while preserving private implementation libraries
+needed by the selected package.
 
-## What could be improved
+A general nested-project export policy was not required for the prototype. The
+smaller rule, "selected owner plus required private closure", was enough and is
+a better starting point for production.
 
-### Performance workloads were conflated
+### Regression-first development paid off
 
-We did not initially separate:
+The difficult failures were reduced to focused Cram tests before their fixes.
+This was particularly valuable for:
 
-1. a clean package build;
-2. a warm build with action-cache hits;
-3. a null rule-generation build;
-4. replay of a failed build;
-5. native mounted rules versus legacy nested recipes.
+- mounted source and artifact paths;
+- private and virtual library metadata;
+- PPX ownership;
+- binary narrowing;
+- overlays, patches, substitutions, and deletion;
+- recursive source-tree materialization;
+- mixed workspace dependencies;
+- compile-command collection cycles; and
+- null-build workspace-cache writes.
 
-The package digest problem dominated one null/failure workload. It did not
-explain the successful clean `ocaml-cohttp` trace:
+Keeping test and fix changes separate made it possible to discard broad fixes
+without losing the evidence that motivated them.
 
-- total build time was about 481 seconds;
-- Dune loading took about 28 milliseconds;
-- lock-directory loading took about 18 milliseconds;
-- the first package sandbox started after about 0.4 seconds;
-- the first nested Dune started after about 1.1 seconds.
+## What changed during implementation
 
-That build instead contained 171 nested Dune invocations, hundreds of outer
-sandboxes, and very large block output. These figures came from a local trace
-that is not checked into the repository and must be reproduced before being
-used as release evidence. The later
-`sandbox/materialize-dependencies` event was added to measure the suspected
-copy phase directly. It should have existed before making a causal claim from
-the broader `sandbox/create` span.
+### Separate source and artifact trees became one logical hierarchy
 
-Future measurements must state the binary revision, environment, target, cache
-state, clean/warm state, success status, and whether another Dune process owns
-the build directory.
+The original plan treated `_fetch/.../dir` as the package's complete native
+source root and generated artifacts elsewhere. That is clean in isolation, but
+native Dune semantics repeatedly relate a source directory to its corresponding
+build directory. Carrying two unrelated physical hierarchies through every
+rule either multiplied path plumbing or encouraged another remapping layer.
 
-### The implementation grew before the smallest vertical path stabilized
+The final design retains `_fetch` only as immutable backing. The rules-side
+source tree gives each file its canonical logical path under `pkg/<name>`, and
+fine-grained rules materialize it there. Authored and generated paths can then
+participate in ordinary Dune selection without a directory target claiming the
+whole package root.
 
-The feature necessarily crosses many rules modules, but some breadth came from
-adding autolock, HTTP, watch mode, install layouts, providers, and performance
-work while source ownership was still changing.
+This is controlled coexistence, not the old source/artifact co-location:
+ownership is per file, immutable bytes stay in `_fetch`, and no synchronization
+step mutates or mirrors a complete source tree.
 
-A future implementation should first prove:
+### Package identity became name-based
+
+Digest-addressed output roots made a transport property part of package
+identity. They also leaked long, unstable paths into diagnostics, metadata, and
+tests. The selected lock universe already provides one package per name, so the
+normal package map and root now use `Package.Name.t`.
+
+The source digest still does the job it is good at: identifying reusable
+acquisition content under `_fetch`. It does not select scopes, capabilities,
+artifacts, or normal package rules.
+
+### Classification became ownership-aware
+
+"Any Dune file means native" was too broad. Real Opam sources can contain an
+incidental Dune project in an example, test fixture, or vendored directory that
+does not define the selected package.
+
+The final classifier first constructs the transformed logical view, detects
+Dune files, and then checks whether an enabled decoded project defines the
+selected package. Otherwise the package remains opaque. Parsing errors in a
+candidate native project are still real errors; they are not silently converted
+into an opaque build.
+
+### Native preparation became a static extraction problem
+
+The plan originally deferred patches, substitutions, lock `files/`, and extra
+sources to a transformed source target. The final one-root invariant ruled out
+that second root.
+
+Instead, overlays are source layers and deterministic transformations produce
+exact in-memory contents or deletion layers. This handles ordinary Opam patches
+and substitutions while preserving immutable acquisition data. If evaluation
+requires package build outputs or unsupported dynamic action structure, native
+loading is rejected conservatively and the complete recipe runs opaquely.
+
+### Mixed workspace locks grew beyond the initial scope
+
+The first goal concentrated on workspace consumers of lock packages. Real
+projects, especially Dream, required repository packages to depend back on
+workspace packages. The prototype therefore added:
+
+- unchecked project-context loading for a generated mixed lockdir;
+- workspace `Install_layout` environments and binaries for locked consumers;
+- workspace precedence for path-like capabilities;
+- lock generation that retains repository-to-workspace names; and
+- tests with alternating locked and workspace nodes.
+
+Generic disk validation remains strict. The project loader is the only place
+that interprets the live workspace boundary.
+
+### A few root-only rules needed explicit mounted guards
+
+Mounted package roots and the workspace root can both appear to have no project
+components. Dune 3.23 compile-command collection therefore tried to generate
+`compile_commands.json` from every mounted root and created a directory-content
+cycle in `re/private_re`.
+
+The correct fix was not a source glob or load restriction. Compile-command
+generation is a workspace-root service, so mounted dispatch skips it explicitly.
+This is a useful general lesson: an empty component list is not proof that a
+rule is running at the workspace root.
+
+### Toolchain runtime data remained the user's dependency
+
+The relocatable compiler exposed another distinction. Sandboxing the selected
+`ocaml` executable without its sibling stdlib produced:
 
 ```text
-one local archive
-  -> one build-backed source target
-  -> one mounted library
-  -> one separate artifact root
-  -> one workspace consumer
+Error: Unbound module Stdlib
 ```
 
-Only then should it add the mixed dependency graph and broader transports.
-
-### Consumer visibility was discovered piecemeal
-
-Libraries, executables, PPXs, `PATH`, package variables, and install roots all
-needed the same concept: a capability derived from the consuming package's
-selected dependency branch.
-
-The current implementation gradually threaded package sets through these
-systems. A production design should introduce the capability boundary early and
-avoid global package tables that later need narrowing.
-
-### Some debugging followed broad traces too long
-
-`Alias builder`, `build-finish`, and `sandbox/create` are enclosing spans. A
-large duration does not identify the work inside them. Silent intervals identify
-missing instrumentation, not a specific cause.
-
-The most useful investigations added narrow spans or deterministic counters:
-
-- `mounted-dune-load`;
-- `mounted-packages-load`;
-- `package-digest-table`;
-- `materialize-dependencies`.
-
-This should be the default sequence: instrument, reproduce, change one hotspot,
-then remeasure a successful workload.
-
-### Environment and binary provenance were not controlled early enough
-
-Investigations were delayed by:
-
-- `_boot/dune.exe` versus the fully built executable;
-- inherited `DUNE_SOURCE_ROOT` in isolated copies;
-- missing `npm` and `zarith` dependencies;
-- HTTP test-server port conflicts;
-- concurrent Dune processes sharing one build directory;
-- traces containing child events from a previous top-level process.
-
-A benchmark checklist would have avoided much of this churn.
-
-### The lock-index fix became too general during review
-
-The repeated digest work was real, but attempts to make its cache universally
-correct temporarily expanded into lock-directory APIs, revision hashing, and
-structural equality details. Those changes distracted from the measured
-workload and were reverted.
-
-The lesson is to keep a performance patch local to the demonstrated repeated
-work, add a focused invalidation test, and avoid generalizing adjacent APIs
-until another consumer requires it.
-
-## Comparison with the previous prototypes
-
-### The common premise of the early tracks
-
-`main`, `fresh`, `exp3`, and the archived implementation varied in fetch timing,
-context construction, source claims, and invalidation. They nevertheless shared
-one premise:
-
-> Every loaded Dune source must have a `Path.Source.t` identity.
-
-They mounted a package under a virtual path such as `pkg/foo.1.0`, redirected
-that path to `_build`, and generally placed fetched files and generated
-artifacts under the same package root.
-
-Agreement between independent implementations was useful behavioral evidence,
-but it did not validate this premise. The archive post-mortem correctly
-identified it as the main architectural mistake.
-
-### Source representation
-
-Earlier prototypes represented a mounted root approximately as:
-
-```ocaml
-{ virtual_source : Path.Source.t
-; physical_build : Path.Build.t
-; package_mask : Package.Name.Set.t
-}
-```
-
-Callers kept the virtual source path and recovered the physical path through
-`real_path` when bytes or artifacts were needed.
-
-Current code uses `Source_path.t`:
-
-```ocaml
-type t =
-  | Workspace of Path.Source.t
-  | Build of Path.Build.t
-```
-
-The rules-side source tree keeps this distinction private behind directory and
-file operations. No arbitrary build path becomes source merely because of its
-shape.
-
-### Rule ownership
-
-Earlier prototypes fetched or synchronized files into the final package output
-root. The archive refined this with source manifests and non-destructive
-updates, but the fetch still owned selected paths beside generated objects.
-Synthetic claim rules were also explored so the engine would preserve files
-already under `_build`.
-
-Current code gives the complete fetched tree one ordinary directory target under
-`_fetch`. The package artifact root is a separate rule domain. Only selected
-source inputs are copied to artifact paths, and generated/fallback precedence is
-resolved by generic source selection.
-
-### Engine boundary
-
-Earlier engine behavior included some combination of:
-
-- virtual-to-real source lookup;
-- suppressing source-copy rules for redirected paths;
-- treating unowned build paths as direct source facts;
-- adding mounted filenames to selectors;
-- mounted cleanup and promotion exceptions.
-
-Current engine behavior is not package-specific. Build-backed topology and bytes
-are requested through existing build-system dependencies, while the ordinary
-engine source view remains the workspace.
-
-### State and invalidation
-
-Earlier tracks published mounted roots through mutable process-global state and
-included a registry generation in memo keys. The archive made the registry value
-immutable, but its publication remained a global startup handoff.
-
-Current mounted candidates are prepared per context and carried into loading.
-There is no global source overlay or reverse path registry. Some routes are
-still recovered by absence from the mounted list, which is noted below as debt.
-
-### Artifact and resolver ownership
-
-Earlier tracks often treated `_default+lockfile` as a derived context and
-recovered ownership from the context name plus virtual source root. This could
-make it behave like a second workspace context and duplicate implicit targets.
-
-Current `Build_partition` records a resolver context and a separate output root.
-A mounted partition shares compiler and resolver semantics with its owning
-workspace context while disabling implicit workspace targets.
-
-### Routing policy
-
-The archive used a conservative action veto. Any unconditional non-Dune step or
-separate install action kept a package on legacy rules.
-
-The current implementation instead classifies source-backed project dependencies
-from the immutable primary source target:
-
-- any Dune build file selects native loading;
-- a tree with no Dune build file receives an internal synthetic `Opam` stanza;
-- lock metadata and recipe shape do not participate in selection;
-- Dune parsing and loading errors propagate rather than selecting `Opam`;
-- local archives and live directories use the same primary-source contract;
-- a source-less package selects synthetic `Opam` directly, without fabricating a
-  fetch target or loaded source project.
-
-Lock `files/`, extra sources, patches, substitutions, and other recipe actions
-are deliberately not applied before classification. Synthetic `Opam` packages
-apply their overlays and complete recipe in the copy sandbox. A native-selected
-package currently consumes the immutable primary source as-is and ignores the
-recorded Opam recipe. This is a known limitation for upstream Dune projects that
-require a patch or source transformation before they can build. Supporting them
-requires a separate design such as
-`_fetch/raw -> transformed source target -> native loading`; mutating the
-primary fetch target or silently falling back to `Opam` is not acceptable.
-
-### Overall assessment
-
-The current prototype is a clear architectural improvement:
-
-- path kinds retain their ownership meaning;
-- fetch targets and artifacts have independent owners;
-- source, project, resolver, and artifact identities are explicit;
-- the engine is not taught about packages;
-- source selection is centralized;
-- mixed mounted/legacy lookup is dependency-scoped;
-- shared archives can use one fetch target and multiple artifact identities.
-
-Its costs are also real:
-
-- the migration touches many rules modules;
-- mounted conditionals remain spread across consumers;
-- the rules-side source API exposes more representation than the final feature
-  may need;
-- physical routing still uses a synthetic mounted context name in places;
-- several older focused tests were folded into large multi-scenario cram files;
-- some behavior from the archive was not carried forward.
-
-## Behavioral test audit
-
-### Coverage retained or strengthened
-
-The current suite directly covers:
-
-- native loading with no nested package Dune;
-- strict absence of mounted `.pkg` rules and cookies;
-- distinct recursive fetch and artifact targets;
-- exact artifact-path requests after clean;
-- source symlink preservation;
-- generated, promote-mode, and fallback precedence;
-- `%{project_root}` and source-tree dependencies;
-- local archive and HTTP transport;
-- one-invocation autolock;
-- lock replacement in one running watch server;
-- shared fetch targets with separate package artifact identities;
-- nested locked projects and Cram data-project masking;
-- `include_subdirs` over build-backed directories;
-- static includes, dynamic includes, and OCaml-syntax Dune files;
-- mounted PPX drivers used by mounted and workspace consumers;
-- mounted-to-mounted executables and ambient `PATH` fallback;
-- mounted-to-legacy and legacy-to-mounted library/PPX boundaries;
-- provider packages whose names differ from their libraries;
-- package-scoped binary narrowing;
-- mounted loading and digest-table construction counts.
-
-These cases are concentrated in:
-
-- `pkg/mounted-dune-package.t`;
-- `pkg/mounted-dune-package-projects.t`;
-- `pkg/mounted-dune-package-ppx.t`;
-- `pkg/mounted-dune-package-tools.t`;
-- `pkg/mounted-dune-package-http.t`;
-- `pkg/mounted-dune-package-autolock.t`;
-- `pkg/mounted-dune-package-watch.t`.
-
-### Coverage gaps and unsettled behaviors
-
-The following old scenarios remain relevant comparison points. Most lack an
-exact current regression; a few first require an explicit product-policy
-decision.
-
-#### Unselected nested vendored project
-
-Historical tests:
-
-- `mounted-nested-project.t`;
-- `e2e-nested-vendor.t`.
-
-A mounted package contains `vendor/.../dune-project`. The nested project
-declares a package absent from the lock, and the mounted parent consumes its
-public library.
-
-Current nested-project coverage gives the nested package its own lock candidate.
-Moreover, `Pkg_sources.mount` filters every discovered project to the selected
-candidate package. The old auxiliary-project behavior is therefore not only
-untested; it is likely narrower in the current implementation. The `exp3`
-fixture also checked that recursive `runtest` did not enter the auxiliary
-project.
-
-The desired eventual behavior is that an auxiliary project can be an internal
-input without automatically becoming visible outside the package. That belongs
-to the later in/out design. Builder unification may retain the complete decoded
-universe when that simplifies ownership, but it does not implement or decide
-nested-project visibility.
-
-#### Complete native -> Opam-built -> workspace chain
-
-The complete historical fixture is the archive's
-`mounted-chain-abc.t`. Similarly named tests on `main`, `fresh`, and `exp3`
-covered only parts of the composition.
-
-The full scenario combines several boundaries:
-
-- native A invokes an Opam-built package tool through `%{pkg:...}`;
-- Opam-built B compiles and links against native A through its environment;
-- B installs a binary;
-- workspace C depends only on B, resolves A transitively, and runs B's binary;
-- under the current builder model, only B receives the synthetic Opam stanza.
-
-Package tests exercise these mechanisms through the shared package rule
-primitive, and the current `ocaml-re` and `ocaml-cohttp` builds cover real mixed
-graphs. The archived combined fixture remains useful reference material, but it
-is not a prerequisite for duplicating the same capability matrix in the new
-route.
-
-#### Refresh, stale-file removal, repair, and HTTP retry
-
-Historical tests:
-
-- `mounted-refetch.t`;
-- `mounted-fetch-retry.t`.
-
-Current watch coverage keeps the package name and version stable while replacing
-its archive URL. It does not prove:
-
-- changing content and checksum at the same source URL or local path;
-- removal of files and empty directories that disappear upstream;
-- no fetch or extraction on an unchanged build;
-- repair after deleting one source target;
-- preservation or correct rebuild of generated siblings;
-- retry of a failed HTTP fetch after a lock URL changes;
-- reuse of a successful download in the same watch process.
-
-Some archived assertions were specific to source manifests and claim rules and
-should not be copied literally. The observable refresh and retry behavior should
-be ported using target-backed expectations.
-
-#### Lock-selected compiler and configurator metadata
-
-Historical tests:
-
-- `mounted-lock-compiler.t`;
-- `mounted-configurator-runtime.t`.
-
-The first selects compiler wrapper binaries from the lock and verifies that
-mounted rules use that toolchain. This is high-value because using the host
-compiler can make valid locked `.cmi` files appear corrupted. `ocaml-re` and
-`ocaml-cohttp` exercise substantial compiler graphs, but are not substitutes for
-a small provenance test.
-
-The second is a separate, cheaper assertion that a mounted runtime action sees
-the mounted partition's `.dune/configurator.v2` through `INSIDE_DUNE`.
-
-#### Cross-lock digest identity
-
-Historical test:
-
-- `pkg/ocamlformat/mounted-package-digest-identity.t`.
-
-A project lock and a dev-tool lock contain packages with the same name and
-version but different source digests. The project entry is mounted while the
-dev-tool entry remains independently resolved.
-
-Current package tables and mounted checks use complete digests, and recent index
-work explicitly preserves separate project and dev-tool name indexes. There is
-nevertheless no equivalent end-to-end regression.
-
-#### Builder-selection matrix
-
-Historical tests:
-
-- `mounted-action-veto.t`;
-- `mounted-veto.t`.
-
-The old expectation that mixed work must veto mounting is intentionally not
-retained. The planned contract prepares package sources independently, selects
-native `Dune` loading when the tree contains any Dune build file, and otherwise
-selects a synthetic `Opam` stanza containing the complete recipe.
-
-Add focused cases proving:
-
-- mixed work, wrappers, separate install actions, depexts, and package
-  declarations do not participate in selection;
-- a tree with no Dune build file selects `Opam` independently of action syntax;
-- a source-less package selects `Opam` without a fabricated source tree;
-- a Dune file anywhere in the prepared tree selects native loading;
-- Dune parsing/loading errors propagate instead of falling back to `Opam`;
-- every currently supported source transport implements the common prepared
-  source contract before its old `.pkg` source ownership is removed.
-
-Synthetic `Opam` coverage proves that lock `files/` and ordered extra sources
-are overlaid in its copy sandbox without mutating the primary source. Native
-selection intentionally inspects and consumes only the immutable primary source
-for now; pre-loading transformations require the separate transformed-source
-phase described above.
-
-#### Same-project package masking
-
-Historical tests:
-
-- `mounted-same-source-masking.t`;
-- `mounted-same-source-mask.t`.
-
-Current shared-source coverage places packages in separate root and nested
-projects. The older tests place multiple selected packages in one
-`dune-project`, sometimes with both libraries and a
-`deprecated_library_name` stanza in one Dune file.
-
-The current mask implementation is intended to support this, but the sharper
-case should be retained. It also exercises package aliases and redirections
-across separately mounted views of one source target.
-
-#### Vendored formatting and warning behavior
-
-Historical tests:
-
-- `mounted-sources-vendored.t`;
-- `mounted-vendored.t`;
-- `e2e-vendored.t`.
-
-Current tests prove vendored compiler flags and recursive `runtest` exclusion.
-They do not directly prove that `dune fmt` avoids mounted files, nor every class
-of Dune warning suppression. A focused formatting test is cheap and protects an
-important ownership boundary.
-
-#### Direct workspace execution of a mounted public binary
-
-Historical test:
-
-- `mounted-binary.t`.
-
-Current tests cover a mounted package running another mounted executable and a
-workspace using a mounted PPX. They do not directly cover an ordinary workspace
-rule executing `%{bin:foo-tool}` from a mounted package.
-
-#### Broader promotion behavior
-
-Historical test:
-
-- `mounted-promotions.t`.
-
-Current coverage proves that a mounted promote rule generates an artifact
-without changing fetched source, and that workspace promotion still works. It
-does not retain the matrix for:
-
-- `promote (until-clean)`;
-- `promote (only ...)`;
-- `copy_files` with promote mode;
-- generated-only promotion targets;
-- `dune build --promote`.
-
-The old physical paths should not be copied, but the semantic matrix remains
-useful.
-
-#### Remaining focused gaps
-
-Lower-priority archived cases without exact current equivalents include:
-
-- `%{version:foo}` expansion and package-alias routing;
-- fetched opam files combined with `(generate_opam_files true)`;
-- mounted traversal diagnostics for directory symlink cycles;
-- a workspace-only target being absent from the mounted output partition;
-- one installed legacy cookie being loaded once across workspace and mounted
-  consumers.
-
-### Intentional scope differences
-
-The following should be reported as prototype scope or policy differences, not
-blindly restored as old tests.
-
-#### Source transformations
-
-Synthetic `Opam` packages overlay checksum-verified extra sources and lock
-`files/` after copying the immutable primary source into their sandbox. Native
-packages do not receive those overlays and do not execute patch, substitute, or
-other preparation actions from the lock recipe. A Dune-bearing upstream that
-needs such preparation is therefore unsupported by native selection today.
-
-The future extension point is a separately owned transformed source directory
-target between the raw fetch and native loading. It must preserve checksum and
-cache identity for the raw source, deterministic overlay ordering, and ordinary
-rule-graph invalidation.
-
-#### VCS and source-less packages
-
-Archive and live-directory primary sources participate in classification. VCS
-coverage still needs an end-to-end regression. A source-less package bypasses
-source inspection, starts with an empty Opam sandbox working directory, and has
-no primary-source target.
-
-#### Mixed recipes with a selected Dune dependency
-
-The archive's conservative action veto is intentionally retired. The presence
-of any Dune build file selects native loading and supersedes the complete
-recipe. A package that requires action-specific preparation or install layout
-must express that requirement through its Dune files; recipe shape is not a
-routing veto.
-
-#### Virtual workspace collisions
-
-The archive reserved `pkg/` and tested collisions with physical and synthetic
-workspace directories. Current mounted sources have no virtual workspace path,
-so those exact collisions no longer exist. The still-relevant assertion is that
-ordinary workspace targets are not generated in the mounted output partition.
-
-#### Source-claim repair
-
-The archive tested re-creating an individually deleted source-claim target while
-preserving generated siblings. Source claims were intentionally removed. A
-current test should instead request the owning fetch directory or selected
-artifact target and assert correct ordinary rule-graph repair.
-
-## Rough implementation guide
-
-This section records the broad sequence and API capabilities a future feature
-implementor is likely to need. It intentionally avoids treating every current
-module boundary as final.
-
-### Start with independent identities
-
-Keep these concerns independent from the first type design:
-
-```text
-lock universe and snapshot identity
-exact package identity within that universe
-decoded source-project identity
-masked loaded-project identity
-source owner and source location
-explicitly anchored project-relative location
-resolver/toolchain
-artifact output root
-visible package mask
-exact selected package dependencies
-```
-
-Do not reconstruct one from another. In particular:
-
-- no virtual workspace path for fetched input;
-- no artifact root derived from a source path;
-- no library owner recovered from name plus directory;
-- no context-name suffix used as the sole artifact authority;
-- no package identity recovered by reversing a path.
-
-### Keep separate engine and rules source views
-
-The engine source view should continue to mean the watched workspace. It is used
-for source-copy rules, fallback suppression, ordinary workspace loading, and
-cleanup.
-
-Rule loading needs a richer source view:
-
-```text
-Rules source view = workspace directories + build-backed directory targets
-```
-
-Only the rules-side abstraction should know whether enumeration and reads use
-workspace filesystem APIs or build-system APIs.
-
-### Rules-side source-tree capabilities
-
-The current reference is `Source_tree.Rules`, but its full shape should not be
-copied. The fundamental source-owner API is smaller than the eager prototype.
-
-A directory value needs dependency-recording operations to:
-
-- identify its logical location and owning root;
-- enumerate visible files and subdirectories, forcing its producer when needed;
-- descend without losing or escaping that owner;
-- resolve a directory relative to an explicit project or source-root anchor;
-- produce file values for ordinary loading and action dependencies.
-
-A file value needs operations to:
-
-- resolve an ordinary include while enforcing owner-root containment;
-- read bytes with the correct workspace or build dependency;
-- compare identity for include-cycle detection;
-- report a stable diagnostic location;
-- deny promotion by default unless it carries an explicit workspace promotion
-  capability.
-
-Raw `Path.t` access is an escape hatch for action inputs and working
-directories, not the preferred read API. Reading or enumerating through it must
-not bypass build dependencies.
-
-Current reference operations include:
-
-```text
-Rules.Dir.source_path
-Rules.Dir.path
-Rules.Dir.file
-Rules.Dir.relative_dir
-Rules.Dir.filenames
-Rules.Dir.sub_dirs / sub_dir_as_t
-Rules.Dir.find_dir
-
-Rules.File.source_path
-Rules.File.path
-Rules.File.relative
-Rules.File.read
-Rules.File.equal
-Rules.File.diagnostic_name
-Rules.File.include_context
-```
-
-The current `Rules.Dir.relative_dir` is relative to the workspace root for
-workspace directories and to the fetched tree for build-backed directories. A
-future API should name the anchor explicitly, especially across nested projects.
-The current file representation preserves path kind but not a separate owner
-root token, so containment also deserves an explicit design.
-
-`Rules.Dir.status`, `project`, `dune_file`, and `Make_map_reduce` are useful
-current operations, not fundamental source-owner capabilities. A production
-design may keep decoded project and directory status in `Dune_load` or another
-loaded-tree layer.
-
-`Source_tree.Rules.Build.load` demonstrates the target-backed case. It uses
-`Build_system.directory_target_contents` for topology and
-`Build_system.read_file` for bytes, then eagerly loads nested projects and Dune
-files. A production design should measure whether topology and decoding can
-remain lazier without reintroducing repeated scans or loading cycles.
-
-### Carry source and artifact ownership at the loading boundary
-
-The semantic requirement is an ownership-capable source reference, an explicitly
-anchored local directory, stable decoded and masked project identities, a
-resolver/toolchain capability, and an artifact owner.
-
-The current `Loaded_project`, `Loaded_dir`, and `Build_partition` modules are
-useful references, but their exact fields are prototype shape. A final design
-need not retain duplicate source roots, reverse source/output mappings, a
-`purpose` enum, or an `implicit_workspace_targets` boolean if stronger types
-express those capabilities directly.
-
-What must not return is reconstructing output ownership or package identity from
-a source path and context name.
-
-### Prepare package sources before choosing builders
-
-Create each immutable source directory target using only lock data and source
-transport. The target must have an independent rule namespace such as `_fetch`.
-Archive extraction, VCS checkout, local-source preparation, the lock package's
-`files/` tree, and extra-source overlays must converge on this contract rather
-than select a build backend themselves. Preserve the current order: primary
-source, then `files/`, then each extra source at its declared path. All layers,
-paths, and ordering participate in dependencies and source identity.
-
-Use two explicit values in sequence:
-
-```text
-package node
-  = lock universe + exact package + complete recipe
-  + optional immutable primary-source directory target
-  + exact selected package dependencies + artifact owner
-
-builder
-  = Dune of loaded Dune files
-  | Opam of complete recorded recipe
-```
-
-When a primary source exists, enumerate it through the rules-side `Source_tree`.
-The presence of any Dune build file selects `Dune`; only the absence of all Dune
-build files selects `Opam`. A package with no primary source selects `Opam`
-directly. Do not inspect the lock recipe, dependency metadata, package
-declarations, install layout, or system-provider metadata. External tools remain
-resolver capabilities rather than builder outcomes. Once a Dune file is found,
-all source, parsing, and loading failures propagate normally rather than changing
-builders. Absence from a mounted list must not select or publish either builder.
-
-The package-builder layer presents both choices to ordinary rule generation:
-
-```text
-Dune files present -> normally loaded source projects and stanzas
-Source, no Dune    -> one synthetic loaded project and Opam stanza per package
-No source          -> synthetic Opam rules with no loaded source project
-```
-
-For a source-backed Opam node, construct one synthetic project after source
-enumeration, attach exact package and artifact ownership, and pass it through
-ordinary stanza traversal and `Gen_rules`. A source-less node retains the same
-exact identity and artifact ownership but dispatches its synthetic Opam rules
-directly, without entering `Dune_load`. Generic workspace `Dune_load` remains
-unaware of locks and Opam recipes. Several projects may share one prepared
-source target; they do not share recipes, dependencies, artifact roots, or
-cookies.
-
-Package-node and memo keys must include the owning lock universe or snapshot
-plus exact package identity. Fetch data may be shared by checksum, but builder,
-artifact, and package identities remain distinct when two lock universes contain
-the same name and version.
-
-### Load first, decide visibility later
-
-Load the complete Dune-file universe without using package visibility to choose
-the builder. Complete loading is needed for:
-
-- nested projects;
-- shared archives;
-- package declarations and versions;
-- aliases and redirects;
-- Cram data directories;
-- package-enabled conditions.
-
-An explicit package mask is useful now, but it must not turn a source containing
-Dune files into an Opam build. Auxiliary-project visibility beyond that mask
-remains later in/out work.
-
-### Represent package masks as unreleased scopes
-
-A real user-facing `scope` stanza is guarded by `(using unreleased 0.1)`:
-
-```lisp
-(scope
- (packages foo bar))
-```
-
-The stanza applies to its logical directory; `(subdir ...)` supplies explicit
-placement. Nested scopes intersect, duplicate scopes in one logical directory
-are rejected, and package selection happens before duplicate-package detection.
-The evaluator filters package-owned stanzas while retaining canonical package
-maps and unowned implementation stanzas.
-
-The package-builder layer must still synthesize the same value for each exact
-native package view. That integration should build and decode one canonical
-source universe, then create cheap package scopes with independent artifact
-owners rather than remounting or cloning the canonical project per package.
-
-PR #13337 remains relevant prior art, but the implemented grammar omits its
-`dir` field, ordered-set package expression, closest-ancestor behavior,
-duplicate-scope composition, and library-only filtering. Nested auxiliary
-project in/out semantics remain deferred.
-
-Like `opam`, `scope` has no released compatibility promise. Mounted package
-loading does not yet synthesize or evaluate package scopes.
-
-### Generate into an explicit artifact owner
-
-A fetched directory target is opaque. Do not generate compilation artifacts
-beneath it.
-
-Generate ordinary stanza rules under the project's artifact partition. Use one
-central source-selection policy so that:
-
-- standard and contained promote rules may replace corresponding source input;
-- an existing source suppresses a fallback rule;
-- selectors and module discovery see the same selected source;
-- only selected source inputs are materialized into artifact paths;
-- no mounted source can become a promotion destination.
-
-The current `Pkg_sources.add_artifact_source_rules` and
-`Dune_engine.Source_selection` demonstrate the required behavior. Their exact
-placement is prototype debt, not necessarily the final API.
-
-### Represent opaque builds as an Opam stanza
-
-A source tree with no Dune files becomes a package-owned rule subtree, not a
-parallel source and routing system. A source-backed package gets a synthetic
-loaded project containing one `opam` stanza. A source-less package dispatches
-the same rule directly, with no fabricated source tree or loaded project:
-
-```text
-inputs
-  = optional immutable primary-source directory target
-  + exact recipe + exact selected package dependencies
-
-opaque rule
-  = copied primary source, or an empty working directory, in a copy sandbox
-  + lock files and ordered extra-source overlays
-  + recorded build/install actions
-
-outputs
-  = package-owned install-layout directory target + install cookie
-```
-
-The stanza owns its entire output subtree. It may invoke nested Dune, Make, or
-shell commands, but it cannot write to `_fetch` and no other rule owns a target
-inside its install-layout directory target. Its cookie remains the installation
-trace for files and package variables. Native Dune projects receive neither this
-opaque target wrapper nor a cookie; their rules stay fine-grained.
-
-The first implementation mechanically extracted the old `Pkg_rules` runtime
-into `Opam_package_rules`. This proved action, install, and cookie reuse, but it
-also copied the recursive `Pkg.t` graph, `Dependency_view`, mutable exported
-environments, digest routing, and `Package_universe` into the stanza primitive.
-That package-model coupling must be removed before `.pkg` ownership is deleted.
-
-Make `opam` a user-facing stanza for direct tests and experiments, guarded by
-`(using unreleased 0.1)`. Its grammar has no released compatibility promise. The
-unreleased decoder and synthetic lock-package project must construct the same
-stanza value and use the same rule generator; do not maintain a test-only
-facsimile of the package path.
-
-### Pass package dependencies to Opam stanzas
-
-Loaded native projects compose through ordinary Dune scopes, libraries,
-executables, PPX rules, and dependencies, as in a composed monorepo. Do not wrap
-native-to-native edges in install cookies or opaque package targets. The later
-in/out design may constrain visibility without changing that rule model.
-
-An Opam stanza receives the exact dependencies from its owning `Package.t`.
-Synthetic lock packages construct `Package.depends` from platform-selected lock
-edges; user-authored stanzas use the ordinary `(package ... (depends ...))`
-declaration. `Opam_stanza.t` should not retain a second dependency list.
-
-Resolve those names through `Package_db` and a shared materializer extracted
-from `(deps (package ...))`. The materializer's `Action_builder` records native
-install-layout and Opam target or cookie dependencies and returns the
-environment, binaries, package variables, and concrete paths needed by action
-expansion. Ordinary rule dependencies remain immediate-only; Opam actions use
-the package dependency closure to retain transitive Opam environment semantics.
-
-In the reverse direction, native rules consume an Opam-built dependency through
-that package edge's installed artifacts and cookie.
-
-Keep three concepts distinct:
-
-- native project visibility, deferred in detail to in/out;
-- exact package-dependency edges;
-- artifact ownership.
-
-Package-specific install layouts and cookie-backed Opam results are the concrete
-providers for this materializer. Do not replace the old recursive package graph
-with another graph-shaped result type: package identity and edges already live
-in `Package_db` and `Package.t`.
-
-### Preserve a workspace-only lock phase
-
-Autolock requires two explicit loading phases in one invocation:
-
-1. load only the workspace to generate or validate the lock;
-2. read the resulting lock, prepare package sources, then select and instantiate
-   package builders.
-
-Lock generation must not force package roots whose existence depends on that
-same lock.
-
-### Implementation status
-
-The prototype has completed target-backed native loading, source-content builder
-selection, the unreleased Opam stanza, source-backed and source-less synthetic
-Opam rules, copy-sandbox overlays, alternate-context cookies, and native/Opam
-capability bridging. Both `ocaml-re` and `ocaml-cohttp` build cleanly.
-
-The next architectural step is the package-dependency materializer described
-above and in [Recommended next steps](#recommended-next-steps). It must replace
-the mechanically extracted recursive package runtime before normal `.pkg`
-ownership is removed. Explicit package scopes, transformed native sources, and
-the remaining invalidation and ownership matrix follow that cutover.
-
-### Verification milestones
-
-The native vertical milestone should prove:
-
-- source topology and bytes depend on a real fetch directory target;
-- source and artifact roots have separate rule ownership;
-- a native library compiles and links in the current process;
-- the artifact exists only beneath its explicit package output root;
-- no nested Dune process builds the package;
-- no old `.pkg` target, cookie, or action exists;
-- direct artifact targets work after clean;
-- workspace loading remains unchanged;
-- the engine has no package source registry or redirection callback.
-
-The builder-unification milestone should additionally prove:
-
-- every source-backed package has an immutable primary-source target, while a
-  source-less package has no fabricated source target;
-- Opam sandboxes preserve primary, lock `files/`, and ordered extra-source
-  overlay semantics;
-- `(scope ...)` is rejected without `(using unreleased 0.1)` and decoded and
-  synthetic scopes share one evaluator;
-- two exact packages reuse one canonical decoded source under independent masks
-  and artifact owners;
-- masks cover package-associated stanza classes without affecting builder
-  selection;
-- an Opam stanza's copy sandbox cannot mutate the primary source;
-- each source-backed Opam package has its own synthetic project, recipe,
-  artifact root, and cookie even when its primary source is shared;
-- source-backed synthetic projects use ordinary stanza traversal and
-  `Gen_rules`, while source-less packages dispatch without a loaded project;
-- `(opam ...)` is rejected without `(using unreleased 0.1)` and exercises the
-  same rule generator when enabled;
-- generic workspace `Dune_load` has no lock or Opam-recipe branch;
-- it owns one install-layout directory target and install cookie;
-- direct cookie and install-layout targets work after clean;
-- the Opam stanza sees its exact package dependencies and resolves their
-  builder-owned outputs;
-- native projects compose through ordinary fine-grained Dune rules without
-  cookies or opaque package targets;
-- only primary-source contents select the builder, explicit no-source selects
-  Opam, and loading errors propagate.
-
-Later milestones should add focused tests for:
-
-- source/generated/fallback precedence;
-- auxiliary nested visibility beyond explicit package masks;
-- native/Opam-builder chains in both directions;
-- public binary and PPX lookup;
-- exact locked compiler and version behavior;
-- autolock and watch mode;
-- refresh, retry, removed files, and no-change reuse;
-- same-name packages across lock universes;
-- promotion and formatting isolation;
-- real package graphs.
-
-Use the fully built Dune executable for end-to-end checks. Trace assertions
-about process execution require a fresh action cache. Do not compare a failed
-replay with a successful null build.
-
-### Mechanisms not to copy
-
-Do not reintroduce:
-
-- virtual `Path.Source.t` identities for fetched targets;
-- virtual-to-real source lookup;
-- mounted branches in engine copying, lookup, selectors, fallback handling,
-  cleanup, or promotion;
-- source and generated artifact co-location;
-- build-start synchronization into the artifact root;
-- synthetic source-claim rules;
-- external source snapshot stores or manifests;
-- mutable process-global mount publication;
-- reverse path-to-package or path-to-context registries;
-- a generic rule that interprets arbitrary `Path.Build.t` as source;
-- an Opam action writing directly into an immutable primary source;
-- a parallel `.pkg` source/build system selected by absence from native loading;
-- lock-package or Opam-recipe branches in generic workspace `Dune_load`;
-- an unguarded or compatibility-stable user-facing `opam` or `scope` stanza;
-- destructive filtering or cloning of the canonical decoded project per package;
+A proposed generic package-binary runtime-closure mechanism was deliberately
+abandoned. The affected Dune source rules execute the OCaml toplevel directly,
+so those rules now declare `%{ocaml_where}` and set `OCAMLLIB` for that action.
+The fix is local to the authored consumer rather than changing every package
+binary's semantics or injecting a global `OCAMLLIB`.
+
+## Mechanisms deliberately avoided or removed
+
+The final prototype contains none of the following in the normal package path:
+
+- virtual `Path.Source.t` values for fetched files;
+- virtual-to-real source redirection;
+- mutable process-global mount registries;
+- reverse path-to-package lookup;
+- source claim rules;
+- prepared, snapshot, shadow, or copied source trees;
+- source manifests or provider callbacks;
+- symlink mounts;
+- a whole-source directory target under `pkg/<name>`;
+- digest-addressed normal package roots;
+- a parallel normal `.pkg` package graph;
 - a second semantic workspace context;
-- context-name suffixes as the sole artifact authority;
-- nested Dune execution or an Opam stanza for a package selected for native
-  loading;
-- compatibility shims whose only purpose is preserving an incorrect
-  `Path.Source.t` API.
+- global exposure of all mounted binaries or environments;
+- global attachment of every package's runtime closure;
+- treating all `copy_files` globs as source-only;
+- loading opaque Opam sources into `Dune_load`; or
+- accepting `_fetch` paths in native diagnostics as the intended interface.
 
-## Current prototype debt
+Several of these were tried temporarily. Removing them was progress, not lost
+work: each experiment clarified which ownership fact was missing from the
+simpler model.
 
-The current code should be treated as evidence, not polished production design.
-Known broad areas for cleanup include:
+The prototype also rejected performance changes that had no stable measured
+benefit. Complete package-metadata memoization and an optimization for absent
+lock `files/` were reverted rather than retained on intuition.
 
-- `Source_path.t` is visible to many callers; ownership dispatch should ideally
-  remain concentrated in the rules-side source API.
-- Build-backed file relatives preserve path kind but do not carry an explicit
-  owner-root token or containment proof.
-- Mounted conditionals remain in `Gen_rules`, `Dune_file`, `Scope`,
-  `Super_context`, install rules, PPX handling, and other consumers.
-- `Mounted_context` still encodes physical routing in a context-name suffix.
-- The mounted package list represents only one route; legacy is often inferred
-  by absence and rechecked by name and digest.
-- `Pkg_sources.mount` constructs per-package filtered `Dune_project.t` values
-  instead of reusing one canonical decode under explicit package scopes.
-- Native packages consume raw primary sources and therefore do not yet receive
-  patches, substitutions, lock `files/`, or extra-source transformations.
-- `Source_tree.Rules.Build.load` recursively enumerates and parses the complete
-  build-backed tree.
-- Promotion eligibility is not a first-class file capability.
-- Source selection still accepts raw paths and is attached in `Pkg_sources`.
-- Some install-layout integration uses callbacks and process-local reverse
-  tables.
-- Mounted lookup paths and exported environments require further performance
-  measurement.
-- `Pkg_sources.find_mounted` remains a linear lookup.
-- Broad `Vendored` status currently conflates mounted-root behavior with an
-  explicit `(vendored_dirs ...)` declaration. The paused Menhir experiment
-  exposed this distinction.
-- `Opam_package_rules` still hosts a mechanically extracted recursive package
-  graph, dependency view, mutable exported environments, digest routing, and
-  `Package_universe` even though package edges already live in `Package.t`.
-- Several large cram tests should be split back into focused regressions.
+## Unexpected costs and lessons
 
-These are reasons to redesign interfaces before productionizing the feature,
-not reasons to discard the target-backed model.
+### The migration was broader than the first vertical slice suggested
 
-## Recommended next steps
+The net prototype range touches 286 files and adds substantially more code than
+a reviewable production change should. Native loading reached almost every
+rule family that had encoded the assumption that source and output directories
+were paired workspace paths:
 
-The live progress and ordered work list are maintained in
-[`goal.md`](../../goal.md#current-todo). Since this retrospective was written,
-the implementation has completed the package-name-only root cutover, canonical
-`Package.depends` and `Package_db` graph, concrete `Package_deps`
-materialization, unreleased scopes over canonical projects, direct capability
-visibility, owner-private metadata closure, and recursive mounted
-`(source_tree ...)` materialization. Normal project dependencies now bypass
-`.pkg`, and the complete `ocaml-cohttp` test target passes.
+- libraries and executables;
+- PPXs and preprocessing;
+- Merlin and OCaml index data;
+- foreign stubs and configurator metadata;
+- MDX, odoc, Cinaps, and Cram;
+- JavaScript and Melange rules;
+- Rocq rules;
+- install metadata and public binaries;
+- aliases, globs, includes, and generated sources.
 
-The remaining architectural work is narrower:
+The lesson is not that the abstraction was wrong. It is that a production
+series should establish the ownership types first and land consumers in
+reviewable groups, each with a focused package regression.
 
-1. apply lock overlays, patches, and substitutions directly to native per-file
-   ownership before classification and loading, without introducing a second
-   source root;
-2. delete the residual normal `.pkg/<digest>` dispatcher and confine any legacy
-   recursive package runtime to `.dev-tool`;
-3. complete logical diagnostic excerpts and path spelling;
-4. rewrite the superseded source/artifact-separation sections of this
-   retrospective and `goal.md`, and decide the fate of `dune pkg print-digest`;
-5. finish acquisition, ownership, clean-build, performance, and independent
-   review coverage.
+### Capability visibility is different from build ordering
+
+A package may need its full transitive closure to be built without being
+allowed to resolve every transitive binary or package variable. Early global
+maps caused both accidental visibility and dependency cycles.
+
+The final useful split is:
+
+```text
+direct declared edges  -> capabilities and path precedence
+transitive closure      -> ordering and installed-library availability
+explicit forwarding    -> virtual packages and compiler facilities
+```
+
+This distinction should be part of the first production package-dependency API,
+not repaired independently in binary, environment, and library lookup.
+
+### Metadata is observable behavior
+
+A package can compile successfully and still be unusable if private archives,
+`META`, `dune-package`, relocation information, or install-section paths are
+wrong. Real external projects exposed these issues more effectively than small
+library-only tests.
+
+Mounted install entries should therefore be described as package metadata, not
+as workspace installation requests.
+
+### Observability can perturb the build
+
+Rich runtime tracing originally wrote `<pid>.events` into the source root. The
+filesystem memo observed that transient file and rewrote `_build/.db` on an
+otherwise null build. Moving runtime events outside the source tree restored a
+stable cache.
+
+Tracing configurations also affect rule digests and must be warmed separately.
+Enclosing spans such as `Alias builder` cannot be interpreted as exclusive CPU
+time, and overlapping child durations must be combined by wall-time union.
+
+### External provenance must be controlled early
+
+Several investigations were delayed by using `_boot/dune.exe`, inheriting
+Dune/OCaml environment variables, or sharing a build directory between
+processes. External validation became reliable only after consistently using:
+
+```text
+/home/ali/dune3/_build/default/bin/main.exe
+```
+
+with `DUNE_SOURCE_ROOT`, `INSIDE_DUNE`, `OCAMLPATH`, `OPAM_SWITCH_PREFIX`, and
+compiler-library overrides unset.
+
+## Performance outcome
+
+Profiling the real `ocaml-cohttp` graph found repeated structural work rather
+than one dominant source-loading cost. The useful optimizations were small and
+composable:
+
+- linear construction of concatenated `PATH` values;
+- retained list-valued environments with one final serialization;
+- one shared native environment root;
+- memoized selected package paths;
+- shared opaque materialization and binary maps;
+- reused mounted scope databases; and
+- owner-indexed mounted library and install stanzas.
+
+On the measured cache-stable null workload, wall time fell from roughly 30
+seconds to about 4.2 seconds. Maximum RSS fell from roughly 1.7 GiB to about
+607--609 MiB. Minor allocation fell from about 3.036 billion to about 396.8
+million words.
+
+These are local prototype measurements, not portable benchmark claims. Timing
+variation was larger than some attempted changes, and those changes were not
+credited. Allocation sampling was a more stable guide for structural work.
+
+The remaining graph is still large: one instrumented run had about 143,000
+Memo nodes and 866,000 edges. Mounted Merlin configuration serialization was
+the largest identified direct-major allocator. It could not simply be disabled
+because compilation rules currently consume `.merlin-conf`. Production work
+should decouple compilation dependency tracking from editor configuration
+before trying to remove that cost.
+
+## Validation evidence
+
+The focused package suite covers, among other cases:
+
+- one-root package-name layout and absence of normal `.pkg` rules;
+- local, HTTP, source-less, and opaque sources;
+- source overlays, executable files, patches, substitutions, and deletion;
+- generated/fallback precedence and promotion isolation;
+- includes, dynamic includes, `copy_files`, and recursive source trees;
+- nested projects, scopes, private libraries, and redirects;
+- native and opaque libraries, PPXs, binaries, variables, and environments;
+- direct capability narrowing and virtual-package forwarding;
+- install cookies, `META`, `dune-package`, and external `ocamlfind` behavior;
+- autolock and watch paths;
+- alternating workspace and locked dependencies;
+- compile-command cycle prevention; and
+- null-build cache stability under rich tracing.
+
+During development, the prototype completed real `ocaml-re` and
+`ocaml-cohttp` workloads. Dream validated a real repository-to-workspace edge
+and reached source compilation before an unrelated selected Caqti API
+incompatibility.
+
+The Dune self-build found the mounted compile-command cycle and the relocatable
+compiler stdlib issue. After the two local fixes, both `dune build src` and
+`dune build %{bin:dune}` succeeded in the existing external build directory
+without an ambient `OCAMLLIB`. A fresh alternate build directory reached
+construction of the relocatable compiler before that validation run was
+interrupted, so this document does not claim a final clean self-build from that
+run.
+
+Focused `@check`, formatting, package, lockdir, and regression suites passed
+throughout the stack. The complete `@runtest` environment still includes
+unrelated timeouts, network fixtures, benchmark dependencies, and existing
+expectation differences. Prototype completion therefore means the architecture
+and target scenarios are demonstrated, not that this branch is ready to merge
+unchanged.
+
+## Work intentionally left for productionization
+
+The following are no longer blockers for the prototype conclusion, but they
+must be resolved before a production feature is proposed.
+
+### Mixed-lock contract
+
+Generated mixed lockdirs need an explicit workspace boundary containing at
+least referenced package names, selected versions, and hashes of solver-relevant
+metadata. Contextual validation must distinguish harmless source edits from
+changes that require relocking, including portable conditional-platform
+branches.
+
+Cycle detection must operate over one graph whose nodes are either workspace or
+locked packages and report complete mixed-origin paths. Standalone lockdir
+validation should remain strict unless an explicit boundary format gives it the
+information needed to do otherwise.
+
+### API and implementation reduction
+
+The production design should reduce the visibility of `Source_path.t`, make
+mounted owner containment explicit, and group consumer migrations into smaller
+changes. Mounted branches that merely compensate for weak ownership types
+should be replaced by capability-bearing values where practical.
+
+The unreleased `scope` and `opam` stanzas are useful test interfaces, but their
+public future remains a separate product decision.
+
+### Diagnostics and audits
+
+Native errors should consistently show logical package paths and source
+excerpts, never acquisition paths. Acquisition still needs a final audit for
+VCS refresh, failed-fetch retry, stale removal, symlink edge cases, cross-lock
+reuse, watch invalidation, and interrupted materialization.
+
+The remaining `.dev-tool` regressions should be handled without reopening the
+normal legacy route. `dune pkg print-digest` should also be removed, renamed, or
+explicitly documented now that normal package roots are not digest-addressed.
+
+### Final external and performance checks
+
+A production series should rerun clean current-head `ocaml-re`,
+`ocaml-cohttp`, Dream, and Dune self-builds in isolated build directories. It
+should retain the cache-stable null benchmark and add focused counters that
+prevent full mounted scope or install traversals from returning.
+
+## Recommended production sequence
+
+If this work is rebuilt as a mergeable feature, the shortest sequence is:
+
+1. Introduce the package-name root and explicit artifact owner without changing
+   normal package routing.
+2. Introduce logical/backing mounted files and prove one local native library
+   with fine-grained materialization.
+3. Move rule consumers in coherent groups, retaining one regression per group.
+4. Add canonical package scopes and owner-private auxiliary closure.
+5. Materialize dependencies from `Package.depends` and `Package_db`, with
+   direct capabilities and transitive ordering separated from the start.
+6. Add the opaque Opam boundary and then remove normal `.pkg` routing.
+7. Add ordered overlays and conservative static transformation extraction.
+8. Add mixed workspace edges only together with their persisted boundary and
+   cycle-validation contract.
+9. Run real external graphs and profile cache-stable null builds before adding
+   further memoization.
+
+Do not start by porting the current branch wholesale. Start from the invariants
+and tests that survived it.
 
 ## Bottom line
 
-The previous prototypes proved the behavior was possible. Their post-mortem
-identified that virtual workspace paths were the wrong representation. The
-current prototype validates the replacement: target-backed source trees can be
-loaded through a rules-side API while the engine remains workspace-only and
-artifacts retain separate ownership.
+The original plan was right about the hard boundaries:
 
-Building `ocaml-re` and `ocaml-cohttp` is a substantial success. The remaining
-work is not to return to the old architecture, but to compose native projects
-directly while confining opaque Opam builds behind owned install targets and
-cookies, restore the useful missing fixtures, measure the full-build path with
-narrow events, and turn the broad prototype migration into a smaller,
-reviewable feature design.
+- build native lock packages in the current process;
+- keep fetched input out of `Path.Source.t`;
+- put build-backed operations behind a rules-side source API;
+- preserve opaque packages as explicit boundaries;
+- make artifact and dependency ownership explicit; and
+- avoid teaching the engine about packages.
+
+It was wrong or incomplete about three important details:
+
+- native source did not need a second prepared physical root;
+- digest was not the right normal package address; and
+- the presence of any Dune file was not enough to identify the selected
+  package's builder.
+
+The final prototype replaced those assumptions with one package-name hierarchy,
+logical files backed by immutable acquisition data, per-file transformation
+layers, and ownership-aware classification. It also demonstrated that the
+model can preserve realistic metadata and capability boundaries and can be made
+fast enough for large null builds.
+
+That is a successful prototype outcome. The next task is not to add more
+features to this branch. It is to turn the validated model into a smaller,
+staged production design while preserving the negative lessons just as
+carefully as the working mechanisms.

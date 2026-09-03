@@ -1,11 +1,18 @@
 # Build locked Dune packages in one workspace
 
-This is the design plan for the `flatten-dune` prototype and its remaining
-builder-unification work. The current implementation establishes target-backed
-native source loading and synthetic Opam builds in the same rule graph. The
-archive remains a behavioral reference, but its source remapping is not
-retained: build-backed sources are first-class in the rules-side `Source_tree`
-rather than masquerading as workspace `Path.Source.t` values.
+> **Historical design plan.** The prototype is complete and deliberately
+> diverged from several details below. In particular, the final prototype uses
+> one package-name logical source and artifact hierarchy, direct layered source
+> ownership, and ownership-aware native classification. See the
+> [final retrospective](doc/dev/mounted-packages-prototype-postmortem.md) for
+> the outcome and the plan-to-implementation comparison.
+
+This was the design plan for the `flatten-dune` prototype and its
+builder-unification work. It established the target-backed direction that the
+prototype tested. The archive remains a behavioral reference, but its source
+remapping was not retained: build-backed sources became first-class in the
+rules-side `Source_tree` rather than masquerading as workspace `Path.Source.t`
+values.
 
 ## Goal
 
@@ -39,9 +46,9 @@ synthesize those scopes over their canonical source decode.
 
 Workspace packages retain their existing behaviour.
 
-## Implemented milestones
+## Implemented milestones at this checkpoint
 
-The current implementation provides:
+At the checkpoint captured by this plan, the implementation provided:
 
 - target-backed package source roots whose real locations are `Path.Build.t`
   values in the independent fetch namespace;
@@ -463,10 +470,14 @@ The new implementation must not contain:
 The archived implementation may be consulted for behaviour and tests, not used
 as a scaffold.
 
-## Current TODO
+## Last implementation TODO snapshot (historical)
 
-The normal selected-package cutover is substantially complete. The current
-stack has:
+This section records an intermediate implementation checkpoint. It is retained
+to show how the plan evolved; it is not the current work list. See the final
+retrospective for completed work and production follow-ups.
+
+At this checkpoint, the normal selected-package cutover was substantially
+complete. The stack had:
 
 - package-name-only roots at `_build/<context>+lockfile/pkg/<name>`;
 - one logical native source and artifact hierarchy, backed by immutable
@@ -566,7 +577,8 @@ The builder-unification milestone additionally demonstrates:
 7. It owns exactly one package install-layout subtree and its install cookie.
 8. Each source-backed Opam package has its own synthetic loaded project, recipe,
    artifact root, and cookie even when its source target is shared. A
-   source-less package owns the same Opam result without a loaded source project.
+   source-less package owns the same Opam result without a loaded source
+   project.
 9. A user-authored `opam` stanza is rejected without
    `(using unreleased 0.1)` and exercises the same representation and rule
    generator when enabled.
