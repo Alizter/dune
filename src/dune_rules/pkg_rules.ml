@@ -315,22 +315,76 @@ module Mounted_packages = struct
   let closure t roots = closure_if t roots ~follow:(Fun.const true)
   let capability_closure t roots = closure_if t roots ~follow:forwards_capabilities
 
-  let materialize_capabilities context packages direct =
+  let has_only_mounted_dependencies packages mounted =
+    List.for_all (dependencies mounted) ~f:(fun name ->
+      Option.is_some (find packages name))
+  ;;
+
+  (* An opaque package that leaves the lock directory cannot be scanned through
+     the context-wide OCAMLPATH: materializing its workspace dependency would
+     make that dependency require the package currently being scanned. *)
+  let opaque_library_roots packages =
+    Package.Name.Map.values packages
+    |> List.filter_map ~f:(fun mounted ->
+      match Pkg_sources.Mounted.kind mounted with
+      | Dune -> None
+      | Opam stanza ->
+        if has_only_mounted_dependencies packages mounted
+        then (
+          let name = Package.name stanza.package in
+          let paths, _ = opam_paths mounted name in
+          Some (Paths.install_roots paths).lib_root)
+        else None)
+  ;;
+
+  let materialize_capabilities context packages direct workspace =
     let open Action_builder.O in
     let direct_names =
       List.map direct ~f:(fun mounted -> Package.name (package mounted))
     in
     let direct_name_set = Package.Name.Set.of_list direct_names in
     let all = capability_closure packages direct_names in
-    let+ all =
+    let* all =
       List.map all ~f:provider
       |> Opam_package_rules.Dependency_provider.materialize context
+    in
+    let workspace = Package.Name.Set.of_list workspace in
+    let+ value_env, binaries =
+      if Package.Name.Set.is_empty workspace
+      then Action_builder.return (all.value_env, all.binaries)
+      else
+        let* workspace_env = Install_layout.env context workspace in
+        let* workspace_binaries =
+          Action_builder.of_memo (Install_layout.binaries context workspace)
+        in
+        (* The workspace package may depend back on a closed lock package.
+           Preserve those opaque library roots in the package action's
+           OCAMLPATH without exposing an outgoing package globally. *)
+        let workspace_value_env =
+          List.fold_right
+            (opaque_library_roots packages)
+            ~init:(Package_deps.Value_list_env.of_env workspace_env)
+            ~f:(fun path env ->
+              Package_deps.Value_list_env.add_path
+                env
+                Dune_findlib.Config.ocamlpath_var
+                path)
+        in
+        let value_env =
+          Env.Map.union workspace_value_env all.value_env ~f:(fun _ workspace lock_dir ->
+            Some (workspace @ lock_dir))
+        in
+        let binaries =
+          Filename.Map.union workspace_binaries all.binaries ~f:(fun _ workspace _ ->
+            Some workspace)
+        in
+        Action_builder.return (value_env, binaries)
     in
     let packages =
       Package.Name.Map.filteri all.packages ~f:(fun name _ ->
         Package.Name.Set.mem direct_name_set name)
     in
-    { all with packages }
+    { Package_deps.value_env; binaries; packages }
   ;;
 
   module Opaque_binary_key = struct
@@ -831,20 +885,20 @@ let setup_rules ~components ~dir ctx =
 
 let mounted_dependencies context (stanza : Opam_stanza.t) =
   let+ packages = Mounted_packages.create context in
-  let dependencies =
-    List.filter_map (Package.depends stanza.package) ~f:(fun dependency ->
-      let name = dependency.Package_dependency.name in
-      if Package.Name.equal name Dune_pkg.Dune_dep.name
-      then None
-      else (
-        match Mounted_packages.find packages name with
-        | Some mounted -> Some mounted
-        | None ->
-          User_error.raise
-            ~loc:stanza.loc
-            [ Pp.textf "Package %s does not exist" (Package.Name.to_string name) ]))
+  let dependencies, workspace_dependencies =
+    List.fold_right
+      (Package.depends stanza.package)
+      ~init:([], [])
+      ~f:(fun dependency (dependencies, workspace_dependencies) ->
+        let name = dependency.Package_dependency.name in
+        if Package.Name.equal name Dune_pkg.Dune_dep.name
+        then dependencies, workspace_dependencies
+        else (
+          match Mounted_packages.find packages name with
+          | Some mounted -> mounted :: dependencies, workspace_dependencies
+          | None -> dependencies, name :: workspace_dependencies))
   in
-  packages, dependencies
+  packages, dependencies, workspace_dependencies
 ;;
 
 let gen_opam_rules context ~dir package_name =
@@ -891,10 +945,14 @@ let gen_opam_rules context ~dir package_name =
   in
   let dependencies =
     let open Action_builder.O in
-    let* packages, dependencies =
+    let* packages, dependencies, workspace_dependencies =
       Action_builder.of_memo (mounted_dependencies context stanza)
     in
-    Mounted_packages.materialize_capabilities context packages dependencies
+    Mounted_packages.materialize_capabilities
+      context
+      packages
+      dependencies
+      workspace_dependencies
   in
   Opam_package_rules.gen_rules
     context
@@ -981,7 +1039,7 @@ let ocaml_toolchain context =
     let toolchain =
       let open Action_builder.O in
       let* materialized =
-        Mounted_packages.materialize_capabilities context packages closure
+        Mounted_packages.materialize_capabilities context packages closure []
       in
       let env = Env.extend_env (Global.env ()) (Package_deps.env materialized) in
       let { Package_deps.binaries; _ } = materialized in
@@ -1051,14 +1109,7 @@ let ocamlpath_of_deps deps =
 
 let project_ocamlpath context =
   let+ packages = Mounted_packages.create context in
-  Package.Name.Map.values packages
-  |> List.filter_map ~f:(fun mounted ->
-    match Pkg_sources.Mounted.kind mounted with
-    | Dune -> None
-    | Opam stanza ->
-      let name = Package.name stanza.package in
-      let paths, _ = opam_paths mounted name in
-      Some (Paths.install_roots paths).lib_root)
+  Mounted_packages.opaque_library_roots packages
 ;;
 
 module Opaque_libraries = struct
