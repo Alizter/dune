@@ -1135,11 +1135,11 @@ type missing_dependency =
   ; loc : Loc.t
   }
 
-(* [validate_packages packages] returns
+(* [validate_packages packages ~local_package_names] returns
    [Error (`Missing_dependencies missing_dependencies)] where
    [missing_dependencies] is a non-empty list with an element for each package
-   dependency which doesn't have a corresponding entry in [packages]. *)
-let validate_packages packages =
+   dependency which is neither in [packages] nor [local_package_names]. *)
+let validate_packages packages ~local_package_names =
   let missing_dependencies =
     Packages.to_pkg_list packages
     |> List.concat_map ~f:(fun (dependant_package : Pkg.t) ->
@@ -1149,6 +1149,7 @@ let validate_packages packages =
              we supposed to filter these upfront? *)
           if
             Package_name.Map.mem packages depend.name
+            || Package_name.Set.mem local_package_names depend.name
             || Package_name.equal depend.name Dune_dep.name
           then None
           else Some { dependant_package; dependency = depend.name; loc = depend.loc })))
@@ -1171,7 +1172,12 @@ let create_latest_version
     Package_name.Map.map packages ~f:(fun (pkg : Pkg.t) ->
       Package_version.Map.singleton pkg.info.version pkg)
   in
-  (match validate_packages packages with
+  let local_package_names =
+    List.map local_packages ~f:(fun (package : Local_package.For_solver.t) ->
+      package.name)
+    |> Package_name.Set.of_list
+  in
+  (match validate_packages packages ~local_package_names with
    | Ok () -> ()
    | Error (`Missing_dependencies missing_dependencies) ->
      List.map missing_dependencies ~f:(fun { dependant_package; dependency; loc = _ } ->
@@ -1639,7 +1645,7 @@ struct
   ;;
 
   let check_packages packages ~lock_dir_path =
-    match validate_packages packages with
+    match validate_packages packages ~local_package_names:Package_name.Set.empty with
     | Ok () -> Ok ()
     | Error (`Missing_dependencies missing_dependencies) ->
       List.iter missing_dependencies ~f:(fun { dependant_package; dependency; loc } ->

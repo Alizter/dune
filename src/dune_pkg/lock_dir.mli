@@ -130,11 +130,10 @@ val to_dyn : t -> Dyn.t
     handle multiple versions of the same package. *)
 val uses_versioned_paths : t -> bool
 
-(** [create_latest_version packages ~ocaml ~repos
-    ~expanded_solver_variable_bindings] raises a [Code_error] if [packages] is
-    not closed under the "depends on" relationship between packages. Every
-    dependency of every package in [packages] must itself have a corresponding
-    entry in [packages]. *)
+(** [create_latest_version packages ~local_packages ~ocaml ~repos
+    ~expanded_solver_variable_bindings] raises a [Code_error] unless every
+    dependency of [packages] is another locked package, a local package, or
+    dune. *)
 val create_latest_version
   :  Pkg.t Package_name.Map.t
   -> local_packages:Local_package.For_solver.t list
