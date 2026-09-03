@@ -692,14 +692,18 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
                 else Memo.return Rules.empty
               and+ compile_commands_rules =
                 (* Generate compile_commands.json only for the merlin
-                   context at the context root *)
-                match components with
-                | [] ->
-                  let* sctx = sctx in
-                  if Context.merlin (Super_context.context sctx)
-                  then Rules.collect_unit (fun () -> Compile_commands.gen_rules sctx)
-                  else Memo.return Rules.empty
-                | _ -> Memo.return Rules.empty
+                   context at the workspace root. Mounted package dispatch
+                   also gives package roots an empty [components] list. *)
+                if mounted
+                then Memo.return Rules.empty
+                else (
+                  match components with
+                  | [] ->
+                    let* sctx = sctx in
+                    if Context.merlin (Super_context.context sctx)
+                    then Rules.collect_unit (fun () -> Compile_commands.gen_rules sctx)
+                    else Memo.return Rules.empty
+                  | _ -> Memo.return Rules.empty)
               and+ rules = rules in
               Rules.union
                 project_metadata_rules
