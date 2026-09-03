@@ -218,7 +218,8 @@ let get_with_path =
          ~input:(module Path)
          (fun path ->
             let* () = Build_system.build_dir path in
-            Load.load path))
+            let+ lock_dir = Load.load_unchecked path in
+            Ok lock_dir))
   in
   Per_context.create_by_name ~name:"lock-dir-get" (fun ctx ->
     Memo.lazy_ ~name:"lock-dir-get" (fun () ->
