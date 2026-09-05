@@ -91,6 +91,9 @@ let direct_process (shell : t) =
   let body, dir, env =
     leading_context shell.action ~dir:shell.dir ~env:shell.replay_env
   in
+  let env =
+    Dtemp.add_to_env env ~purpose:(Process_metadata.Build_job (Some shell.targets))
+  in
   match body with
   | Run { prog = Ok program; args; can_run_in_action_runner = _ } ->
     Some { program; args = Appendable_list.to_list args; dir; env }
