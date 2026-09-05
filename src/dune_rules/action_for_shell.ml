@@ -87,9 +87,14 @@ let encode_as encoding =
       List
         (atom (sprintf "pipe-%s" (Outputs.to_string outputs))
          :: List.map actions ~f:encode)
-    | Diff { optional; file1; file2; mode = Binary; directory_diffs = _ } ->
+    | Diff { optional; file1; file2; mode = Binary; directory_diffs } ->
       assert (not optional);
-      List [ atom "cmp"; path file1; target file2 ]
+      let name =
+        match encoding, directory_diffs with
+        | Replay, false -> "cmp-no-directory"
+        | Rules, _ | Replay, true -> "cmp"
+      in
+      List [ atom name; path file1; target file2 ]
     | Diff { optional; file1; file2; mode = Text; directory_diffs } ->
       List [ atom (text_diff_name ~optional ~directory_diffs); path file1; target file2 ]
     | Extension extension ->
@@ -225,7 +230,8 @@ module Replay = struct
       ; "diff?", diff ~optional:true ~mode:Text ~directory_diffs:true
       ; "diff-no-directory", diff ~optional:false ~mode:Text ~directory_diffs:false
       ; "diff-no-directory?", diff ~optional:true ~mode:Text ~directory_diffs:false
-      ; "cmp", diff ~optional:false ~mode:Binary ~directory_diffs:false
+      ; "cmp", diff ~optional:false ~mode:Binary ~directory_diffs:true
+      ; "cmp-no-directory", diff ~optional:false ~mode:Binary ~directory_diffs:false
       ; ( "ext"
         , let+ (_ : string) = string in
           User_error.raise
