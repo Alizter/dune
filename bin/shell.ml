@@ -411,14 +411,19 @@ let resolve_rule ~target common =
     |> Action_builder.evaluate_and_collect_facts
     >>| fst
   in
+  let paths =
+    List.map requests ~f:(function
+      | Target.Request.File path -> path
+      | Alias _ ->
+        User_error.raise
+          [ Pp.text "dune shell requires a concrete file or directory target."
+          ; Pp.text "Aliases select multiple actions and are not supported yet."
+          ])
+    |> Path.Set.of_list
+  in
   let path =
-    match requests with
-    | [ Target.Request.File path ] -> path
-    | [ Alias _ ] ->
-      User_error.raise
-        [ Pp.text "dune shell requires a concrete file or directory target."
-        ; Pp.text "Aliases select multiple actions and are not supported yet."
-        ]
+    match Path.Set.to_list paths with
+    | [ path ] -> path
     | [] | _ :: _ :: _ ->
       User_error.raise [ Pp.text "dune shell requires exactly one concrete target." ]
   in
