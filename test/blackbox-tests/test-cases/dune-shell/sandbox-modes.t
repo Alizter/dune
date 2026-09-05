@@ -69,3 +69,63 @@ outside the sandbox in an ordinary build can do so through dune-run.
   >   ' &&
   >   test -e outside/from-action
   > fi
+
+The policy must also reach the processes inside compound actions and the
+external diff command. Temporary files remain writable under the policy.
+BUG: these replay processes currently escape the policy too.
+
+  $ cat > policy-probe <<'EOF'
+  > if touch "$OUTSIDE/$1" 2>/dev/null; then echo wrote; else echo blocked; fi
+  > : > "$TMPDIR/policy-temp"
+  > EOF
+  $ echo expected > policy-expected
+  $ cat > policy-diff <<'EOF'
+  > if touch "$OUTSIDE/diff" 2>/dev/null; then
+  >   echo wrote > diff-policy
+  > else
+  >   echo blocked > diff-policy
+  > fi
+  > exit 1
+  > EOF
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (targets run-report bash-report system-report pipe-report)
+  >  (deps policy-probe)
+  >  (action
+  >   (progn
+  >    (with-stdout-to run-report (run sh policy-probe run))
+  >    (with-stdout-to bash-report (bash "sh policy-probe bash"))
+  >    (with-stdout-to system-report (system "sh policy-probe system"))
+  >    (with-stdout-to pipe-report
+  >     (pipe-stdout (run sh policy-probe pipe) (run cat))))))
+  > (rule
+  >  (target policy-actual)
+  >  (action
+  >   (progn
+  >    (write-file policy-actual actual)
+  >    (diff policy-expected policy-actual))))
+  > EOF
+  $ if dune internal with-landlock -- true >/dev/null 2>&1; then
+  >   dune build --sandbox=copy run-report &&
+  >   test "$(cat _build/default/*-report | sort -u)" = blocked &&
+  >   dune shell --sandbox=copy _build/default/run-report -- sh -c '
+  >     "$DUNE_SHELL/dune-run" &&
+  >     test "$(cat *-report | sort -u)" = wrote
+  >   '
+  > fi
+  $ if dune internal with-landlock -- true >/dev/null 2>&1; then
+  >   dune shell --sandbox=copy --diff-command "sh $PWD/policy-diff" \
+  >     _build/default/policy-actual -- sh -c '
+  >       "$DUNE_SHELL/dune-run" >diff.stdout 2>diff.stderr
+  >       test "$?" -eq 1 && test "$(cat diff-policy)" = wrote
+  >     '
+  > fi
+
+Disabling the policy in the initiating invocation is preserved even when the
+replay is launched with a different value in its environment.
+
+  $ DUNE_CONFIG__LANDLOCK=disabled dune shell --sandbox=copy \
+  >   _build/default/policy-report -- sh -c '
+  >     DUNE_CONFIG__LANDLOCK=enabled "$DUNE_SHELL/dune-run" &&
+  >     test "$(cat policy-report)" = wrote
+  >   '
