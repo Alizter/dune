@@ -64,3 +64,19 @@ The shell and replay use that same initiating-build directory.
   > '
   shell-temp: exact
   replay-temp: exact
+
+The direct-process environment should include execution-time injection too.
+BUG: its leading setenv wrapper overrides the recorded temporary directory,
+even though the interpreter replaces that value before launching the process.
+
+  $ dune shell --sandbox=copy _build/default/prepared-temp -- sh -c '
+  > grep "^TMPDIR=" "$DUNE_SHELL/command.env"
+  > "$DUNE_SHELL/dune-run"
+  > if grep -Fx "TMPDIR=$(cat prepared-temp)" "$DUNE_SHELL/command.env" >/dev/null; then
+  >   echo "metadata-temp: matches replay"
+  > else
+  >   echo "metadata-temp: differs from replay"
+  > fi
+  > '
+  TMPDIR=action-overridden-temp
+  metadata-temp: differs from replay

@@ -50,3 +50,27 @@ Replay retains the initiating invocation's configured diff command.
   > '
   $ test -e custom-diff-ran && echo "diff-command: preserved"
   diff-command: preserved
+
+Binary directory comparisons are valid since Dune 3.23. BUG: serializing a
+cmp action drops its directory-diffs flag, so replay rejects a valid action.
+
+  $ make_dune_project_with_extension 3.23 directory-targets 0.1
+  $ mkdir expected-dir
+  $ echo matching > expected-dir/input
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (targets (dir matching-dir))
+  >  (deps (source_tree expected-dir))
+  >  (action
+  >   (progn
+  >    (run cp -R expected-dir matching-dir)
+  >    (no-infer (cmp expected-dir matching-dir)))))
+  > EOF
+  $ dune build --sandbox=copy matching-dir
+  $ dune shell --sandbox=copy _build/default/matching-dir -- sh -c '
+  > "$DUNE_SHELL/dune-run" 2>replay.stderr
+  > echo "binary-directory-replay-status: $?"
+  > grep "Directory operands" replay.stderr
+  > '
+  binary-directory-replay-status: 1
+  Error: Directory operands in diff actions require at least (lang dune 3.23).

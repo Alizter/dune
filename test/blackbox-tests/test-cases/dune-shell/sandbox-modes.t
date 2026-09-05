@@ -40,3 +40,32 @@ give dependencies the selected link semantics.
   hardlink-mode: hardlink
   canonical-path: $PWD/_build/.sandbox/$DIGEST/default/sub
   hardlink-semantics: shared
+
+Dune 3.25 also applies an OS sandbox policy on supported Linux kernels.
+BUG: replay does not preserve that policy, so an action that cannot write
+outside the sandbox in an ordinary build can do so through dune-run.
+
+  $ make_dune_project 3.25
+  $ unset DUNE_CONFIG__LANDLOCK
+  $ export OUTSIDE=$PWD/outside
+  $ mkdir "$OUTSIDE"
+  $ cat > dune <<'EOF'
+  > (rule
+  >  (target policy-report)
+  >  (action
+  >   (with-stdout-to %{target}
+  >    (run sh -c
+  >     "if touch \"$OUTSIDE/from-action\" 2>/dev/null; then
+  >        echo wrote
+  >      else
+  >        echo blocked
+  >      fi"))))
+  > EOF
+  $ if dune internal with-landlock -- true >/dev/null 2>&1; then
+  >   dune build --sandbox=copy _build/default/policy-report &&
+  >   test "$(cat _build/default/policy-report)" = blocked &&
+  >   dune shell --sandbox=copy _build/default/policy-report -- sh -c '
+  >     "$DUNE_SHELL/dune-run" && test "$(cat policy-report)" = wrote
+  >   ' &&
+  >   test -e outside/from-action
+  > fi

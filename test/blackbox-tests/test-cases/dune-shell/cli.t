@@ -176,3 +176,16 @@ long-lived prepared session, so it is rejected explicitly.
   $ grep -qi 'watch mode' watch.stderr &&
   >   echo "watch-error: specific"
   watch-error: specific
+
+A fully qualified target should remain unambiguous in a multi-context workspace.
+BUG: target resolution returns the same request once per context, and shell
+mistakes these duplicate requests for different targets.
+
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.23)
+  > (context (default))
+  > (context (default (name other)))
+  > EOF
+  $ dune shell _build/default/ordinary -- true
+  Error: dune shell requires exactly one concrete target.
+  [1]
