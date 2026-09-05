@@ -42,8 +42,8 @@ give dependencies the selected link semantics.
   hardlink-semantics: shared
 
 Dune 3.25 also applies an OS sandbox policy on supported Linux kernels.
-BUG: replay does not preserve that policy, so an action that cannot write
-outside the sandbox in an ordinary build can do so through dune-run.
+Replay preserves that policy, even when launched with a different setting
+in the shell's environment.
 
   $ make_dune_project 3.25
   $ unset DUNE_CONFIG__LANDLOCK
@@ -65,14 +65,14 @@ outside the sandbox in an ordinary build can do so through dune-run.
   >   dune build --sandbox=copy _build/default/policy-report &&
   >   test "$(cat _build/default/policy-report)" = blocked &&
   >   dune shell --sandbox=copy _build/default/policy-report -- sh -c '
-  >     "$DUNE_SHELL/dune-run" && test "$(cat policy-report)" = wrote
+  >     DUNE_CONFIG__LANDLOCK=disabled "$DUNE_SHELL/dune-run" &&
+  >     test "$(cat policy-report)" = blocked
   >   ' &&
-  >   test -e outside/from-action
+  >   test ! -e outside/from-action
   > fi
 
-The policy must also reach the processes inside compound actions and the
+The policy also reaches the processes inside compound actions and the
 external diff command. Temporary files remain writable under the policy.
-BUG: these replay processes currently escape the policy too.
 
   $ cat > policy-probe <<'EOF'
   > if touch "$OUTSIDE/$1" 2>/dev/null; then echo wrote; else echo blocked; fi
@@ -110,14 +110,14 @@ BUG: these replay processes currently escape the policy too.
   >   test "$(cat _build/default/*-report | sort -u)" = blocked &&
   >   dune shell --sandbox=copy _build/default/run-report -- sh -c '
   >     "$DUNE_SHELL/dune-run" &&
-  >     test "$(cat *-report | sort -u)" = wrote
+  >     test "$(cat *-report | sort -u)" = blocked
   >   '
   > fi
   $ if dune internal with-landlock -- true >/dev/null 2>&1; then
   >   dune shell --sandbox=copy --diff-command "sh $PWD/policy-diff" \
   >     _build/default/policy-actual -- sh -c '
   >       "$DUNE_SHELL/dune-run" >diff.stdout 2>diff.stderr
-  >       test "$?" -eq 1 && test "$(cat diff-policy)" = wrote
+  >       test "$?" -eq 1 && test "$(cat diff-policy)" = blocked
   >     '
   > fi
 

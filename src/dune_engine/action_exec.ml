@@ -98,6 +98,7 @@ let exec_run ~(ectx : context) ~(eenv : env) ~can_run_in_action_runner prog args
         ~stderr_to:eenv.stderr_to
         ~stdin_from:eenv.stdin_from
         ~metadata
+        ?sandbox:ectx.sandbox
         prog
         args
     in
@@ -248,7 +249,8 @@ let rec exec_action t ~ectx ~eenv : unit Fiber.t =
   | Diff diff ->
     (match ectx.mode with
      | Build -> Diff_action.exec ~sandbox:ectx.sandbox ~patch_back:None ectx.rule_loc diff
-     | Shell_replay -> Diff_action.exec_without_promotion ectx.rule_loc diff)
+     | Shell_replay ->
+       Diff_action.exec_without_promotion ~sandbox:ectx.sandbox ectx.rule_loc diff)
   | Extension (module A) ->
     let metadata =
       { ectx.metadata with can_run_in_action_runner = A.Spec.can_run_in_action_runner }
@@ -421,9 +423,10 @@ type replay_input =
   ; rule_loc : Loc.t
   ; action : Action.t
   ; temp_dir : Path.t
+  ; sandbox_policy_root : Path.t option
   }
 
-let replay { targets; dir; env; rule_loc; action; temp_dir } =
+let replay { targets; dir; env; rule_loc; action; temp_dir; sandbox_policy_root } =
   let () =
     match Action.find_extension_name action with
     | None -> ()
@@ -433,43 +436,58 @@ let replay { targets; dir; env; rule_loc; action; temp_dir } =
         [ "extension", Dyn.string name ]
   in
   Dtemp.with_temp_dir_for_shell temp_dir ~f:(fun () ->
-    let build_deps (_ : Dep.Set.t) =
-      Code_error.raise "dynamic dependencies in a static dune shell replay" []
+    let sandbox =
+      Option.map sandbox_policy_root ~f:(fun root ->
+        let base =
+          Process.Sandbox.create_base ~action_trace_root:(Action_trace.root ())
+        in
+        Process.Sandbox.for_action base ~root)
     in
-    let ectx =
-      let metadata =
-        Process_metadata.create ~purpose:(Process_metadata.Build_job (Some targets)) ()
-      in
-      { targets = Some targets
-      ; metadata
-      ; context = None
-      ; sandbox = None
-      ; rule_loc
-      ; build_deps
-      ; mode = Shell_replay
-      }
-    in
-    let eenv =
-      { working_dir = dir
-      ; env
-      ; stdout_to = Process.Io.inherit_stdout
-      ; stderr_to = Process.Io.inherit_stderr
-      ; stdin_from = Process.Io.null In
-      ; exit_codes = Predicate.create (Int.equal 0)
-      }
-    in
-    let open Fiber.O in
-    let* () = prepare_chdirs action in
-    Fiber.collect_errors (fun () -> exec_action action ~ectx ~eenv)
-    >>= function
-    | Ok _ -> Fiber.return 0
-    | Error errors ->
-      (match
-         List.find_map errors ~f:(fun { Exn_with_backtrace.exn; _ } ->
-           match exn with
-           | Shell_replay_failed status -> Some status
-           | _ -> None)
-       with
-       | Some status -> Fiber.return (Process.Failure_mode.exit_code_of_raw_status status)
-       | None -> Fiber.reraise_all errors))
+    Fiber.finalize
+      ~finally:(fun () ->
+        Option.iter sandbox ~f:Process.Sandbox.destroy;
+        Fiber.return ())
+      (fun () ->
+         let build_deps (_ : Dep.Set.t) =
+           Code_error.raise "dynamic dependencies in a static dune shell replay" []
+         in
+         let ectx =
+           let metadata =
+             Process_metadata.create
+               ~purpose:(Process_metadata.Build_job (Some targets))
+               ()
+           in
+           { targets = Some targets
+           ; metadata
+           ; context = None
+           ; sandbox
+           ; rule_loc
+           ; build_deps
+           ; mode = Shell_replay
+           }
+         in
+         let eenv =
+           { working_dir = dir
+           ; env
+           ; stdout_to = Process.Io.inherit_stdout
+           ; stderr_to = Process.Io.inherit_stderr
+           ; stdin_from = Process.Io.null In
+           ; exit_codes = Predicate.create (Int.equal 0)
+           }
+         in
+         let open Fiber.O in
+         let* () = prepare_chdirs action in
+         Fiber.collect_errors (fun () -> exec_action action ~ectx ~eenv)
+         >>= function
+         | Ok _ -> Fiber.return 0
+         | Error errors ->
+           (match
+              List.find_map errors ~f:(fun { Exn_with_backtrace.exn; _ } ->
+                match exn with
+                | Shell_replay_failed status -> Some status
+                | _ -> None)
+            with
+            | Some status ->
+              Fiber.return (Process.Failure_mode.exit_code_of_raw_status status)
+            | None -> Fiber.reraise_all errors)))
 ;;

@@ -52,6 +52,7 @@ type replay_input =
   ; rule_loc : Loc.t
   ; action : Action.t
   ; temp_dir : Path.t
+  ; sandbox_policy_root : Path.t option
   }
 
 (** Replay a static standard action with inherited standard streams.

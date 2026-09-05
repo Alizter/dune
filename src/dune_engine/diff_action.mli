@@ -9,6 +9,7 @@ val exec
 
 (** Execute the comparison without registering any resulting promotion. *)
 val exec_without_promotion
-  :  Loc.t
+  :  sandbox:Process.Sandbox.t option
+  -> Loc.t
   -> (Path.t, Path.Build.t) Stdune.Action_types.Diff.t
   -> unit Fiber.t

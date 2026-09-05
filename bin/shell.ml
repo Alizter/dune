@@ -212,12 +212,13 @@ module Metadata_codec = struct
 
   (* Session data, in order: (workspace_root, build_dir, cwd),
      ((session_root, temp_dir, dune_binary),
-      ((invocation_env, action_env, diff_command), targets)) *)
+      ((invocation_env, action_env, diff_command), targets)), sandbox_policy_root *)
   let session =
     let open Conv in
-    pair
+    triple
       (triple string string string)
       (pair (triple string string string) (pair (triple env env optional_string) targets))
+      (option string)
   ;;
 
   let write path codec value =
@@ -397,7 +398,8 @@ let write_metadata (shell : Rule_shell.t) ~metadata =
       , Path.to_absolute_filename Path.build_dir
       , build_path_payload cwd )
     , ( (build_path_payload session_root, temp_dir, dune_binary ())
-      , ((Env.initial, shell.replay_env, !Clflags.diff_command), shell.targets) ) );
+      , ((Env.initial, shell.replay_env, !Clflags.diff_command), shell.targets) )
+    , Option.map shell.sandbox_policy_root ~f:build_path_payload );
   let has_direct_process_metadata = write_direct_process_metadata shell metadata in
   write_runner metadata;
   env, has_direct_process_metadata
@@ -564,7 +566,9 @@ module Internal_replay = struct
         Arg.(value & flag & info [ "environment-restored" ] ~doc:None)
       in
       let metadata = Path.of_filename_relative_to_initial_cwd metadata in
-      let (workspace_root, build_dir, cwd), session = read_session metadata in
+      let (workspace_root, build_dir, cwd), session, sandbox_policy_root =
+        read_session metadata
+      in
       let (session_root, temp_dir, dune_binary), session = session in
       let (invocation_env, action_env, diff_command), targets = session in
       if not environment_restored
@@ -587,6 +591,10 @@ module Internal_replay = struct
         let dir = Path.Build.of_string cwd |> Path.build in
         let session_root = Path.Build.of_string session_root |> Path.build in
         let temp_dir = Path.of_string temp_dir in
+        let sandbox_policy_root =
+          Option.map sandbox_policy_root ~f:(fun path ->
+            Path.Build.of_string path |> Path.build)
+        in
         let action =
           Action_file.parse action_path
           |> Action_file.expand ~session_root ~dir ~loc:(Loc.in_file action_path)
@@ -602,6 +610,7 @@ module Internal_replay = struct
               ; rule_loc = Loc.in_file action_path
               ; action
               ; temp_dir
+              ; sandbox_policy_root
               })
         in
         if exit_code <> 0

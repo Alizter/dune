@@ -68,6 +68,7 @@ type t =
   ; shell_env : Env.t
   ; replay_env : Env.t
   ; sandbox_dir : Path.Build.t option
+  ; sandbox_policy_root : Path.Build.t option
   ; sandbox_mode : Sandbox_mode.some option
   ; action : Action.t
   ; targets : Targets.Validated.t
@@ -147,13 +148,16 @@ let with_ (rule : Rule.t) ~f =
        ~execution_parameters
        ~sandbox_mode
        ~targets:original_targets
-       ~f:(fun { sandbox; action; root; env; _ } ->
+       ~f:(fun { sandbox; process_sandbox; action; root; env; _ } ->
          let targets = map_targets sandbox original_targets in
          let base_env = Action_exec.prepare_env ~root ~env execution_parameters in
          let purpose = Process_metadata.Build_job (Some targets) in
          let replay_env = Dtemp.add_to_env base_env ~purpose in
          let sandbox_dir =
            Sandbox.root sandbox |> Option.map ~f:Path.as_in_build_dir_exn
+         in
+         let sandbox_policy_root =
+           if Option.is_some process_sandbox then sandbox_dir else None
          in
          let _, dir, shell_env =
            leading_context
@@ -167,6 +171,7 @@ let with_ (rule : Rule.t) ~f =
            ; shell_env
            ; replay_env
            ; sandbox_dir
+           ; sandbox_policy_root
            ; sandbox_mode
            ; action
            ; targets

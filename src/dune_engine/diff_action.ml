@@ -332,7 +332,7 @@ let exec ~sandbox loc ~patch_back diff =
   exec_plan loc ~patch_back ~sandbox ~promote:true diff (plan_diff loc diff)
 ;;
 
-let exec_without_promotion loc diff =
+let exec_without_promotion ~sandbox loc diff =
   let plan = plan_diff loc diff in
-  exec_plan loc ~patch_back:None ~sandbox:None ~promote:false diff plan
+  exec_plan loc ~patch_back:None ~sandbox ~promote:false diff plan
 ;;
