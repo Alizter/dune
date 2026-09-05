@@ -86,3 +86,40 @@ real build directory.
   source-copy-replay: direct-source
   $ printf "source-copy-after-shell: "; cat _build/default/direct-source
   source-copy-after-shell: direct-source
+
+BUG: external paths with a symlink followed by .. are normalized lexically
+on replay, changing the input without any edit to the prepared action.
+
+  $ mkdir -p _ext/real/child
+  $ ln -s real/child _ext/link
+  $ echo correct > _ext/real/input
+  $ echo wrong > _ext/input
+  $ export INPUT="$PWD/_ext/link/../input"
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (target external-input)
+  >  (action (copy %{env:INPUT=unset} external-input)))
+  > EOF
+  $ dune build external-input
+  $ printf "external-normal: "; cat _build/default/external-input
+  external-normal: correct
+  $ dune shell _build/default/external-input -- sh -c '
+  > "$DUNE_SHELL/dune-run" && printf "external-replay: " && cat external-input
+  > '
+  external-replay: wrong
+
+BUG: the build directory string prefix is mistaken for a path component,
+so a valid external input in _build-extra is treated as a build path.
+
+  $ mkdir _build-extra
+  $ echo sibling > _build-extra/input
+  $ export INPUT="$PWD/_build-extra/input"
+  $ dune build --sandbox=copy external-input
+  $ printf "prefix-normal: "; cat _build/default/external-input
+  prefix-normal: sibling
+  $ dune shell --sandbox=copy _build/default/external-input -- sh -c \
+  >   '"$DUNE_SHELL/dune-run"' >prefix.stdout 2>prefix.stderr
+  [1]
+  $ grep -q 'escapes the dune shell session' prefix.stderr &&
+  >   echo "prefix-replay: misclassified as build path"
+  prefix-replay: misclassified as build path

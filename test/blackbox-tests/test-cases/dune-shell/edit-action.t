@@ -110,3 +110,19 @@ Valid two-stage pipelines still replay successfully.
   > "$DUNE_SHELL/dune-run"
   > '
   replayed
+
+BUG: a concurrent raw process failure hides diagnostics from other branches.
+
+  $ dune shell --sandbox=copy _build/default/local-tool-output -- sh -c '
+  > printf "%s\n" "(concurrent (run /bin/sh -c \"exit 2\") (cat missing))" \
+  >   > "$DUNE_SHELL/action.sexp"
+  > "$DUNE_SHELL/dune-run" >mixed.stdout 2>mixed.stderr
+  > echo "mixed-failure-status: $?"
+  > if test -s mixed.stderr; then
+  >   echo "mixed-diagnostic: present"
+  > else
+  >   echo "mixed-diagnostic: absent"
+  > fi
+  > '
+  mixed-failure-status: 2
+  mixed-diagnostic: absent

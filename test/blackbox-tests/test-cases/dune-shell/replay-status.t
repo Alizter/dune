@@ -69,3 +69,35 @@ wrapped Dune process error, and still cleans up the sandbox and metadata.
   nonzero-sandbox: cleaned
   $ test ! -e "$(cat nonzero-metadata)" && echo "nonzero-metadata: cleaned"
   nonzero-metadata: cleaned
+
+BUG: compound accepted-exit predicates do not round-trip through the replay
+encoder. An or predicate fails to parse; an empty and becomes false.
+
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (target accepted-or)
+  >  (action
+  >   (with-accepted-exit-codes (or 0 7)
+  >    (run sh -c "touch accepted-or; exit 7"))))
+  > (rule
+  >  (target accepted-all)
+  >  (action
+  >   (with-accepted-exit-codes (and)
+  >    (run sh -c "touch accepted-all; exit 7"))))
+  > EOF
+  $ dune build accepted-or accepted-all
+  $ for target in accepted-or accepted-all; do
+  >   dune shell --sandbox=copy _build/default/$target -- sh -c '
+  >     "$DUNE_SHELL/dune-run" >predicate.stdout 2>predicate.stderr
+  >     echo "predicate-replay-status: $?"
+  >     if test -s predicate.stderr; then
+  >       echo "predicate-stderr: nonempty"
+  >     else
+  >       echo "predicate-stderr: empty"
+  >     fi
+  >   '
+  > done
+  predicate-replay-status: 1
+  predicate-stderr: nonempty
+  predicate-replay-status: 7
+  predicate-stderr: empty
