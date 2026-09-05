@@ -75,7 +75,8 @@ Malformed edited pipelines receive a parsing error rather than reaching the
 interpreter's internal assertions. The replay decoder requires at least two
 pipeline stages.
 
-  $ for action in '(pipe-stdout)' '(pipe-stdout (echo one))'; do
+  $ for outputs in stdout stderr outputs; do
+  > for action in "(pipe-$outputs)" "(pipe-$outputs (echo one))"; do
   >   dune shell --sandbox=copy _build/default/local-tool-output -- sh -c '
   >     printf "%s\n" "$1" > "$DUNE_SHELL/action.sexp"
   >     "$DUNE_SHELL/dune-run" >pipe.stdout 2>pipe.stderr
@@ -87,7 +88,25 @@ pipeline stages.
   >     fi
   >   ' sh "$action"
   > done
+  > done
   pipeline-status: 1
   pipeline-diagnostic: user error
   pipeline-status: 1
   pipeline-diagnostic: user error
+  pipeline-status: 1
+  pipeline-diagnostic: user error
+  pipeline-status: 1
+  pipeline-diagnostic: user error
+  pipeline-status: 1
+  pipeline-diagnostic: user error
+  pipeline-status: 1
+  pipeline-diagnostic: user error
+
+Valid two-stage pipelines still replay successfully.
+
+  $ dune shell --sandbox=copy _build/default/local-tool-output -- sh -c '
+  > printf "%s\n" "(pipe-stdout (echo replayed) (bash cat))" \
+  >   > "$DUNE_SHELL/action.sexp"
+  > "$DUNE_SHELL/dune-run"
+  > '
+  replayed

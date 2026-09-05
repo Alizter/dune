@@ -78,3 +78,20 @@ the process.
   > fi
   > '
   metadata-temp: matches replay
+
+Bash actions receive the same final environment in their process metadata.
+
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (target prepared-bash-temp)
+  >  (action
+  >   (setenv TMPDIR action-overridden-temp
+  >    (bash "printf '%s\\n' \"$TMPDIR\" > prepared-bash-temp"))))
+  > EOF
+  $ dune shell --sandbox=copy _build/default/prepared-bash-temp -- sh -c '
+  > "$DUNE_SHELL/dune-run" &&
+  > grep -Fx "TMPDIR=$(cat prepared-bash-temp)" \
+  >   "$DUNE_SHELL/command.env" >/dev/null &&
+  > echo "bash-metadata-temp: matches replay"
+  > '
+  bash-metadata-temp: matches replay

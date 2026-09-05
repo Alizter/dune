@@ -129,3 +129,16 @@ replay is launched with a different value in its environment.
   >     DUNE_CONFIG__LANDLOCK=enabled "$DUNE_SHELL/dune-run" &&
   >     test "$(cat policy-report)" = wrote
   >   '
+
+The policy root follows a custom build directory. The debugging command is
+not restricted, even though the replayed action is.
+
+  $ rm outside/from-action
+  $ if dune internal with-landlock -- true >/dev/null 2>&1; then
+  >   dune shell --build-dir _custom --sandbox=copy \
+  >     _custom/default/policy-report -- sh -c '
+  >       touch "$OUTSIDE/from-debug-shell" &&
+  >       "$DUNE_SHELL/dune-run" && test "$(cat policy-report)" = blocked
+  >     ' &&
+  >   test -e outside/from-debug-shell
+  > fi

@@ -186,3 +186,14 @@ even when target resolution returns the same request once per context.
   > (context (default (name other)))
   > EOF
   $ dune shell _build/default/ordinary -- true
+  $ dune shell _build/other/ordinary -- true
+
+Distinct concrete targets are still ambiguous, and aliases remain unsupported.
+
+  $ dune shell ordinary -- true
+  Error: dune shell requires exactly one concrete target.
+  [1]
+  $ dune shell @grouped -- true
+  Error: dune shell requires a concrete file or directory target.
+  Aliases select multiple actions and are not supported yet.
+  [1]

@@ -74,3 +74,17 @@ the directory-diffs flag of the prepared cmp action.
   > '
   binary-directory-replay-status: 0
   binary-directory-replay-stderr: empty
+
+The same action from an older project retains its restriction to files.
+
+  $ make_dune_project_with_extension 3.22 directory-targets 0.1
+  $ dune shell --sandbox=copy _build/default/matching-dir -- sh -c '
+  > grep -q cmp-no-directory "$DUNE_SHELL/action.sexp" &&
+  >   echo "legacy-comparison: file-only"
+  > "$DUNE_SHELL/dune-run" 2>replay.stderr
+  > echo "legacy-replay-status: $?"
+  > grep "Directory operands" replay.stderr
+  > '
+  legacy-comparison: file-only
+  legacy-replay-status: 1
+  Error: Directory operands in diff actions require at least (lang dune 3.23).
