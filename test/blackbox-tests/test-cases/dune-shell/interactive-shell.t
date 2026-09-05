@@ -2,6 +2,10 @@ With no command after the target, `dune shell` opens bash in the prepared
 environment.  Piping a script into its stdin keeps this path deterministic in
 a cram test.
 
+Use a private home directory so startup never loads the developer's bashrc.
+
+  $ mkdir home
+  $ export HOME=$PWD/home
   $ make_dune_project 3.23
 
   $ cat > dune <<'EOF'

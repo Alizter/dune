@@ -57,7 +57,8 @@ replay.
 An interactive session under [none] warns in its help screen that this is the
 real build directory and that commands write there directly.
 
-  $ dune shell _build/default/no-sandbox <<'EOF' 2>/dev/null
+  $ mkdir home
+  $ HOME=$PWD/home dune shell _build/default/no-sandbox <<'EOF' 2>/dev/null
   > . "$DUNE_SHELL/init.bash" >/dev/null 2>&1
   > help | grep -qi 'sandbox mode none' && echo "help-mode: none"
   > help | grep -qi 'real _build' && echo "help-mode: warns real build"
