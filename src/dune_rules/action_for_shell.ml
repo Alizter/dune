@@ -160,6 +160,12 @@ module Replay = struct
     in
     let wrapped make = action >>| make in
     let sequence make = repeat action >>| make in
+    let pipe outputs =
+      let+ first = action
+      and+ second = action
+      and+ rest = repeat action in
+      Engine_action.For_shell.Pipe (outputs, first :: second :: rest)
+    in
     let redirect_out outputs perm =
       scoped (fun path action ->
         Engine_action.For_shell.Redirect_out (outputs, path, perm, action))
@@ -220,12 +226,9 @@ module Replay = struct
         , binary (fun source target -> Engine_action.For_shell.Rename (source, target)) )
       ; "remove-tree", unary (fun path -> Engine_action.For_shell.Remove_tree path)
       ; "mkdir", unary (fun path -> Engine_action.For_shell.Mkdir path)
-      ; ( "pipe-stdout"
-        , sequence (fun actions -> Engine_action.For_shell.Pipe (Stdout, actions)) )
-      ; ( "pipe-stderr"
-        , sequence (fun actions -> Engine_action.For_shell.Pipe (Stderr, actions)) )
-      ; ( "pipe-outputs"
-        , sequence (fun actions -> Engine_action.For_shell.Pipe (Outputs, actions)) )
+      ; "pipe-stdout", pipe Stdout
+      ; "pipe-stderr", pipe Stderr
+      ; "pipe-outputs", pipe Outputs
       ; "diff", diff ~optional:false ~mode:Text ~directory_diffs:true
       ; "diff?", diff ~optional:true ~mode:Text ~directory_diffs:true
       ; "diff-no-directory", diff ~optional:false ~mode:Text ~directory_diffs:false

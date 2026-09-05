@@ -71,9 +71,9 @@ process diagnostic.
   edited-concurrent-status: 2
   edited-concurrent-error: silent
 
-Malformed edited pipelines should receive a parsing error, not reach the
-interpreter's internal assertions. BUG: the replay decoder accepts fewer
-than two pipeline stages.
+Malformed edited pipelines receive a parsing error rather than reaching the
+interpreter's internal assertions. The replay decoder requires at least two
+pipeline stages.
 
   $ for action in '(pipe-stdout)' '(pipe-stdout (echo one))'; do
   >   dune shell --sandbox=copy _build/default/local-tool-output -- sh -c '
@@ -88,6 +88,6 @@ than two pipeline stages.
   >   ' sh "$action"
   > done
   pipeline-status: 1
-  pipeline-diagnostic: internal error
+  pipeline-diagnostic: user error
   pipeline-status: 1
-  pipeline-diagnostic: internal error
+  pipeline-diagnostic: user error
