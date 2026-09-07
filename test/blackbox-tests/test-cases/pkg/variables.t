@@ -67,3 +67,71 @@ Now we demonstrate we get a proper error from invalid .config files:
   Reason: Parse error
   -> required by _build/_default+lockfile/pkg/test/.opam/test/target
   [1]
+
+The lock's development flag is independent of its version. Both native and
+opaque dependencies must retain it when materialized as package providers.
+
+  $ mkdir dev-variables
+  $ cd dev-variables
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.24)
+  > (using unreleased 0.1)
+  > (package
+  >  (name consumer)
+  >  (allow_empty)
+  >  (depends native dev-pkg release-pkg))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (dirs :standard \ native-source)
+  > (opam
+  >  (package consumer)
+  >  (build
+  >   (system "echo workspace: %{pkg:native:dev} %{pkg:dev-pkg:dev} %{pkg:release-pkg:dev}")))
+  > EOF
+  $ mkdir native-source
+  $ cat > native-source/dune-project <<'EOF'
+  > (lang dune 3.24)
+  > (package (name native) (allow_empty))
+  > EOF
+  $ echo '(rule (alias all) (action (echo native)))' > native-source/dune
+  $ make_lockdir
+  $ make_lockpkg native <<EOF
+  > (version 1.0)
+  > (dev)
+  > (source (copy $PWD/native-source))
+  > EOF
+  $ make_lockpkg dev-pkg <<'EOF'
+  > (version 1.0)
+  > (dev)
+  > (build
+  >  (progn
+  >   (system "echo self: %{pkg-self:dev}")
+  >   (when %{pkg-self:dev} (system "echo development-action"))))
+  > EOF
+  $ make_lockpkg release-pkg <<'EOF'
+  > (version 1.0)
+  > EOF
+  $ make_lockpkg locked-consumer <<'EOF'
+  > (version 1.0)
+  > (depends native dev-pkg release-pkg)
+  > (build
+  >  (system "echo locked: %{pkg:native:dev} %{pkg:dev-pkg:dev} %{pkg:release-pkg:dev}"))
+  > EOF
+
+BUG: converting lock metadata to Package.t loses the development flag.
+The development action should run and the first two dependency flags should
+both be true, regardless of whether the consumer is locked or workspace-owned.
+
+  $ build_pkg locked-consumer
+  self: false
+  locked: false false false
+  $ dune build .opam/consumer/target
+  workspace: false false false
+
+Changing only the development flag at the same package-name root must also be
+observed by the next build.
+
+  $ sed -i '/^(dev)$/d' dune.lock/native.pkg dune.lock/dev-pkg.pkg
+  $ build_pkg locked-consumer
+  $ dune build .opam/consumer/target
+  workspace: false false false
