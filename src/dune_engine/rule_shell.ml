@@ -68,7 +68,7 @@ type t =
   ; shell_env : Env.t
   ; replay_env : Env.t
   ; sandbox_dir : Path.Build.t option
-  ; sandbox_policy_root : Path.Build.t option
+  ; use_sandbox_policy : bool
   ; sandbox_mode : Sandbox_mode.some option
   ; action : Action.t
   ; targets : Targets.Validated.t
@@ -157,9 +157,7 @@ let with_ (rule : Rule.t) ~f =
          let sandbox_dir =
            Sandbox.root sandbox |> Option.map ~f:Path.as_in_build_dir_exn
          in
-         let sandbox_policy_root =
-           if Option.is_some process_sandbox then sandbox_dir else None
-         in
+         let use_sandbox_policy = Option.is_some process_sandbox in
          let _, dir, shell_env =
            leading_context
              action
@@ -172,7 +170,7 @@ let with_ (rule : Rule.t) ~f =
            ; shell_env
            ; replay_env
            ; sandbox_dir
-           ; sandbox_policy_root
+           ; use_sandbox_policy
            ; sandbox_mode
            ; action
            ; targets

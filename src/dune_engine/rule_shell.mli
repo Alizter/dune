@@ -11,8 +11,8 @@ type t =
     (** The base action environment. Scoped wrappers remain in [action]; the
         Dune temporary-directory injection is already present. *)
   ; sandbox_dir : Path.Build.t option
-  ; sandbox_policy_root : Path.Build.t option
-    (** The writable sandbox root when replay processes need an OS sandbox policy. *)
+  ; use_sandbox_policy : bool
+    (** Whether replay processes need an OS sandbox policy for [sandbox_dir]. *)
   ; sandbox_mode : Sandbox_mode.some option
   ; action : Action.t
   ; targets : Targets.Validated.t

@@ -228,13 +228,13 @@ module Metadata_codec = struct
       ; action_env : Env.t
       ; diff_command : string option
       ; targets : Targets.Validated.t
-      ; sandbox_policy_root : string option
+      ; use_sandbox_policy : bool
       }
 
     let codec =
       let to_
             ( (workspace_root, build_dir, cwd, session_root, temp_dir, dune_binary)
-            , (invocation_env, action_env, diff_command, targets, sandbox_policy_root) )
+            , (invocation_env, action_env, diff_command, targets, use_sandbox_policy) )
         =
         { workspace_root
         ; build_dir
@@ -246,7 +246,7 @@ module Metadata_codec = struct
         ; action_env
         ; diff_command
         ; targets
-        ; sandbox_policy_root
+        ; use_sandbox_policy
         }
       in
       let from
@@ -260,11 +260,11 @@ module Metadata_codec = struct
             ; action_env
             ; diff_command
             ; targets
-            ; sandbox_policy_root
+            ; use_sandbox_policy
             }
         =
         ( (workspace_root, build_dir, cwd, session_root, temp_dir, dune_binary)
-        , (invocation_env, action_env, diff_command, targets, sandbox_policy_root) )
+        , (invocation_env, action_env, diff_command, targets, use_sandbox_policy) )
       in
       let open Conv in
       iso
@@ -282,7 +282,9 @@ module Metadata_codec = struct
                  (field "action-env" (required env))
                  (field "diff-command" (optional string))
                  (field "targets" (required targets))
-                 (field "sandbox-policy-root" (optional string)))))
+                 (field
+                    "sandbox-policy"
+                    (required (enum [ "enabled", true; "disabled", false ]))))))
         to_
         from
     ;;
@@ -472,7 +474,7 @@ let write_metadata (shell : Rule_shell.t) ~metadata =
     ; action_env = shell.replay_env
     ; diff_command = !Clflags.diff_command
     ; targets = shell.targets
-    ; sandbox_policy_root = Option.map shell.sandbox_policy_root ~f:build_path_payload
+    ; use_sandbox_policy = shell.use_sandbox_policy
     };
   let has_direct_process_metadata = write_direct_process_metadata shell metadata in
   write_runner metadata;
@@ -665,7 +667,7 @@ module Internal_replay = struct
           ; action_env
           ; diff_command
           ; targets
-          ; sandbox_policy_root
+          ; use_sandbox_policy
           }
         =
         read_session metadata
@@ -690,10 +692,6 @@ module Internal_replay = struct
         let dir = Path.Build.of_string cwd |> Path.build in
         let session_root = Path.Build.of_string session_root |> Path.build in
         let temp_dir = Path.of_string temp_dir in
-        let sandbox_policy_root =
-          Option.map sandbox_policy_root ~f:(fun path ->
-            Path.Build.of_string path |> Path.build)
-        in
         let action =
           Action_file.parse action_path
           |> Action_file.expand ~session_root ~dir ~loc:(Loc.in_file action_path)
@@ -709,7 +707,8 @@ module Internal_replay = struct
               ; rule_loc = Loc.in_file action_path
               ; action
               ; temp_dir
-              ; sandbox_policy_root
+              ; sandbox_policy_root =
+                  (if use_sandbox_policy then Some session_root else None)
               })
         in
         if exit_code <> 0
