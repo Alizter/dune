@@ -86,3 +86,73 @@ and are visible to both Opam-built and native dependants.
   OPAM_PACKAGE_VERSION=2.0
   $ cat _build/default/native/env.txt
   FOO=bar
+
+A package set must have the same environment regardless of dependency order
+or duplicate mentions. Updates within one package retain their written order.
+
+  $ mkdir package-set
+  $ cd package-set
+  $ mkdir a z
+  $ cat >dune-workspace <<'EOF'
+  > (lang dune 3.24)
+  > (pkg disabled)
+  > EOF
+  $ cat >dune-project <<'EOF'
+  > (lang dune 3.24)
+  > (using unreleased 0.1)
+  > (package (name a) (dir a))
+  > (package (name z) (dir z))
+  > EOF
+  $ cat >a/dune <<'EOF'
+  > (opam
+  >  (package a)
+  >  (exported_env
+  >   (= SET_PICK a)
+  >   (+= SET_ORDER a1)
+  >   (+= SET_ORDER a2)
+  >   (= SET_STAMP first)))
+  > EOF
+  $ cat >z/dune <<'EOF'
+  > (opam
+  >  (package z)
+  >  (exported_env
+  >   (= SET_PICK z)
+  >   (+= SET_ORDER z)))
+  > EOF
+  $ cat >dune <<'EOF'
+  > (rule
+  >  (target az)
+  >  (deps (package a) (package z))
+  >  (action
+  >   (with-stdout-to %{target}
+  >    (system "echo $SET_PICK $SET_ORDER $SET_STAMP"))))
+  > (rule
+  >  (target za)
+  >  (deps (package z) (package a))
+  >  (action
+  >   (with-stdout-to %{target}
+  >    (system "echo $SET_PICK $SET_ORDER $SET_STAMP"))))
+  > (rule
+  >  (target duplicate)
+  >  (deps (package a) (package z) (package a))
+  >  (action
+  >   (with-stdout-to %{target}
+  >    (system "echo $SET_PICK $SET_ORDER $SET_STAMP"))))
+  > EOF
+
+BUG: the environment currently depends on the order and multiplicity of the
+package dependencies, rather than the canonical package set.
+
+  $ dune build az za duplicate
+  $ cat _build/default/az _build/default/za _build/default/duplicate
+  z z:a2:a1 first
+  a a2:a1:z first
+  a a2:a1:z:a2:a1 first
+
+Changing an export without changing any installed files must invalidate the
+consumer, even though the shell reads the variable without an env_var dep.
+
+  $ sed -i 's/SET_STAMP first/SET_STAMP second/' a/dune
+  $ dune build az
+  $ cat _build/default/az
+  z z:a2:a1 first
