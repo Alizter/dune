@@ -223,7 +223,6 @@ module Metadata_codec = struct
       ; build_dir : string
       ; cwd : string
       ; session_root : string
-      ; temp_dir : string
       ; dune_binary : string
       ; invocation_env : Env.t
       ; action_env : Env.t
@@ -234,14 +233,13 @@ module Metadata_codec = struct
 
     let codec =
       let to_
-            ( (workspace_root, build_dir, cwd, session_root, temp_dir, dune_binary)
+            ( (workspace_root, build_dir, cwd, session_root, dune_binary)
             , (invocation_env, action_env, diff_command, targets, use_sandbox_policy) )
         =
         { workspace_root
         ; build_dir
         ; cwd
         ; session_root
-        ; temp_dir
         ; dune_binary
         ; invocation_env
         ; action_env
@@ -255,7 +253,6 @@ module Metadata_codec = struct
             ; build_dir
             ; cwd
             ; session_root
-            ; temp_dir
             ; dune_binary
             ; invocation_env
             ; action_env
@@ -264,19 +261,18 @@ module Metadata_codec = struct
             ; use_sandbox_policy
             }
         =
-        ( (workspace_root, build_dir, cwd, session_root, temp_dir, dune_binary)
+        ( (workspace_root, build_dir, cwd, session_root, dune_binary)
         , (invocation_env, action_env, diff_command, targets, use_sandbox_policy) )
       in
       let open Conv in
       iso
         (record
            (both
-              (six
+              (five
                  (field "workspace-root" (required string))
                  (field "build-dir" (required string))
                  (field "cwd" (required string))
                  (field "session-root" (required string))
-                 (field "temp-dir" (required string))
                  (field "dune-binary" (required string)))
               (five
                  (field "invocation-env" (required env))
@@ -406,16 +402,13 @@ help
   init
 ;;
 
-let prepared_temp_dir (shell : Rule_shell.t) =
-  match Env.get shell.replay_env Env.Var.temp_dir with
-  | Some temp_dir -> temp_dir
-  | None -> Code_error.raise "prepared dune shell environment has no temp dir" []
-;;
-
-let write_direct_process_metadata { Rule_shell.direct_process; _ } metadata =
+let write_direct_process_metadata
+      { Rule_shell.direct_process; dir; shell_env = env; _ }
+      metadata
+  =
   match direct_process with
   | None -> false
-  | Some { program; args; dir; env } ->
+  | Some { program; args } ->
     let argv = Path.to_absolute_filename program :: args in
     Metadata_codec.write
       (Path.relative metadata "command.argv.csexp")
@@ -461,7 +454,6 @@ let write_metadata (shell : Rule_shell.t) ~metadata =
     (Sandbox_mode.to_string shell.sandbox_mode ^ "\n");
   let cwd = Path.as_in_build_dir_exn shell.dir in
   let session_root = Option.value shell.sandbox_dir ~default:Path.Build.root in
-  let temp_dir = prepared_temp_dir shell in
   Metadata_codec.write
     (Path.relative metadata "session.csexp")
     Metadata_codec.Session.codec
@@ -469,7 +461,6 @@ let write_metadata (shell : Rule_shell.t) ~metadata =
     ; build_dir = Path.to_absolute_filename Path.build_dir
     ; cwd = build_path_payload cwd
     ; session_root = build_path_payload session_root
-    ; temp_dir
     ; dune_binary = dune_binary ()
     ; invocation_env = Env.initial
     ; action_env = shell.replay_env
@@ -662,7 +653,6 @@ module Internal_replay = struct
           ; build_dir
           ; cwd
           ; session_root
-          ; temp_dir
           ; dune_binary
           ; invocation_env
           ; action_env
@@ -692,7 +682,14 @@ module Internal_replay = struct
         let action_path = Path.relative metadata "action.sexp" in
         let dir = Path.Build.of_string cwd |> Path.build in
         let session_root = Path.Build.of_string session_root |> Path.build in
-        let temp_dir = Path.of_string temp_dir in
+        let temp_dir =
+          match Env.get action_env Env.Var.temp_dir with
+          | Some temp_dir -> Path.of_string temp_dir
+          | None ->
+            User_error.raise
+              ~loc:(Loc.in_file (Path.relative metadata "session.csexp"))
+              [ Pp.text "No temporary directory in the dune shell action environment." ]
+        in
         let action =
           Action_file.parse action_path
           |> Action_file.expand ~session_root ~dir ~loc:(Loc.in_file action_path)

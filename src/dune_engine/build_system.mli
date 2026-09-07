@@ -51,8 +51,6 @@ module Rule_shell : sig
   type direct_process =
     { program : Path.t
     ; args : string list
-    ; dir : Path.t
-    ; env : Env.t
     }
 
   type t =

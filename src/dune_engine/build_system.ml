@@ -1193,8 +1193,6 @@ module Rule_shell = struct
   type direct_process =
     { program : Path.t
     ; args : string list
-    ; dir : Path.t
-    ; env : Env.t
     }
 
   type t =
@@ -1212,14 +1210,14 @@ module Rule_shell = struct
 
   let bash = lazy (Bin.which ~path:(Env_path.path Env.initial) "bash")
 
-  let direct_process (action : Action.t) ~dir ~env =
+  let direct_process (action : Action.t) =
     match action with
     | Run { prog = Ok program; args; can_run_in_action_runner = _ } ->
-      Some { program; args = Appendable_list.to_list args; dir; env }
+      Some { program; args = Appendable_list.to_list args }
     | Run { prog = Error _; _ } -> None
     | Bash { script; can_run_in_action_runner = _ } ->
       Option.map (Lazy.force bash) ~f:(fun program ->
-        { program; args = [ "-e"; "-u"; "-o"; "pipefail"; "-c"; script ]; dir; env })
+        { program; args = [ "-e"; "-u"; "-o"; "pipefail"; "-c"; script ] })
     | _ -> None
   ;;
 
@@ -1289,7 +1287,7 @@ module Rule_shell = struct
              ; use_sandbox_policy
              ; sandbox_mode
              ; action
-             ; direct_process = direct_process body ~dir ~env:shell_env
+             ; direct_process = direct_process body
              ; targets
              ; rule_digest
              }))
