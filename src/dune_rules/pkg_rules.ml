@@ -244,12 +244,18 @@ module Mounted_packages = struct
   ;;
 
   let provider mounted =
+    let lock_pkg =
+      Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.lock_pkg
+    in
+    let variables = Pkg_info.variables lock_pkg.info in
     match Pkg_sources.Mounted.kind mounted with
-    | Dune -> Opam_package_rules.Dependency_provider.Local (local_package mounted)
+    | Dune ->
+      Opam_package_rules.Dependency_provider.Local
+        { package = local_package mounted; variables }
     | Opam stanza ->
       let name = Package.name stanza.package in
       let _, paths = opam_paths mounted name in
-      Opam_package_rules.Dependency_provider.Opam { stanza; paths }
+      Opam_package_rules.Dependency_provider.Opam { stanza; paths; variables }
   ;;
 
   let forwards_capabilities mounted =
@@ -472,15 +478,15 @@ module Mounted_packages = struct
     Memo.List.fold_left mounted ~init ~f:(fun acc mounted ->
       let package = package mounted in
       let kind = Pkg_sources.Mounted.kind mounted in
+      let lock_pkg =
+        Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.lock_pkg
+      in
       let stanza, paths =
         match kind with
         | Opam stanza ->
           let paths, _ = opam_paths mounted (Package.name package) in
           stanza, paths
         | Dune ->
-          let lock_pkg =
-            Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.lock_pkg
-          in
           ( { Opam_stanza.loc = Loc.none
             ; origin = Lock
             ; package
@@ -491,7 +497,7 @@ module Mounted_packages = struct
             }
           , Package_deps.Paths.of_local_package package ~install_root )
       in
-      let variables = Package_deps.variables package in
+      let variables = Pkg_info.variables lock_pkg.info in
       let+ exported_env =
         Opam_package_rules.Action_expander.exported_env_of_stanza
           context
@@ -958,7 +964,7 @@ let gen_opam_rules context ~dir package_name =
     context
     stanza
     ~paths
-    ~variables:(Package_deps.variables stanza.package)
+    ~variables:(Pkg_info.variables lock_pkg.info)
     ~source
     ~source_deps
     ~dependencies
@@ -1248,6 +1254,8 @@ let all_filtered_depexts context =
   Package.Name.Map.values packages
   |> Memo.List.map ~f:(fun mounted ->
     let package = Mounted_packages.package mounted in
+    let candidate = Pkg_sources.Mounted.candidate mounted in
+    let lock_pkg = Pkg_sources.Candidate.lock_pkg candidate in
     let dependencies =
       Mounted_packages.dependencies mounted
       |> Mounted_packages.capability_closure packages
@@ -1259,8 +1267,6 @@ let all_filtered_depexts context =
         let paths, _ = opam_paths mounted (Package.name package) in
         stanza, paths
       | Dune ->
-        let candidate = Pkg_sources.Mounted.candidate mounted in
-        let lock_pkg = Pkg_sources.Candidate.lock_pkg candidate in
         let stanza =
           { Opam_stanza.loc = Loc.none
           ; origin = Lock
@@ -1282,7 +1288,7 @@ let all_filtered_depexts context =
       context
       stanza
       ~paths
-      ~variables:(Package_deps.variables package)
+      ~variables:(Pkg_info.variables lock_pkg.info)
       dependencies)
   >>| List.concat
   >>| List.sort_uniq ~compare:String.compare

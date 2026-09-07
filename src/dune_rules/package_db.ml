@@ -4,6 +4,7 @@ open Memo.O
 type opam =
   { stanza : Opam_stanza.t
   ; paths : Path.Build.t Package_deps.Paths.t
+  ; variables : Package_deps.package_variables
   }
 
 type t =
@@ -12,7 +13,10 @@ type t =
   }
 
 type any_package =
-  | Local of Package.t
+  | Local of
+      { package : Package.t
+      ; variables : Package_deps.package_variables
+      }
   | Installed of Dune_package.t
   | Opam of opam
 
@@ -31,7 +35,8 @@ let load_user_opam_packages context =
       let+ stanzas = Dune_file.find_stanzas dune_file Opam_stanza.key in
       List.map stanzas ~f:(fun (stanza : Opam_stanza.t) ->
         let paths = user_opam_paths stanza ~output_dir:(Dune_file.output_dir dune_file) in
-        Package.name stanza.package, { stanza; paths }))
+        let variables = Package_deps.variables stanza.package in
+        Package.name stanza.package, { stanza; paths; variables }))
   in
   Package.Name.Map.of_list_reduce packages ~f:(fun first second ->
     User_error.raise
@@ -65,12 +70,18 @@ let find_package { context; user_opam_packages } pkg =
   match Package.Name.Map.find packages pkg with
   | Some package ->
     (match Package.Name.Map.find user_opam_packages pkg with
-     | None -> Memo.return (Some (Local package))
+     | None ->
+       let variables = Package_deps.variables package in
+       Memo.return (Some (Local { package; variables }))
      | Some opam -> Memo.return (Some (Opam opam)))
   | None ->
     Pkg_sources.find_mounted context pkg
     >>= (function
      | Some mounted ->
+       let lock_pkg =
+         Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.lock_pkg
+       in
+       let variables = Dune_pkg.Lock_dir.Pkg_info.variables lock_pkg.info in
        (match Pkg_sources.Mounted.kind mounted with
         | Dune ->
           let package =
@@ -79,10 +90,10 @@ let find_package { context; user_opam_packages } pkg =
               Package.Name.Map.find (Dune_project.including_hidden_packages project) pkg)
             |> Option.value_exn
           in
-          Memo.return (Some (Local package))
+          Memo.return (Some (Local { package; variables }))
         | Opam stanza ->
           let paths = mounted_opam_paths mounted stanza in
-          Memo.return (Some (Opam { stanza; paths })))
+          Memo.return (Some (Opam { stanza; paths; variables })))
      | None ->
        Lock_dir.lock_dir_active context
        >>= (function
@@ -111,7 +122,7 @@ let section_of_any_package_site any_package pkg_name loc site =
       (* TODO We should be able to extract this information after the package
          is built *)
       Site.Map.empty
-    | Local p -> Package.sites p
+    | Local { package; _ } -> Package.sites package
     | Installed p -> p.sites
   in
   match Site.Map.find sites site with
