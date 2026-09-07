@@ -116,15 +116,10 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
 module Aliases_cmd = struct
   let fetch_results (dir : Path.Build.t) =
     let open Action_builder.O in
-    let+ alias_targets =
-      let+ load_dir =
-        Action_builder.of_memo (Load_rules.load_dir ~dir:(Path.build dir))
-      in
-      match load_dir with
-      | Load_rules.Loaded.Build build -> Dune_engine.Alias.Name.Map.keys build.aliases
-      | _ -> []
+    let+ { Dune_rules.Build_target.aliases; _ } =
+      Action_builder.of_memo (Dune_rules.Build_target.in_dir dir)
     in
-    List.map ~f:Dune_engine.Alias.Name.to_string alias_targets
+    List.map ~f:Dune_engine.Alias.Name.to_string aliases
   ;;
 
   let term = ls_term fetch_results
@@ -138,25 +133,15 @@ end
 module Targets_cmd = struct
   let fetch_results (dir : Path.Build.t) =
     let open Action_builder.O in
-    let+ load_dir = Action_builder.of_memo (Load_rules.load_dir ~dir:(Path.build dir)) in
-    match load_dir with
-    | Load_rules.Loaded.Build { rules_here; _ } ->
-      let file_targets =
-        Path.Build.Map.keys rules_here.by_file_targets
-        |> List.filter_map ~f:(fun path ->
-          if Path.Build.equal (Path.Build.parent_exn path) dir
-          then Some (Path.Build.basename path |> Filename.to_string)
-          else None)
-      in
-      let dir_targets =
-        Path.Build.Map.keys rules_here.by_directory_targets
-        |> List.filter_map ~f:(fun path ->
-          if Path.Build.equal (Path.Build.parent_exn path) dir
-          then Some ((Path.Build.basename path |> Filename.to_string) ^ Filename.dir_sep)
-          else None)
-      in
-      List.sort ~compare:String.compare (file_targets @ dir_targets)
-    | _ -> []
+    let+ listing = Action_builder.of_memo (Dune_rules.Build_target.in_dir dir) in
+    let files =
+      Dune_rules.Build_target.direct_files listing ~dir |> List.map ~f:Filename.to_string
+    in
+    let directories =
+      Dune_rules.Build_target.direct_directories listing ~dir
+      |> List.map ~f:(fun name -> Filename.to_string name ^ Filename.dir_sep)
+    in
+    List.sort ~compare:String.compare (files @ directories)
   ;;
 
   let term = ls_term fetch_results

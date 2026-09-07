@@ -54,18 +54,16 @@ let all_direct_targets dir =
       ~traverse:Source_dir_status.Set.all
       ~trace_event_name:"All direct targets"
       ~f:(fun dir ->
-        Dune_engine.Load_rules.load_dir
-          ~dir:
-            (Path.build
-               (Path.Build.append_source ctx.build_dir (Source_tree.Dir.path dir)))
-        >>| function
-        | External _ | Source _ -> All_targets.empty
-        | Build { rules_here; _ } ->
-          All_targets.combine
-            (Path.Build.Map.map rules_here.by_file_targets ~f:(fun _ -> Target_type.File))
-            (Path.Build.Map.map rules_here.by_directory_targets ~f:(fun _ ->
-               Target_type.Directory))
-        | Build_under_directory_target _ -> All_targets.empty))
+        let build_dir =
+          Path.Build.append_source ctx.build_dir (Source_tree.Dir.path dir)
+        in
+        Dune_rules.Build_target.in_dir build_dir
+        >>| fun { file_paths; directory_paths; _ } ->
+        All_targets.combine
+          (Path.Build.Map.of_list_map_exn file_paths ~f:(fun path ->
+             path, Target_type.File))
+          (Path.Build.Map.of_list_map_exn directory_paths ~f:(fun path ->
+             path, Target_type.Directory))))
   >>| All_targets.reduce
 ;;
 
