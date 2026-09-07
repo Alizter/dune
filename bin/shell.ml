@@ -633,8 +633,7 @@ module Internal_replay = struct
       | Ok _ | Error _ -> Path.rm_rf ~chmod:true path
     in
     let clear path = clear (Path.build path) in
-    Targets.Validated.iter targets ~file:clear ~dir:clear;
-    Fiber.return ()
+    Targets.Validated.iter targets ~file:clear ~dir:clear
   ;;
 
   let command =
@@ -696,8 +695,7 @@ module Internal_replay = struct
         in
         let exit_code =
           Scheduler_setup.no_build_no_rpc ~config (fun () ->
-            let open Fiber.O in
-            let* () = clear_targets targets ~dir in
+            clear_targets targets ~dir;
             Dune_engine.Action_exec.replay
               { targets
               ; dir

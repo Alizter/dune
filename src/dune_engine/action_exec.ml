@@ -369,12 +369,6 @@ let prepare_env ~root ~env execution_parameters =
        Env.add env ~var ~value:(Path.to_absolute_filename (Path.build project_root)))
 ;;
 
-let prepare_chdirs action =
-  Action.chdirs action
-  |> Path.Build.Set.iter ~f:(fun path -> Path.mkdir_p (Path.build path));
-  Fiber.return ()
-;;
-
 let exec
       { targets; root; context; env; rule_loc; execution_parameters; sandbox; action = t }
       ~build_deps
@@ -476,7 +470,8 @@ let replay { targets; dir; env; rule_loc; action; temp_dir; sandbox_policy_root 
            }
          in
          let open Fiber.O in
-         let* () = prepare_chdirs action in
+         Action.chdirs action
+         |> Path.Build.Set.iter ~f:(fun path -> Path.mkdir_p (Path.build path));
          Fiber.collect_errors (fun () -> exec_action action ~ectx ~eenv)
          >>= function
          | Ok _ -> Fiber.return 0

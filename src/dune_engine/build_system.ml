@@ -405,28 +405,25 @@ module Internal = struct
 
   let remove_rule_targets (targets : Targets.Validated.t) =
     Rule_cache.Workspace_local.remove targets;
-    let () =
-      let remove_target_dir dir =
-        let () = Rule_cache.Workspace_local.remove_subtree dir in
-        Path.rm_rf (Path.build dir)
-      in
-      let remove_target_file path =
-        match Fpath.unlink (Path.Build.to_string path) with
-        | Success -> ()
-        | Does_not_exist -> ()
-        | Is_a_directory ->
-          (* If target changed from a directory to a file, delete it anyway. *)
-          remove_target_dir path
-        | Error exn ->
-          Log.warn
-            "Error while removing target"
-            [ "path", Dyn.string (Path.Build.to_string path)
-            ; "error", Dyn.string (Printexc.to_string exn)
-            ]
-      in
-      Targets.Validated.iter targets ~file:remove_target_file ~dir:remove_target_dir
+    let remove_target_dir dir =
+      let () = Rule_cache.Workspace_local.remove_subtree dir in
+      Path.rm_rf (Path.build dir)
     in
-    Fiber.return ()
+    let remove_target_file path =
+      match Fpath.unlink (Path.Build.to_string path) with
+      | Success -> ()
+      | Does_not_exist -> ()
+      | Is_a_directory ->
+        (* If target changed from a directory to a file, delete it anyway. *)
+        remove_target_dir path
+      | Error exn ->
+        Log.warn
+          "Error while removing target"
+          [ "path", Dyn.string (Path.Build.to_string path)
+          ; "error", Dyn.string (Printexc.to_string exn)
+          ]
+    in
+    Targets.Validated.iter targets ~file:remove_target_file ~dir:remove_target_dir
   ;;
 
   let with_prepared_action_for_rule
@@ -731,7 +728,7 @@ module Internal = struct
           Path.mkdir_p (Path.build targets.root);
           (* Step II. Remove stale targets both from the digest table and from
              the build directory. *)
-          let* () = remove_rule_targets targets in
+          remove_rule_targets targets;
           let* produced_targets, dynamic_deps_stages =
             (* Step III. Try to restore artifacts from the shared cache. *)
             Dune_cache.Shared.lookup ~can_go_in_shared_cache ~rule_digest ~targets
@@ -1251,9 +1248,8 @@ module Rule_shell = struct
         ~execution_parameters
     in
     Memo.of_non_reproducible_fiber
-      (let open Fiber.O in
-       Path.mkdir_p (Path.build original_targets.root);
-       let* () = remove_rule_targets original_targets in
+      (Path.mkdir_p (Path.build original_targets.root);
+       remove_rule_targets original_targets;
        with_prepared_action_for_rule
          ~rule_digest
          ~action:full_action
