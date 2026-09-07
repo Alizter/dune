@@ -6,8 +6,8 @@ Completion failures are not hidden by the protocol parser.
   [1]
 
   $ make_directory_targets_project 3.21
-  $ mkdir sub
-  $ touch source.input
+  $ mkdir -p sub single/child empty source-only
+  $ touch source.input source-only/input
   $ cat > dune <<'EOF'
   > (rule
   >  (targets generated.txt generated.log)
@@ -27,6 +27,11 @@ Completion failures are not hidden by the protocol parser.
   >  (action (write-file nested.out nested)))
   > (alias
   >  (name publish))
+  > EOF
+  $ cat > single/child/dune <<'EOF'
+  > (rule
+  >  (target only.output)
+  >  (action (write-file only.output only)))
   > EOF
 
 Completion evaluates candidates without creating the default trace file.
@@ -58,14 +63,20 @@ is passed to `dune show targets`.
   $ dune_complete build "source"
 
 Source directories remain open so completion can inspect the targets within
-them.
+them. Completion stops at a branch, but follows a uniquely matching chain of
+single-child directories in full. Directories without generated targets are
+omitted.
 
   $ dune_complete build "sub"
-  sub/
+  sub/nested.out
   $ dune_complete build "sub/n"
   sub/nested.out
   $ (cd sub && dune_complete build --root .. "n")
   nested.out
+  $ dune_complete build "sing"
+  single/child/only.output
+  $ dune_complete build "empty"
+  $ dune_complete build "source-only"
   $ dune_complete build "does/not/exist/"
 
 Aliases support both recursive (`@`) and non-recursive (`@@`) command-line

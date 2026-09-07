@@ -66,6 +66,7 @@ Semantic directory candidates keep completion active inside the directory.
   $ cat > project/tests/example.t <<'EOF'
   >   $ true
   > EOF
+  $ cp project/tests/example.t project/tests/other.t
   $ bash <<'EOF'
   > enable complete compgen
   > source <(dune completion bash)
@@ -90,6 +91,7 @@ Semantic directory candidates keep completion active inside the directory.
   > cat > "tests with spaces/example.t" <<'INNER_EOF'
   >   $ true
   > INNER_EOF
+  > cp "tests with spaces/example.t" "tests with spaces/other.t"
   > : >compopt.log
   > COMP_WORDS=(dune runtest "tests w")
   > "${completion[@]}" -- "tests w" 2>/dev/null

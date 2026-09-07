@@ -8,10 +8,10 @@ type t =
 
 and directory =
   | Opaque
-  | Expandable of t Memo.Lazy.t
-
-let opaque = Opaque
-let expandable contents = Expandable contents
+  | Expandable of
+      { contents : t Memo.Lazy.t
+      ; nonempty : bool Memo.Lazy.t
+      }
 
 let create ~values ~directories =
   let directories =
@@ -23,14 +23,79 @@ let create ~values ~directories =
   { values = String.Set.of_list values; directories }
 ;;
 
+let has_candidates { values; directories } =
+  if not (String.Set.is_empty values)
+  then Memo.return true
+  else (
+    let rec loop = function
+      | [] -> Memo.return false
+      | (_, Opaque) :: _ -> Memo.return true
+      | (_, Expandable { nonempty; _ }) :: directories ->
+        Memo.Lazy.force nonempty
+        >>= (function
+         | true -> Memo.return true
+         | false -> loop directories)
+    in
+    loop (String.Map.to_list directories))
+;;
+
+let opaque = Opaque
+
+let expandable contents =
+  let nonempty =
+    Memo.lazy_ ~name:"path-completion-nonempty" (fun () ->
+      let* contents = Memo.Lazy.force contents in
+      has_candidates contents)
+  in
+  Expandable { contents; nonempty }
+;;
+
+type candidate =
+  | Value of string
+  | Directory of string * directory
+
+let matching_candidates { values; directories } ~prefix =
+  let matches name = String.starts_with name ~prefix in
+  let values =
+    String.Set.to_list values
+    |> List.filter_map ~f:(fun name -> Option.some_if (matches name) (Value name))
+  in
+  let+ directories =
+    String.Map.to_list directories
+    |> Memo.parallel_map ~f:(fun (name, dir) ->
+      if not (matches name)
+      then Memo.return None
+      else (
+        match dir with
+        | Opaque -> Memo.return (Some (Directory (name, dir)))
+        | Expandable { nonempty; _ } ->
+          let+ nonempty = Memo.Lazy.force nonempty in
+          Option.some_if nonempty (Directory (name, dir))))
+  in
+  values @ List.filter_opt directories
+;;
+
+let all_candidates t = matching_candidates t ~prefix:""
+
 let rec find t = function
   | [] -> Memo.return (Some t)
   | component :: components ->
     (match String.Map.find t.directories (Filename.to_string component) with
      | None | Some Opaque -> Memo.return None
-     | Some (Expandable child) ->
-       let* child = Memo.Lazy.force child in
+     | Some (Expandable { contents; _ }) ->
+       let* child = Memo.Lazy.force contents in
        find child components)
+;;
+
+let rec expand_directory path = function
+  | Opaque -> Memo.return (path ^ "/")
+  | Expandable { contents; _ } ->
+    let* child = Memo.Lazy.force contents in
+    let* candidates = all_candidates child in
+    (match candidates with
+     | [ Value name ] -> Memo.return (path ^ "/" ^ name)
+     | [ Directory (name, dir) ] -> expand_directory (path ^ "/" ^ name) dir
+     | [] | _ :: _ :: _ -> Memo.return (path ^ "/"))
 ;;
 
 let split_token ~cwd token =
@@ -52,19 +117,15 @@ let candidates t ~cwd ~token =
   let with_parent basename =
     if String.is_empty parent_string then basename else parent_string ^ "/" ^ basename
   in
-  let matches name = String.starts_with name ~prefix in
   let* parent = find t (Path.Source.explode parent_dir) in
   match parent with
   | None -> Memo.return []
-  | Some { values; directories } ->
-    let values =
-      String.Set.to_list values
-      |> List.filter_map ~f:(fun name -> Option.some_if (matches name) (with_parent name))
+  | Some parent ->
+    let* candidates = matching_candidates parent ~prefix in
+    let+ candidates =
+      Memo.parallel_map candidates ~f:(function
+        | Value name -> Memo.return (with_parent name)
+        | Directory (name, dir) -> expand_directory (with_parent name) dir)
     in
-    let directories =
-      String.Map.keys directories
-      |> List.filter_map ~f:(fun name ->
-        Option.some_if (matches name) (with_parent (name ^ "/")))
-    in
-    values @ directories |> String.Set.of_list |> String.Set.to_list |> Memo.return
+    String.Set.of_list candidates |> String.Set.to_list
 ;;

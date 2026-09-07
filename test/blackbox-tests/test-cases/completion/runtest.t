@@ -62,12 +62,13 @@ diagnosing slow completion.
   build-start
   build-finish
 
-Completing on "with_tests/" lists its cram tests, ml tests, and subdirs:
+Completing on "with_tests/" lists its cram tests and ml tests. The nested
+directory is completed through its only test:
 
   $ dune_complete runtest "with_tests/"
   with_tests/foo.t
   with_tests/inline_lib.ml
-  with_tests/nested/
+  with_tests/nested/bar.t
   with_tests/test_a.ml
   with_tests/test_b.ml
 
@@ -77,13 +78,17 @@ Completing on "with_tests/test" narrows by basename prefix:
   with_tests/test_a.ml
   with_tests/test_b.ml
 
-Directories are offered without recursively searching them for tests. Once a
-directory is entered, completion only discovers the tests in that directory.
+A uniquely matching directory is completed through its single child:
+
+  $ dune_complete runtest "with_tests/n"
+  with_tests/nested/bar.t
+
+Directories with no tests in their subtree are omitted. Completion stops at a
+branch rather than eagerly printing every test beneath it.
 
   $ dune_complete runtest ""
   top.t
   with_tests/
-  without_tests/
 
 A bogus parent yields nothing and doesn't crash:
 
@@ -99,7 +104,7 @@ Completion paths are relative to the directory where dune was invoked:
   $ (cd with_tests && dune_complete runtest --root .. "")
   foo.t
   inline_lib.ml
-  nested/
+  nested/bar.t
   test_a.ml
   test_b.ml
 
@@ -196,7 +201,6 @@ The request also flushes pending watcher events before looking up candidates.
   server_only.ml
   top.t
   with_tests/
-  without_tests/
 
 The completion request leaves the watch server responsive.
 
