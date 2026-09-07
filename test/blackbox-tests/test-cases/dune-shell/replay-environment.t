@@ -96,8 +96,8 @@ Bash actions receive the same final environment in their process metadata.
   > '
   bash-metadata-temp: matches replay
 
-BUG: normal action execution injects the action trace directory, but replay
-omits it from the prepared environment.
+Normal action execution and shell preparation share the action trace
+directory injection.
 
   $ unset DUNE_ACTION_TRACE_DIR
   $ cat >> dune <<'EOF'
@@ -118,4 +118,4 @@ omits it from the prepared environment.
   $ dune shell --sandbox=copy _build/default/trace-env -- sh -c '
   > "$DUNE_SHELL/dune-run" && printf "trace-env-replay: " && cat trace-env
   > '
-  trace-env-replay: absent
+  trace-env-replay: present

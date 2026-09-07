@@ -378,6 +378,7 @@ module Internal = struct
 
   type prepared_rule_action =
     { sandbox : Sandbox.t
+    ; action_trace : Action_trace.t
     ; process_sandbox : Process.Sandbox.t option
     ; action : Action.t
     ; root : Path.t
@@ -456,6 +457,8 @@ module Internal = struct
       =
       props
     in
+    let action_trace = Action_trace.create rule_digest in
+    let env = Action_trace.add_to_env action_trace env in
     let prepare_action sandbox =
       let sandbox_root = Sandbox.root sandbox in
       let is_sandboxed = Option.is_some sandbox_root in
@@ -486,6 +489,7 @@ module Internal = struct
         with_locks locks ~f:(fun () ->
           f
             { sandbox
+            ; action_trace
             ; process_sandbox
             ; action
             ; root
@@ -496,12 +500,10 @@ module Internal = struct
             ; execution_parameters
             })
       in
-      match process_sandbox with
-      | None -> execute ()
-      | Some process_sandbox ->
-        Fiber.finalize execute ~finally:(fun () ->
-          Process.Sandbox.destroy process_sandbox;
-          Fiber.return ())
+      Fiber.finalize execute ~finally:(fun () ->
+        Option.iter process_sandbox ~f:Process.Sandbox.destroy;
+        Action_trace.destroy action_trace;
+        Fiber.return ())
     in
     let deps, sandbox_dirs =
       match sandbox_mode with
@@ -579,7 +581,6 @@ module Internal = struct
         ~(targets : Targets.Validated.t)
     : Exec_result.t Fiber.t
     =
-    let action_trace = Action_trace.create rule_digest in
     with_prepared_action_for_rule
       ~rule_digest
       ~action
@@ -591,6 +592,7 @@ module Internal = struct
       ~f:
         (fun
           { sandbox
+          ; action_trace
           ; process_sandbox
           ; action
           ; root
@@ -616,7 +618,6 @@ module Internal = struct
         in
         let* action_exec_result =
           let input =
-            let env = Action_trace.add_to_env action_trace env in
             { Action_exec.root
             ; context (* can be derived from the root *)
             ; env

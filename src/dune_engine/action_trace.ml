@@ -50,7 +50,9 @@ let collect_file file ~digest =
       loop ())
 ;;
 
-let collect { dir; digest } =
+let destroy { dir; _ } = Path.rm_rf (Path.build dir)
+
+let collect ({ dir; digest } as t) =
   let* () = Fiber.return () in
   let unrecognized = Queue.create () in
   let errors = Queue.create () in
@@ -115,7 +117,7 @@ let collect { dir; digest } =
               Queue.push errors (User_error.E error)))
     ();
   Dune_trace.flush ();
-  if !needs_cleanup then Fpath.rm_rf (Path.to_string root_path);
+  if !needs_cleanup then destroy t;
   (match Queue.to_list unrecognized with
    | [] -> ()
    | unrecognized ->

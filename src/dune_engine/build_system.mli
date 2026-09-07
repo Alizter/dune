@@ -54,6 +54,7 @@ val dep_on_alias_definition : Rules.Dir_rules.Alias_spec.item -> unit Action_bui
 
 type prepared_rule_action =
   { sandbox : Sandbox.t
+  ; action_trace : Action_trace.t
   ; process_sandbox : Process.Sandbox.t option
   ; action : Action.t
   ; root : Path.t
