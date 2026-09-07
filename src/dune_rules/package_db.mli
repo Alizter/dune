@@ -12,6 +12,7 @@ type any_package =
   | Local of
       { package : Package.t
       ; variables : Package_deps.package_variables
+      ; exported_env : String_with_vars.t Dune_lang.Action.Env_update.t list
       }
   | Installed of Dune_package.t
   | Opam of opam

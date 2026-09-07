@@ -16,6 +16,7 @@ type any_package =
   | Local of
       { package : Package.t
       ; variables : Package_deps.package_variables
+      ; exported_env : String_with_vars.t Dune_lang.Action.Env_update.t list
       }
   | Installed of Dune_package.t
   | Opam of opam
@@ -72,7 +73,7 @@ let find_package { context; user_opam_packages } pkg =
     (match Package.Name.Map.find user_opam_packages pkg with
      | None ->
        let variables = Package_deps.variables package in
-       Memo.return (Some (Local { package; variables }))
+       Memo.return (Some (Local { package; variables; exported_env = [] }))
      | Some opam -> Memo.return (Some (Opam opam)))
   | None ->
     Pkg_sources.find_mounted context pkg
@@ -90,7 +91,8 @@ let find_package { context; user_opam_packages } pkg =
               Package.Name.Map.find (Dune_project.including_hidden_packages project) pkg)
             |> Option.value_exn
           in
-          Memo.return (Some (Local { package; variables }))
+          Memo.return
+            (Some (Local { package; variables; exported_env = lock_pkg.exported_env }))
         | Opam stanza ->
           let paths = mounted_opam_paths mounted stanza in
           Memo.return (Some (Opam { stanza; paths; variables })))

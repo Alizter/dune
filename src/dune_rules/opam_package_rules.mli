@@ -163,12 +163,13 @@ module Action_expander : sig
     -> String_with_vars.t Env_update.t
     -> string Env_update.t Memo.t
 
-  val exported_env_of_stanza
+  val exported_env_of_package
     :  Context_name.t
-    -> Opam_stanza.t
+    -> Package.t
     -> paths:Path.t Paths.t
     -> variables:Package_deps.package_variables
     -> Package_deps.t
+    -> String_with_vars.t Env_update.t list
     -> string Env_update.t list Memo.t
 
   val filtered_depexts_of_stanza
@@ -183,17 +184,21 @@ module Action_expander : sig
 end
 
 module Dependency_provider : sig
-  type t =
-    | Local of
-        { package : Package.t
-        ; variables : Package_deps.package_variables
-        }
-    | Opam of
-        { stanza : Opam_stanza.t
-        ; paths : Path.Build.t Paths.t
-        ; variables : Package_deps.package_variables
-        }
+  type installation =
+    | Local
+    | Opam of Path.Build.t Paths.t
 
+  type t =
+    { package : Package.t
+    ; variables : Package_deps.package_variables
+    ; exported_env : String_with_vars.t Env_update.t list
+    ; installation : installation
+    }
+
+  (** Materialize a package set and its environment in canonical package-name
+      order, applying each provider once. No package dependency closure is
+      computed here. The builder records installed-file dependencies and the
+      environment variables it contributes. *)
   val materialize : Context_name.t -> t list -> Package_deps.t Action_builder.t
 end
 
