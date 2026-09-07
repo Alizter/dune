@@ -108,8 +108,8 @@ on replay, changing the input without any edit to the prepared action.
   > '
   external-replay: wrong
 
-BUG: the build directory string prefix is mistaken for a path component,
-so a valid external input in _build-extra is treated as a build path.
+A shared string prefix is not a path component: an external input in
+_build-extra remains outside the build directory.
 
   $ mkdir _build-extra
   $ echo sibling > _build-extra/input
@@ -118,8 +118,5 @@ so a valid external input in _build-extra is treated as a build path.
   $ printf "prefix-normal: "; cat _build/default/external-input
   prefix-normal: sibling
   $ dune shell --sandbox=copy _build/default/external-input -- sh -c \
-  >   '"$DUNE_SHELL/dune-run"' >prefix.stdout 2>prefix.stderr
-  [1]
-  $ grep -q 'escapes the dune shell session' prefix.stderr &&
-  >   echo "prefix-replay: misclassified as build path"
-  prefix-replay: misclassified as build path
+  >   '"$DUNE_SHELL/dune-run" && cat external-input'
+  sibling
