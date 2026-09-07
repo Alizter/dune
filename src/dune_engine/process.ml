@@ -1754,12 +1754,11 @@ let run_inherit_std_in_out =
   >>| Failure_mode.exit_code_of_result
 ;;
 
-let run_inherit_std_in_out_raw =
-  fun ?dir ?env ~metadata prog args ->
+let run_inherit_std_in_out_raw ~dir ~env ~metadata prog args =
   let+ status, _ =
     run_internal
-      ?dir
-      ?env
+      ~dir
+      ~env
       ~display:Display.Quiet
       ~stdout_to:Io.inherit_stdout
       ~stderr_to:Io.inherit_stderr

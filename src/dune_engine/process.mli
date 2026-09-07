@@ -70,7 +70,6 @@ module Io : sig
   val inherit_stdout : output t
 
   val inherit_stderr : output t
-  val inherit_stdin : input t
   val stdin : input t
   val null : 'a mode -> 'a t
 
@@ -235,8 +234,8 @@ val run_inherit_std_in_out
 (** Like [run_inherit_std_in_out], but preserves whether the process exited or
     was terminated by a signal. *)
 val run_inherit_std_in_out_raw
-  :  ?dir:Path.t
-  -> ?env:Env.t
+  :  dir:Path.t
+  -> env:Env.t
   -> metadata:Process_metadata.t
   -> Path.t
   -> string list

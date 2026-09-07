@@ -80,7 +80,7 @@ let run_change loc ~patch_back ~sandbox ~promote (mode : Diff.Mode.t) = function
      | Text ->
        Print_diff.print
          ~sandbox
-         ?promotion:(Option.some_if promote (promotion source_file))
+         ~promotion:(Option.some_if promote (promotion source_file))
          ~patch_back
          file1
          file2

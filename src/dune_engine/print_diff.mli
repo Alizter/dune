@@ -4,7 +4,7 @@ open Import
     source-promotion annotation is attached to the rendered diff output and
     errors. *)
 val print
-  :  ?promotion:User_message.Diff_annot.t
+  :  promotion:User_message.Diff_annot.t option
   -> sandbox:Process.Sandbox.t option
   -> skip_trailing_cr:bool
   -> patch_back:Path.t option

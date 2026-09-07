@@ -267,7 +267,7 @@ let prepare ~skip_trailing_cr promotion path1 path2 =
   prepare_with_labels ~skip_trailing_cr ~dir loc promotion (label1, path1) (label2, path2)
 ;;
 
-let print ?promotion ~sandbox ~skip_trailing_cr ~patch_back path1 path2 =
+let print ~promotion ~sandbox ~skip_trailing_cr ~patch_back path1 path2 =
   let p =
     match patch_back with
     | None -> prepare ~skip_trailing_cr promotion path1 path2
