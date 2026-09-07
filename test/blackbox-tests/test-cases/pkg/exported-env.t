@@ -30,3 +30,48 @@ Packages can export environment variables
   OPAM_PACKAGE_NAME=usetest
   OPAM_PACKAGE_VERSION=1.2.3
   OPAMSWITCH=dune
+
+Native packages must contribute their lock-declared exports to the same
+package-set environment as opaque packages. Both locked and workspace Opam
+consumers must see these exports.
+
+  $ mkdir native-exports
+  $ cd native-exports
+  $ cat >dune-project <<'EOF'
+  > (lang dune 3.24)
+  > (using unreleased 0.1)
+  > (package
+  >  (name workspace-consumer)
+  >  (allow_empty)
+  >  (depends native))
+  > EOF
+  $ cat >dune <<'EOF'
+  > (dirs :standard \ native-source)
+  > (opam
+  >  (package workspace-consumer)
+  >  (build (system "echo workspace=$NATIVE_EXPORT")))
+  > EOF
+  $ mkdir native-source
+  $ cat >native-source/dune-project <<'EOF'
+  > (lang dune 3.24)
+  > (package (name native) (allow_empty))
+  > EOF
+  $ echo '(rule (alias all) (action (echo native-built)))' >native-source/dune
+  $ make_lockdir
+  $ make_lockpkg native <<EOF
+  > (version 1.0)
+  > (source (copy $PWD/native-source))
+  > (exported_env (= NATIVE_EXPORT present))
+  > EOF
+  $ make_lockpkg locked-consumer <<'EOF'
+  > (version 1.0)
+  > (depends native)
+  > (build (system "echo locked=$NATIVE_EXPORT"))
+  > EOF
+
+BUG: the native provider loses its exported environment during materialization.
+
+  $ build_pkg locked-consumer
+  locked=
+  $ dune build .opam/workspace-consumer/target
+  workspace=
