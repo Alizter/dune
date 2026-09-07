@@ -87,8 +87,8 @@ real build directory.
   $ printf "source-copy-after-shell: "; cat _build/default/direct-source
   source-copy-after-shell: direct-source
 
-BUG: external paths with a symlink followed by .. are normalized lexically
-on replay, changing the input without any edit to the prepared action.
+External inputs preserve symlink/.. components on replay, so filesystem
+resolution selects the same input as an ordinary build.
 
   $ mkdir -p _ext/real/child
   $ ln -s real/child _ext/link
@@ -106,7 +106,7 @@ on replay, changing the input without any edit to the prepared action.
   $ dune shell _build/default/external-input -- sh -c '
   > "$DUNE_SHELL/dune-run" && printf "external-replay: " && cat external-input
   > '
-  external-replay: wrong
+  external-replay: correct
 
 A shared string prefix is not a path component: an external input in
 _build-extra remains outside the build directory.

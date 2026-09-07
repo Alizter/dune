@@ -87,15 +87,21 @@ module Action_file = struct
                 (Path.to_string_maybe_quoted path)
             ]
     in
-    let path ~dir path =
+    let checked_path ~dir path =
       let resolved = resolve ~dir path in
       let localized = Path.Expert.try_localize_external resolved in
       match Path.as_in_build_dir localized with
       | Some _ -> ensure_session_build_path localized
       | None -> resolved
     in
+    let path ~dir path =
+      let checked = checked_path ~dir path in
+      (* Absolute operands denote external paths. Normalization is only for
+         checking the session boundary, not interpreting symlink/.. components. *)
+      if Filename.is_relative path then checked else Path.of_string path
+    in
     let target ~dir target =
-      let path = path ~dir target in
+      let path = checked_path ~dir target in
       match Path.as_in_build_dir path with
       | Some target -> target
       | None ->
@@ -118,7 +124,7 @@ module Action_file = struct
       | With_accepted_exit_codes (codes, action) ->
         Action.With_accepted_exit_codes (codes, loop action ~dir)
       | Chdir (chdir, action) ->
-        let chdir = path ~dir chdir in
+        let chdir = checked_path ~dir chdir in
         if
           not (Path.equal chdir session_root || Path.is_descendant chdir ~of_:session_root)
         then
@@ -141,7 +147,9 @@ module Action_file = struct
         let target = target ~dir target_ in
         let source_dir = Path.build (Path.Build.parent_exn target) in
         let source =
-          resolve ~dir:source_dir source |> Path.Expert.try_localize_external
+          if Filename.is_relative source
+          then resolve ~dir:source_dir source |> Path.Expert.try_localize_external
+          else Path.of_string source
         in
         Action.Symlink (source, target)
       | Hardlink (source, target_) ->
