@@ -140,14 +140,14 @@ or duplicate mentions. Updates within one package retain their written order.
   >    (system "echo $SET_PICK $SET_ORDER $SET_STAMP"))))
   > EOF
 
-BUG: the environment currently depends on the order and multiplicity of the
-package dependencies, rather than the canonical package set.
+All three requests use the canonical package-name order, applying each package
+once. The last package in that order wins for assignments.
 
   $ dune build az za duplicate
   $ cat _build/default/az _build/default/za _build/default/duplicate
   z z:a2:a1 first
-  a a2:a1:z first
-  a a2:a1:z:a2:a1 first
+  z z:a2:a1 first
+  z z:a2:a1 first
 
 Changing an export without changing any installed files must invalidate the
 consumer, even though the shell reads the variable without an env_var dep.
@@ -155,4 +155,4 @@ consumer, even though the shell reads the variable without an env_var dep.
   $ sed -i 's/SET_STAMP first/SET_STAMP second/' a/dune
   $ dune build az
   $ cat _build/default/az
-  z z:a2:a1 first
+  z z:a2:a1 second

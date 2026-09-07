@@ -247,15 +247,19 @@ module Mounted_packages = struct
     let lock_pkg =
       Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.lock_pkg
     in
-    let variables = Pkg_info.variables lock_pkg.info in
-    match Pkg_sources.Mounted.kind mounted with
-    | Dune ->
-      Opam_package_rules.Dependency_provider.Local
-        { package = local_package mounted; variables }
-    | Opam stanza ->
-      let name = Package.name stanza.package in
-      let _, paths = opam_paths mounted name in
-      Opam_package_rules.Dependency_provider.Opam { stanza; paths; variables }
+    let installation =
+      match Pkg_sources.Mounted.kind mounted with
+      | Dune -> Opam_package_rules.Dependency_provider.Local
+      | Opam stanza ->
+        let name = Package.name stanza.package in
+        let _, paths = opam_paths mounted name in
+        Opam_package_rules.Dependency_provider.Opam paths
+    in
+    { Opam_package_rules.Dependency_provider.package = local_package mounted
+    ; variables = Pkg_info.variables lock_pkg.info
+    ; exported_env = lock_pkg.exported_env
+    ; installation
+    }
   ;;
 
   let forwards_capabilities mounted =
@@ -481,30 +485,20 @@ module Mounted_packages = struct
       let lock_pkg =
         Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.lock_pkg
       in
-      let stanza, paths =
+      let paths =
         match kind with
-        | Opam stanza ->
-          let paths, _ = opam_paths mounted (Package.name package) in
-          stanza, paths
-        | Dune ->
-          ( { Opam_stanza.loc = Loc.none
-            ; origin = Lock
-            ; package
-            ; build = None
-            ; install = None
-            ; depexts = lock_pkg.depexts
-            ; exported_env = lock_pkg.exported_env
-            }
-          , Package_deps.Paths.of_local_package package ~install_root )
+        | Opam _ -> fst (opam_paths mounted (Package.name package))
+        | Dune -> Package_deps.Paths.of_local_package package ~install_root
       in
       let variables = Pkg_info.variables lock_pkg.info in
       let+ exported_env =
-        Opam_package_rules.Action_expander.exported_env_of_stanza
+        Opam_package_rules.Action_expander.exported_env_of_package
           context
-          stanza
+          package
           ~paths
           ~variables
           acc
+          lock_pkg.exported_env
       in
       match kind with
       | Opam _ ->

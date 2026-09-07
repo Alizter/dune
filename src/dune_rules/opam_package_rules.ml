@@ -1133,14 +1133,14 @@ module Action_expander = struct
     Value_list_env.extend_concat_path (Lazy.force Value_list_env.global) package_env
   ;;
 
-  let expander_of_stanza context (stanza : Opam_stanza.t) ~paths ~variables dependencies =
-    let name = Package.name stanza.package in
+  let expander_of_package context package ~paths ~variables ~depexts dependencies =
+    let name = Package.name package in
     let version =
-      Package.version stanza.package |> Option.value ~default:Pkg_info.default_version
+      Package.version package |> Option.value ~default:Pkg_info.default_version
     in
     let depends =
       let+ { Package_deps.packages; _ } = dependencies in
-      Package.Name.Map.add_exn packages name (variables, paths)
+      Package.Name.Map.set packages name (variables, paths)
     in
     let artifacts =
       let+ { Package_deps.binaries; _ } = dependencies in
@@ -1150,15 +1150,7 @@ module Action_expander = struct
       let+ dependencies = dependencies in
       value_env ~name ~version paths dependencies
     in
-    { Expander.paths
-    ; name
-    ; artifacts
-    ; context
-    ; depends
-    ; depexts = stanza.depexts
-    ; version
-    ; env
-    }
+    { Expander.paths; name; artifacts; context; depends; depexts; version; env }
   ;;
 
   let expander context (pkg : Pkg.t) (dependencies : Dependency_view.t) =
@@ -1241,17 +1233,17 @@ module Action_expander = struct
     { env with value }
   ;;
 
-  let exported_env_of_stanza
+  let exported_env_of_package context package ~paths ~variables dependencies updates =
+    let expander =
+      expander_of_package
         context
-        (stanza : Opam_stanza.t)
+        package
         ~paths
         ~variables
-        dependencies
-    =
-    let expander =
-      expander_of_stanza context stanza ~paths ~variables (Memo.return dependencies)
+        ~depexts:[]
+        (Memo.return dependencies)
     in
-    Memo.parallel_map stanza.exported_env ~f:(exported_env expander)
+    Memo.parallel_map updates ~f:(exported_env expander)
   ;;
 
   let filtered_depexts_of_stanza
@@ -1261,7 +1253,13 @@ module Action_expander = struct
         ~variables
         dependencies
     =
-    expander_of_stanza context stanza ~paths ~variables (Memo.return dependencies)
+    expander_of_package
+      context
+      stanza.package
+      ~paths
+      ~variables
+      ~depexts:stanza.depexts
+      (Memo.return dependencies)
     |> Expander.filtered_depexts
   ;;
 
@@ -1276,22 +1274,28 @@ module Action_expander = struct
 end
 
 module Dependency_provider = struct
+  type installation =
+    | Local
+    | Opam of Path.Build.t Paths.t
+
   type t =
-    | Local of
-        { package : Package.t
-        ; variables : Package_deps.package_variables
-        }
-    | Opam of
-        { stanza : Opam_stanza.t
-        ; paths : Path.Build.t Paths.t
-        ; variables : Package_deps.package_variables
-        }
+    { package : Package.t
+    ; variables : Package_deps.package_variables
+    ; exported_env : String_with_vars.t Env_update.t list
+    ; installation : installation
+    }
 
   let materialize context providers =
     let open Action_builder.O in
+    let providers =
+      List.fold_left providers ~init:Package.Name.Map.empty ~f:(fun acc provider ->
+        Package.Name.Map.set acc (Package.name provider.package) provider)
+      |> Package.Name.Map.values
+    in
     let local_package_names =
-      List.filter_map providers ~f:(function
-        | Local { package; _ } -> Some (Package.name package)
+      List.filter_map providers ~f:(fun { package; installation; _ } ->
+        match installation with
+        | Local -> Some (Package.name package)
         | Opam _ -> None)
       |> Package.Name.Set.of_list
     in
@@ -1305,15 +1309,29 @@ module Dependency_provider = struct
       then Action_builder.return Filename.Map.empty
       else Action_builder.of_memo (Install_layout.binaries context local_package_names)
     in
-    let packages =
+    let* providers =
       let install_root = Install_layout.root context local_package_names |> Path.build in
-      List.fold_left providers ~init:Package.Name.Map.empty ~f:(fun packages -> function
-        | Local { package; variables } ->
-          Package.Name.Map.set
-            packages
-            (Package.name package)
-            (variables, Paths.of_local_package package ~install_root)
-        | Opam _ -> packages)
+      Action_builder.List.map
+        providers
+        ~f:(fun ({ package; variables; installation; _ } as provider) ->
+          match installation with
+          | Local ->
+            let paths = Paths.of_local_package package ~install_root in
+            Action_builder.return (provider, paths, None)
+          | Opam paths ->
+            let paths = Paths.map_path paths ~f:Path.build in
+            let* () = Action_builder.dep (Dep.file paths.target_dir) in
+            let cookie = Paths.install_cookie paths |> Install_cookie.load_exn in
+            let variables =
+              Package_variable_name.Map.superpose
+                (Package_variable_name.Map.of_list_exn cookie.variables)
+                variables
+            in
+            Action_builder.return ({ provider with variables }, paths, Some cookie.files))
+    in
+    let packages =
+      Package.Name.Map.of_list_map_exn providers ~f:(fun (provider, paths, _) ->
+        Package.name provider.package, (provider.variables, paths))
     in
     let materialized =
       { Package_deps.value_env = Package_deps.Value_list_env.of_env env
@@ -1321,23 +1339,38 @@ module Dependency_provider = struct
       ; packages
       }
     in
-    Action_builder.List.fold_left providers ~init:materialized ~f:(fun acc -> function
-      | Local _ -> Action_builder.return acc
-      | Opam { stanza; paths; variables } ->
-        let paths = Paths.map_path paths ~f:Path.build in
-        let* () = Action_builder.dep (Dep.file paths.target_dir) in
-        let cookie = Paths.install_cookie paths |> Install_cookie.load_exn in
-        let variables =
-          Package_variable_name.Map.superpose
-            (Package_variable_name.Map.of_list_exn cookie.variables)
-            variables
-        in
-        let* exported_env =
-          Action_builder.of_memo
-            (Action_expander.exported_env_of_stanza context stanza ~paths ~variables acc)
-        in
-        Package_deps.add_package acc ~paths ~variables ~files:cookie.files ~exported_env
-        |> Action_builder.return)
+    let* materialized =
+      Action_builder.List.fold_left
+        providers
+        ~init:materialized
+        ~f:(fun acc ({ package; variables; exported_env; _ }, paths, files) ->
+          let* exported_env =
+            Action_builder.of_memo
+              (Action_expander.exported_env_of_package
+                 context
+                 package
+                 ~paths
+                 ~variables
+                 materialized
+                 exported_env)
+          in
+          match files with
+          | Some files ->
+            Package_deps.add_package acc ~paths ~variables ~files ~exported_env
+            |> Action_builder.return
+          | None ->
+            let { Package_deps.value_env; _ } = acc in
+            let value_env =
+              List.fold_left exported_env ~init:value_env ~f:Package_deps.Env_update.set
+            in
+            Action_builder.return { acc with value_env })
+    in
+    let+ () =
+      Env.Map.keys materialized.value_env
+      |> Dep.Set.of_list_map ~f:Dep.env
+      |> Action_builder.deps
+    in
+    materialized
   ;;
 end
 
@@ -1933,11 +1966,12 @@ let build_rule
     Action_builder.evaluate_and_collect_facts dependencies >>| fst
   in
   let expander =
-    Action_expander.expander_of_stanza
+    Action_expander.expander_of_package
       context_name
-      stanza
+      stanza.package
       ~paths:read_paths
       ~variables
+      ~depexts:stanza.depexts
       materialized_dependencies
   in
   let+ build_action =

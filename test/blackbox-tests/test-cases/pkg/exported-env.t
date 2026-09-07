@@ -69,9 +69,7 @@ consumers must see these exports.
   > (build (system "echo locked=$NATIVE_EXPORT"))
   > EOF
 
-BUG: the native provider loses its exported environment during materialization.
-
   $ build_pkg locked-consumer
-  locked=
+  locked=present
   $ dune build .opam/workspace-consumer/target
-  workspace=
+  workspace=present

@@ -3,7 +3,6 @@ open Memo.O
 module Package_rules = Opam_package_rules
 module Paths = Package_rules.Paths
 module Install_cookie = Package_rules.Install_cookie
-module Action_expander = Package_rules.Action_expander
 
 type entry = Package_db.opam
 
@@ -93,38 +92,6 @@ let cookie (entry : entry) =
   let path = Paths.install_cookie paths in
   let+ () = Action_builder.dep (Dep.file path) in
   Install_cookie.load_exn path
-;;
-
-let materialize context (entries : entry list) =
-  let open Action_builder.O in
-  Action_builder.List.fold_left
-    entries
-    ~init:Package_deps.empty
-    ~f:(fun materialized (entry : entry) ->
-      let paths = read_paths entry in
-      let* () = Action_builder.dep (Dep.file paths.target_dir) in
-      let cookie = Install_cookie.load_exn (Paths.install_cookie paths) in
-      let variables =
-        Package_variable_name.Map.superpose
-          (Package_variable_name.Map.of_list_exn cookie.variables)
-          (package_variables entry)
-      in
-      let* exported_env =
-        Action_builder.of_memo
-          (Action_expander.exported_env_of_stanza
-             context
-             entry.stanza
-             ~paths
-             ~variables
-             materialized)
-      in
-      Action_builder.return
-        (Package_deps.add_package
-           materialized
-           ~paths
-           ~variables
-           ~files:cookie.files
-           ~exported_env))
 ;;
 
 let gen_rules context ~dir stanza =
@@ -233,7 +200,14 @@ let materialize_selected =
       ~input:(module Materialize_key)
       (fun (context, selected) ->
          let* entries = entries context in
-         materialize context (selected_entries entries selected)
+         selected_entries entries selected
+         |> List.map ~f:(fun (entry : entry) ->
+           { Package_rules.Dependency_provider.package = entry.stanza.package
+           ; variables = package_variables entry
+           ; exported_env = entry.stanza.exported_env
+           ; installation = Opam entry.paths
+           })
+         |> Package_rules.Dependency_provider.materialize context
          |> Action_builder.evaluate_and_collect_facts
          >>| fst)
   in

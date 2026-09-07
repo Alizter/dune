@@ -89,10 +89,20 @@ let materialize context ~dune_version dependencies =
   let providers =
     List.filter_map classified ~f:(fun (_, found) ->
       match found with
-      | Some (Package_db.Local { package; variables }) ->
-        Some (Opam_package_rules.Dependency_provider.Local { package; variables })
+      | Some (Package_db.Local { package; variables; exported_env }) ->
+        Some
+          { Opam_package_rules.Dependency_provider.package
+          ; variables
+          ; exported_env
+          ; installation = Local
+          }
       | Some (Opam { stanza; paths; variables }) ->
-        Some (Opam_package_rules.Dependency_provider.Opam { stanza; paths; variables })
+        Some
+          { Opam_package_rules.Dependency_provider.package = stanza.package
+          ; variables
+          ; exported_env = stanza.exported_env
+          ; installation = Opam paths
+          }
       | Some (Installed _) | None -> None)
   in
   let* materialized =
