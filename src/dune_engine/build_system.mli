@@ -46,57 +46,42 @@ type rule_execution_result =
 val execute_rule : Rule.t -> rule_execution_result Memo.t
 val dep_on_alias_definition : Rules.Dir_rules.Alias_spec.item -> unit Action_builder.t
 
-(** {2 Sharing the rule execution pipeline}
+(** Preparation of a rule action for an interactive [dune shell] session. *)
+module Rule_shell : sig
+  type direct_process =
+    { program : Path.t
+    ; args : string list
+    ; dir : Path.t
+    ; env : Env.t
+    }
 
-    These functions are part of the ordinary rule execution pipeline and are
-    exposed so that [dune shell] can prepare a rule action without executing
-    it. *)
+  type t =
+    { dir : Path.t
+    ; shell_env : Env.t
+      (** The entry environment after common leading action wrappers and the
+          final Dune temporary-directory injection. *)
+    ; replay_env : Env.t
+      (** The base action environment. Scoped wrappers remain in [action]; the
+          Dune temporary-directory injection is already present. *)
+    ; sandbox_dir : Path.Build.t option
+    ; use_sandbox_policy : bool
+      (** Whether replay processes need an OS sandbox policy for [sandbox_dir]. *)
+    ; sandbox_mode : Sandbox_mode.some option
+    ; action : Action.t
+    ; direct_process : direct_process option
+      (** Literal process metadata using the entry directory and environment. *)
+    ; targets : Targets.Validated.t
+    ; rule_digest : Digest.t
+    }
 
-type prepared_rule_action =
-  { sandbox : Sandbox.t
-  ; action_trace : Action_trace.t
-  ; input : Action_exec.input
-  }
-
-(** Evaluate the rule's action and build the facts of its dependencies. *)
-val evaluate_rule_action
-  :  Rule.t
-  -> (Action.Full.t * Dep.Facts.t * Execution_parameters.t) Memo.t
-
-(** Remove the rule's declared targets both from the digest table and from
-    the build directory. *)
-val remove_rule_targets : Targets.Validated.t -> unit Fiber.t
-
-(** Prepare the rule's action in its normally selected sandbox and run [f]
-    while the sandbox and the rule's action locks are held. *)
-val with_prepared_action_for_rule
-  :  rule_digest:Digest.t
-  -> action:Action.Full.t
-  -> facts:Dep.Facts.t
-  -> loc:Loc.t
-  -> execution_parameters:Execution_parameters.t
-  -> sandbox_mode:Sandbox_mode.some option
-  -> targets:Targets.Validated.t
-  -> f:(prepared_rule_action -> 'a Fiber.t)
-  -> 'a Fiber.t
-
-(** Select the sandbox mode for a rule given its sandboxing configuration and
-    the sandboxing preference. *)
-val select_sandbox_mode
-  :  Sandbox_config.t
-  -> rule:Rule.t
-  -> sandboxing_preference:Sandbox_mode.t list
-  -> Sandbox_mode.t
-
-(** Compute the digest of a rule. This determines the shared-cache key and the
-    name of the rule's sandbox directory. *)
-val compute_rule_digest
-  :  Rule.t
-  -> facts:Dep.Facts.t
-  -> action:Action.Full.t
-  -> sandbox_mode:Sandbox_mode.t
-  -> execution_parameters:Execution_parameters.t
-  -> Digest.t
+  (** Build and evaluate all prerequisites of [rule], prepare the rule's action
+      in its normally selected execution location, and run [f] instead of the
+      action. Existing declared targets are removed as they are before ordinary
+      action execution. The selected action is not executed and its outputs are
+      not extracted, cached, or promoted. The execution location and the rule's
+      action locks remain owned by the build system until [f] returns. *)
+  val with_ : Rule.t -> f:(t -> 'a Fiber.t) -> 'a Memo.t
+end
 
 (** {2 Running the build system} *)
 

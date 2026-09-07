@@ -1,4 +1,5 @@
 open Import
+module Rule_shell = Build_system.Rule_shell
 
 let doc = "Open a shell in the prepared environment of a rule action."
 
