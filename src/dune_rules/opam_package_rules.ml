@@ -1277,17 +1277,21 @@ end
 
 module Dependency_provider = struct
   type t =
-    | Local of Package.t
+    | Local of
+        { package : Package.t
+        ; variables : Package_deps.package_variables
+        }
     | Opam of
         { stanza : Opam_stanza.t
         ; paths : Path.Build.t Paths.t
+        ; variables : Package_deps.package_variables
         }
 
   let materialize context providers =
     let open Action_builder.O in
     let local_package_names =
       List.filter_map providers ~f:(function
-        | Local package -> Some (Package.name package)
+        | Local { package; _ } -> Some (Package.name package)
         | Opam _ -> None)
       |> Package.Name.Set.of_list
     in
@@ -1304,11 +1308,11 @@ module Dependency_provider = struct
     let packages =
       let install_root = Install_layout.root context local_package_names |> Path.build in
       List.fold_left providers ~init:Package.Name.Map.empty ~f:(fun packages -> function
-        | Local package ->
+        | Local { package; variables } ->
           Package.Name.Map.set
             packages
             (Package.name package)
-            (Package_deps.variables package, Paths.of_local_package package ~install_root)
+            (variables, Paths.of_local_package package ~install_root)
         | Opam _ -> packages)
     in
     let materialized =
@@ -1319,14 +1323,14 @@ module Dependency_provider = struct
     in
     Action_builder.List.fold_left providers ~init:materialized ~f:(fun acc -> function
       | Local _ -> Action_builder.return acc
-      | Opam { stanza; paths } ->
+      | Opam { stanza; paths; variables } ->
         let paths = Paths.map_path paths ~f:Path.build in
         let* () = Action_builder.dep (Dep.file paths.target_dir) in
         let cookie = Paths.install_cookie paths |> Install_cookie.load_exn in
         let variables =
           Package_variable_name.Map.superpose
             (Package_variable_name.Map.of_list_exn cookie.variables)
-            (Package_deps.variables stanza.package)
+            variables
         in
         let* exported_env =
           Action_builder.of_memo

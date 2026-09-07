@@ -184,10 +184,14 @@ end
 
 module Dependency_provider : sig
   type t =
-    | Local of Package.t
+    | Local of
+        { package : Package.t
+        ; variables : Package_deps.package_variables
+        }
     | Opam of
         { stanza : Opam_stanza.t
         ; paths : Path.Build.t Paths.t
+        ; variables : Package_deps.package_variables
         }
 
   val materialize : Context_name.t -> t list -> Package_deps.t Action_builder.t

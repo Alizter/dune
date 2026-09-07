@@ -3,12 +3,16 @@ open Import
 type opam =
   { stanza : Opam_stanza.t
   ; paths : Path.Build.t Package_deps.Paths.t
+  ; variables : Package_deps.package_variables
   }
 
 type t
 
 type any_package =
-  | Local of Package.t
+  | Local of
+      { package : Package.t
+      ; variables : Package_deps.package_variables
+      }
   | Installed of Dune_package.t
   | Opam of opam
 

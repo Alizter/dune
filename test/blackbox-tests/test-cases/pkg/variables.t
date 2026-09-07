@@ -86,7 +86,8 @@ opaque dependencies must retain it when materialized as package providers.
   > (opam
   >  (package consumer)
   >  (build
-  >   (system "echo workspace: %{pkg:native:dev} %{pkg:dev-pkg:dev} %{pkg:release-pkg:dev}")))
+  >   (run echo workspace:
+  >    %{pkg:native:dev} %{pkg:dev-pkg:dev} %{pkg:release-pkg:dev})))
   > EOF
   $ mkdir native-source
   $ cat > native-source/dune-project <<'EOF'
@@ -105,8 +106,8 @@ opaque dependencies must retain it when materialized as package providers.
   > (dev)
   > (build
   >  (progn
-  >   (system "echo self: %{pkg-self:dev}")
-  >   (when %{pkg-self:dev} (system "echo development-action"))))
+  >   (run echo self: %{pkg-self:dev})
+  >   (when %{pkg-self:dev} (run echo development-action))))
   > EOF
   $ make_lockpkg release-pkg <<'EOF'
   > (version 1.0)
@@ -115,23 +116,26 @@ opaque dependencies must retain it when materialized as package providers.
   > (version 1.0)
   > (depends native dev-pkg release-pkg)
   > (build
-  >  (system "echo locked: %{pkg:native:dev} %{pkg:dev-pkg:dev} %{pkg:release-pkg:dev}"))
+  >  (run echo locked:
+  >   %{pkg:native:dev} %{pkg:dev-pkg:dev} %{pkg:release-pkg:dev}))
   > EOF
 
-BUG: converting lock metadata to Package.t loses the development flag.
-The development action should run and the first two dependency flags should
-both be true, regardless of whether the consumer is locked or workspace-owned.
+The development action runs and the first two dependency flags are true,
+regardless of whether the consumer is locked or workspace-owned.
 
   $ build_pkg locked-consumer
-  self: false
-  locked: false false false
+  self: true
+  development-action
+  locked: true true false
   $ dune build .opam/consumer/target
-  workspace: false false false
+  workspace: true true false
 
 Changing only the development flag at the same package-name root must also be
 observed by the next build.
 
   $ sed -i '/^(dev)$/d' dune.lock/native.pkg dune.lock/dev-pkg.pkg
   $ build_pkg locked-consumer
+  self: false
+  locked: false false false
   $ dune build .opam/consumer/target
   workspace: false false false
