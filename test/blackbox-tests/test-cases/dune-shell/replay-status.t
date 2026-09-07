@@ -70,8 +70,8 @@ wrapped Dune process error, and still cleans up the sandbox and metadata.
   $ test ! -e "$(cat nonzero-metadata)" && echo "nonzero-metadata: cleaned"
   nonzero-metadata: cleaned
 
-BUG: compound accepted-exit predicates do not round-trip through the replay
-encoder. An or predicate fails to parse; an empty and becomes false.
+Compound accepted-exit predicates round-trip through the replay encoder,
+including an empty conjunction that accepts every exit code.
 
   $ cat >> dune <<'EOF'
   > (rule
@@ -97,7 +97,7 @@ encoder. An or predicate fails to parse; an empty and becomes false.
   >     fi
   >   '
   > done
-  predicate-replay-status: 1
-  predicate-stderr: nonempty
-  predicate-replay-status: 7
+  predicate-replay-status: 0
+  predicate-stderr: empty
+  predicate-replay-status: 0
   predicate-stderr: empty
