@@ -43,6 +43,13 @@ nested cram test, and a sibling subdir with no tests.
   >   top
   > EOF
 
+Option suggestions are only included when the token starts with a dash.
+
+  $ dune --__complete runtest --__complete= | grep -x Options
+  [1]
+  $ dune --__complete runtest --__complete=- | grep -x Options
+  Options
+
 Completion evaluates candidates inside a build-system run without creating the
 default trace on every invocation. An explicit trace remains available for
 diagnosing slow completion.

@@ -59,7 +59,7 @@ let add_options_group ~err_ppf ~subst eval comp directives =
     in
     List.filter_map add_name names
   in
-  let maybe_opt = prefix = "" || prefix.[0] = '-' in
+  let maybe_opt = prefix <> "" && prefix.[0] = '-' in
   if Cmdliner_def.Complete.after_dashdash comp || not maybe_opt
   then directives else
   let cmd_info = Cmdliner_def.Eval.cmd eval in
