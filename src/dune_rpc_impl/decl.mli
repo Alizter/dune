@@ -28,4 +28,5 @@ val build : (string list, Build_outcome_with_diagnostics.t) Decl.Request.t
 val status : (unit, Status.t) Decl.Request.t
 val pkg_enabled : (unit, bool) Decl.Request.t
 val runtest_completion : (string * string, string list) Decl.Request.t
+val build_completion : (string * string, string list) Decl.Request.t
 val simulate_file_watcher_queue_overflow : (unit, Queue_overflow.response) Decl.Request.t

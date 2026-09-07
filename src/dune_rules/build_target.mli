@@ -17,3 +17,7 @@ val direct_directories : t -> dir:Path.Build.t -> Filename.t list
 val file_paths_excluding_sources : t -> Path.Build.t list Memo.t
 
 val direct_files_excluding_sources : t -> dir:Path.Build.t -> Filename.t list Memo.t
+
+(** Complete build targets and aliases relative to [cwd]. Alias tokens start
+    with [@] or [@@]. *)
+val candidates : cwd:Path.Source.t -> token:string -> string list Memo.t

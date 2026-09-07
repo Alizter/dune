@@ -353,6 +353,24 @@ let handler (t : t Fdecl.t) : unit Handler.t =
     Handler.implement_request_with_id rpc Decl.runtest_completion f
   in
   let () =
+    let f session request_id (cwd, token) =
+      let t = Fdecl.get t in
+      match t.build with
+      | Disabled -> Fiber.return []
+      | Enabled { build_loop; _ } ->
+        let cwd = For_handlers.source_path_of_string cwd in
+        Build_loop.submit_rpc_query
+          build_loop
+          ~session_id:(Session.id session)
+          ~request_id
+          ~query:(Dune_rules.Build_target.candidates ~cwd ~token)
+        >>| (function
+         | Busy | Query_failed -> []
+         | Query_succeeded candidates -> candidates)
+    in
+    Handler.implement_request_with_id rpc Decl.build_completion f
+  in
+  let () =
     let shutdown _ () =
       let t = Fdecl.get t in
       let terminate_sessions () =

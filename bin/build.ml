@@ -59,6 +59,69 @@ let run_build_command ~(common : Common.t) ~config ~request =
     run_build_command_poll ~common ~config ~sticky_goal
 ;;
 
+let target_completion_candidates builder ~token =
+  match builder with
+  | None -> []
+  | Some builder ->
+    (try
+       let builder = Common.Builder.for_completion builder in
+       let common, config = Common.init builder in
+       let cwd =
+         Path.of_filename_relative_to_initial_cwd Filename.current_dir_name
+         |> Path.Expert.try_localize_external
+         |> Path.as_in_source_tree
+       in
+       match cwd with
+       | None -> []
+       | Some cwd ->
+         (match Global_lock.lock () with
+          | Ok () ->
+            Scheduler_setup.go_for_completion ~common ~config (fun () ->
+              Build_system.run_exn (fun () ->
+                Dune_rules.Build_target.candidates ~cwd ~token))
+          | Error lock_held_by ->
+            Scheduler_setup.go_for_completion ~common ~config (fun () ->
+              Rpc.Rpc_common.fire_request
+                ~name:"build-completion"
+                ~wait:false
+                ~warn_forwarding:false
+                ~lock_held_by
+                builder
+                Dune_rpc_impl.Decl.build_completion
+                (Path.Source.to_string cwd, token)))
+     with
+     | User_error.E _ | Dune_rpc.Version_error.E _ | Dune_scheduler.Shutdown.E Timeout ->
+       [])
+;;
+
+let completion_func marker builder ~token =
+  Ok
+    (target_completion_candidates builder ~token:(marker ^ token)
+     |> List.map ~f:(fun candidate -> String.drop candidate (String.length marker))
+     |> List.map ~f:Cmdliner.Arg.Completion.string)
+;;
+
+let target_conv =
+  let completion =
+    Cmdliner.Arg.Completion.make ~context:Common.Builder.term (completion_func "")
+  in
+  Cmdliner.Arg.Conv.of_conv ~completion Arg.dep
+;;
+
+let alias_conv =
+  let completion =
+    Cmdliner.Arg.Completion.make ~context:Common.Builder.term (completion_func "@@")
+  in
+  Cmdliner.Arg.Conv.of_conv ~completion Arg.Dep.alias_arg
+;;
+
+let alias_rec_conv =
+  let completion =
+    Cmdliner.Arg.Completion.make ~context:Common.Builder.term (completion_func "@")
+  in
+  Cmdliner.Arg.Conv.of_conv ~completion Arg.Dep.alias_rec_arg
+;;
+
 let build =
   let doc = "Build the given targets, or the default ones if none are given." in
   let man =
@@ -123,11 +186,11 @@ let build =
   in
   let term =
     let+ builder = Common.Builder.term
-    and+ targets = Arg.(value & pos_all dep [] name_)
+    and+ targets = Arg.(value & pos_all target_conv [] name_)
     and+ aliases_rec =
       Arg.(
         value
-        & opt_all Dep.alias_rec_arg []
+        & opt_all alias_rec_conv []
         & info
             [ "alias-rec" ]
             ~docv:"ALIAS"
@@ -140,7 +203,7 @@ let build =
     and+ aliases =
       Arg.(
         value
-        & opt_all Dep.alias_arg []
+        & opt_all alias_conv []
         & info
             [ "alias" ]
             ~docv:"ALIAS"
