@@ -481,13 +481,15 @@ let replay { targets; dir; env; rule_loc; action; temp_dir; sandbox_policy_root 
          >>= function
          | Ok _ -> Fiber.return 0
          | Error errors ->
-           (match
-              List.find_map errors ~f:(fun { Exn_with_backtrace.exn; _ } ->
-                match exn with
-                | Shell_replay_failed status -> Some status
-                | _ -> None)
-            with
-            | Some status ->
-              Fiber.return (Process.Failure_mode.exit_code_of_raw_status status)
-            | None -> Fiber.reraise_all errors)))
+           let statuses, errors =
+             List.partition_map errors ~f:(fun ({ Exn_with_backtrace.exn; _ } as error) ->
+               match exn with
+               | Shell_replay_failed status -> Left status
+               | _ -> Right error)
+           in
+           (match statuses with
+            | [] -> Fiber.reraise_all errors
+            | status :: _ ->
+              List.iter errors ~f:Dune_util.Report_error.report;
+              Fiber.return (Process.Failure_mode.exit_code_of_raw_status status))))
 ;;
