@@ -52,20 +52,17 @@ let collect_file file ~digest =
 
 let destroy { dir; _ } = Path.rm_rf (Path.build dir)
 
-let collect ({ dir; digest } as t) =
+let collect { dir; digest } =
   let* () = Fiber.return () in
   let unrecognized = Queue.create () in
   let errors = Queue.create () in
-  let needs_cleanup = ref false in
   let root = dir in
   let root_path = Path.build root in
-  if Fpath.exists (Path.to_string root_path) then needs_cleanup := true;
   let build_dir_of dir =
     if String.equal dir "" then root else Path.Build.relative root dir
   in
   let build_path_of ~dir fname = Path.Build.relative_fname (build_dir_of dir) fname in
   let push_broken_symlink ~dir fname error =
-    needs_cleanup := true;
     let path = build_path_of ~dir fname in
     let error =
       User_message.make
@@ -76,15 +73,11 @@ let collect ({ dir; digest } as t) =
     Queue.push errors (User_error.E error)
   in
   let on_file ~dir fname () =
-    needs_cleanup := true;
     let file = build_path_of ~dir fname in
     try collect_file file ~digest with
     | exn -> Queue.push errors exn
   in
-  let on_other ~dir fname _kind () =
-    needs_cleanup := true;
-    Queue.push unrecognized (build_path_of ~dir fname)
-  in
+  let on_other ~dir fname _kind () = Queue.push unrecognized (build_path_of ~dir fname) in
   let on_symlink ~dir fname () =
     let path = Path.build (build_path_of ~dir fname) in
     match Path.Untracked.stat path with
@@ -97,7 +90,6 @@ let collect ({ dir; digest } as t) =
     ~dir:(Path.to_string root_path)
     ~init:()
     ~on_file
-    ~on_dir:(fun ~dir:_ _ () -> needs_cleanup := true)
     ~on_other:(`Call on_other)
     ~on_symlink:(`Call on_symlink)
     ~on_error:
@@ -106,7 +98,6 @@ let collect ({ dir; digest } as t) =
             match error with
             | Unix.ENOENT, _, _ -> ()
             | _ ->
-              needs_cleanup := true;
               let dir = build_dir_of dir in
               let error =
                 User_error.make
@@ -117,7 +108,6 @@ let collect ({ dir; digest } as t) =
               Queue.push errors (User_error.E error)))
     ();
   Dune_trace.flush ();
-  if !needs_cleanup then destroy t;
   (match Queue.to_list unrecognized with
    | [] -> ()
    | unrecognized ->

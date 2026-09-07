@@ -8,5 +8,9 @@ type t
 val root : unit -> Path.t
 val add_to_env : t -> Env.t -> Env.t
 val create : Dune_digest.t -> t
+
+(** Collect events without removing the trace directory. The prepared-action
+    scope owns [destroy]. *)
 val collect : t -> unit Fiber.t
+
 val destroy : t -> unit
