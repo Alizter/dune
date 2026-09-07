@@ -1,8 +1,10 @@
 open Stdune
 
-(** Add values for expanding [%{name}] for a package *)
+(** Bind the package's name and version. For workspace packages, also bind
+    [dev] and [_:dev] to true without changing the global solver environment. *)
 val add_self_to_filter_env
   :  OpamPackage.t
+  -> is_local:bool
   -> (OpamTypes.full_variable -> OpamVariable.variable_contents option)
   -> OpamTypes.full_variable
   -> OpamVariable.variable_contents option
@@ -10,9 +12,9 @@ val add_self_to_filter_env
 (** Evaluate a local package's dependency formula. This is the single
     implementation shared by the solver and by validation
     ([Package_universe]), so the two cannot drift apart. The package's own
-    [name] and [version] are bound as self variables and the running version
-    of Dune is injected into [packages]. Only regular (non-post) dependencies
-    are returned. Dune is removed from the returned list because it is a
+    [name], [version], and [dev] are bound as self variables and the running
+    version of Dune is injected into [packages]. Only regular (non-post)
+    dependencies are returned. Dune is removed from the returned list because it is a
     pseudo-package that is not written to lockdirs. [env] is the filter
     environment before the self bindings are added. *)
 val local_package_dependencies

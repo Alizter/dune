@@ -1,10 +1,12 @@
 open Import
 
-let add_self_to_filter_env package env variable =
+let add_self_to_filter_env package ~is_local env variable =
+  let var_name = Package_variable_name.of_opam (OpamVariable.Full.variable variable) in
   match OpamVariable.Full.scope variable with
+  | (Self | Global) when is_local && Package_variable_name.(equal var_name dev) ->
+    Some (OpamVariable.B true)
   | Self | Package _ -> env variable
   | Global ->
-    let var_name = Package_variable_name.of_opam (OpamVariable.Full.variable variable) in
     if Package_variable_name.(equal var_name name)
     then Some (OpamVariable.S (OpamPackage.Name.to_string (OpamPackage.name package)))
     else if Package_variable_name.(equal var_name version)
@@ -24,7 +26,7 @@ let local_package_dependencies
       (Package_name.to_opam_package_name local_package.name)
       (Package_version.to_opam_package_version local_package.version)
   in
-  let env = add_self_to_filter_env opam_package env in
+  let env = add_self_to_filter_env opam_package ~is_local:true env in
   let packages = Package_name.Map.set packages Dune_dep.name dune_version in
   Resolve_opam_formula.filtered_formula_to_package_names
     ~env
@@ -523,6 +525,7 @@ let opam_package_to_lock_file_pkg_single
         ~env:
           (add_self_to_filter_env
              opam_package
+             ~is_local:false
              (Solver_env.add_sentinel_values_for_unset_platform_vars solver_env
               |> Solver_env.to_env))
         what

@@ -197,7 +197,7 @@ module Context = struct
     |> OpamFilter.partial_eval
          (Solver_env.to_env solver_env
           |> Solver_stats.Updater.wrap_env t.stats_updater
-          |> Lock_pkg.add_self_to_filter_env package)
+          |> Lock_pkg.add_self_to_filter_env package ~is_local:false)
     |> eval_to_bool
   ;;
 
@@ -249,7 +249,7 @@ module Context = struct
     let with_test = package_is_local && with_test solver_env in
     Solver_env.to_env solver_env
     |> Solver_stats.Updater.wrap_env t.stats_updater
-    |> Lock_pkg.add_self_to_filter_env package
+    |> Lock_pkg.add_self_to_filter_env package ~is_local:package_is_local
     |> Resolve_opam_formula.apply_filter ~with_test ~formula:filtered_formula
   ;;
 
