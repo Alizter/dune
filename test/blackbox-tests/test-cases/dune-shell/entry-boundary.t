@@ -54,7 +54,6 @@ prerequisite and again stop at the selected action boundary.
 
 A selected static action may have a dynamic prerequisite. On the RPC action
 plugin implementation, prerequisite execution needs a live RPC server too.
-BUG: shell preparation does not start that server.
 
   $ make_dune_project_with_extension 3.23 action-plugin 0.1
   $ export ACTION_PLUGIN_HELPER="$PWD/../../utils/action_plugin_helper.exe"
@@ -83,7 +82,7 @@ BUG: shell preparation does not start that server.
   > else
   >   echo "dynamic-prerequisite: failed"
   > fi
-  dynamic-prerequisite: failed
+  dynamic-prerequisite: refreshed
   $ if test ! -s dynamic.stderr; then
   >   echo "dynamic-diagnostic: empty"
   > elif grep -qi rpc dynamic.stderr; then
@@ -91,4 +90,4 @@ BUG: shell preparation does not start that server.
   > else
   >   echo "dynamic-diagnostic: unexpected"
   > fi
-  dynamic-diagnostic: RPC unavailable
+  dynamic-diagnostic: empty

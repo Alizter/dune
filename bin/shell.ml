@@ -600,7 +600,7 @@ let term =
   | No ->
     Global_lock.lock_exn ();
     let exit_code =
-      Scheduler_setup.go_without_rpc_server ~common ~config (fun () ->
+      Scheduler_setup.go_with_rpc_server ~common ~config (fun () ->
         run_in_rule_shell ~target ~command common)
     in
     if exit_code <> 0
