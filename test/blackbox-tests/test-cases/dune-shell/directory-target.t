@@ -18,8 +18,8 @@ the target.
   > '
   directory-target: directory-target
 
-BUG: a leading chdir can place the live shell inside a directory target.
-Replay recreates the target's pathname but leaves the shell in a deleted inode.
+A leading chdir can place the live shell inside a directory target. Replay
+clears the contents while keeping the shell's working directory inode.
 
   $ cat >> dune <<'EOF'
   > (rule
@@ -35,5 +35,5 @@ Replay recreates the target's pathname but leaves the shell in a deleted inode.
   > fi
   > test -f "$PWD/value" && echo "absolute-value: present"
   > '
-  relative-value: absent
+  relative-value: present
   absolute-value: present

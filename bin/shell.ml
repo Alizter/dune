@@ -303,8 +303,9 @@ let write_shell_init metadata ~mode ~has_direct_process_metadata =
       ~sep:"\n"
       [ mode_note mode
       ; "This is not an isolation boundary; commands can modify your source tree."
-      ; "run clears the action's declared targets and replays only the action; it does \
-         not rebuild dependencies or pick up edits made after entry."
+      ; "run clears the action's declared targets, keeping live working directories, and \
+         replays only the action; it does not rebuild dependencies or pick up edits made \
+         after entry."
       ]
   in
   let contents =
@@ -554,11 +555,26 @@ module Internal_replay = struct
     Path.Build.set_build_dir (Path.Outside_build_dir.of_string build_dir)
   ;;
 
-  let clear_targets targets =
-    Targets.Validated.iter
-      targets
-      ~file:(fun path -> Path.rm_rf ~chmod:true (Path.build path))
-      ~dir:(fun path -> Path.rm_rf ~chmod:true (Path.build path));
+  let clear_targets targets ~dir =
+    let cwd =
+      Path.of_filename_relative_to_initial_cwd "." |> Path.Expert.try_localize_external
+    in
+    let rec clear path =
+      match Path.lstat path with
+      | Ok { Unix.st_kind = S_DIR; st_perm; _ }
+        when List.exists [ dir; cwd ] ~f:(fun cwd ->
+               Path.equal path cwd || Path.is_descendant cwd ~of_:path) ->
+        (* Recreating a pathname cannot repair another process's deleted cwd.
+           Keep its directory inode and ancestors, without following symlinks. *)
+        Unix.chmod (Path.to_string path) (st_perm lor 0o700);
+        (match Path.readdir_unsorted path with
+         | Ok entries ->
+           List.iter entries ~f:(fun name -> clear (Path.relative_fname path name))
+         | Error error -> Unix_error.Detailed.raise error)
+      | Ok _ | Error _ -> Path.rm_rf ~chmod:true path
+    in
+    let clear path = clear (Path.build path) in
+    Targets.Validated.iter targets ~file:clear ~dir:clear;
     Fiber.return ()
   ;;
 
@@ -610,7 +626,7 @@ module Internal_replay = struct
         let exit_code =
           Scheduler_setup.no_build_no_rpc ~config (fun () ->
             let open Fiber.O in
-            let* () = clear_targets targets in
+            let* () = clear_targets targets ~dir in
             Dune_engine.Action_exec.replay
               { targets
               ; dir
