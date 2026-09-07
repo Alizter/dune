@@ -119,3 +119,46 @@ directory injection.
   > "$DUNE_SHELL/dune-run" && printf "trace-env-replay: " && cat trace-env
   > '
   trace-env-replay: present
+
+Trace writes are permitted with the process sandbox policy. Ordinary builds
+collect them, whereas a shell leaves them available until the session exits.
+Both successful and unsuccessful sessions clean up without collecting them.
+
+  $ make_dune_project 3.25
+  $ export ROOT=$PWD
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (target trace-output)
+  >  (action
+  >   (bash
+  >    "mkdir -p \"$DUNE_ACTION_TRACE_DIR\"
+  >     echo '{}' > \"$DUNE_ACTION_TRACE_DIR/ignored.json\"
+  >     printf '%s\\n' \"$DUNE_ACTION_TRACE_DIR\" > trace-output")))
+  > EOF
+  $ dune build --sandbox=copy trace-output
+  $ test ! -e "$(cat _build/default/trace-output)" &&
+  >   echo "ordinary-trace: cleaned"
+  ordinary-trace: cleaned
+  $ for status in 0 5; do
+  >   if dune shell --sandbox=copy _build/default/trace-output -- sh -c '
+  >     "$DUNE_SHELL/dune-run" &&
+  >     test "$(cat trace-output)" = "$DUNE_ACTION_TRACE_DIR" &&
+  >     test -f "$DUNE_ACTION_TRACE_DIR/ignored.json" &&
+  >     grep -Fx "DUNE_ACTION_TRACE_DIR=$DUNE_ACTION_TRACE_DIR" \
+  >       "$DUNE_SHELL/command.env" >/dev/null &&
+  >     echo "session-trace: available"
+  >     printf "%s\n" "$DUNE_ACTION_TRACE_DIR" > "$ROOT/replay-trace-dir"
+  >     exit "$1"
+  >   ' sh "$status"; then
+  >     echo "session-status: 0"
+  >   else
+  >     echo "session-status: $?"
+  >   fi
+  >   test ! -e "$(cat replay-trace-dir)" && echo "session-trace: cleaned"
+  > done
+  session-trace: available
+  session-status: 0
+  session-trace: cleaned
+  session-trace: available
+  session-status: 5
+  session-trace: cleaned

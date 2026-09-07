@@ -101,3 +101,28 @@ including an empty conjunction that accepts every exit code.
   predicate-stderr: empty
   predicate-replay-status: 0
   predicate-stderr: empty
+
+Nested Boolean operators retain their meaning, and an empty disjunction
+still rejects every exit code.
+
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (target accepted-nested)
+  >  (action
+  >   (with-accepted-exit-codes (and (or :standard 7) (not 0))
+  >    (run sh -c "touch accepted-nested; exit 7"))))
+  > (rule
+  >  (target rejected-all)
+  >  (action
+  >   (with-accepted-exit-codes (or)
+  >    (run sh -c "exit 7"))))
+  > EOF
+  $ dune build accepted-nested
+  $ for target in accepted-nested rejected-all; do
+  >   dune shell --sandbox=copy _build/default/$target -- sh -c '
+  >     "$DUNE_SHELL/dune-run"
+  >     echo "nested-predicate-status: $?"
+  >   '
+  > done
+  nested-predicate-status: 0
+  nested-predicate-status: 7

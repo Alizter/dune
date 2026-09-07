@@ -120,3 +120,52 @@ _build-extra remains outside the build directory.
   $ dune shell --sandbox=copy _build/default/external-input -- sh -c \
   >   '"$DUNE_SHELL/dune-run" && cat external-input'
   sibling
+
+External symlink/.. inputs also work inside copy sandboxes, including as the
+literal source of an edited symlink action.
+
+  $ export INPUT="$PWD/_ext/link/../input"
+  $ cat >> dune <<'EOF'
+  > (rule
+  >  (target external-link)
+  >  (action (write-file external-link unused)))
+  > EOF
+  $ dune shell --sandbox=copy _build/default/external-input -- sh -c '
+  > "$DUNE_SHELL/dune-run" && cat external-input
+  > '
+  correct
+  $ dune shell --sandbox=copy _build/default/external-link -- sh -c '
+  > printf "(symlink \"%s\" external-link)\n" "$INPUT" \
+  >   > "$DUNE_SHELL/action.sexp"
+  > "$DUNE_SHELL/dune-run" &&
+  > test "$(readlink external-link)" = "$INPUT" &&
+  > printf "external-link: " && cat external-link
+  > '
+  external-link: correct
+
+An absolute external operand below the build directory must retain its
+filesystem meaning too. Under sandbox none, that path is in the session.
+
+  $ mkdir -p _build/.external/real/child
+  $ ln -s real/child _build/.external/link
+  $ echo correct > _build/.external/real/input
+  $ echo wrong > _build/.external/input
+  $ export INPUT="$PWD/_build/.external/link/../input"
+  $ dune build external-input
+  $ cat _build/default/external-input
+  correct
+  $ dune shell _build/default/external-input -- sh -c '
+  > "$DUNE_SHELL/dune-run" && cat external-input
+  > '
+  correct
+
+Prefix boundaries are respected with a custom build directory as well.
+
+  $ mkdir _custom-extra
+  $ echo custom-sibling > _custom-extra/input
+  $ export INPUT="$PWD/_custom-extra/input"
+  $ dune shell --build-dir _custom --sandbox=copy \
+  >   _custom/default/external-input -- sh -c '
+  > "$DUNE_SHELL/dune-run" && cat external-input
+  > '
+  custom-sibling
