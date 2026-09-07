@@ -379,14 +379,7 @@ module Internal = struct
   type prepared_rule_action =
     { sandbox : Sandbox.t
     ; action_trace : Action_trace.t
-    ; process_sandbox : Process.Sandbox.t option
-    ; action : Action.t
-    ; root : Path.t
-    ; context : Build_context.t option
-    ; env : Env.t
-    ; targets : Targets.Validated.t
-    ; rule_loc : Loc.t
-    ; execution_parameters : Execution_parameters.t
+    ; input : Action_exec.input
     }
 
   let evaluate_rule_action (rule : Rule.t) =
@@ -490,14 +483,16 @@ module Internal = struct
           f
             { sandbox
             ; action_trace
-            ; process_sandbox
-            ; action
-            ; root
-            ; context
-            ; env
-            ; targets
-            ; rule_loc = loc
-            ; execution_parameters
+            ; input =
+                { Action_exec.root
+                ; context
+                ; env
+                ; targets = Some targets
+                ; rule_loc = loc
+                ; execution_parameters
+                ; sandbox = process_sandbox
+                ; action
+                }
             })
       in
       Fiber.finalize execute ~finally:(fun () ->
@@ -589,22 +584,10 @@ module Internal = struct
       ~execution_parameters
       ~sandbox_mode
       ~targets
-      ~f:
-        (fun
-          { sandbox
-          ; action_trace
-          ; process_sandbox
-          ; action
-          ; root
-          ; context
-          ; env
-          ; targets
-          ; rule_loc
-          ; execution_parameters
-          }
-        ->
+      ~f:(fun { sandbox; action_trace; input } ->
         let open Fiber.O in
         let action =
+          let ({ action; _ } : Action_exec.input) = input in
           (* We must add the creation of the stamp file after sandboxing it, as
              otherwise the stamp file would end up inside the sandbox. This is
              especially a problem for the [Patch_back_source_tree] sandboxing
@@ -617,17 +600,6 @@ module Internal = struct
             else Action.progn [ action; Action.write_file stamp_file "" ]
         in
         let* action_exec_result =
-          let input =
-            { Action_exec.root
-            ; context (* can be derived from the root *)
-            ; env
-            ; targets = Some targets
-            ; rule_loc
-            ; execution_parameters
-            ; sandbox = process_sandbox
-            ; action
-            }
-          in
           let build_deps deps =
             let* facts = Memo.run (build_deps deps) in
             let+ () =
@@ -646,7 +618,7 @@ module Internal = struct
             in
             facts
           in
-          Action_exec.exec input ~build_deps
+          Action_exec.exec { input with action } ~build_deps
         in
         let* action_exec_result, () =
           Fiber.fork_and_join
@@ -669,7 +641,7 @@ module Internal = struct
         match Targets.Produced.of_validated targets with
         | Ok produced_targets -> { Exec_result.produced_targets; action_exec_result }
         | Error error ->
-          User_error.raise ~loc:rule_loc (Targets.Produced.Error.message error))
+          User_error.raise ~loc:input.rule_loc (Targets.Produced.Error.message error))
 
   and promote_targets ~rule_mode ~targets ~promote_source =
     match rule_mode, !Clflags.promote with

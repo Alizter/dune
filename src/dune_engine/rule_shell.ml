@@ -148,7 +148,8 @@ let with_ (rule : Rule.t) ~f =
        ~execution_parameters
        ~sandbox_mode
        ~targets:original_targets
-       ~f:(fun { sandbox; process_sandbox; action; root; env; _ } ->
+       ~f:(fun { sandbox; input; _ } ->
+         let { Action_exec.action; root; env; sandbox = process_sandbox; _ } = input in
          let targets = map_targets sandbox original_targets in
          let base_env = Action_exec.prepare_env ~root ~env execution_parameters in
          let purpose = Process_metadata.Build_job (Some targets) in
