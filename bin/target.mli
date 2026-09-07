@@ -7,9 +7,13 @@ type target_type =
 (** List of all buildable direct targets. This does not include files and
     directories produced under a directory target.
 
-    If argument is [None], load the root, otherwise only load targets from the
-    nearest subdirectory. *)
-val all_direct_targets : Path.Source.t option -> target_type Path.Build.Map.t Memo.t
+    If the directory argument is [None], load the root, otherwise only load
+    targets from the nearest subdirectory. [include_source_files] controls
+    whether file targets that also exist in the source tree are returned. *)
+val all_direct_targets
+  :  Path.Source.t option
+  -> include_source_files:bool
+  -> target_type Path.Build.Map.t Memo.t
 
 val interpret_targets
   :  Workspace_root.t

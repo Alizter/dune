@@ -348,7 +348,7 @@ let term =
       let* request =
         match targets with
         | [] ->
-          Target.all_direct_targets None
+          Target.all_direct_targets None ~include_source_files:true
           >>| Path.Build.Map.foldi ~init:[] ~f:(fun p _ acc -> Path.build p :: acc)
           >>| Action_builder.paths
         | _ -> Memo.return (Target.interpret_targets (Common.root common) setup targets)

@@ -12,3 +12,8 @@ val in_dir : Path.Build.t -> t Memo.t
 
 val direct_files : t -> dir:Path.Build.t -> Filename.t list
 val direct_directories : t -> dir:Path.Build.t -> Filename.t list
+
+(** Exclude file targets that also exist in the source tree. *)
+val file_paths_excluding_sources : t -> Path.Build.t list Memo.t
+
+val direct_files_excluding_sources : t -> dir:Path.Build.t -> Filename.t list Memo.t

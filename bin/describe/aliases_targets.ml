@@ -1,6 +1,6 @@
 open Import
 
-let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
+let common_args =
   let+ builder = Common.Builder.term
   (* CR-someday Alizter: document this option *)
   and+ paths = Arg.(value & pos_all string [ "." ] & info [] ~docv:"DIR" ~doc:None)
@@ -8,6 +8,15 @@ let ls_term (fetch_results : Path.Build.t -> string list Action_builder.t) =
     Common.context_arg
       ~doc:(Some "The context to look in. Defaults to the default context.")
   in
+  builder, paths, context
+;;
+
+let ls_term
+      ~builder
+      ~paths
+      ~context
+      (fetch_results : Path.Build.t -> string list Action_builder.t)
+  =
   let common, config = Common.init builder in
   let request (_ : Dune_rules.Main.build_system) =
     let header = List.length paths > 1 in
@@ -122,7 +131,10 @@ module Aliases_cmd = struct
     List.map ~f:Dune_engine.Alias.Name.to_string aliases
   ;;
 
-  let term = ls_term fetch_results
+  let term =
+    let+ builder, paths, context = common_args in
+    ls_term ~builder ~paths ~context fetch_results
+  ;;
 
   let command =
     let doc = "Print aliases in a given directory. Works similarly to ls." in
@@ -131,12 +143,17 @@ module Aliases_cmd = struct
 end
 
 module Targets_cmd = struct
-  let fetch_results (dir : Path.Build.t) =
+  let fetch_results ~all (dir : Path.Build.t) =
     let open Action_builder.O in
-    let+ listing = Action_builder.of_memo (Dune_rules.Build_target.in_dir dir) in
-    let files =
-      Dune_rules.Build_target.direct_files listing ~dir |> List.map ~f:Filename.to_string
+    let* listing = Action_builder.of_memo (Dune_rules.Build_target.in_dir dir) in
+    let+ files =
+      if all
+      then Action_builder.return (Dune_rules.Build_target.direct_files listing ~dir)
+      else
+        Action_builder.of_memo
+          (Dune_rules.Build_target.direct_files_excluding_sources listing ~dir)
     in
+    let files = List.map files ~f:Filename.to_string in
     let directories =
       Dune_rules.Build_target.direct_directories listing ~dir
       |> List.map ~f:(fun name -> Filename.to_string name ^ Filename.dir_sep)
@@ -144,7 +161,18 @@ module Targets_cmd = struct
     List.sort ~compare:String.compare (files @ directories)
   ;;
 
-  let term = ls_term fetch_results
+  let term =
+    let+ builder, paths, context = common_args
+    and+ all =
+      Arg.(
+        value
+        & flag
+        & info
+            [ "all" ]
+            ~doc:(Some "Print all targets, including files in the source tree."))
+    in
+    ls_term ~builder ~paths ~context (fetch_results ~all)
+  ;;
 
   let command =
     let doc = "Print targets in a given directory. Works similarly to ls." in

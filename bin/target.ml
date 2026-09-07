@@ -36,7 +36,7 @@ end
 
 module Source_tree_map_reduce = Source_tree.Dir.Make_map_reduce (Memo) (All_targets)
 
-let all_direct_targets dir =
+let all_direct_targets dir ~include_source_files =
   let open Memo.O in
   let* root =
     match dir with
@@ -57,13 +57,21 @@ let all_direct_targets dir =
         let build_dir =
           Path.Build.append_source ctx.build_dir (Source_tree.Dir.path dir)
         in
-        Dune_rules.Build_target.in_dir build_dir
-        >>| fun { file_paths; directory_paths; _ } ->
+        let* listing = Dune_rules.Build_target.in_dir build_dir in
+        let* file_paths =
+          if include_source_files
+          then (
+            let { Dune_rules.Build_target.file_paths; _ } = listing in
+            Memo.return file_paths)
+          else Dune_rules.Build_target.file_paths_excluding_sources listing
+        in
+        let { Dune_rules.Build_target.directory_paths; _ } = listing in
         All_targets.combine
           (Path.Build.Map.of_list_map_exn file_paths ~f:(fun path ->
              path, Target_type.File))
           (Path.Build.Map.of_list_map_exn directory_paths ~f:(fun path ->
-             path, Target_type.Directory))))
+             path, Target_type.Directory))
+        |> Memo.return))
   >>| All_targets.reduce
 ;;
 
@@ -81,7 +89,9 @@ let target_hint (_setup : Dune_rules.Main.build_system) path =
     | In_source_tree d -> d
     | In_build_dir d -> Path.Build.drop_build_context_exn d
   in
-  let+ candidates = all_direct_targets (Some root) >>| Path.Build.Map.keys in
+  let+ candidates =
+    all_direct_targets (Some root) ~include_source_files:false >>| Path.Build.Map.keys
+  in
   let candidates =
     if Path.is_in_build_dir path
     then List.map ~f:Path.build candidates
