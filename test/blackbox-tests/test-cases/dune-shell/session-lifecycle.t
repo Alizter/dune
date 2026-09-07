@@ -102,3 +102,34 @@ released.
   $ dune build _build/default/sub/prepared-input
   $ echo "live-build-lock-after-exit: released"
   live-build-lock-after-exit: released
+
+Malformed session data is rejected before clearing targets. Restoring valid
+metadata permits replay again in the same live session.
+
+  $ cat > dune <<'EOF'
+  > (rule
+  >  (target metadata-probe)
+  >  (action (write-file metadata-probe restored)))
+  > EOF
+  $ dune shell --sandbox=copy _build/default/metadata-probe -- sh -c '
+  > cp "$DUNE_SHELL/session.csexp" valid-session
+  > printf untouched > metadata-probe
+  > for invalid in "malformed" "((3:cwd0:))"; do
+  >   printf "%s" "$invalid" > "$DUNE_SHELL/session.csexp"
+  >   "$DUNE_SHELL/dune-run" >invalid.stdout 2>invalid.stderr
+  >   echo "metadata-status: $?"
+  >   grep -q "Invalid session data in dune shell metadata" invalid.stderr &&
+  >     echo "metadata-diagnostic: user error"
+  >   printf "target: "; cat metadata-probe; echo
+  > done
+  > cp valid-session "$DUNE_SHELL/session.csexp"
+  > "$DUNE_SHELL/dune-run" &&
+  > printf "restored-session: " && cat metadata-probe; echo
+  > '
+  metadata-status: 1
+  metadata-diagnostic: user error
+  target: untouched
+  metadata-status: 1
+  metadata-diagnostic: user error
+  target: untouched
+  restored-session: restored
