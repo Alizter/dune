@@ -411,8 +411,8 @@ let prepared_temp_dir (shell : Rule_shell.t) =
   | None -> Code_error.raise "prepared dune shell environment has no temp dir" []
 ;;
 
-let write_direct_process_metadata shell metadata =
-  match Rule_shell.direct_process shell with
+let write_direct_process_metadata { Rule_shell.direct_process; _ } metadata =
+  match direct_process with
   | None -> false
   | Some { program; args; dir; env } ->
     let argv = Path.to_absolute_filename program :: args in

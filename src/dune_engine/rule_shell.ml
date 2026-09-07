@@ -63,6 +63,13 @@ let rec leading_context action ~dir ~env =
   | _ -> action, dir, env
 ;;
 
+type direct_process =
+  { program : Path.t
+  ; args : string list
+  ; dir : Path.t
+  ; env : Env.t
+  }
+
 type t =
   { dir : Path.t
   ; shell_env : Env.t
@@ -71,31 +78,15 @@ type t =
   ; use_sandbox_policy : bool
   ; sandbox_mode : Sandbox_mode.some option
   ; action : Action.t
+  ; direct_process : direct_process option
   ; targets : Targets.Validated.t
   ; rule_digest : Digest.t
   }
 
-type direct_process =
-  { program : Path.t
-  ; args : string list
-  ; dir : Path.t
-  ; env : Env.t
-  }
-
 let bash = lazy (Bin.which ~path:(Env_path.path Env.initial) "bash")
 
-(* If the prepared action is a single process invocation modulo its leading
-   wrappers, return that direct process: its program, arguments, and the
-   working directory and environment the action interpreter would run it
-   with. *)
-let direct_process (shell : t) =
-  let body, dir, env =
-    leading_context shell.action ~dir:shell.dir ~env:shell.replay_env
-  in
-  let env =
-    Dtemp.add_to_env env ~purpose:(Process_metadata.Build_job (Some shell.targets))
-  in
-  match body with
+let direct_process (action : Action.t) ~dir ~env =
+  match action with
   | Run { prog = Ok program; args; can_run_in_action_runner = _ } ->
     Some { program; args = Appendable_list.to_list args; dir; env }
   | Run { prog = Error _; _ } -> None
@@ -158,7 +149,7 @@ let with_ (rule : Rule.t) ~f =
            Sandbox.root sandbox |> Option.map ~f:Path.as_in_build_dir_exn
          in
          let use_sandbox_policy = Option.is_some process_sandbox in
-         let _, dir, shell_env =
+         let body, dir, shell_env =
            leading_context
              action
              ~dir:(Path.build (Sandbox.map_path sandbox original_targets.root))
@@ -173,6 +164,7 @@ let with_ (rule : Rule.t) ~f =
            ; use_sandbox_policy
            ; sandbox_mode
            ; action
+           ; direct_process = direct_process body ~dir ~env:shell_env
            ; targets
            ; rule_digest
            }))

@@ -2,6 +2,13 @@ open Import
 
 (** Preparation of a rule action for an interactive [dune shell] session. *)
 
+type direct_process =
+  { program : Path.t
+  ; args : string list
+  ; dir : Path.t
+  ; env : Env.t
+  }
+
 type t =
   { dir : Path.t
   ; shell_env : Env.t
@@ -15,22 +22,11 @@ type t =
     (** Whether replay processes need an OS sandbox policy for [sandbox_dir]. *)
   ; sandbox_mode : Sandbox_mode.some option
   ; action : Action.t
+  ; direct_process : direct_process option
+    (** Literal process metadata using the entry directory and environment. *)
   ; targets : Targets.Validated.t
   ; rule_digest : Digest.t
   }
-
-type direct_process =
-  { program : Path.t
-  ; args : string list
-  ; dir : Path.t
-  ; env : Env.t
-  }
-
-(** If the prepared action is a single process invocation modulo its leading
-    wrappers, return that direct process: its program, arguments, and the
-    working directory and environment the action interpreter would run it
-    with. *)
-val direct_process : t -> direct_process option
 
 (** Build and evaluate all prerequisites of [rule], prepare the rule's action
     in its normally selected execution location, and run [f] instead of the
