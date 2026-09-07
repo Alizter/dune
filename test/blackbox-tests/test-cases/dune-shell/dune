@@ -1,0 +1,3 @@
+(cram
+ (applies_to entry-boundary.t)
+ (deps ../../utils/action_plugin_helper.exe))

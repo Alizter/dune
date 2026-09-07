@@ -51,3 +51,44 @@ prerequisite and again stop at the selected action boundary.
   refreshed-target: suspended
   refreshed-side-effect: suspended
   refreshed-dependency: refreshed
+
+A selected static action may have a dynamic prerequisite. On the RPC action
+plugin implementation, prerequisite execution needs a live RPC server too.
+BUG: shell preparation does not start that server.
+
+  $ make_dune_project_with_extension 3.23 action-plugin 0.1
+  $ export ACTION_PLUGIN_HELPER="$PWD/../../utils/action_plugin_helper.exe"
+  $ cat > dune <<'EOF'
+  > (rule
+  >  (target dynamic-input)
+  >  (deps dynamic-source)
+  >  (action
+  >   (progn
+  >    (dynamic-run %{env:ACTION_PLUGIN_HELPER=unset} noop)
+  >    (copy dynamic-source dynamic-input))))
+  > (rule
+  >  (target static-output)
+  >  (deps dynamic-input)
+  >  (action (copy dynamic-input static-output)))
+  > EOF
+  $ echo initial > dynamic-source
+  $ dune build --sandbox=copy static-output
+  $ cat _build/default/static-output
+  initial
+  $ echo refreshed > dynamic-source
+  $ if dune shell --sandbox=copy _build/default/static-output -- sh -c '
+  >   "$DUNE_SHELL/dune-run" && cat static-output
+  > ' >dynamic.stdout 2>dynamic.stderr; then
+  >   printf "dynamic-prerequisite: "; cat dynamic.stdout
+  > else
+  >   echo "dynamic-prerequisite: failed"
+  > fi
+  dynamic-prerequisite: failed
+  $ if test ! -s dynamic.stderr; then
+  >   echo "dynamic-diagnostic: empty"
+  > elif grep -qi rpc dynamic.stderr; then
+  >   echo "dynamic-diagnostic: RPC unavailable"
+  > else
+  >   echo "dynamic-diagnostic: unexpected"
+  > fi
+  dynamic-diagnostic: RPC unavailable
