@@ -97,13 +97,14 @@ all repository packages.
   >  (depends regular (development-only :dev)))
   > EOF
 
-BUG: dev is unbound for the workspace package, so development-only is omitted.
-The nonexistent dev-only dependency of regular must remain excluded.
+The workspace's development-only dependency is included, while the nonexistent
+dev-only dependency of regular remains excluded.
 
   $ dune pkg lock
   Solution for dune.lock
   
   Dependencies common to all supported platforms:
+  - development-only.0.0.1
   - regular.0.0.1
   $ dune pkg validate-lockdir
 
@@ -127,5 +128,7 @@ including both the unqualified dev variable and the explicit _:dev form.
   Solution for dune.lock
   
   Dependencies common to all supported platforms:
+  - development-only.0.0.1
   - regular.0.0.1
+  - self-development-only.0.0.1
   $ dune pkg validate-lockdir
