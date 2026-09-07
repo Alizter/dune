@@ -216,18 +216,77 @@ module Metadata_codec = struct
     Conv.iso_result Conv.(pair strings strings) to_ from
   ;;
 
-  let optional_string = Conv.(option string)
+  module Session = struct
+    type t =
+      { workspace_root : string
+      ; build_dir : string
+      ; cwd : string
+      ; session_root : string
+      ; temp_dir : string
+      ; dune_binary : string
+      ; invocation_env : Env.t
+      ; action_env : Env.t
+      ; diff_command : string option
+      ; targets : Targets.Validated.t
+      ; sandbox_policy_root : string option
+      }
 
-  (* Session data, in order: (workspace_root, build_dir, cwd),
-     ((session_root, temp_dir, dune_binary),
-      ((invocation_env, action_env, diff_command), targets)), sandbox_policy_root *)
-  let session =
-    let open Conv in
-    triple
-      (triple string string string)
-      (pair (triple string string string) (pair (triple env env optional_string) targets))
-      (option string)
-  ;;
+    let codec =
+      let to_
+            ( (workspace_root, build_dir, cwd, session_root, temp_dir, dune_binary)
+            , (invocation_env, action_env, diff_command, targets, sandbox_policy_root) )
+        =
+        { workspace_root
+        ; build_dir
+        ; cwd
+        ; session_root
+        ; temp_dir
+        ; dune_binary
+        ; invocation_env
+        ; action_env
+        ; diff_command
+        ; targets
+        ; sandbox_policy_root
+        }
+      in
+      let from
+            { workspace_root
+            ; build_dir
+            ; cwd
+            ; session_root
+            ; temp_dir
+            ; dune_binary
+            ; invocation_env
+            ; action_env
+            ; diff_command
+            ; targets
+            ; sandbox_policy_root
+            }
+        =
+        ( (workspace_root, build_dir, cwd, session_root, temp_dir, dune_binary)
+        , (invocation_env, action_env, diff_command, targets, sandbox_policy_root) )
+      in
+      let open Conv in
+      iso
+        (record
+           (both
+              (six
+                 (field "workspace-root" (required string))
+                 (field "build-dir" (required string))
+                 (field "cwd" (required string))
+                 (field "session-root" (required string))
+                 (field "temp-dir" (required string))
+                 (field "dune-binary" (required string)))
+              (five
+                 (field "invocation-env" (required env))
+                 (field "action-env" (required env))
+                 (field "diff-command" (optional string))
+                 (field "targets" (required targets))
+                 (field "sandbox-policy-root" (optional string)))))
+        to_
+        from
+    ;;
+  end
 
   let write path codec value =
     Conv.to_sexp codec value |> Csexp.to_string |> Io.write_file path
@@ -402,13 +461,19 @@ let write_metadata (shell : Rule_shell.t) ~metadata =
   let temp_dir = prepared_temp_dir shell in
   Metadata_codec.write
     (Path.relative metadata "session.csexp")
-    Metadata_codec.session
-    ( ( Path.to_absolute_filename Path.root
-      , Path.to_absolute_filename Path.build_dir
-      , build_path_payload cwd )
-    , ( (build_path_payload session_root, temp_dir, dune_binary ())
-      , ((Env.initial, shell.replay_env, !Clflags.diff_command), shell.targets) )
-    , Option.map shell.sandbox_policy_root ~f:build_path_payload );
+    Metadata_codec.Session.codec
+    { Metadata_codec.Session.workspace_root = Path.to_absolute_filename Path.root
+    ; build_dir = Path.to_absolute_filename Path.build_dir
+    ; cwd = build_path_payload cwd
+    ; session_root = build_path_payload session_root
+    ; temp_dir
+    ; dune_binary = dune_binary ()
+    ; invocation_env = Env.initial
+    ; action_env = shell.replay_env
+    ; diff_command = !Clflags.diff_command
+    ; targets = shell.targets
+    ; sandbox_policy_root = Option.map shell.sandbox_policy_root ~f:build_path_payload
+    };
   let has_direct_process_metadata = write_direct_process_metadata shell metadata in
   write_runner metadata;
   env, has_direct_process_metadata
@@ -546,7 +611,7 @@ module Internal_replay = struct
   let read_session metadata =
     Metadata_codec.read
       (Path.relative metadata "session.csexp")
-      Metadata_codec.session
+      Metadata_codec.Session.codec
       ~description:"session data"
   ;;
 
@@ -590,11 +655,21 @@ module Internal_replay = struct
         Arg.(value & flag & info [ "environment-restored" ] ~doc:None)
       in
       let metadata = Path.of_filename_relative_to_initial_cwd metadata in
-      let (workspace_root, build_dir, cwd), session, sandbox_policy_root =
+      let { Metadata_codec.Session.workspace_root
+          ; build_dir
+          ; cwd
+          ; session_root
+          ; temp_dir
+          ; dune_binary
+          ; invocation_env
+          ; action_env
+          ; diff_command
+          ; targets
+          ; sandbox_policy_root
+          }
+        =
         read_session metadata
       in
-      let (session_root, temp_dir, dune_binary), session = session in
-      let (invocation_env, action_env, diff_command), targets = session in
       if not environment_restored
       then
         Proc.restore_cwd_and_execve
