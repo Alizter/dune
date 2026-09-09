@@ -759,15 +759,6 @@ let gen_rules ctx sctx ~dir components : Gen_rules.result Memo.t =
     Loaded_project.source_path loaded_project dir |> Option.value_exn
   in
   match components with
-  | [ component ] when String.equal component Pkg_sources.artifact_dir_basename ->
-    let+ mounted = Pkg_sources.mounted ctx in
-    List.map mounted ~f:(fun mounted ->
-      Pkg_sources.Mounted.candidate mounted
-      |> Pkg_sources.Candidate.artifact_root
-      |> Path.Build.basename)
-    |> Filename.Set.of_list
-    |> Subdir_set.of_set
-    |> Gen_rules.make_empty ~dir
   | ".js" :: rest ->
     has_rules
       ~dir
@@ -893,7 +884,7 @@ let raise_on_lock_dir_out_of_sync =
   |> Staged.unstage
 ;;
 
-let mounted_context ~resolver ~dir components =
+let mounted_packages context ~dir components =
   match components with
   | [] ->
     Gen_rules.make_empty
@@ -901,7 +892,7 @@ let mounted_context ~resolver ~dir components =
       (Subdir_set.of_list [ Filename.of_string_exn Pkg_sources.artifact_dir_basename ])
     |> Memo.return
   | [ component ] when String.equal component Pkg_sources.artifact_dir_basename ->
-    let+ mounted = Pkg_sources.mounted resolver in
+    let+ mounted = Pkg_sources.mounted context in
     List.map mounted ~f:(fun mounted ->
       Pkg_sources.Mounted.candidate mounted
       |> Pkg_sources.Candidate.artifact_root
@@ -912,87 +903,86 @@ let mounted_context ~resolver ~dir components =
   | component :: package :: rest
     when String.equal component Pkg_sources.artifact_dir_basename ->
     (match Package.Name.of_string_opt package with
-     | None -> Memo.return Gen_rules.unknown_context
+     | None -> Memo.return Gen_rules.no_rules
      | Some package ->
-       Pkg_sources.find_mounted resolver package
+       Pkg_sources.find_mounted context package
        >>= (function
-        | None -> Memo.return Gen_rules.unknown_context
+        | None -> Memo.return Gen_rules.no_rules
         | Some mounted ->
           (match Pkg_sources.Mounted.kind mounted with
-           | Dune -> gen_rules resolver (Super_context.find_exn resolver) ~dir rest
+           | Dune -> gen_rules context (Super_context.find_exn context) ~dir rest
            | Opam _ ->
              Pkg_rules.setup_mounted_opam_package_rules
-               resolver
+               context
                mounted
                ~dir
                ~components:rest)))
-  | _ -> Memo.return Gen_rules.unknown_context
+  | _ -> Memo.return Gen_rules.no_rules
 ;;
 
 let gen_rules ctx ~dir components =
-  match Mounted_context.resolver ctx with
-  | Some resolver -> mounted_context ~resolver ~dir components
-  | None ->
-    if Context_name.equal ctx Install.Context.install_context.name
-    then (
-      match components with
-      | [] ->
-        let+ build_dir_only_sub_dirs =
-          let+ context_dirs =
-            let+ workspace = Workspace.workspace () in
-            Workspace.build_contexts workspace
-            |> List.map ~f:(fun (ctx : Build_context.t) ->
-              Filename.of_string_exn (Context_name.to_string ctx.name))
-            |> Subdir_set.of_list
-          in
-          Gen_rules.Build_only_sub_dirs.singleton ~dir context_dirs
+  if Context_name.equal ctx Install.Context.install_context.name
+  then (
+    match components with
+    | [] ->
+      let+ build_dir_only_sub_dirs =
+        let+ context_dirs =
+          let+ workspace = Workspace.workspace () in
+          Workspace.build_contexts workspace
+          |> List.map ~f:(fun (ctx : Build_context.t) ->
+            Filename.of_string_exn (Context_name.to_string ctx.name))
+          |> Subdir_set.of_list
         in
-        Gen_rules.make ~build_dir_only_sub_dirs (Memo.return Rules.empty)
-      | _ctx :: ".binaries" :: rest -> Bin_layout.gen_rules ~dir rest |> Memo.return
-      | ctx :: ".packages" :: rest ->
-        Install_layout.gen_rules (Context_name.of_string ctx) ~dir rest
-      | ctx :: rest ->
-        let ctx = Context_name.of_string ctx in
-        with_context ctx ~f:(fun sctx ->
-          let+ subdirs, rules = Install_rules.symlink_rules sctx ~dir in
-          let subdirs =
-            match rest with
-            | [] ->
-              (* Here we retain the extra subdirectories that we dispatched
+        Gen_rules.Build_only_sub_dirs.singleton ~dir context_dirs
+      in
+      Gen_rules.make ~build_dir_only_sub_dirs (Memo.return Rules.empty)
+    | _ctx :: ".binaries" :: rest -> Bin_layout.gen_rules ~dir rest |> Memo.return
+    | ctx :: ".packages" :: rest ->
+      Install_layout.gen_rules (Context_name.of_string ctx) ~dir rest
+    | ctx :: rest ->
+      let ctx = Context_name.of_string ctx in
+      with_context ctx ~f:(fun sctx ->
+        let+ subdirs, rules = Install_rules.symlink_rules sctx ~dir in
+        let subdirs =
+          match rest with
+          | [] ->
+            (* Here we retain the extra subdirectories that we dispatched
                above. *)
-              Subdir_set.union
-                subdirs
-                (* CR-someday Alizter: Sharing these directory names with the
+            Subdir_set.union
+              subdirs
+              (* CR-someday Alizter: Sharing these directory names with the
                  dispatch cases above would avoid duplicate strings, but
                  dispatch and retention could still get out of sync.
 
                  It would be better to have a structured [Gen_rules] API where
                  registering a generated child dispatcher automatically retains
                  that child. *)
-                (Subdir_set.of_list
-                   [ Filename.of_string_exn ".binaries"
-                   ; Filename.of_string_exn ".packages"
-                   ])
-            | _ :: _ -> subdirs
-          in
-          let directory_targets = Rules.directory_targets rules in
-          Gen_rules.make
-            ~build_dir_only_sub_dirs:
-              (Gen_rules.Build_only_sub_dirs.singleton ~dir subdirs)
-            ~directory_targets
-            (Memo.return rules)))
-    else if Context_name.equal ctx Private_context.t.name
-    then private_context ~dir components ctx
-    else if Context_name.equal ctx Fetch_rules.context.name
-    then
-      Fetch_rules.gen_rules
-        ~dir
-        ~components:(List.map components ~f:Filename.of_string_exn)
-    else
-      let* () = raise_on_lock_dir_out_of_sync ctx in
-      let gen_pkg_alias_rule = Pkg_rules.setup_pkg_install_alias ~dir ctx in
-      let+ sctx_rules = gen_rules ctx (Super_context.find_exn ctx) ~dir components in
-      Gen_rules.combine sctx_rules gen_pkg_alias_rule
+              (Subdir_set.of_list
+                 [ Filename.of_string_exn ".binaries"
+                 ; Filename.of_string_exn ".packages"
+                 ])
+          | _ :: _ -> subdirs
+        in
+        let directory_targets = Rules.directory_targets rules in
+        Gen_rules.make
+          ~build_dir_only_sub_dirs:(Gen_rules.Build_only_sub_dirs.singleton ~dir subdirs)
+          ~directory_targets
+          (Memo.return rules)))
+  else if Context_name.equal ctx Private_context.t.name
+  then private_context ~dir components ctx
+  else if Context_name.equal ctx Fetch_rules.context.name
+  then
+    Fetch_rules.gen_rules ~dir ~components:(List.map components ~f:Filename.of_string_exn)
+  else
+    let* () = raise_on_lock_dir_out_of_sync ctx in
+    let gen_pkg_alias_rule = Pkg_rules.setup_pkg_install_alias ~dir ctx in
+    let+ sctx_rules =
+      match components with
+      | root :: rest when String.equal root Pkg_sources.root_dir_basename ->
+        mounted_packages ctx ~dir rest
+      | _ -> gen_rules ctx (Super_context.find_exn ctx) ~dir components
+    in
+    Gen_rules.combine sctx_rules gen_pkg_alias_rule
 ;;
 
 let () =

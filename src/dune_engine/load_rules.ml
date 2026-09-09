@@ -66,6 +66,25 @@ module Dir_triage = struct
       Option.map (Path.Source.parent t.sub_dir) ~f:(fun sub_dir ->
         { t with dir = Path.Build.parent_exn t.dir; sub_dir })
     ;;
+
+    let is_build_only_root { context_type; sub_dir; _ } =
+      match context_type with
+      | Empty -> false
+      | With_sources { build_only_sub_dirs } ->
+        (match Path.Source.split_first_component sub_dir with
+         | Some (name, rest) when Path.Local.is_root rest ->
+           Filename.Set.mem build_only_sub_dirs name
+         | _ -> false)
+    ;;
+
+    let has_workspace_source { context_type; sub_dir; _ } =
+      match context_type with
+      | Empty -> false
+      | With_sources { build_only_sub_dirs } ->
+        (match Path.Source.split_first_component sub_dir with
+         | None -> true
+         | Some (name, _) -> not (Filename.Set.mem build_only_sub_dirs name))
+    ;;
   end
 
   type t =
@@ -555,16 +574,20 @@ end = struct
     ;;
 
     let gen_rules_impl d =
-      match Dir_triage.Build_directory.parent d with
-      | None -> call_rules_generator d
-      | Some d' ->
-        Gen_rules.gen_rules d'
-        >>= (function
-         | Under_directory_target _ as res -> Memo.return res
-         | Normal rules ->
-           if Path.Build.Map.mem rules.directory_targets d.dir
-           then Memo.return (Under_directory_target { directory_target_ancestor = d.dir })
-           else call_rules_generator d)
+      if Dir_triage.Build_directory.is_build_only_root d
+      then call_rules_generator d
+      else (
+        match Dir_triage.Build_directory.parent d with
+        | None -> call_rules_generator d
+        | Some d' ->
+          Gen_rules.gen_rules d'
+          >>= (function
+           | Under_directory_target _ as res -> Memo.return res
+           | Normal rules ->
+             if Path.Build.Map.mem rules.directory_targets d.dir
+             then
+               Memo.return (Under_directory_target { directory_target_ancestor = d.dir })
+             else call_rules_generator d))
     ;;
 
     let gen_rules =
@@ -610,19 +633,23 @@ end = struct
   ;;
 
   let descendants_to_keep
-        { Dir_triage.Build_directory.dir; context_name = _; context_type; sub_dir }
+        ({ Dir_triage.Build_directory.dir; context_name = _; context_type; sub_dir } as
+         build_dir)
         (build_dir_only_sub_dirs : Subdir_set.t)
         ~source_dirs
         rules_produced
     =
     let* allowed_by_parent =
       match context_type, Path.Source.to_string sub_dir with
-      | With_sources, ".dune" ->
+      | With_sources _, ".dune" ->
         (* GROSS HACK: this is to avoid a cycle as the rules for all
            directories force the generation of ".dune/configurator". We need a
            better way to deal with such cases. *)
         Memo.return Generated_directory_restrictions.Unrestricted
-      | _ -> Generated_directory_restrictions.allowed_by_parent ~dir
+      | _ ->
+        if Dir_triage.Build_directory.is_build_only_root build_dir
+        then Memo.return Generated_directory_restrictions.Unrestricted
+        else Generated_directory_restrictions.allowed_by_parent ~dir
     in
     let* () =
       match allowed_by_parent with
@@ -711,7 +738,11 @@ end = struct
       Memo.return (Loaded.Build_under_directory_target { directory_target_ancestor })
     | Normal { rules; build_dir_only_sub_dirs; directory_targets } ->
       let build_dir_only_sub_dirs =
-        Build_only_sub_dirs.find build_dir_only_sub_dirs dir
+        let declared = Build_only_sub_dirs.find build_dir_only_sub_dirs dir in
+        match context_type, Path.Source.is_root sub_dir with
+        | With_sources { build_only_sub_dirs }, true ->
+          Subdir_set.union declared (Subdir_set.of_set build_only_sub_dirs)
+        | _ -> declared
       in
       Path.Build.Map.iteri directory_targets ~f:(fun dir_target loc ->
         let name = Path.Build.basename dir_target in
@@ -726,19 +757,15 @@ end = struct
       in
       let collected = Rules.Dir_rules.consume rules in
       let rules = collected.rules in
+      let from_workspace = Dir_triage.Build_directory.has_workspace_source build_dir in
       let* source_files_and_dirs =
-        match context_type with
-        | Empty -> Memo.return Source_files_and_dirs.empty
-        | With_sources -> source_files_and_dirs sub_dir
+        if from_workspace
+        then source_files_and_dirs sub_dir
+        else Memo.return Source_files_and_dirs.empty
       in
       let { Source_selection.source_filenames; source_dirs; rules } =
-        match context_type with
-        | Empty ->
-          { Source_selection.source_filenames = source_files_and_dirs.source_filenames
-          ; source_dirs = source_files_and_dirs.source_dirs
-          ; rules
-          }
-        | With_sources ->
+        if from_workspace
+        then
           Source_selection.select
             ~dir
             ~source_dir:(Path.source sub_dir)
@@ -746,6 +773,11 @@ end = struct
             ~source_filenames:source_files_and_dirs.source_filenames
             ~source_dirs:source_files_and_dirs.source_dirs
             rules
+        else
+          { Source_selection.source_filenames = source_files_and_dirs.source_filenames
+          ; source_dirs = source_files_and_dirs.source_dirs
+          ; rules
+          }
       in
       let copy_rules =
         let ctx_dir = Context_name.build_dir context_name in
@@ -773,7 +805,7 @@ end = struct
          ~subdirs_to_keep);
       let+ aliases =
         match context_type with
-        | With_sources -> compute_alias_expansions ~collected ~dir
+        | With_sources _ -> compute_alias_expansions ~collected ~dir
         | Empty ->
           (* There are no aliases in contexts without sources *)
           Memo.return Alias.Name.Map.empty

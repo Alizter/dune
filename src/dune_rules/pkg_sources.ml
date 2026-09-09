@@ -3,7 +3,20 @@ open Memo.O
 module Gen_rules = Build_config.Gen_rules
 module Lock_pkg = Dune_pkg.Lock_dir.Pkg
 
+let root_dir_basename = ".lockfile"
 let artifact_dir_basename = "pkg"
+
+let package_of_artifact_path path =
+  match Path.Build.extract_build_context path with
+  | None -> None
+  | Some (_, source) ->
+    (match Path.Source.explode source |> Filename.L.to_string with
+     | root :: packages :: name :: _
+       when String.equal root root_dir_basename
+            && String.equal packages artifact_dir_basename ->
+       Package.Name.of_string_opt name
+     | _ -> None)
+;;
 
 module Candidate = struct
   type t =
@@ -20,15 +33,17 @@ module Candidate = struct
   let artifact_root t = t.artifact_root
 
   let make context (lock_pkg : Lock_pkg.t) ~files_dir =
-    let mounted_context = Context_name.build_dir (Mounted_context.make context) in
     let source_root =
       Option.map lock_pkg.info.source ~f:(fun source ->
         Fetch_rules.target source `Directory)
     in
     let artifact_root =
       Path.Build.L.relative
-        mounted_context
-        [ artifact_dir_basename; Package.Name.to_string lock_pkg.info.name ]
+        (Context_name.build_dir context)
+        [ root_dir_basename
+        ; artifact_dir_basename
+        ; Package.Name.to_string lock_pkg.info.name
+        ]
     in
     { lock_pkg; source_root; files_dir; artifact_root }
   ;;

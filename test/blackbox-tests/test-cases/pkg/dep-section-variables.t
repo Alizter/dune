@@ -124,16 +124,16 @@ These currently expand to absolute paths instead of relative ones:
   > EOF
 
   $ build_pkg run-consumer 2>&1 | censor | dune_cmd subst '/[^ ]*/cat:' 'cat:'
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/lib/dep
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/lib/dep
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/bin
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/sbin
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/share/dep
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/etc/dep
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/doc/dep
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/man
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/lib/toplevel
-  $PWD/_build/.sandbox/$DIGEST/_default+lockfile/pkg/dep/.opam/dep/target/lib/stublibs
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/lib/dep
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/lib/dep
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/bin
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/sbin
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/share/dep
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/etc/dep
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/doc/dep
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/man
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/lib/toplevel
+  $PWD/_build/.sandbox/$DIGEST/default/.lockfile/pkg/dep/.opam/dep/target/lib/stublibs
   lib-data
   libexec-data
   bin-data

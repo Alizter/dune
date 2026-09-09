@@ -27,7 +27,7 @@ locked packages can also depend on live workspace packages.
 The final normal package address is:
 
 ```text
-_build/<context>+lockfile/pkg/<package-name>
+_build/<context>/.lockfile/pkg/<package-name>
 ```
 
 That path is both the logical source hierarchy seen by native rule generation
@@ -75,7 +75,7 @@ The prototype ended with the following invariants.
 A selected normal package has exactly one stable root:
 
 ```text
-_build/<context>+lockfile/pkg/<name>
+_build/<context>/.lockfile/pkg/<name>
 ```
 
 The selected lock universe guarantees one package per name. Version remains
@@ -213,9 +213,9 @@ they are not lost inside the main architectural story.
 The latest prototype checklist in issue #8652 named seven pieces. Their status
 on this branch is:
 
-1. **Load sources directly in an adjacent context: implemented.** Native package
-   projects are loaded into the `+lockfile` output partition while sharing the
-   owning workspace context's compiler and resolver.
+1. **Load sources directly in an adjacent context: implemented, then simplified.**
+   Native package projects now use a build-only `.lockfile` subtree in the
+   owning workspace context, without a synthetic engine context.
 2. **Add an Opam stanza: implemented.** The unreleased stanza and synthetic
    lock-package form use the same rule generator.
 3. **Add a scope stanza: implemented.** The unreleased package-selection stanza
@@ -248,10 +248,11 @@ transitive locked/workspace ordering.
   reads, includes, diagnostics, and materialization for both source kinds.
 - `Loaded_project`, `Loaded_dir`, and `Build_partition` separate project
   identity, relative source location, resolver context, and artifact owner.
-- Lock packages are prepared in a sibling `+lockfile` partition rather than a
-  second semantic workspace context.
+- Lock packages use a build-only `.lockfile` subtree in their owning context.
+  Their `Build_partition` purpose still distinguishes them from workspace
+  projects without creating another engine or semantic context.
 - Normal package roots are stable and package-name-only:
-  `_build/<context>+lockfile/pkg/<name>`.
+  `_build/<context>/.lockfile/pkg/<name>`.
 - Primary archives and extra sources remain immutable, reusable `_fetch`
   targets.
 - Logical package trees combine primary source, lock `files/`, and ordered

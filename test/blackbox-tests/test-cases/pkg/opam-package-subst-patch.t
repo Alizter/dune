@@ -151,20 +151,20 @@ not executed.
 
   $ dune exec ./main.exe
   right:renamed:exec:1:7:dune
-  $ dune build _build/_default+lockfile/pkg/native-transform/dune
-  $ head -3 _build/_default+lockfile/pkg/native-transform/dune
+  $ dune build _build/default/.lockfile/pkg/native-transform/dune
+  $ head -3 _build/default/.lockfile/pkg/native-transform/dune
   (* -*- tuareg -*- *)
   let () =
     Jbuild_plugin.V1.send
-  $ cat _build/_default+lockfile/pkg/native-transform/native_transform.ml
+  $ cat _build/default/.lockfile/pkg/native-transform/native_transform.ml
   let message = String.concat ":" [ "right"; Created.suffix; Generated.suffix ]
-  $ cat _build/_default+lockfile/pkg/native-transform/created.ml
+  $ cat _build/default/.lockfile/pkg/native-transform/created.ml
   let suffix = "renamed"
-  $ test ! -e _build/_default+lockfile/pkg/native-transform/old.ml
-  $ test -x _build/_default+lockfile/pkg/native-transform/generated.sh
-  $ cat _build/_default+lockfile/pkg/native-transform/generated.ml
+  $ test ! -e _build/default/.lockfile/pkg/native-transform/old.ml
+  $ test -x _build/default/.lockfile/pkg/native-transform/generated.sh
+  $ cat _build/default/.lockfile/pkg/native-transform/generated.ml
   let suffix = "exec:1:7:dune"
-  $ test ! -e _build/_default+lockfile/pkg/native-transform/.opam
+  $ test ! -e _build/default/.lockfile/pkg/native-transform/.opam
   $ raw_ml=$(find _build/_fetch -path '*/dir/native_transform.ml')
   $ test -n "$raw_ml" && cat "$raw_ml"
   let message = String.concat ":" [ "primary"; Created.suffix; Generated.suffix ]
@@ -180,7 +180,7 @@ without modifying or reacquiring the primary source:
   $ sed -i 's/\[ "right";/[ "updated";/' native.lock/native-transform.files/fix.patch
   $ dune exec ./main.exe
   updated:renamed:exec:1:7:dune
-  $ head -1 _build/_default+lockfile/pkg/native-transform/native_transform.ml
+  $ head -1 _build/default/.lockfile/pkg/native-transform/native_transform.ml
   let message = String.concat ":" [ "updated"; Created.suffix; Generated.suffix ]
   $ cat "$raw_ml"
   let message = String.concat ":" [ "primary"; Created.suffix; Generated.suffix ]

@@ -110,8 +110,8 @@ translated [dune build] action. Both tools and generated files belong to their
 explicit mounted artifact roots. Looking up the executable must not instantiate
 either package's old rules.
 
-  $ tool_root=_build/_default+lockfile/pkg/tool
-  $ foo_root=_build/_default+lockfile/pkg/foo
+  $ tool_root=_build/default/.lockfile/pkg/tool
+  $ foo_root=_build/default/.lockfile/pkg/foo
   $ test -x "$tool_root/gen.exe" && echo mounted-tool-artifact
   mounted-tool-artifact
   $ test -f "$foo_root/generated.ml" && test -f "$foo_root/path_marker.ml" && echo mounted-generated-artifacts

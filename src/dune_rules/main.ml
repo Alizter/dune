@@ -37,19 +37,17 @@ let execution_parameters ~sandbox_actions =
     | Regular Root | Anonymous_action Root | Invalid _ -> None
   in
   let is_opaque_mounted_dir context path =
-    match Mounted_context.resolver context with
+    match Pkg_sources.package_of_artifact_path path with
     | None -> Memo.return false
-    | Some resolver ->
+    | Some package ->
       let open Memo.O in
-      let+ mounted = Pkg_sources.mounted resolver in
-      List.exists mounted ~f:(fun mounted ->
-        match Pkg_sources.Mounted.kind mounted with
-        | Dune -> false
-        | Opam _ ->
-          let artifact_root =
-            Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.artifact_root
-          in
-          Path.is_descendant (Path.build path) ~of_:(Path.build artifact_root))
+      let+ mounted = Pkg_sources.find_mounted context package in
+      (match mounted with
+       | None -> false
+       | Some mounted ->
+         (match Pkg_sources.Mounted.kind mounted with
+          | Dune -> false
+          | Opam _ -> true))
   in
   let f context path =
     let open Memo.O in
@@ -120,13 +118,14 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
          let open Memo.O in
          let+ contexts = Workspace.workspace () >>| Workspace.build_contexts in
          let open Dune_engine.Build_config.Context_type in
-         let contexts =
-           List.concat_map contexts ~f:(fun context ->
-             let mounted =
-               Build_context.create ~name:(Mounted_context.make context.name)
-             in
-             [ context, With_sources; mounted, Empty ])
+         let context_type =
+           With_sources
+             { build_only_sub_dirs =
+                 Filename.Set.singleton
+                   (Filename.of_string_exn Pkg_sources.root_dir_basename)
+             }
          in
+         let contexts = List.map contexts ~f:(fun context -> context, context_type) in
          (Private_context.t, Empty)
          :: (Install.Context.install_context, Empty)
          :: (Fetch_rules.context, Empty)

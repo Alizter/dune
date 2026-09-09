@@ -106,10 +106,10 @@ directory.
   one-source-target
   $ test ! -e "$DUNE_CACHE_ROOT/pkg-sources" && echo no-external-source-store
   no-external-source-store
-  $ test "$(find _build/_default+lockfile/pkg -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 2 && echo two-artifact-roots
+  $ test "$(find _build/default/.lockfile/pkg -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 2 && echo two-artifact-roots
   two-artifact-roots
-  $ foo_root=_build/_default+lockfile/pkg/foo
-  $ bar_root=_build/_default+lockfile/pkg/bar
+  $ foo_root=_build/default/.lockfile/pkg/foo
+  $ bar_root=_build/default/.lockfile/pkg/bar
   $ test -f "$foo_root/foo.cmxa" && test -f "$bar_root/sub/bar.cmxa" && echo nested-artifacts
   nested-artifacts
   $ test ! -e "$foo_root/sub/bar.cmxa" && test ! -e "$bar_root/foo.cmxa" && echo package-masks
@@ -168,7 +168,7 @@ than the workspace-only engine source tree.
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   mounted include_subdirs
-  $ grouped_root=_build/_default+lockfile/pkg/grouped
+  $ grouped_root=_build/default/.lockfile/pkg/grouped
   $ test -n "$(find "$grouped_root/src/.grouped.objs" -name '*Message*.cmx' -print -quit)" && echo nested-module-artifact
   nested-module-artifact
   $ test ! -e _build/_private/default/.pkg/grouped.1.0-* && echo no-old-package-rules
@@ -347,8 +347,8 @@ auxiliary library.
   $ cat _build/default/left.output _build/default/right.output
   shared auxiliary/left
   shared auxiliary/right
-  $ left_root=_build/_default+lockfile/pkg/left
-  $ right_root=_build/_default+lockfile/pkg/right
+  $ left_root=_build/default/.lockfile/pkg/left
+  $ right_root=_build/default/.lockfile/pkg/right
   $ test -f "$left_root/vendor/src/vendored_support.cmxa" && test -f "$right_root/vendor/src/vendored_support.cmxa" && echo separately-owned-auxiliary-artifacts
   separately-owned-auxiliary-artifacts
 
@@ -431,7 +431,7 @@ metadata entries, not implementations to link together.
   > (build (run dune build -p %{pkg-self:name} -j %{jobs}))
   > EOF
 
-  $ virtuals_root=_build/_default+lockfile/pkg/virtuals
+  $ virtuals_root=_build/default/.lockfile/pkg/virtuals
   $ "$real_dune" build "$virtuals_root/META.virtuals" --display quiet
   $ grep '^package' "$virtuals_root/META.virtuals"
   package "native" (
@@ -571,7 +571,7 @@ scope as an internal error.
   >   (run cp opaque_wrapper.a %{lib}/opaque-wrapper/opaque_wrapper.a)))
   > EOF
 
-  $ consumer_root=_build/_default+lockfile/pkg/consumer
+  $ consumer_root=_build/default/.lockfile/pkg/consumer
   $ "$real_dune" build "$consumer_root/consumer.cmxa" --display quiet
   $ test -f "$consumer_root/consumer.cmxa" && echo transitive-opaque-library
   transitive-opaque-library

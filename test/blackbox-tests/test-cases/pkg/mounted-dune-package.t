@@ -138,7 +138,7 @@ namespace. It is part of the workspace executable's recursive rule graph, while
 artifacts have a separate owner.
 
   $ source_root=$(find _build/_fetch -type d -name dir)
-  $ artifact_root=_build/_default+lockfile/pkg/foo
+  $ artifact_root=_build/default/.lockfile/pkg/foo
   $ "$real_dune" rules --recursive --format=json ./main.exe |
   > jq_dune --arg source_root "$source_root" \
   >   '[.[] | .targets.directories[] | select(. == $source_root)] | length'
@@ -256,7 +256,7 @@ whole recipe.
 
   $ "$real_dune" clean
   $ "$real_dune" build @pkg-install --display quiet
-  $ foo_artifact_root=_build/_default+lockfile/pkg/foo
+  $ foo_artifact_root=_build/default/.lockfile/pkg/foo
   $ foo_layout=$(echo _build/install/default/.packages/*/lib/foo)
   $ test -f "$foo_artifact_root/META.foo" && test -f "$foo_artifact_root/foo.dune-package" && echo artifact-metadata
   artifact-metadata
@@ -269,7 +269,7 @@ whole recipe.
   $ "$real_dune" build ./main.exe --display quiet
   $ ./_build/default/main.exe
   symlink-source/generated/source-fallback/legacy-symlink-source
-  $ legacy_artifact_root=_build/_default+lockfile/pkg/legacy
+  $ legacy_artifact_root=_build/default/.lockfile/pkg/legacy
   $ legacy_layout=$(echo _build/install/default/.packages/*/lib/legacy)
   $ test -f "$legacy_artifact_root/META.legacy" && test -L "$legacy_layout/META" && echo dune-dependency-mounted
   dune-dependency-mounted

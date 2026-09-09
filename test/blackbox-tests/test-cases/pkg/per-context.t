@@ -43,12 +43,12 @@ Build both contexts
   building from foo
   version: 0.0.2
 
-The artifacts currently live under synthetic engine contexts rather than the
-contexts that supply their compiler and environment.
+The artifacts live under the same contexts that supply their compiler and
+environment. There are no synthetic lockfile contexts.
 
   $ find _build -name cookie | sort
-  _build/_default+lockfile/pkg/test/.opam/test/target/cookie
-  _build/_foo+lockfile/pkg/test/.opam/test/target/cookie
+  _build/default/.lockfile/pkg/test/.opam/test/target/cookie
+  _build/foo/.lockfile/pkg/test/.opam/test/target/cookie
 
 Native lock packages must likewise keep separate artifacts for each real
 context, without becoming part of the workspace's recursive test aliases.
@@ -69,6 +69,7 @@ context, without becoming part of the workspace's recursive test aliases.
   >  (action (write-file %{target} %{context_name})))
   > (install (package native) (section share) (files marker))
   > (rule (alias runtest) (action (run false)))
+  > (rule (alias check) (action (echo native-alias)))
   > EOF
   $ for lock in foo.lock bar.lock; do
   >   cat >"$lock/native.pkg" <<EOF
@@ -80,27 +81,41 @@ context, without becoming part of the workspace's recursive test aliases.
   $ find _build -path '*/pkg/native/marker' | sort | while read marker; do
   >   printf '%s: %s\n' "$marker" "$(cat "$marker")"
   > done
-  _build/_default+lockfile/pkg/native/marker: default
-  _build/_foo+lockfile/pkg/native/marker: foo
+  _build/default/.lockfile/pkg/native/marker: default
+  _build/foo/.lockfile/pkg/native/marker: foo
+  $ test ! -d _build/_default+lockfile && test ! -d _build/_foo+lockfile
   $ dune runtest
+  $ dune build @@_build/default/.lockfile/pkg/native/check
+  native-alias
 
-An ordinary workspace directory named pkg must not be taken over by the lock
-package dispatcher. BUG: the old dispatch reserves it unnecessarily.
+An ignored workspace .lockfile directory cannot supply source files or Dune
+stanzas to the mounted build subtree.
+
+  $ mkdir -p .lockfile/pkg/native
+  $ echo '(include missing)' >.lockfile/pkg/native/dune
+  $ echo workspace-poison >.lockfile/pkg/native/marker
+  $ dune build _build/default/.lockfile/pkg/native/marker
+  $ cat _build/default/.lockfile/pkg/native/marker
+  default
+
+An ordinary workspace directory named pkg is not taken over by the lock
+package dispatcher.
 
   $ mkdir pkg
   $ cat >pkg/dune <<'EOF'
   > (rule (target marker) (action (write-file %{target} workspace-pkg)))
   > EOF
   $ dune build pkg/marker
-  Error: Don't know how to build pkg/marker
-  [1]
+  $ cat _build/default/pkg/marker
+  workspace-pkg
 
-Once .lockfile is the reserved build-only namespace, explicitly including a
-workspace directory with that name must be rejected instead of mixing its
-source files with lock package artifacts. Currently it is an ordinary source
-directory and the build succeeds.
+Explicitly including the reserved workspace directory is rejected before its
+Dune files are loaded, instead of mixing sources with lock package artifacts.
 
-  $ mkdir .lockfile
   $ echo workspace-data >.lockfile/data
   $ echo '(dirs :standard .lockfile \ native-source)' >dune
   $ dune build .lockfile/data
+  File ".", line 1, characters 0-0:
+  Error: ".lockfile" is reserved for lock package build artifacts and cannot be
+  included in the workspace source tree.
+  [1]

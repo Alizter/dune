@@ -72,12 +72,9 @@ let mounted_files_with_filter dir ~filter =
 let files_with_filter path ~filter =
   match (path : Path.t) with
   | In_build_dir dir ->
-    (match Path.Build.extract_build_context dir with
-     | Some (context, _)
-       when Context_name.of_string (Filename.to_string context)
-            |> Mounted_context.resolver
-            |> Option.is_some -> mounted_files_with_filter dir ~filter
-     | None | Some _ -> workspace_files_with_filter path ~filter)
+    (match Pkg_sources.package_of_artifact_path dir with
+     | Some _ -> mounted_files_with_filter dir ~filter
+     | None -> workspace_files_with_filter path ~filter)
   | In_source_tree _ | External _ -> workspace_files_with_filter path ~filter
 ;;
 

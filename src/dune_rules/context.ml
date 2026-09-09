@@ -762,7 +762,7 @@ module DB = struct
   let by_dir dir =
     let context =
       match Install.Context.of_path dir with
-      | Some name -> Option.value (Mounted_context.resolver name) ~default:name
+      | Some name -> name
       | None ->
         Code_error.raise
           "directory does not have an associated context"

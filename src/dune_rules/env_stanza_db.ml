@@ -67,9 +67,7 @@ let value ~default ~f =
 
 let profile ~dir =
   let name, _ = Path.Build.extract_build_context_exn dir in
-  let context =
-    Context_name.of_string (Filename.to_string name) |> Mounted_context.resolver_or_self
-  in
+  let context = Context_name.of_string (Filename.to_string name) in
   Per_context.profile context
 ;;
 
@@ -201,7 +199,7 @@ module Inherit = struct
           "path is not allowed inherited nodes"
           [ "path", Path.Build.to_dyn path ]
       | Some ctx ->
-        let* for_ctx = by_context (Mounted_context.resolver_or_self ctx) in
+        let* for_ctx = by_context ctx in
         Staged.unstage for_ctx path)
   ;;
 end
