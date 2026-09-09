@@ -24,8 +24,8 @@ We should be able to specify (package ..) deps on locally built packages.
   > EOF
 
   $ dune build @foo 2>&1 | censor
-  $PWD/_build/_default+lockfile/pkg/foo/.opam/foo/target/bin/foo
-  ../_default+lockfile/pkg/foo/.opam/foo/target/bin/foo
+  $PWD/_build/default/.lockfile/pkg/foo/.opam/foo/target/bin/foo
+  .lockfile/pkg/foo/.opam/foo/target/bin/foo
 
 Now we define the external package using a dune project:
 
@@ -49,4 +49,4 @@ Now we define the external package using a dune project:
   > EOF
   $ dune build @foo 2>&1 | censor
   $PWD/_build/install/default/.packages/$DIGEST/bin/foo
-  ../_default+lockfile/pkg/foo/foo.exe
+  .lockfile/pkg/foo/foo.exe

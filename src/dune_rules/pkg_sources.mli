@@ -1,6 +1,10 @@
 open Import
 
+val root_dir_basename : string
 val artifact_dir_basename : string
+
+(** Identify a package-owned path under a context's [.lockfile/pkg] subtree. *)
+val package_of_artifact_path : Path.Build.t -> Package.Name.t option
 
 module Candidate : sig
   type t

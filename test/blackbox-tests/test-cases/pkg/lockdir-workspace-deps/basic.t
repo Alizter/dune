@@ -23,7 +23,7 @@ workspace install layout is materialized as part of consumer's build:
   building consumer
 
   $ dune rules --format=json _build/default/out | jq 'include "dune"; .[] | ruleDepFilePaths' | censor | sort
-  "_build/_default+lockfile/pkg/consumer/.opam/consumer/target"
+  "_build/default/.lockfile/pkg/consumer/.opam/consumer/target"
 
   $ find _build/install/default/.packages -name '*.cmi' -o -name 'META' | censor | sort
   _build/install/default/.packages/$DIGEST/lib/workspace-lib/META

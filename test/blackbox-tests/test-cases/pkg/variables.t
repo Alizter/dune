@@ -65,7 +65,7 @@ Now we demonstrate we get a proper error from invalid .config files:
            ^^
   Error parsing test.config
   Reason: Parse error
-  -> required by _build/_default+lockfile/pkg/test/.opam/test/target
+  -> required by _build/default/.lockfile/pkg/test/.opam/test/target
   [1]
 
 The lock's development flag is independent of its version. Both native and

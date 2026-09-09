@@ -83,6 +83,18 @@ let load () =
       Memo.return (projects, dune_files, scopes)
     in
     let* root = Source_tree.root () in
+    let reserved = Filename.of_string_exn Pkg_sources.root_dir_basename in
+    if
+      Filename.Array.Set.mem (Source_tree.Dir.sub_dir_names root) reserved
+      || Filename.Array.Set.mem (Source_tree.Dir.filenames root) reserved
+    then
+      User_error.raise
+        ~loc:(Loc.in_dir Path.root)
+        [ Pp.textf
+            "%S is reserved for lock package build artifacts and cannot be included in \
+             the workspace source tree."
+            Pkg_sources.root_dir_basename
+        ];
     Rules_source_tree_map_reduce.map_reduce
       (Source_tree.Rules.Dir.source root)
       ~traverse:Source_dir_status.Set.all
@@ -446,7 +458,7 @@ let context_of_dir dir =
         Code_error.raise
           "Dune_load: private path has no resolver context"
           [ "dir", Path.Build.to_dyn dir ])
-    else Option.value (Mounted_context.resolver context) ~default:context
+    else context
   | None ->
     Code_error.raise
       "Dune_load: path is not in a build context"
@@ -507,7 +519,6 @@ let stanzas_in_dir dir =
     match Install.Context.of_path dir with
     | None -> Memo.return None
     | Some context ->
-      let context = Option.value (Mounted_context.resolver context) ~default:context in
       let+ { dune_file_by_dir; _ } = loaded context in
       Path.Build.Map.find dune_file_by_dir dir)
 ;;

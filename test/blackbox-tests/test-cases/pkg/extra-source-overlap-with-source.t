@@ -90,11 +90,11 @@ unchanged.
   $ dune exec ./main.exe
   extra:lock:added
 
-  $ cat _build/_default+lockfile/pkg/overlay/extra.ml
+  $ cat _build/default/.lockfile/pkg/overlay/extra.ml
   let message = "extra"
-  $ cat _build/_default+lockfile/pkg/overlay/lock_only.ml
+  $ cat _build/default/.lockfile/pkg/overlay/lock_only.ml
   let message = "lock"
-  $ cat _build/_default+lockfile/pkg/overlay/added.ml
+  $ cat _build/default/.lockfile/pkg/overlay/added.ml
   let message = "added"
   $ raw_extra=$(find _build/_fetch -path '*/dir/extra.ml')
   $ test -n "$raw_extra" && cat "$raw_extra"

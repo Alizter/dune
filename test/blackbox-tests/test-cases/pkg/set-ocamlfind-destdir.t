@@ -10,7 +10,7 @@ install and build commands.
 
   $ build_pkg test 2>&1 \
   > | dune_cmd subst "$PWD" PWD \
-  > | dune_cmd subst '\.sandbox/[^/]*/_default\+lockfile' '.sandbox/SANDBOX/_default+lockfile' \
+  > | dune_cmd subst '\.sandbox/[^/]*/default/\.lockfile' '.sandbox/SANDBOX/default/.lockfile' \
   > | censor
-  [build] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/_default+lockfile/pkg/test/.opam/test/target/lib
-  [install] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/_default+lockfile/pkg/test/.opam/test/target/lib
+  [build] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/default/.lockfile/pkg/test/.opam/test/target/lib
+  [install] OCAMLFIND_DESTDIR=PWD/_build/.sandbox/SANDBOX/default/.lockfile/pkg/test/.opam/test/target/lib

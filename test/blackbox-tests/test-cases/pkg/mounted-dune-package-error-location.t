@@ -47,13 +47,13 @@ materialized source in the package-name-only mounted hierarchy.
   > EOF
 
   $ dune build ./main.exe 2>&1
-  File "../_default+lockfile/pkg/broken/broken.ml", line 2, characters 0-0:
+  File ".lockfile/pkg/broken/broken.ml", line 2, characters 0-0:
   Error: Syntax error
   [1]
 
-The package name is its complete address within the selected lock context.
+The package name is its complete address within the context's lock subtree.
 
-  $ find _build/_default+lockfile/pkg -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+  $ find _build/default/.lockfile/pkg -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
   broken
 
 A missing library is reported from the package's authored dune file.
@@ -81,9 +81,9 @@ A missing library is reported from the package's authored dune file.
   > EOF
 
   $ dune build ./main.exe 2>&1 | censor
-  File "_build/_default+lockfile/pkg/broken/dune", line 4, characters 12-26:
+  File "_build/default/.lockfile/pkg/broken/dune", line 4, characters 12-26:
   Error: Library "does-not-exist" not found.
-  -> required by library "broken" in _build/_default+lockfile/pkg/broken
+  -> required by library "broken" in _build/default/.lockfile/pkg/broken
   -> required by executable main in dune:3
   -> required by _build/default/.main.eobjs/native/dune__exe__Main.cmx
   -> required by _build/default/main.exe

@@ -11,7 +11,7 @@ export DUNE_CONFIG__SYS_OCAML_VERSION=5.4.0+fake
 
 dune="dune"
 
-pkg_root="_build/_default+lockfile/pkg"
+pkg_root="_build/default/.lockfile/pkg"
 
 default_lock_dir="dune.lock"
 source_lock_dir="${default_lock_dir}"
@@ -23,7 +23,7 @@ default_repo_path() {
 }
 
 # Prints the synthetic Opam directory containing the package target and source
-# dirs within the alternate package context.
+# dirs within the context's lock-package subtree.
 get_build_pkg_dir() {
   local package_name=$1
   echo "$pkg_root/$package_name/.opam/$package_name"

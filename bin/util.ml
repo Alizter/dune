@@ -24,10 +24,7 @@ let check_path contexts =
         ]
     in
     let context_exn ctx =
-      let resolver =
-        Dune_rules.Mounted_context.resolver ctx |> Option.value ~default:ctx
-      in
-      match Dune_engine.Context_name.Map.find contexts resolver with
+      match Dune_engine.Context_name.Map.find contexts ctx with
       | Some context -> context
       | None ->
         User_error.raise
