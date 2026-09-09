@@ -72,7 +72,7 @@ let wait_term =
   Arg.(value & flag & info [ "wait" ] ~doc:(Some doc))
 ;;
 
-let establish_connection ?(lock_held_by = Global_lock.Lock_held_by.Unknown) () =
+let establish_connection ~lock_held_by () =
   match active_server ~lock_held_by () with
   | Error e -> Fiber.return (Error e)
   | Ok where -> Client.Connection.connect where
@@ -82,7 +82,7 @@ let establish_connection_with_retry () =
   let open Fiber.O in
   let pause_between_retries_s = Time.Span.of_secs 0.2 in
   let rec loop () =
-    establish_connection ()
+    establish_connection ~lock_held_by:Global_lock.Lock_held_by.Unknown ()
     >>= function
     | Ok x -> Fiber.return x
     | Error _ ->
@@ -157,7 +157,8 @@ let with_rpc_connected_status_line f =
     Fiber.return ())
 ;;
 
-let send_request ~f connection name =
+let send_request ~name ~warn_forwarding ~lock_held_by builder connection ~f =
+  if should_warn ~warn_forwarding builder then warn_ignore_arguments lock_held_by;
   Dune_rpc_impl.Client.client
     connection
     (Dune_rpc.Initialize.Request.create ~id:(Dune_rpc.Id.make (Sexp.Atom name)))
@@ -167,8 +168,20 @@ let send_request ~f connection name =
 let fire ~name ~wait ~warn_forwarding ~lock_held_by builder f =
   let open Fiber.O in
   let* connection = establish_client_session ~wait ~lock_held_by in
-  if should_warn ~warn_forwarding builder then warn_ignore_arguments lock_held_by;
-  send_request connection name ~f
+  send_request ~name ~warn_forwarding ~lock_held_by builder connection ~f
+;;
+
+let request_on_connection
+      ~name
+      ~warn_forwarding
+      ~lock_held_by
+      builder
+      request
+      arg
+      connection
+  =
+  send_request ~name ~warn_forwarding ~lock_held_by builder connection ~f:(fun client ->
+    request_exn client request arg)
 ;;
 
 let fire_request
@@ -180,8 +193,16 @@ let fire_request
       request
       arg
   =
-  fire ~name ~wait ~warn_forwarding ~lock_held_by builder (fun client ->
-    request_exn client request arg)
+  let open Fiber.O in
+  let* connection = establish_client_session ~wait ~lock_held_by in
+  request_on_connection
+    ~name
+    ~warn_forwarding
+    ~lock_held_by
+    builder
+    request
+    arg
+    connection
 ;;
 
 let fire_notification

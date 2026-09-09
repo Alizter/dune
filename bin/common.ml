@@ -587,6 +587,7 @@ let shared_with_config_file ~allow_pkg_flag =
   ; action_stderr_on_success
   ; project_defaults = None
   ; pkg_enabled
+  ; daemon = None
   ; experimental = None
   }
 ;;
@@ -634,6 +635,7 @@ module Builder = struct
   let set_default_root_is_cwd t x = { t with default_root_is_cwd = x }
   let disable_log_file t = { t with trace_file = None }
   let set_promote t v = { t with promote = Some v }
+  let for_daemon t = { t with watch = Yes Passive; trace_file = None }
   let default_target t = t.default_target
 
   (** Cmdliner documentation markup language

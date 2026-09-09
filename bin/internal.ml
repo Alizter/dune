@@ -226,7 +226,8 @@ end
 let group =
   Cmd.group
     (Cmd.info "internal")
-    [ Internal_dump.command
+    [ Daemon.command
+    ; Internal_dump.command
     ; Internal_digest_db.command
     ; Internal_action_runner.group
     ; Bwrap.With_bwrap.command

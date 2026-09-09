@@ -104,6 +104,7 @@ module Dune_config : sig
       ; action_stderr_on_success : Action_output_on_success.t field
       ; project_defaults : Project_defaults.t field
       ; pkg_enabled : Pkg_enabled.t field
+      ; daemon : bool field
       ; experimental : (string * (Loc.t * string)) list field
       }
   end
@@ -146,6 +147,10 @@ module Dune_config : sig
 
   (** Initialises the configuration for the process *)
   val init : t -> watch:bool -> unit
+
+  (** Whether automatic daemon startup is enabled, including internal overrides.
+      Must be called after [init]. *)
+  val daemon_enabled : t -> bool
 
   val to_dyn : t -> Dyn.t
   val hash : t -> int

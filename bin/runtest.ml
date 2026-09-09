@@ -39,14 +39,14 @@ let runtest_term =
   let+ builder = Common.Builder.term
   and+ test_paths = Arg.(value & pos_all string [ "." ] name) in
   let common, config = Common.init_build builder in
-  match Global_lock.lock () with
-  | Ok () ->
+  match Daemon.prepare ~common ~config with
+  | `Local ->
     Build.run_build_command ~common ~config ~request:(fun setup ->
       Runtest_common.make_request
         ~scontexts:setup.scontexts
         ~to_cwd:(Common.root common).to_cwd
         ~test_paths)
-  | Error lock_held_by ->
+  | `Rpc server ->
     let test_paths =
       List.map test_paths ~f:(fun path ->
         let path =
@@ -56,13 +56,15 @@ let runtest_term =
     in
     Scheduler_setup.no_build_no_rpc ~config (fun () ->
       let open Fiber.O in
-      Rpc.Rpc_common.fire_request
+      let* connection, lock_held_by = Daemon.connect server in
+      Rpc.Rpc_common.request_on_connection
         ~name:"runtest"
-        ~wait:false
+        ~warn_forwarding:true
         ~lock_held_by
         builder
         Dune_rpc.Procedures.Public.runtest
         test_paths
+        connection
       >>| Rpc.Rpc_common.wrap_build_outcome_exn ~print_on_success:true)
 ;;
 

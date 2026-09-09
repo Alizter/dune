@@ -47,3 +47,28 @@ Append an invaild stanza to the config file and attempt project initialzation.
   dune language. Please update your dune config file to have (lang dune 2.7).
   [1]
 
+Daemon configuration is versioned and accepts enabled/disabled, not booleans.
+
+  $ cat >dune-config <<EOF
+  > (lang dune 3.24)
+  > (daemon enabled)
+  > EOF
+  $ dune build --config-file=dune-config
+  File "$TESTCASE_ROOT/dune-config", line 2, characters 0-16:
+  2 | (daemon enabled)
+      ^^^^^^^^^^^^^^^^
+  Error: 'daemon' is only available since version 3.25 of the dune language.
+  Please update your dune config file to have (lang dune 3.25).
+  [1]
+
+  $ cat >dune-config <<EOF
+  > (lang dune 3.25)
+  > (daemon true)
+  > EOF
+  $ dune build --config-file=dune-config
+  File "$TESTCASE_ROOT/dune-config", line 2, characters 8-12:
+  2 | (daemon true)
+              ^^^^
+  Error: Unknown value true
+  [1]
+

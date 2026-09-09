@@ -54,6 +54,11 @@ module Builder : sig
   val set_default_root_is_cwd : t -> bool -> t
   val disable_log_file : t -> t
   val set_promote : t -> Stdune.Clflags.Promote.t -> t
+
+  (** Initialize an RPC-only watch server without creating a trace before it has
+      acquired the build lock. *)
+  val for_daemon : t -> t
+
   val default_target : t -> Arg.Dep.t
   val term : t Cmdliner.Term.t
   val term_no_trace_no_pkg : t Cmdliner.Term.t

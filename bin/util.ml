@@ -13,6 +13,13 @@ let find_in_path_exn prog =
   | None -> User_error.raise [ Pp.textf "unable to find %s in PATH" prog ]
 ;;
 
+let dune_executable () =
+  let prog = Sys.executable_name in
+  if Filename.is_relative prog && not (Fpath.contains_path_sep prog)
+  then find_in_path_exn prog
+  else Path.of_filename_relative_to_initial_cwd prog
+;;
+
 let check_path contexts =
   let contexts =
     Dune_engine.Context_name.Map.of_list_map_exn contexts ~f:(fun c -> Context.name c, c)

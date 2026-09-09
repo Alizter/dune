@@ -71,3 +71,24 @@ let%expect_test "double lock" =
     lock 1 worked
     lock 2 worked |}]
 ;;
+
+let%expect_test "global lock PID after reacquiring" =
+  Path.set_root (Path.External.cwd ());
+  Path.Build.set_build_dir (Path.Outside_build_dir.of_string "_build");
+  let check_pid () =
+    let expected = Pid.me () |> Pid.to_int |> Int.to_string in
+    let actual = Io.String_path.read_file "_build/.lock" in
+    Printf.printf "PID is correct: %b\n" (String.equal expected actual)
+  in
+  Global_lock.lock_exn ();
+  check_pid ();
+  Global_lock.unlock ();
+  Global_lock.lock_exn ();
+  check_pid ();
+  Global_lock.unlock ();
+  [%expect
+    {|
+    PID is correct: true
+    PID is correct: true
+    |}]
+;;

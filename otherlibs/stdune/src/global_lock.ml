@@ -37,7 +37,9 @@ module Lock = struct
      | `Failure -> ()
      | `Success ->
        let fd = Flock.fd t in
-       Unix.ftruncate (Fd.unsafe_to_unix_file_descr fd) 0;
+       let raw_fd = Fd.unsafe_to_unix_file_descr fd in
+       Unix.ftruncate raw_fd 0;
+       ignore (Unix.lseek raw_fd 0 SEEK_SET : int);
        write_pid fd);
     res
   ;;
@@ -59,6 +61,7 @@ module Lock_held_by = struct
   let read_lock_file () =
     match Io.read_file (Path.build lock_file) with
     | exception _ -> Unknown
+    | "" -> Unknown
     | pid ->
       (match int_of_string_opt pid with
        | Some pid -> Pid_from_lockfile pid

@@ -24,6 +24,23 @@ val prepare_targets_relative_to_root
   -> Dune_lang.Dep_conf.t list
   -> string list
 
+(** Try to connect to the server selected by the current workspace. *)
+val establish_connection
+  :  lock_held_by:Global_lock.Lock_held_by.t
+  -> unit
+  -> (Root.Rpc.Client.Connection.t, User_message.t) result Fiber.t
+
+(** Send a request using an already-established connection. *)
+val request_on_connection
+  :  name:string
+  -> warn_forwarding:bool
+  -> lock_held_by:Global_lock.Lock_held_by.t
+  -> Common.Builder.t
+  -> ('a, 'b) Dune_rpc.Decl.request
+  -> 'a
+  -> Root.Rpc.Client.Connection.t
+  -> 'b Fiber.t
+
 (** Send a request to the RPC server. If [wait], it will poll forever until a server is listening.
     Should be scheduled by a scheduler that does not come with a RPC server on its own.
 
