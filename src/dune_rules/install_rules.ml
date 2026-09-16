@@ -532,6 +532,7 @@ end = struct
            then Memo.return true
            else
              let* compile_info =
+               let* scope = Scope.DB.for_package scope exes.package in
                let dune_version = Scope.project scope |> Dune_project.dune_version in
                let libs = Scope.libs scope in
                (* This is wrong. If the preprocessors fail to resolve, we
