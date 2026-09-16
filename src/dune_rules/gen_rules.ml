@@ -748,10 +748,19 @@ let private_context ~dir components _ctx =
   analyze_private_context_path components
   >>= function
   | `Invalid_context -> Memo.return Gen_rules.unknown_context
+  | `Valid (ctx, ".opam" :: rest) -> Opam_rules.gen_rules ctx ~dir rest
   | `Valid (ctx, components) ->
     let+ lock_rules = Lock_rules.setup_rules ~dir ~components
     and+ pkg_rules = Pkg_rules.setup_rules ctx ~dir ~components in
-    Gen_rules.combine lock_rules pkg_rules
+    let rules = Gen_rules.combine lock_rules pkg_rules in
+    (match components with
+     | [] ->
+       Gen_rules.combine
+         rules
+         (Gen_rules.make_empty
+            ~dir
+            (Subdir_set.of_list [ Filename.of_string_exn ".opam" ]))
+     | _ -> rules)
   | `Root ->
     let+ contexts = Per_context.list () in
     let build_dir_only_sub_dirs =

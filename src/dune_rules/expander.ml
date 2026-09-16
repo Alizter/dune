@@ -51,8 +51,6 @@ type t =
   { dir : Path.Build.t
   ; env : Env.t Memo.t
   ; local_env : string Action_builder.t Env.Var.Map.t
-  ; public_libs : Lib.DB.t Memo.t
-  ; public_libs_host : Lib.DB.t Memo.t
   ; artifacts_host : Artifacts.t Memo.t
   ; bindings : value Pform.Map.t
   ; scope : Scope.t Memo.t
@@ -80,7 +78,29 @@ let set_scope t ~dir ~project ~scope ~scope_host =
   { t with dir; project; scope; scope_host }
 ;;
 
+let for_package t = function
+  | None -> t
+  | Some _ as package ->
+    let select scope =
+      let open Memo.O in
+      let* scope = scope in
+      Scope.DB.for_package scope package
+    in
+    { t with scope = select t.scope; scope_host = select t.scope_host }
+;;
+
 let set_artifacts t ~artifacts_host = { t with artifacts_host }
+
+let add_package_deps t packages =
+  let artifacts_host =
+    let open Memo.O in
+    let* packages, _ = Action_builder.evaluate_and_collect_facts packages in
+    let+ artifacts = t.artifacts_host in
+    Artifacts.add_package_deps artifacts packages
+  in
+  { t with artifacts_host }
+;;
+
 let set_expanding_what t x = { t with expanding_what = x }
 
 let map_exe ~force_host t prog args =
@@ -435,13 +455,9 @@ let expand_lib_variable t source ~lib ~file ~lib_exec ~lib_private =
                     |> String.quoted)
              ])
     else (
-      let artifacts, context =
-        if lib_exec
-        then t.public_libs_host, Context.host t.context
-        else t.public_libs, Memo.return t.context
-      in
-      let* artifacts = Resolve.Memo.lift_memo artifacts in
-      file_of_lib artifacts context ~loc ~lib ~file)
+      let context = if lib_exec then Context.host t.context else Memo.return t.context in
+      let* scope = Resolve.Memo.lift_memo scope in
+      file_of_lib (Scope.public_libs scope) context ~loc ~lib ~file)
   in
   (let open Memo.O in
    let* project = project in
@@ -771,61 +787,123 @@ let resolve_local_pkg_file ~loc ~context_name ~pkg_name ~section ~file =
   path
 ;;
 
-let expand_pkg_macro ~loc { context; _ } macro_invocation =
+let expand_pkg_macro ~loc { context; project; _ } macro_invocation =
   let context_name = Context.name context in
-  let pkg_name, section, file =
-    match Pform.Macro_invocation.Args.split macro_invocation with
-    (* CR-someday Alizter: validate the package name *)
-    | [ pkg_name; section; file ] -> Package.Name.of_string pkg_name, section, file
-    | _ ->
-      User_error.raise
-        ~loc
-        ~hints:[ Pp.text "the syntax is %{pkg:PACKAGE:SECTION:PATH}" ]
-        [ Pp.text "%{pkg:..} requires exactly 3 arguments." ]
-  in
-  let section =
-    match Section.of_string section with
-    | Some Misc | None ->
-      let supported =
-        Section.Set.to_list Section.all
-        |> List.filter_map ~f:(fun s ->
-          if Section.equal s Misc then None else Some (Section.to_string s))
-        |> String.enumerate_and
-      in
-      User_error.raise
-        ~loc
-        ~hints:[ Pp.textf "supported sections are %s." supported ]
-        [ Pp.textf "%s is not a valid section." section ]
-    | Some section -> section
-  in
-  let file =
-    match Path.Local.of_string file with
-    | f -> f
-    | exception User_error.E _ ->
-      User_error.raise
-        ~loc
-        ~hints:[ Pp.text "the path must be relative and must not contain '..'." ]
-        [ Pp.textf "%s is not a valid file path." file ]
-  in
-  let open Action_builder.O in
-  let+ path =
-    let* found =
-      Action_builder.of_memo
-        (let open Memo.O in
-         let* package_db = Package_db.create context_name in
-         Package_db.find_package package_db pkg_name)
+  match Pform.Macro_invocation.Args.split macro_invocation with
+  | [ package; variable ]
+    when Option.is_some
+           (Dune_project.find_extension_version project Dune_lang.Unreleased.syntax) ->
+    let package = Package.Name.of_string package in
+    let* opaque = Action_builder.of_memo (Opam_package.find context_name package) in
+    let* variables =
+      match opaque with
+      | Some opaque ->
+        let+ dependency = Opam_package.dependency opaque in
+        dependency.variables
+      | None ->
+        let+ packages = Action_builder.of_memo (Dune_load.packages ()) in
+        (match Package.Name.Map.find packages package with
+         | None -> User_error.raise ~loc [ Pp.text "Unknown package" ]
+         | Some pkg ->
+           let version =
+             Package.version pkg
+             |> Option.value ~default:(Package_version.of_string "dev")
+           in
+           Opam_build.variables ~name:package ~version ~dev:false)
     in
-    match found with
-    | None ->
-      User_error.raise
-        ~loc
-        [ Pp.textf "Package %s does not exist" (Package.Name.to_string pkg_name) ]
-    | Some (Installed pkg) -> resolve_installed_pkg_file ~loc pkg ~section ~file
-    | Some (Local _) -> resolve_local_pkg_file ~loc ~context_name ~pkg_name ~section ~file
-    | Some (Build _) ->
-      Pkg_rules.resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file
-  in
-  [ Value.Path path ]
+    (match
+       Package_variable_name.Map.find variables (Package_variable_name.of_string variable)
+     with
+     | Some value -> Action_builder.return (Opam_build.Variable.dune_value value)
+     | None ->
+       User_error.raise
+         ~loc
+         [ Pp.textf
+             "Undefined package variable: %s:%s"
+             (Package.Name.to_string package)
+             variable
+         ])
+  | _ ->
+    let pkg_name, section, file =
+      match Pform.Macro_invocation.Args.split macro_invocation with
+      (* CR-someday Alizter: validate the package name *)
+      | [ pkg_name; section; file ] -> Package.Name.of_string pkg_name, section, file
+      | _ ->
+        User_error.raise
+          ~loc
+          ~hints:[ Pp.text "the syntax is %{pkg:PACKAGE:SECTION:PATH}" ]
+          [ Pp.text "%{pkg:..} requires exactly 3 arguments." ]
+    in
+    let section =
+      match Section.of_string section with
+      | Some Misc | None ->
+        let supported =
+          Section.Set.to_list Section.all
+          |> List.filter_map ~f:(fun s ->
+            if Section.equal s Misc then None else Some (Section.to_string s))
+          |> String.enumerate_and
+        in
+        User_error.raise
+          ~loc
+          ~hints:[ Pp.textf "supported sections are %s." supported ]
+          [ Pp.textf "%s is not a valid section." section ]
+      | Some section -> section
+    in
+    let file =
+      match Path.Local.of_string file with
+      | f -> f
+      | exception User_error.E _ ->
+        User_error.raise
+          ~loc
+          ~hints:[ Pp.text "the path must be relative and must not contain '..'." ]
+          [ Pp.textf "%s is not a valid file path." file ]
+    in
+    let open Action_builder.O in
+    let+ path =
+      let* found =
+        Action_builder.of_memo
+          (let open Memo.O in
+           let* package_db = Package_db.create context_name in
+           Package_db.find_package package_db pkg_name)
+      in
+      match found with
+      | None ->
+        User_error.raise
+          ~loc
+          [ Pp.textf "Package %s does not exist" (Package.Name.to_string pkg_name) ]
+      | Some (Installed pkg) -> resolve_installed_pkg_file ~loc pkg ~section ~file
+      | Some (Local _) ->
+        resolve_local_pkg_file ~loc ~context_name ~pkg_name ~section ~file
+      | Some (Opam _) ->
+        let* dependencies =
+          Install_layout.materialize context_name (Package.Name.Set.singleton pkg_name)
+        in
+        let dependency = List.hd dependencies in
+        let path =
+          Path.append_local
+            (Install.Paths.get (Opam_build.Paths.install_paths dependency.paths) section)
+            file
+        in
+        if
+          not
+            (List.mem
+               (Section.Map.Multi.find dependency.files section)
+               path
+               ~equal:Path.equal)
+        then
+          User_error.raise
+            ~loc
+            [ Pp.textf
+                "File %s not found in section %s of package %s"
+                (Path.Local.to_string file)
+                (Section.to_string section)
+                (Package.Name.to_string pkg_name)
+            ];
+        Action_builder.return path
+      | Some (Build _) ->
+        Pkg_rules.resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file
+    in
+    [ Value.Path path ]
 ;;
 
 (* CR-someday punchagan: Dependency filters such as [{with-test}] are not
@@ -1067,24 +1145,13 @@ let expand_str_partial t template =
     ~f:(fun ~source pform -> expand_pform t ~source pform >>| Option.some)
 ;;
 
-let make_root
-      ~project
-      ~scope
-      ~scope_host
-      ~(context : Context.t)
-      ~env
-      ~public_libs
-      ~public_libs_host
-      ~artifacts_host
-  =
+let make_root ~project ~scope ~scope_host ~(context : Context.t) ~env ~artifacts_host =
   { dir = Context.build_dir context
   ; env
   ; local_env = Env.Var.Map.empty
   ; bindings = Pform.Map.empty
   ; scope
   ; scope_host
-  ; public_libs
-  ; public_libs_host
   ; artifacts_host
   ; context
   ; expanding_what = Nothing_special
