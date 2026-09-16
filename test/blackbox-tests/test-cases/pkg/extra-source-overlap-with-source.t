@@ -4,6 +4,7 @@ file in the package's source.
   $ make_lockdir
   $ make_lockpkg foo <<EOF
   > (version 1)
+  > (build (run cp foo.txt observed))
   > (source
   >  (copy $PWD/foo-source))
   > (extra_sources
@@ -14,6 +15,7 @@ file in the package's source.
 
   $ mkdir -p foo-source
   $ echo "from source" > foo-source/foo.txt
+  $ echo 'share: [ "observed" ]' > foo-source/foo.install
 
   $ echo "from extra source" > foo.txt
 
@@ -27,7 +29,17 @@ file in the package's source.
 
   $ build_pkg foo
 
-Make sure that the package's source directory ends up with the version
-of foo.txt from extra_sources:
-  $ cat _build/_private/default/.pkg/$($dune pkg print-digest foo)/source/foo.txt
+The build action observes the overlay before installation, without modifying
+the workspace input:
+
+  $ digest=$($dune pkg print-digest foo)
+  $ cat _build/_private/default/.pkg/$digest/target/share/foo/observed
   from extra source
+  $ cat foo-source/foo.txt
+  from source
+
+The prepared source directory also stays unchanged. The overlay is confined to
+the writable build copy:
+
+  $ cat _build/_private/default/.pkg/$digest/source/foo.txt
+  from source
