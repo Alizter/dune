@@ -120,7 +120,7 @@ module Stubs = struct
 
   type t =
     { loc : Loc.t
-    ; language : Foreign_language.t
+    ; languages : Foreign_language.t Nonempty_list.t
     ; names : Ordered_set_lang.t
     ; mode : Mode.Select.t
     ; flags : Ordered_set_lang.Unexpanded.t
@@ -129,7 +129,14 @@ module Stubs = struct
     }
 
   let make ~loc ~language ~names ~flags =
-    { loc; language; names; flags; include_dirs = []; extra_deps = []; mode = All }
+    { loc
+    ; languages = [ language ]
+    ; names
+    ; flags
+    ; include_dirs = []
+    ; extra_deps = []
+    ; mode = All
+    }
   ;;
 
   let syntax =
@@ -154,7 +161,12 @@ module Stubs = struct
     let open Dune_lang.Decoder in
     let* loc = loc in
     let+ loc_archive_name, archive_name = located (field_o "archive_name" string)
-    and+ language = field "language" decode_lang
+    and+ languages =
+      let decode = decode_lang >>| fun language -> Nonempty_list.[ language ] in
+      let* dune_version = Dune_lang.Syntax.get_exn Stanza.syntax in
+      if dune_version < (3, 26)
+      then field "language" decode
+      else field "language" decode ~default:Nonempty_list.[ Foreign_language.C; Cxx ]
     and+ names = Ordered_set_lang.field "names"
     and+ loc_mode, mode =
       located (field_o "mode" (Dune_lang.Syntax.since syntax (0, 1) >>> Mode.decode))
@@ -182,7 +194,7 @@ module Stubs = struct
       | _ -> ()
     in
     let mode = Mode.Select.of_option mode in
-    { loc; language; names; mode; flags; include_dirs; extra_deps }
+    { loc; languages; names; mode; flags; include_dirs; extra_deps }
   ;;
 
   let decode = Dune_lang.Decoder.fields @@ decode_stubs ~for_library:false
@@ -235,7 +247,7 @@ end
 
 module Source = struct
   type kind =
-    | Stubs of Stubs.t
+    | Stubs of Foreign_language.t * Stubs.t
     | Ctypes of Ctypes_field.t
 
   (* we store the entire [stubs] record even though [t] only describes an
@@ -247,7 +259,7 @@ module Source = struct
 
   let language t =
     match t.kind with
-    | Stubs stubs -> stubs.language
+    | Stubs (language, _) -> language
     | Ctypes _ -> C
   ;;
 
@@ -256,13 +268,13 @@ module Source = struct
 
   let mode t =
     match t.kind with
-    | Stubs s -> s.mode
+    | Stubs (_, stubs) -> stubs.mode
     | Ctypes _ -> All
   ;;
 
   let include_dirs t =
     match t.kind with
-    | Stubs stubs -> stubs.include_dirs
+    | Stubs (_, stubs) -> stubs.include_dirs
     | Ctypes _ -> []
   ;;
 

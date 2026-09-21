@@ -92,7 +92,7 @@ module Stubs : sig
 
   type t =
     { loc : Loc.t
-    ; language : Foreign_language.t
+    ; languages : Foreign_language.t Nonempty_list.t
     ; names : Ordered_set_lang.t
     ; mode : Mode.Select.t
     ; flags : Ordered_set_lang.Unexpanded.t
@@ -117,7 +117,7 @@ end
     corresponding [Foreign.Stubs.t] declaration. *)
 module Source : sig
   type kind =
-    | Stubs of Stubs.t
+    | Stubs of Foreign_language.t * Stubs.t
     | Ctypes of Ctypes_field.t
 
   type t

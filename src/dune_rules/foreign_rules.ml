@@ -252,7 +252,7 @@ let compilation_flags ~sctx ~dir ~expander ~loc ~(src : Foreign.Source.t) =
              sctx
          in
          default_flags @ pkg_config_flags)
-    | Stubs { Foreign.Stubs.flags; _ } ->
+    | Stubs (_, { Foreign.Stubs.flags; _ }) ->
       foreign_flags sctx ~dir ~expander ~flags ~language:kind
   in
   base_flags
@@ -281,7 +281,7 @@ let c_compile_args ~sctx ~dir ~expander ~loc ~src ~include_flags =
 let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), dst) =
   let env, sandbox =
     match Foreign.Source.kind src with
-    | Stubs stubs ->
+    | Stubs (_, stubs) ->
       let env, _ =
         Dep_conf_eval.unnamed
           Sandbox_config.no_special_requirements
@@ -298,7 +298,7 @@ let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), 
   let* () =
     match Foreign.Source.kind src with
     | Ctypes _ -> Memo.return ()
-    | Stubs { Foreign.Stubs.flags; _ } ->
+    | Stubs (_, { Foreign.Stubs.flags; _ }) ->
       (* DUNE3 will have [use_standard_c_and_cxx_flags] enabled by default. To
          guide users toward this change we emit a warning when dune_lang is >=
          1.8, [use_standard_c_and_cxx_flags] is not specified in the
