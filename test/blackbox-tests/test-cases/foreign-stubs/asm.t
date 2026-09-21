@@ -44,17 +44,32 @@ Here is the C file we will turn into assembly.
   > char *message() { return "Hello, world!\n"; };
   > EOF
 
-We can build the archive.
+Generating the compilation database does not build the assembly source or object.
+
+  $ dune build compile_commands.json
+  $ test ! -e _build/default/hello.s
+  $ test ! -e _build/default/hello.o
+
+We can build the archive and capture the assembler arguments.
+
   $ dune build libmylib.a
+  $ dune trace cat | jq '
+  > include "dune";
+  > processes | select(.args | targets | any(endswith("/hello.o")))
+  > | .args.process_args' > assembler_args.json
 
 We test that the contents of the archive contain our message.
   $ nm _build/default/libmylib.a | grep message > /dev/null
 
-Assembly sources are not mistaken for C sources in the compilation database.
+Check assembly entries and compare their arguments with the actual invocation.
+Currently assembly sources are omitted.
 
   $ dune build @check
   $ jq -c 'map(.file)' compile_commands.json
   []
+  $ jq -s '.[0] == (.[1][0].arguments[1:])' \
+  >   assembler_args.json compile_commands.json
+  false
 
 Assembly flags support ordered-set includes and variable expansion.
 C/C++ flags do not leak into assembly compilation.
@@ -170,6 +185,10 @@ Dune must invoke ml64 with MASM options, not the C compiler.
   >  (flags :standard "/DASM_TEXT=hello world"))
   > EOF
   $ touch 'hello world.asm'
+  $ dune build compile_commands.json
+  $ jq -c 'map({file, arguments})' compile_commands.json
+  []
+  $ test ! -e '_build/default/hello world.obj'
   $ dune build '"hello world.obj"'
   $ cat '_build/default/hello world.obj'
   ml64
@@ -193,6 +212,10 @@ MinGW still uses the C compiler driver, despite targeting Windows.
   $ mv 'hello world.asm' 'hello world.S'
   $ sed 's|/DASM_TEXT|-DASM_TEXT|' dune > dune.mingw
   $ mv dune.mingw dune
+  $ dune build compile_commands.json
+  $ jq -c 'map({file, arguments: .arguments[1:]})' compile_commands.json
+  []
+  $ test ! -e '_build/default/hello world.o'
   $ dune build '"hello world.o"'
   $ cat '_build/default/hello world.o'
   c-compiler
