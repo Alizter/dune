@@ -653,6 +653,58 @@ others.
   $ grep -o 'Library with name "vector" is already defined' error
   Library with name "vector" is already defined
 
+An opaque-installed PPX must retain its selected provider when the generated
+PPX driver is reconstructed. Currently reconstruction searches unrelated roots.
+
+  $ mkdir ../ppx && cd ../ppx
+  $ export DUNE_DEBUG_PACKAGE_LOGS=0
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (using unreleased 0.1)
+  > (package (name geometry) (dir geometry) (allow_empty))
+  > (package (name client) (dir client) (depends geometry) (allow_empty))
+  > (package (name unrelated) (dir unrelated) (allow_empty))
+  > EOF
+  $ mkdir -p geometry/src client unrelated
+  $ cat > geometry/dune <<'EOF'
+  > (opam
+  >  (package geometry)
+  >  (dir src)
+  >  (version 1.0)
+  >  (source .)
+  >  (build (run dune build @install))
+  >  (install (run dune install --prefix %{prefix})))
+  > EOF
+  $ cat > geometry/src/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name noop))
+  > EOF
+  $ cat > geometry/src/dune <<'EOF'
+  > (library
+  >  (public_name noop)
+  >  (kind ppx_rewriter)
+  >  (ppx.driver (main Noop.main)))
+  > EOF
+  $ cat > geometry/src/noop.ml <<'EOF'
+  > let main () =
+  >   match Sys.argv with
+  >   | [| _; "--as-ppx"; input; output |] ->
+  >     exit (Sys.command (Filename.quote_command "cp" [input; output]))
+  >   | _ -> failwith "unexpected PPX arguments"
+  > EOF
+  $ echo '(opam (package unrelated) (dir src) (version 1.0) (build (run false)))' > unrelated/dune
+  $ cat > client/dune <<'EOF'
+  > (executable
+  >  (name main)
+  >  (modes byte)
+  >  (preprocess (staged_pps noop)))
+  > EOF
+  $ echo 'let () = print_endline "preprocessed"' > client/main.ml
+  $ dune exec ./client/main.bc 2>error
+  [1]
+  $ grep '^Error:' error
+  Error: Logs for package unrelated
+
 Materializing native inputs must not load the entire legacy install namespace.
 Otherwise an optional executable depending on the opaque producer closes a
 spurious cycle through that producer's native dependency layout.
