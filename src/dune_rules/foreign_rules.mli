@@ -33,6 +33,17 @@ val build_include_flags
   -> src:Foreign.Source.t
   -> Command.Args.without_targets Command.Args.t
 
+(** Assembler and arguments, including the source dependency and object target. *)
+val asm_compile_command
+  :  sctx:Super_context.t
+  -> dir:Path.Build.t
+  -> expander:Expander.t
+  -> ocaml_config:Ocaml_config.t
+  -> loc:Loc.t
+  -> src:Foreign.Source.t
+  -> dst:Path.Build.t
+  -> string * Command.Args.any Command.Args.t list
+
 (** Construct Command.Args.t for C compilation (flags + stdlib include + include_flags).
     Does not include output (-o) or source (-c) arguments. *)
 val c_compile_args

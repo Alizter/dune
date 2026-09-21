@@ -27,8 +27,21 @@ The assembler returns the tagged OCaml representation of 42.
   >   (flags /DASM_ANSWER=85)))
   > EOF
   $ dune build compile_commands.json
-  $ jq -c 'map({file, arguments})' compile_commands.json
-  []
+  $ jq 'map({file, arguments})' compile_commands.json
+  [
+    {
+      "file": "answer.asm",
+      "arguments": [
+        "ml64",
+        "/nologo",
+        "/quiet",
+        "/Foanswer.obj",
+        "/DASM_ANSWER=85",
+        "/c",
+        "answer.asm"
+      ]
+    }
+  ]
   $ test ! -e _build/default/answer.obj
   $ dune exec ./main.exe
   42
@@ -46,7 +59,20 @@ The same assembly source also works through a foreign library.
   >  (foreign_archives answer))
   > EOF
   $ dune build compile_commands.json
-  $ jq -c 'map({file, arguments})' compile_commands.json
-  []
+  $ jq 'map({file, arguments})' compile_commands.json
+  [
+    {
+      "file": "answer.asm",
+      "arguments": [
+        "ml64",
+        "/nologo",
+        "/quiet",
+        "/Foanswer.obj",
+        "/DASM_ANSWER=85",
+        "/c",
+        "answer.asm"
+      ]
+    }
+  ]
   $ dune exec ./main.exe
   42

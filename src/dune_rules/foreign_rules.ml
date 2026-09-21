@@ -364,11 +364,7 @@ let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), 
        ])
 ;;
 
-let build_asm ~sctx ~dir ~expander (loc, src, dst) =
-  let ctx = Super_context.context sctx in
-  let* ocaml = Context.ocaml ctx in
-  Super_context.add_rule sctx ~loc ~dir
-  @@
+let asm_compile_command ~sctx ~dir ~expander ~ocaml_config ~loc ~src ~dst =
   let flags =
     Command.Args.Dyn
       (let open Action_builder.O in
@@ -376,19 +372,34 @@ let build_asm ~sctx ~dir ~expander (loc, src, dst) =
        Command.Args.As flags)
   in
   let src = Path.build (Foreign.Source.path src) in
-  let architecture = Ocaml_config.architecture ocaml.ocaml_config in
+  let architecture = Ocaml_config.architecture ocaml_config in
+  match Ocaml_config.ccomp_type ocaml_config, architecture with
+  | (Cc | Other _), _ ->
+    ( Ocaml_config.c_compiler ocaml_config
+    , [ Command.Args.A "-c"; A "-o"; Target dst; flags; Dep src ] )
+  | Msvc, "amd64" ->
+    let output = Command.Args.Concat ("", [ A "/Fo"; Target dst ]) in
+    "ml64", [ A "/nologo"; A "/quiet"; output; flags; A "/c"; Dep src ]
+  | Msvc, architecture ->
+    User_error.raise
+      ~loc
+      [ Pp.textf "MSVC assembly requires x86-64, not %s." architecture ]
+;;
+
+let build_asm ~sctx ~dir ~expander (loc, src, dst) =
+  let ctx = Super_context.context sctx in
+  let* ocaml = Context.ocaml ctx in
+  Super_context.add_rule sctx ~loc ~dir
+  @@
   let assembler, args =
-    match ocaml.lib_config.ccomp_type, architecture with
-    | (Cc | Other _), _ ->
-      ( Ocaml_config.c_compiler ocaml.ocaml_config
-      , [ Command.Args.A "-c"; A "-o"; Target dst; flags; Dep src ] )
-    | Msvc, "amd64" ->
-      let output = Command.Args.Concat ("", [ A "/Fo"; Target dst ]) in
-      "ml64", [ A "/nologo"; A "/quiet"; output; flags; A "/c"; Dep src ]
-    | Msvc, architecture ->
-      User_error.raise
-        ~loc
-        [ Pp.textf "MSVC assembly requires x86-64, not %s." architecture ]
+    asm_compile_command
+      ~sctx
+      ~dir
+      ~expander
+      ~ocaml_config:ocaml.ocaml_config
+      ~loc
+      ~src
+      ~dst
   in
   let assembler = Super_context.resolve_program ~loc:(Some loc) ~dir sctx assembler in
   Command.run_dyn_prog ~dir:(Path.build dir) assembler args

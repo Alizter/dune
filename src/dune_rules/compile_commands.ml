@@ -62,6 +62,43 @@ let build_c_command
   }
 ;;
 
+let build_asm_command ~sctx ~dir ~expander ~loc (src : Foreign.Source.t) ~ext_obj =
+  let open Action_builder.O in
+  let* ocaml = Action_builder.of_memo (Context.ocaml (Super_context.context sctx)) in
+  let directory = Path.build dir in
+  let dst =
+    Path.Build.relative
+      dir
+      (Filename.to_string (Foreign.Source.object_name src)
+       ^ Filename.Extension.to_string ext_obj)
+  in
+  let assembler, args =
+    Foreign_rules.asm_compile_command
+      ~sctx
+      ~dir
+      ~expander
+      ~ocaml_config:ocaml.ocaml_config
+      ~loc
+      ~src
+      ~dst
+  in
+  let src = Path.build (Foreign.Source.path src) in
+  let { Action_builder.With_targets.build; targets = _ } =
+    Command.expand ~dir:directory (Command.Args.S args)
+  in
+  let+ args =
+    build
+    |> Action_builder.evaluate_and_collect_deps
+    |> Action_builder.of_memo
+    >>| fst
+    >>| Appendable_list.to_list
+  in
+  { directory
+  ; file = Path.reach src ~from:directory |> Path.Local.of_string
+  ; arguments = assembler :: args
+  }
+;;
+
 (* Collect entries from foreign sources in a directory.
    [requires] is the list of library dependencies for include paths. *)
 let collect_from_foreign_sources
@@ -79,7 +116,7 @@ let collect_from_foreign_sources
   in
   Foreign.Sources.to_list_map foreign_sources ~f:(fun _ (loc, src) ->
     match Foreign.Source.language src with
-    | Asm -> None
+    | Asm -> build_asm_command ~sctx ~dir ~expander ~loc src ~ext_obj
     | C | Cxx ->
       let include_flags =
         Foreign_rules.build_include_flags
@@ -90,8 +127,7 @@ let collect_from_foreign_sources
           ~requires
           ~src
       in
-      Some (build_c_command ~sctx ~dir ~expander ~include_flags ~loc src ~ext_obj))
-  |> List.filter_map ~f:Fun.id
+      build_c_command ~sctx ~dir ~expander ~include_flags ~loc src ~ext_obj)
   |> Action_builder.all
 ;;
 

@@ -61,15 +61,42 @@ We can build the archive and capture the assembler arguments.
 We test that the contents of the archive contain our message.
   $ nm _build/default/libmylib.a | grep message > /dev/null
 
-Check assembly entries and compare their arguments with the actual invocation.
-Currently assembly sources are omitted.
+Assembly entries contain the actual assembler arguments, without C-specific
+flags or include directories.
 
   $ dune build @check
   $ jq -c 'map(.file)' compile_commands.json
-  []
+  ["hello.s"]
   $ jq -s '.[0] == (.[1][0].arguments[1:])' \
   >   assembler_args.json compile_commands.json
-  false
+  true
+
+Sources in subdirectories are relative to the recorded compilation directory.
+
+  $ mkdir -p nested/src
+  $ echo '(lang dune 3.26)' > nested/dune-project
+  $ cat > nested/dune <<'EOF'
+  > (include_subdirs unqualified)
+  > (foreign_library
+  >  (archive_name nested)
+  >  (language asm)
+  >  (names part))
+  > EOF
+  $ touch nested/src/part.S
+  $ (cd nested && dune build compile_commands.json)
+  $ jq '.[] | {directory, file, arguments: .arguments[1:]}' \
+  >   nested/compile_commands.json
+  {
+    "directory": "_build/default",
+    "file": "src/part.S",
+    "arguments": [
+      "-c",
+      "-o",
+      "part.o",
+      "src/part.S"
+    ]
+  }
+  $ test ! -e nested/_build/default/part.o
 
 Assembly flags support ordered-set includes and variable expansion.
 C/C++ flags do not leak into assembly compilation.
@@ -102,6 +129,10 @@ C/C++ flags do not leak into assembly compilation.
   >  (flags :standard (:include asm_flags.sexp)
   >   -DASM_VALUE=%{env:ASM_VALUE=42}))
   > EOF
+  $ dune build compile_commands.json
+  $ jq -c 'map(.arguments[1:])' compile_commands.json
+  [["-c","-o","flags.o","-DASM_FLAG","-DASM_VALUE=42","flags.S"]]
+  $ test ! -e _build/default/flags.o
   $ dune build flags.o
 
 The same flags field works for assembly stubs.
@@ -186,8 +217,21 @@ Dune must invoke ml64 with MASM options, not the C compiler.
   > EOF
   $ touch 'hello world.asm'
   $ dune build compile_commands.json
-  $ jq -c 'map({file, arguments})' compile_commands.json
-  []
+  $ jq 'map({file, arguments})' compile_commands.json
+  [
+    {
+      "file": "hello world.asm",
+      "arguments": [
+        "ml64",
+        "/nologo",
+        "/quiet",
+        "/Fohello world.obj",
+        "/DASM_TEXT=hello world",
+        "/c",
+        "hello world.asm"
+      ]
+    }
+  ]
   $ test ! -e '_build/default/hello world.obj'
   $ dune build '"hello world.obj"'
   $ cat '_build/default/hello world.obj'
@@ -213,8 +257,19 @@ MinGW still uses the C compiler driver, despite targeting Windows.
   $ sed 's|/DASM_TEXT|-DASM_TEXT|' dune > dune.mingw
   $ mv dune.mingw dune
   $ dune build compile_commands.json
-  $ jq -c 'map({file, arguments: .arguments[1:]})' compile_commands.json
-  []
+  $ jq 'map({file, arguments: .arguments[1:]})' compile_commands.json
+  [
+    {
+      "file": "hello world.S",
+      "arguments": [
+        "-c",
+        "-o",
+        "hello world.o",
+        "-DASM_TEXT=hello world",
+        "hello world.S"
+      ]
+    }
+  ]
   $ test ! -e '_build/default/hello world.o'
   $ dune build '"hello world.o"'
   $ cat '_build/default/hello world.o'

@@ -423,8 +423,8 @@ this project to see a full working example.
 
 .. _compile-commands:
 
-Editor Support for C/C++ Stubs
-==============================
+Editor Support for Foreign Sources
+==================================
 
 .. versionadded:: 3.23
 
@@ -444,10 +444,19 @@ produce a database. An explicit rule for ``compile_commands.json`` takes
 precedence over automatic generation. If all foreign stanzas are disabled,
 Dune preserves an existing database or generates an empty one if none exists.
 
-Each entry records the full compiler invocation that Dune would use for that
-source file, including the C compiler, base flags from ``ocamlc -config``,
+Each C/C++ entry records the full compiler invocation that Dune would use for
+that source file, including the C compiler, base flags from ``ocamlc -config``,
 user-specified ``(flags ...)``, ``-I`` paths for the OCaml standard library,
 library dependencies (via ``install_c_headers``), and ``(include_dirs ...)``.
+
+.. versionchanged:: 3.26
+
+   Assembly sources declared via ``foreign_stubs`` and ``foreign_library`` also
+   have entries, recording the compiler-driver or MSVC assembler invocation,
+   including user-specified ``(flags ...)``. These can be used by tools such as
+   `asm-lsp
+   <https://github.com/bergercookie/asm-lsp>`_. Generating the database does not
+   assemble the sources.
 
 Since the file is a build artifact promoted to the source tree, you should add
 ``compile_commands.json`` to your ``.gitignore``.
