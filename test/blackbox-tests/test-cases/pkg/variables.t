@@ -69,8 +69,8 @@ Now we demonstrate we get a proper error from invalid .config files:
      _build/_private/default/.pkg/test.0.0.1-$DIGEST/target
   [1]
 
-Configuration paths must survive the producer sandbox. Currently the configured
-path is missing even though the installed file exists.
+Configuration paths must survive the producer sandbox. A consumer must be able
+to read the installed file through its configured path.
 
   $ make_lockpkg producer <<'EOF'
   > (version 1.0)
@@ -97,6 +97,6 @@ path is missing even though the installed file exists.
   >   -- %{pkg:producer:data_path}))
   > EOF
   $ build_pkg consumer
-  missing-configured-file
+  payload
   $ cat "$(get_build_pkg_dir producer)/target/share/producer/data"
   payload
