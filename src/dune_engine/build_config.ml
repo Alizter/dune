@@ -98,6 +98,7 @@ end
 
 type t =
   { contexts : Context_type.t Context_name.Map.t Memo.Lazy.t
+  ; independent_rule_roots : Path.Build.Set.t Memo.Lazy.t
   ; rule_generator :
       Context_name.t -> dir:Path.Build.t -> string list -> Gen_rules.t Memo.t
   ; sandboxing_preference : Sandbox_mode.t list
@@ -118,6 +119,7 @@ let get () = Fdecl.get t
 
 let set
       ~contexts
+      ~independent_rule_roots
       ~promote_source
       ~sandboxing_preference
       ~rule_generator
@@ -128,6 +130,7 @@ let set
   Fdecl.set
     t
     { contexts
+    ; independent_rule_roots
     ; rule_generator
     ; sandboxing_preference =
         sandboxing_preference @ Sandbox_mode.all_except_patch_back_source_tree
