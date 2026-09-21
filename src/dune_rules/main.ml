@@ -88,6 +88,14 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
   Build_config.set
     ~sandboxing_preference
     ~promote_source
+    ~independent_rule_roots:
+      (Memo.lazy_ ~name:"install-layout-rule-roots" (fun () ->
+         let open Memo.O in
+         let+ contexts = Workspace.workspace () >>| Workspace.build_contexts in
+         List.concat_map contexts ~f:(fun (ctx : Build_context.t) ->
+           List.map [ ".packages"; ".binaries" ] ~f:(fun name ->
+             Path.Build.relative (Install.Context.dir ~context:ctx.name) name))
+         |> Path.Build.Set.of_list))
     ~contexts:
       (Memo.lazy_ ~name:"build-context-types" (fun () ->
          let open Memo.O in

@@ -81,6 +81,7 @@ end
       system and only once. *)
 val set
   :  contexts:(Build_context.t * Context_type.t) list Memo.Lazy.t
+  -> independent_rule_roots:Path.Build.Set.t Memo.Lazy.t
   -> promote_source:
        (chmod:(Permissions.Mode.t -> Permissions.Mode.t)
         -> delete_dst_if_it_is_a_directory:bool
@@ -101,6 +102,10 @@ val set
 
 type t = private
   { contexts : (Build_context.t * Context_type.t) Context_name.Map.t Memo.Lazy.t
+  ; independent_rule_roots : Path.Build.Set.t Memo.Lazy.t
+    (** Internal namespaces whose rules can be loaded without generating ancestor
+        rules. Ancestors must retain these directories and must not define targets
+        inside them. Each root must have its own rule generator. *)
   ; rule_generator :
       Context_name.t
       -> dir:Path.Build.t
