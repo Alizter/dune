@@ -654,7 +654,7 @@ others.
   Library with name "vector" is already defined
 
 An opaque-installed PPX must retain its selected provider when the generated
-PPX driver is reconstructed. Currently reconstruction searches unrelated roots.
+PPX driver is reconstructed, without searching unrelated roots.
 
   $ mkdir ../ppx && cd ../ppx
   $ export DUNE_DEBUG_PACKAGE_LOGS=0
@@ -700,10 +700,8 @@ PPX driver is reconstructed. Currently reconstruction searches unrelated roots.
   >  (preprocess (staged_pps noop)))
   > EOF
   $ echo 'let () = print_endline "preprocessed"' > client/main.ml
-  $ dune exec ./client/main.bc 2>error
-  [1]
-  $ grep '^Error:' error
-  Error: Logs for package unrelated
+  $ dune exec ./client/main.bc
+  preprocessed
 
 Materializing native inputs must not load the entire legacy install namespace.
 Otherwise an optional executable depending on the opaque producer closes a
