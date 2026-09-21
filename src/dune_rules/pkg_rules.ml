@@ -1730,7 +1730,7 @@ module Install_action = struct
       }
 
     let name = "install-file-run"
-    let version = 1
+    let version = 2
     let runs_process = false
     let can_run_in_action_runner = false
 
@@ -1880,7 +1880,7 @@ module Install_action = struct
         Unix.chmod dst permission
     ;;
 
-    let read_variables config_file =
+    let read_variables ~target_dir config_file =
       match Fpath.exists (Path.to_string config_file) with
       | false -> []
       | true ->
@@ -1932,8 +1932,31 @@ module Install_action = struct
             in
             User_error.raise [ message_with_loc; User_error.reason (Pp.verbatim message) ]
         in
+        let target = Path.build target_dir in
+        let sandbox_prefix = Path.to_absolute_filename target in
+        let persistent_target = maybe_drop_sandbox_dir target in
+        let relocate value =
+          match String.drop_prefix value ~prefix:sandbox_prefix with
+          | Some suffix when String.is_empty suffix || Path.is_dir_sep suffix.[0] ->
+            let components =
+              String.map suffix ~f:(fun c -> if Path.is_dir_sep c then '/' else c)
+              |> String.split_on_char ~sep:'/'
+            in
+            (match Path.Local_gen.L.relative_result Path.Local.root components with
+             | Error `Outside_the_workspace -> value
+             | Ok suffix ->
+               Path.append_local persistent_target suffix |> Path.to_absolute_filename)
+          | None | Some _ -> value
+        in
         OpamFile.Dot_config.bindings config
-        |> List.map ~f:(fun (name, value) -> Package_variable_name.of_opam name, value)
+        |> List.map ~f:(fun (name, (value : Variable.value)) ->
+          let value =
+            match value with
+            | B _ -> value
+            | S value -> Variable.S (relocate value)
+            | L values -> Variable.L (List.map values ~f:relocate)
+          in
+          Package_variable_name.of_opam name, value)
     ;;
 
     (* On Windows, .install files may omit .exe for bin/sbin entries.
@@ -2105,7 +2128,7 @@ module Install_action = struct
         |> Section.Map.map ~f:(List.sort ~compare:Path.compare)
       in
       let* cookies =
-        let+ variables = Async.async (fun () -> read_variables config_file) in
+        let+ variables = Async.async (fun () -> read_variables ~target_dir config_file) in
         { Install_cookie.Gen.files; variables }
       in
       Async.async (fun () ->
