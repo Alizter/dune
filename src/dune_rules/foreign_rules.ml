@@ -56,13 +56,18 @@ let foreign_flags_env =
         default_context_flags (Context.build_context context) ocaml.ocaml_config ~project)
       ~f:(fun ~parent expander (env : Dune_env.config) ->
         let+ parent = parent in
-        let foreign_flags lang =
-          Foreign_language.Dict.get env.foreign_flags lang
-          |> Expander.expand_and_eval_set
-               expander
-               ~standard:(Foreign_language.Dict.get parent lang)
+        let c =
+          Expander.expand_and_eval_set
+            expander
+            (Foreign_language.Dict.c env.foreign_flags)
+            ~standard:(Foreign_language.Dict.c parent)
+        and cxx =
+          Expander.expand_and_eval_set
+            expander
+            (Foreign_language.Dict.cxx env.foreign_flags)
+            ~standard:(Foreign_language.Dict.cxx parent)
         in
-        Foreign_language.Dict.make ~c:(foreign_flags C) ~cxx:(foreign_flags Cxx))
+        Foreign_language.Dict.make ~c ~cxx)
   in
   fun ~dir ->
     let* () = Memo.return () in
@@ -71,9 +76,12 @@ let foreign_flags_env =
 
 let () = Fdecl.set Expander.foreign_flags foreign_flags_env
 
-let default_foreign_flags ~dir ~language =
+let default_foreign_flags ~dir ~(language : Foreign_language.t) =
   (let+ dict = foreign_flags_env ~dir in
-   Foreign_language.Dict.get dict language)
+   match language with
+   | C -> Foreign_language.Dict.c dict
+   | Cxx -> Foreign_language.Dict.cxx dict
+   | Asm -> Action_builder.return [])
   |> Action_builder.of_memo_join
 ;;
 
@@ -212,7 +220,7 @@ let include_dir_flags ~expander ~dir ~include_dirs =
 
 let base_flags ~(kind : Foreign_language.t) ~use_standard_flags ~ocaml_config =
   match kind with
-  | Cxx -> []
+  | Cxx | Asm -> []
   | C ->
     (match use_standard_flags with
      | Some true -> []
@@ -361,6 +369,30 @@ let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), 
        ])
 ;;
 
+let build_asm ~sctx ~dir (loc, src, dst) =
+  let ctx = Super_context.context sctx in
+  let* ocaml = Context.ocaml ctx in
+  Super_context.add_rule sctx ~loc ~dir
+  @@
+  let src = Path.build (Foreign.Source.path src) in
+  let architecture = Ocaml_config.architecture ocaml.ocaml_config in
+  let assembler, args =
+    match ocaml.lib_config.ccomp_type, architecture with
+    | (Cc | Other _), _ ->
+      ( Ocaml_config.c_compiler ocaml.ocaml_config
+      , [ Command.Args.A "-c"; A "-o"; Target dst; Dep src ] )
+    | Msvc, "amd64" ->
+      let output = Command.Args.Concat ("", [ A "/Fo"; Target dst ]) in
+      "ml64", [ A "/nologo"; A "/quiet"; output; A "/c"; Dep src ]
+    | Msvc, architecture ->
+      User_error.raise
+        ~loc
+        [ Pp.textf "MSVC assembly requires x86-64, not %s." architecture ]
+  in
+  let assembler = Super_context.resolve_program ~loc:(Some loc) ~dir sctx assembler in
+  Command.run_dyn_prog ~dir:(Path.build dir) assembler args
+;;
+
 (* TODO: [requires] is a confusing name, probably because it's too general: it
    looks like it's a list of libraries we depend on. *)
 let header_files dir_contents =
@@ -417,7 +449,11 @@ let build_o_files
           build_include_flags ~sctx ~dir ~expander ~dir_contents ~requires ~src
         in
         let dst = Path.Build.relative dir (obj ^ Filename.Extension.to_string ext_obj) in
-        let+ () = build_c ~sctx ~dir ~expander ~include_flags (loc, src, dst) in
+        let+ () =
+          match Foreign.Source.language src with
+          | Asm -> build_asm ~sctx ~dir (loc, src, dst)
+          | C | Cxx -> build_c ~sctx ~dir ~expander ~include_flags (loc, src, dst)
+        in
         dst
       in
       Foreign.Source.mode src, Path.build build_file)

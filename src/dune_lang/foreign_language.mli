@@ -3,6 +3,7 @@ open Import
 type t =
   | C
   | Cxx
+  | Asm
 
 val compare : t -> t -> ordering
 val equal : t -> t -> bool
@@ -29,9 +30,7 @@ module Dict : sig
   val mapi : 'a t -> f:(language:language -> 'a -> 'b) -> 'b t
   val make_both : 'a -> 'a t
   val make : c:'a -> cxx:'a -> 'a t
-  val update : 'a t -> language -> f:('a -> 'a) -> 'a t
   val merge : 'a t -> 'b t -> f:('a -> 'b -> 'c) -> 'c t
-  val get : 'a t -> language -> 'a
 end
 
 val source_extensions : (t * (int * int)) String.Map.t

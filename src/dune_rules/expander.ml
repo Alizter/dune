@@ -293,17 +293,24 @@ let expand_melange_emit ~source t arg =
 let foreign_flags = Fdecl.create Dyn.opaque
 
 let cc t =
-  let make (language : Foreign_language.t) =
-    let+ cc =
-      let* cc = Action_builder.of_memo @@ Fdecl.get foreign_flags ~dir:t.dir in
-      Foreign_language.Dict.get cc language
+  let flags = Action_builder.of_memo @@ Fdecl.get foreign_flags ~dir:t.dir in
+  let make cc =
+    let+ cc = cc
     and+ c_compiler =
       let+ ocaml = Action_builder.of_memo @@ Context.ocaml t.context in
       Ocaml_config.c_compiler ocaml.ocaml_config
     in
     strings (c_compiler :: cc)
   in
-  { Foreign_language.Dict.c = make C; cxx = make Cxx }
+  { Foreign_language.Dict.c =
+      make
+        (let* flags = flags in
+         Foreign_language.Dict.c flags)
+  ; cxx =
+      make
+        (let* flags = flags in
+         Foreign_language.Dict.cxx flags)
+  }
 ;;
 
 let get_prog = function

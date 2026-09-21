@@ -4,16 +4,20 @@ module T = struct
   type t =
     | C
     | Cxx
+    | Asm
 
   let repr =
     Repr.variant
       "foreign-language"
       [ Repr.case0 "C" ~test:(function
           | C -> true
-          | Cxx -> false)
+          | Cxx | Asm -> false)
       ; Repr.case0 "Cxx" ~test:(function
           | Cxx -> true
-          | C -> false)
+          | C | Asm -> false)
+      ; Repr.case0 "Asm" ~test:(function
+          | Asm -> true
+          | C | Cxx -> false)
       ]
   ;;
 
@@ -31,6 +35,7 @@ include T
 let proper_name = function
   | C -> "C"
   | Cxx -> "C++"
+  | Asm -> "Assembly"
 ;;
 
 include Comparable.Make (T)
@@ -48,23 +53,6 @@ module Dict = struct
   let mapi { c; cxx } ~f = { c = f ~language:C c; cxx = f ~language:Cxx cxx }
   let make_both a = { c = a; cxx = a }
   let make ~c ~cxx = { c; cxx }
-
-  let get { c; cxx } = function
-    | C -> c
-    | Cxx -> cxx
-  ;;
-
-  let add t k v =
-    match k with
-    | C -> { t with c = v }
-    | Cxx -> { t with cxx = v }
-  ;;
-
-  let update t k ~f =
-    let v = get t k in
-    add t k (f v)
-  ;;
-
   let merge t1 t2 ~f = { c = f t1.c t2.c; cxx = f t1.cxx t2.cxx }
 end
 
@@ -72,7 +60,14 @@ let header_extension = Filename.Extension.h
 
 let source_extensions =
   String.Map.of_list_exn
-    [ "c", (C, (1, 0)); "cpp", (Cxx, (1, 0)); "cxx", (Cxx, (1, 8)); "cc", (Cxx, (1, 10)) ]
+    [ "c", (C, (1, 0))
+    ; "cpp", (Cxx, (1, 0))
+    ; "cxx", (Cxx, (1, 8))
+    ; "cc", (Cxx, (1, 10))
+    ; "S", (Asm, (3, 25))
+    ; "s", (Asm, (3, 25))
+    ; "asm", (Asm, (3, 25))
+    ]
 ;;
 
 let has_foreign_extension ~fn =
