@@ -12,9 +12,9 @@ type t =
   ; empty_module_interface_if_absent : bool
   ; libraries : Lib_dep.t list
   ; melange_libraries : Lib_dep.t list option
-  ; foreign_archives : (Loc.t * Foreign.Archive.t) list
-  ; extra_objects : Foreign.Objects.t
-  ; foreign_stubs : Foreign.Stubs.t list
+  ; foreign_archives : (Loc.t * Foreign_archive.t) list
+  ; extra_objects : Foreign_objects.t
+  ; foreign_stubs : Foreign_stubs.t list
   ; preprocess : Preprocess.preprocess
   ; melange_preprocess : Preprocess.preprocess
   ; lint : Lint.t

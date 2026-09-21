@@ -212,7 +212,7 @@ let to_dune_library
           if Filename.Extension.Or_empty.check ext ext_lib
           then (
             let file = Path.relative_fname t.dir fname in
-            if String.starts_with ~prefix:Foreign.Archive.Name.lib_file_prefix f
+            if String.starts_with ~prefix:Foreign_archive.Name.lib_file_prefix f
             then Left file
             else Right file)
           else Skip)

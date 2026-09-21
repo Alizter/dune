@@ -77,7 +77,7 @@ let decode =
        ; melange_libraries = None
        ; melange_modules = None
        ; foreign_archives = []
-       ; extra_objects = Foreign.Objects.empty
+       ; extra_objects = Foreign_objects.empty
        ; foreign_stubs = []
        ; preprocess
        ; melange_preprocess = preprocess

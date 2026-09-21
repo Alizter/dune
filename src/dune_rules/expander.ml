@@ -302,15 +302,15 @@ let cc t =
     in
     strings (c_compiler :: cc)
   in
-  { Foreign_language.Dict.c =
-      make
-        (let* { Foreign_language.Dict.c; _ } = flags in
-         c)
-  ; cxx =
-      make
-        (let* { Foreign_language.Dict.cxx; _ } = flags in
-         cxx)
-  }
+  Foreign_language.Dict.make
+    ~c:
+      (make
+         (let* flags = flags in
+          Foreign_language.Dict.c flags))
+    ~cxx:
+      (make
+         (let* flags = flags in
+          Foreign_language.Dict.cxx flags))
 ;;
 
 let get_prog = function
@@ -646,8 +646,8 @@ let expand_pform_var (context : Context.t) ~dir ~source (var : Pform.Var.t) =
                 |> Path.build)
            ]
            |> Memo.return))
-  | Cc -> Need_full_expander (fun t -> With (cc t).c)
-  | Cxx -> Need_full_expander (fun t -> With (cc t).cxx)
+  | Cc -> Need_full_expander (fun t -> With (Foreign_language.Dict.c (cc t)))
+  | Cxx -> Need_full_expander (fun t -> With (Foreign_language.Dict.cxx (cc t)))
   | Toolchain ->
     (match Context.findlib_toolchain context with
      | Some toolchain -> Context_name.to_string toolchain

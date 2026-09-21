@@ -13,9 +13,9 @@ type t =
   ; empty_module_interface_if_absent : bool
   ; libraries : Lib_dep.t list
   ; melange_libraries : Lib_dep.t list option
-  ; foreign_archives : (Loc.t * Foreign.Archive.t) list
-  ; extra_objects : Foreign.Objects.t
-  ; foreign_stubs : Foreign.Stubs.t list
+  ; foreign_archives : (Loc.t * Foreign_archive.t) list
+  ; extra_objects : Foreign_objects.t
+  ; foreign_stubs : Foreign_stubs.t list
   ; preprocess : Preprocess.preprocess
   ; melange_preprocess : Preprocess.preprocess
   ; lint : Preprocess.Without_instrumentation.t Preprocess.Per_module.t
@@ -93,13 +93,13 @@ let decode (for_ : for_) =
     | Executable -> false
   in
   let only_in_library decode = if in_library then decode else return None in
-  let add_stubs language ~loc ~names ~flags foreign_stubs =
+  let add_stubs languages ~loc ~names ~flags foreign_stubs =
     match names with
     | None -> foreign_stubs
     | Some names ->
       let names = Ordered_set_lang.replace_standard_with_empty names in
       let flags = Option.value ~default:Ordered_set_lang.Unexpanded.standard flags in
-      Foreign.Stubs.make ~loc ~language ~names ~flags :: foreign_stubs
+      Foreign_stubs.make ~loc ~languages ~names ~flags :: foreign_stubs
   in
   let+ loc = loc
   and+ instrumentation = Preprocess.Instrumentation.instrumentation
@@ -109,17 +109,17 @@ let decode (for_ : for_) =
   and+ foreign_stubs =
     multi_field
       "foreign_stubs"
-      (Dune_lang.Syntax.since Stanza.syntax (2, 0) >>> Foreign.Stubs.decode)
+      (Dune_lang.Syntax.since Stanza.syntax (2, 0) >>> Foreign_stubs.decode)
   and+ foreign_archives =
     field_o
       "foreign_archives"
       (Dune_lang.Syntax.since Stanza.syntax (2, 0)
-       >>> repeat (located Foreign.Archive.decode))
+       >>> repeat (located Foreign_archive.decode))
   and+ extra_objects =
     field
       "extra_objects"
-      (Dune_lang.Syntax.since Stanza.syntax (3, 5) >>> Foreign.Objects.decode)
-      ~default:Foreign.Objects.empty
+      (Dune_lang.Syntax.since Stanza.syntax (3, 5) >>> Foreign_objects.decode)
+      ~default:Foreign_objects.empty
   and+ c_flags =
     only_in_library
       (field_o "c_flags" (use_foreign >>> Ordered_set_lang.Unexpanded.decode))
@@ -194,8 +194,8 @@ let decode (for_ : for_) =
   in
   let foreign_stubs =
     foreign_stubs
-    |> add_stubs C ~loc:c_names_loc ~names:c_names ~flags:c_flags
-    |> add_stubs Cxx ~loc:cxx_names_loc ~names:cxx_names ~flags:cxx_flags
+    |> add_stubs [ C ] ~loc:c_names_loc ~names:c_names ~flags:c_flags
+    |> add_stubs [ Cxx ] ~loc:cxx_names_loc ~names:cxx_names ~flags:cxx_flags
   in
   let libraries =
     let ctypes_libraries =
@@ -230,7 +230,7 @@ let decode (for_ : for_) =
          used this naming convention; [foreign_archives] does not use it and
          allows users to name archives as they like (they still need to add
          the "lib" prefix, however, since standard linkers require it). *)
-      | Some name -> (loc, Foreign.Archive.stubs name) :: foreign_archives)
+      | Some name -> (loc, Foreign_archive.stubs name) :: foreign_archives)
   in
   { loc
   ; preprocess
@@ -255,18 +255,19 @@ let decode (for_ : for_) =
 let has_foreign t =
   List.is_non_empty t.foreign_stubs
   || List.is_non_empty t.foreign_archives
-  || (not (Foreign.Objects.is_empty t.extra_objects))
+  || (not (Foreign_objects.is_empty t.extra_objects))
   || Option.is_some t.ctypes
 ;;
 
 let has_foreign_cxx t =
   List.exists
-    ~f:(fun stub -> Foreign_language.(equal Cxx stub.Foreign.Stubs.language))
+    ~f:(fun { Foreign_stubs.languages; _ } ->
+      List.exists (Nonempty_list.to_list languages) ~f:Foreign_language.(equal Cxx))
     t.foreign_stubs
 ;;
 
 let has_mode_dependent_foreign_stubs t =
-  List.exists ~f:Foreign.Stubs.is_mode_dependent t.foreign_stubs
+  List.exists ~f:Foreign_stubs.is_mode_dependent t.foreign_stubs
 ;;
 
 let has_foreign_stubs t =

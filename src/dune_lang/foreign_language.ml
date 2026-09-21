@@ -34,6 +34,17 @@ let proper_name = function
   | Asm -> "Assembly"
 ;;
 
+let all = Nonempty_list.[ C; Cxx; Asm ]
+
+let decode =
+  let open Decoder in
+  sum
+    [ "c", return C
+    ; "cxx", return Cxx
+    ; "asm", Syntax.since Stanza.syntax (3, 26) >>> return Asm
+    ]
+;;
+
 module Dict = struct
   type 'a t =
     { c : 'a
@@ -41,7 +52,11 @@ module Dict = struct
     }
 
   let equal f { c; cxx } t = f c t.c && f cxx t.cxx
-  let make_both a = { c = a; cxx = a }
+  let c t = t.c
+  let cxx t = t.cxx
+  let map { c; cxx } ~f = { c = f c; cxx = f cxx }
+  let mapi { c; cxx } ~f = { c = f ~language:C c; cxx = f ~language:Cxx cxx }
+  let make_all a = { c = a; cxx = a }
   let make ~c ~cxx = { c; cxx }
 end
 

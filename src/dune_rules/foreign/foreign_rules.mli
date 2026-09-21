@@ -10,7 +10,7 @@ val foreign_flags
 
 val build_o_files
   :  sctx:Super_context.t
-  -> foreign_sources:Foreign.Sources.t
+  -> foreign_sources:Foreign_source_files.t
   -> dir:Path.Build.t
   -> expander:Expander.t
   -> requires:Lib.t list Resolve.t
@@ -30,7 +30,7 @@ val build_include_flags
   -> expander:Expander.t
   -> dir_contents:Dir_contents.t
   -> requires:Lib.t list Resolve.t
-  -> src:Foreign.Source.t
+  -> src:Foreign_source.t
   -> Command.Args.without_targets Command.Args.t
 
 (** Assembler and arguments, including the source dependency and object target. *)
@@ -40,7 +40,7 @@ val asm_compile_command
   -> expander:Expander.t
   -> ocaml_config:Ocaml_config.t
   -> loc:Loc.t
-  -> src:Foreign.Source.t
+  -> src:Foreign_source.t
   -> dst:Path.Build.t
   -> string * Command.Args.any Command.Args.t list
 
@@ -51,6 +51,6 @@ val c_compile_args
   -> dir:Path.Build.t
   -> expander:Expander.t
   -> loc:Loc.t
-  -> src:Foreign.Source.t
+  -> src:Foreign_source.t
   -> include_flags:Command.Args.without_targets Command.Args.t
   -> Command.Args.without_targets Command.Args.t

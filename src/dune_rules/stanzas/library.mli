@@ -18,7 +18,7 @@ type t =
          [link_time_flags_for_c_compiler] and [library_flags] to
          [link_time_flags_for_ocaml_compiler], both here and in the Dune
          language, to make it easier to understand the purpose of various
-         flags. Also we could add [c_library_flags] to [Foreign.Stubs.t]. *)
+         flags. Also we could add [c_library_flags] to [Foreign_stubs.t]. *)
   ; library_flags : Ordered_set_lang.Unexpanded.t
   ; c_library_flags : Ordered_set_lang.Unexpanded.t
   ; virtual_deps : (Loc.t * Lib_name.t) list
@@ -54,10 +54,10 @@ val has_foreign : t -> bool
 val has_foreign_cxx : t -> bool
 
 (** The foreign stubs archive. *)
-val stubs_archive : t -> Foreign.Archive.t option
+val stubs_archive : t -> Foreign_archive.t option
 
 (** The list of foreign archives. *)
-val foreign_archives : t -> Foreign.Archive.t list
+val foreign_archives : t -> Foreign_archive.t list
 
 (** The [lib*.a] files of all foreign archives, including foreign stubs. [dir]
     is the directory the library is declared in. Only files relevant to the
