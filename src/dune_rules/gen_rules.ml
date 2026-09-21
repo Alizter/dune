@@ -821,17 +821,10 @@ let gen_rules ctx ~dir components =
         let subdirs =
           match rest with
           | [] ->
-            (* Here we retain the extra subdirectories that we dispatched
-               above. *)
+            (* Retain the independent layout roots registered by [Main.init]
+               when the legacy install namespace is loaded. *)
             Subdir_set.union
               subdirs
-              (* CR-someday Alizter: Sharing these directory names with the
-                 dispatch cases above would avoid duplicate strings, but
-                 dispatch and retention could still get out of sync.
-
-                 It would be better to have a structured [Gen_rules] API where
-                 registering a generated child dispatcher automatically retains
-                 that child. *)
               (Subdir_set.of_list
                  [ Filename.of_string_exn ".binaries"
                  ; Filename.of_string_exn ".packages"

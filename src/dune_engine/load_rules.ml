@@ -611,17 +611,21 @@ end = struct
            combine_gen_rules_result ~parent ~child)
     ;;
 
-    let gen_rules_impl d =
-      match Dir_triage.Build_directory.parent d with
-      | None -> call_rules_generator d
-      | Some d' ->
-        Gen_rules.gen_rules d'
-        >>= (function
-         | Under_directory_target _ as res -> Memo.return res
-         | Normal rules ->
-           if Path.Build.Map.mem rules.directory_targets d.dir
-           then Memo.return (Under_directory_target { directory_target_ancestor = d.dir })
-           else call_rules_generator d)
+    let gen_rules_impl ({ Dir_triage.Build_directory.dir; _ } as d) =
+      let* roots = Memo.Lazy.force (Build_config.get ()).independent_rule_roots in
+      if Path.Build.Set.mem roots dir
+      then call_rules_generator d
+      else (
+        match Dir_triage.Build_directory.parent d with
+        | None -> call_rules_generator d
+        | Some d' ->
+          Gen_rules.gen_rules d'
+          >>= (function
+           | Under_directory_target _ as res -> Memo.return res
+           | Normal rules ->
+             if Path.Build.Map.mem rules.directory_targets dir
+             then Memo.return (Under_directory_target { directory_target_ancestor = dir })
+             else call_rules_generator d))
     ;;
 
     let gen_rules =
@@ -738,7 +742,11 @@ end = struct
            directories force the generation of ".dune/configurator". We need a
            better way to deal with such cases. *)
         Memo.return Generated_directory_restrictions.Unrestricted
-      | _ -> Generated_directory_restrictions.allowed_by_parent ~dir
+      | _ ->
+        let* roots = Memo.Lazy.force (Build_config.get ()).independent_rule_roots in
+        if Path.Build.Set.mem roots dir
+        then Memo.return Generated_directory_restrictions.Unrestricted
+        else Generated_directory_restrictions.allowed_by_parent ~dir
     in
     let* () =
       match allowed_by_parent with
