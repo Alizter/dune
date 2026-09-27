@@ -418,7 +418,10 @@ let gen_project_rules =
       | None -> Memo.return ()
       | Some _ when dune_version < version -> Memo.return ()
       | Some loc ->
-        let+ vendored = Source_tree.is_vendored (Dune_project.root project) in
+        let+ vendored =
+          Source_tree.is_vendored
+            (Dune_project.root project |> Source_path.as_workspace_exn)
+        in
         if not vendored
         then
           Dune_lang.Syntax.Warning.deprecated_in
@@ -444,7 +447,7 @@ let gen_project_rules =
              (Warning_emit.Context.project project)
              (fun () ->
                 let+ () = Memo.return () in
-                let loc = Loc.in_file (Path.source project_file) in
+                let loc = Loc.in_file (Source_path.to_path project_file) in
                 User_message.make
                   ~loc
                   [ Pp.text
@@ -470,7 +473,9 @@ let gen_project_rules =
     let* () = Memo.return () in
     let project = Source_tree.Dir.project source_dir in
     match
-      Path.Source.equal (Source_tree.Dir.path source_dir) (Dune_project.root project)
+      Source_path.equal
+        (Source_path.workspace (Source_tree.Dir.path source_dir))
+        (Dune_project.root project)
     with
     | false -> Memo.return Rules.empty
     | true -> Rules.collect_unit (fun () -> rules sctx project)
