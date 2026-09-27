@@ -47,7 +47,7 @@ let all_direct_targets dir =
   |> List.filter_map ~f:(fun (ctx, (ctx_type : Build_config.Context_type.t)) ->
     match ctx_type with
     | Empty -> None
-    | With_sources -> Some ctx)
+    | With_sources _ -> Some ctx)
   |> Memo.parallel_map ~f:(fun (ctx : Dune_engine.Build_context.t) ->
     Source_tree_map_reduce.map_reduce
       root

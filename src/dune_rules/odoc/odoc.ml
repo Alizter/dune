@@ -11,9 +11,9 @@ module Scope_key : sig
 end = struct
   let file_key project =
     let name = Dune_project.name project in
-    let root = Dune_project.root project |> Source_path.as_workspace_exn in
+    let root = Dune_project.root project in
     let digest =
-      Digest.repr Repr.(pair Dune_project_name.repr Path.Source.repr) (name, root)
+      Digest.repr Repr.(pair Dune_project_name.repr Source_path.repr) (name, root)
       |> Digest.to_string
     in
     String.take digest 12
@@ -1243,7 +1243,7 @@ let setup_private_library_doc_alias sctx ~scope ~dir (l : Library.t) =
   | Private _ ->
     let ctx = Super_context.context sctx in
     let* lib =
-      let src_dir = Path.drop_optional_build_context_src_exn (Path.build dir) in
+      let src_dir = Scope.source_dir scope dir in
       Lib.DB.find_lib_id_even_when_hidden
         (Scope.libs scope)
         (Local (Library.to_lib_id ~src_dir l))
