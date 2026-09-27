@@ -114,7 +114,8 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
          (Private_context.t, Empty)
          :: (Install.Context.install_context, Empty)
          :: (Fetch_rules.context, Empty)
-         :: List.map contexts ~f:(fun ctx -> ctx, With_sources)))
+         :: List.map contexts ~f:(fun ctx ->
+           ctx, With_sources { build_only_sub_dirs = Filename.Set.empty })))
     ~rule_generator:(module Gen_rules)
     ~implicit_default_alias
     ~execution_parameters:(execution_parameters ~sandbox_actions)
