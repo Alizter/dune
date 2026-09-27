@@ -11,7 +11,7 @@ module Scope_key : sig
 end = struct
   let file_key project =
     let name = Dune_project.name project in
-    let root = Dune_project.root project in
+    let root = Dune_project.root project |> Source_path.as_workspace_exn in
     let digest =
       Digest.repr Repr.(pair Dune_project_name.repr Path.Source.repr) (name, root)
       |> Digest.to_string
@@ -1119,7 +1119,7 @@ let setup_package_aliases_format sctx (pkg : Package.t) (output : Output_format.
   let ctx = Super_context.context sctx in
   let name = Package.name pkg in
   let alias =
-    let pkg_dir = Package.dir pkg in
+    let pkg_dir = Package.dir pkg |> Source_path.as_workspace_exn in
     let dir = Path.Build.append_source (Context.build_dir ctx) pkg_dir in
     Output_format.alias output ~dir
   in
