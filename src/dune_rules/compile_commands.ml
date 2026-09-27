@@ -98,12 +98,9 @@ let get_lib_requires ~dir ~scope (lib : Library.t) =
 
 (* Collect compile command entries from the selected foreign stanzas. *)
 let collect_entries sctx stanzas =
-  let ctx = Super_context.context sctx in
   let open Memo.O in
   Memo.parallel_map stanzas ~f:(fun (dune_file, stanza) ->
-    let dir =
-      Path.Build.append_source (Context.build_dir ctx) (Dune_file.dir dune_file)
-    in
+    let dir = Dune_file.output_dir dune_file in
     let* expander = Super_context.expander sctx ~dir
     and* dir_contents = Dir_contents.get sctx ~dir in
     let* foreign_sources = Dir_contents.foreign_sources dir_contents in
