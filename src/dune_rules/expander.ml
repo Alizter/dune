@@ -914,42 +914,51 @@ let visible_packages t =
   if not lock_dir_active
   then Memo.return Package.Name.Selection.All
   else (
-    match Dune_project.exclusive_package t.project ~dir:t.source_dir with
-    | None -> Memo.return Package.Name.Selection.All
-    | Some pkg_id ->
-      let+ packages = Dune_load.packages ()
-      and+ locked_packages =
-        Lock_dir.get_exn context
-        >>| fun lock_dir ->
-        Dune_pkg.Lock_dir.Packages.to_pkg_list lock_dir.packages
-        |> List.map ~f:(fun (pkg : Lock_dir.Pkg.t) -> pkg.info.name)
-        |> Package.Name.Set.of_list
-      in
-      let name = Package.Id.name pkg_id in
-      let visible = Package.Name.Set.singleton name in
-      (match Package.Name.Map.find packages name with
-       | None -> Package.Name.Selection.Only visible
-       | Some pkg ->
-         let visible =
-           List.fold_left
-             (Package.depends pkg)
-             ~init:visible
-             ~f:(fun acc (dep : Package_dependency.t) ->
-               Package.Name.Set.add acc dep.name)
+    match Pkg_sources.package_of_artifact_path t.dir with
+    | Some name ->
+      let* candidate = Pkg_sources.find_candidate context name in
+      (match candidate with
+       | None ->
+         Code_error.raise
+           "Mounted package has no selected source"
+           [ "package", Package.Name.to_dyn name ]
+       | Some candidate ->
+         let+ depends = Pkg_sources.Candidate.dependencies candidate in
+         Package.Name.Selection.Only (Package.Name.Set.add depends name))
+    | None ->
+      (match Dune_project.exclusive_package t.project ~dir:t.source_dir with
+       | None -> Memo.return Package.Name.Selection.All
+       | Some pkg_id ->
+         let+ packages = Dune_load.packages ()
+         and+ locked_packages =
+           Lock_dir.get_exn context
+           >>| fun lock_dir ->
+           Dune_pkg.Lock_dir.Packages.to_pkg_list lock_dir.packages
+           |> List.map ~f:(fun (pkg : Lock_dir.Pkg.t) -> pkg.info.name)
+           |> Package.Name.Set.of_list
          in
-         (* An effective depopt is one that was actually solved: either a
-            workspace package (always present) or a package the solver put in
-            the lock directory. *)
-         let is_present dep_name =
-           Package.Name.Map.mem packages dep_name
-           || Package.Name.Set.mem locked_packages dep_name
-         in
-         Only
-           (List.fold_left
-              (Package.depopts pkg)
-              ~init:visible
-              ~f:(fun acc (dep : Package_dependency.t) ->
-                if is_present dep.name then Package.Name.Set.add acc dep.name else acc))))
+         let name = Package.Id.name pkg_id in
+         let visible = Package.Name.Set.singleton name in
+         (match Package.Name.Map.find packages name with
+          | None -> Package.Name.Selection.Only visible
+          | Some pkg ->
+            let visible =
+              List.fold_left
+                (Package.depends pkg)
+                ~init:visible
+                ~f:(fun acc (dep : Package_dependency.t) ->
+                  Package.Name.Set.add acc dep.name)
+            in
+            let is_present dep_name =
+              Package.Name.Map.mem packages dep_name
+              || Package.Name.Set.mem locked_packages dep_name
+            in
+            Only
+              (List.fold_left
+                 (Package.depopts pkg)
+                 ~init:visible
+                 ~f:(fun acc (dep : Package_dependency.t) ->
+                   if is_present dep.name then Package.Name.Set.add acc dep.name else acc)))))
 ;;
 
 let expand_pform_macro
