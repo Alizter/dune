@@ -18,7 +18,6 @@ The broken symlink is detected:
   $ build_pkg foo 2>&1 | sanitize_pkg_digest foo.0.0.1 \
   > | dune_cmd subst '\.sandbox/[a-f0-9]+' '.sandbox/$SANDBOX'
   Error:
-  readlink(_build/.sandbox/$SANDBOX/_private/default/.pkg/foo.0.0.1-DIGEST_HASH/target/lib/foo/nonexistent.txt): No such file or directory
-  -> required by
-     _build/_private/default/.pkg/foo.0.0.1-DIGEST_HASH/target
+  readlink(_build/.sandbox/$SANDBOX/default/.lockfile/pkg/foo/.opam/foo/target/lib/foo/nonexistent.txt): No such file or directory
+  -> required by _build/default/.lockfile/pkg/foo/.opam/foo/target
   [1]

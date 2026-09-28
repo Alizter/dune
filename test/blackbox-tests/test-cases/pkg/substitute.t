@@ -21,8 +21,7 @@ This should take the `foo.ml.in`, do the substitutions and create `foo.ml`:
 
 Demonstrate that the original sources aren't modified:
 
-  $ src=_build/_private/default/.pkg/test/source/foo.ml; [ -e $src ] && cat $src
-  [1]
+  $ test ! -e test-source/foo.ml
 
 This should also work with any other filename combination:
 
@@ -124,9 +123,9 @@ It is also possible to use variables of your dependencies:
   > There is also some paths set:
   > '%%{dependency:lib}%%' is '%{dependency:lib}%'
   > EOF
-  $ build_pkg test 2>&1 | sanitize_pkg_digest dependency.0.0.1
+  $ build_pkg test 2>&1 | censor
   There is also some paths set:
-  '%{dependency:lib}%' is '../../dependency.0.0.1-DIGEST_HASH/target/lib/dependency'
+  '%{dependency:lib}%' is '../../../../../../../install/default/.packages/$DIGEST/lib/dependency'
 
 The substitute action should not observe the environment:
 
