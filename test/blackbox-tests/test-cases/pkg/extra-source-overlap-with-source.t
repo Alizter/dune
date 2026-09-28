@@ -32,8 +32,7 @@ file in the package's source.
 The build action observes the overlay before installation, without modifying
 the workspace input:
 
-  $ digest=$($dune pkg print-digest foo)
-  $ cat _build/_private/default/.pkg/$digest/target/share/foo/observed
+  $ cat "$(get_build_pkg_dir foo)/target/share/foo/observed"
   from extra source
   $ cat foo-source/foo.txt
   from source
@@ -41,5 +40,5 @@ the workspace input:
 The prepared source directory also stays unchanged. The overlay is confined to
 the writable build copy:
 
-  $ cat _build/_private/default/.pkg/$digest/source/foo.txt
+  $ cat _build/_fetch/url/*/dir/foo.txt
   from source

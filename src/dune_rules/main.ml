@@ -49,6 +49,8 @@ let execution_parameters ~sandbox_actions =
     else (
       match source_backed_dir path with
       | None -> Memo.return ep
+      | Some path when Option.is_some (Pkg_sources.package_of_artifact_path path) ->
+        Memo.return ep
       | Some path ->
         let+ loaded_project = Dune_load.find_loaded_project ~dir:path in
         let action_project_root =
@@ -103,7 +105,8 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
          let open Memo.O in
          let+ contexts = Workspace.workspace () >>| Workspace.build_contexts in
          List.concat_map contexts ~f:(fun (ctx : Build_context.t) ->
-           List.map [ ".packages"; ".binaries" ] ~f:(fun name ->
+           Path.Build.relative ctx.build_dir Pkg_sources.root_dir_basename
+           :: List.map [ ".packages"; ".binaries" ] ~f:(fun name ->
              Path.Build.relative (Install.Context.dir ~context:ctx.name) name))
          |> Path.Build.Set.of_list))
     ~contexts:
@@ -115,7 +118,12 @@ let init ~sandbox_actions ~sandboxing_preference () : unit =
          :: (Install.Context.install_context, Empty)
          :: (Fetch_rules.context, Empty)
          :: List.map contexts ~f:(fun ctx ->
-           ctx, With_sources { build_only_sub_dirs = Filename.Set.empty })))
+           ( ctx
+           , With_sources
+               { build_only_sub_dirs =
+                   Filename.Set.singleton
+                     (Filename.of_string_exn Pkg_sources.root_dir_basename)
+               } ))))
     ~rule_generator:Gen_rules.gen_rules
     ~implicit_default_alias
     ~execution_parameters:(execution_parameters ~sandbox_actions)

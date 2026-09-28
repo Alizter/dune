@@ -105,4 +105,4 @@ Now we finally make the OCaml package for testing through the lock file:
 This should display the ocaml from the lock file rather than shadowsystemocaml
 
   $ DUNE_CONFIG__SYS_OCAML_VERSION=4.14.1 dune build @foo 2>&1 | sanitize_pkg_digest mycaml.0.0.1
-  $TESTCASE_ROOT/_build/_private/default/.pkg/mycaml.0.0.1-DIGEST_HASH/target/bin/ocamlc
+  $TESTCASE_ROOT/_build/default/.lockfile/pkg/mycaml/.opam/mycaml/target/bin/ocamlc
