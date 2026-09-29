@@ -600,10 +600,11 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
   let* dir_status = Dir_status.DB.get ~dir
   and* loaded_project = Dune_load.find_loaded_project ~dir in
   let* source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
-  let mounted =
-    match Build_partition.purpose (Loaded_project.partition loaded_project) with
-    | Mounted -> true
-    | Workspace -> false
+  let source_files =
+    match source_tree_dir with
+    | None -> Path.Build.Map.empty
+    | Some source_dir ->
+      Path.Build.Map.singleton dir (Source_file_dir.rules ~dir source_dir)
   in
   match dir_status with
   | Lock_dir _ -> Memo.return Gen_rules.no_rules
@@ -663,7 +664,7 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
                   ; Filename.of_string_exn Dune_lang.Oxcaml.parameterised_dir
                   ]
             in
-            Filename.Set.union source_subdirs (Filename.Set.union automatic toplevel)
+            Filename.Set.union automatic toplevel
           in
           fun rules ->
             let rules =
@@ -698,7 +699,13 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
                       compile_commands_rules)
                    rules)
             in
-            Gen_rules.rules_for ~dir ~directory_targets ~allowed_subdirs rules
+            Gen_rules.rules_for
+              ~dir
+              ~directory_targets
+              ~source_subdirs
+              ~source_files
+              ~allowed_subdirs
+              rules
         in
         match dir_status with
         | Lock_dir _ -> Gen_rules.rules_here Gen_rules.Rules.empty
@@ -715,18 +722,13 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
           |> make_rules
           |> Gen_rules.rules_here
       in
-      match mounted, source_tree_dir with
-      | true, Some source_dir ->
-        Pkg_sources.add_artifact_source_rules ~dir ~source_dir rules
-      | true, None -> rules
-      | false, _ ->
-        (match Source_path.as_workspace src_dir with
+      match Source_path.as_workspace src_dir with
+      | None -> rules
+      | Some src_dir ->
+        (match Opam_create.gen_rules sctx ~dir ~nearest_src_dir ~src_dir with
          | None -> rules
-         | Some src_dir ->
-           (match Opam_create.gen_rules sctx ~dir ~nearest_src_dir ~src_dir with
-            | None -> rules
-            | Some opam_rules ->
-              Gen_rules.map_rules rules ~f:(Gen_rules.Rules.combine_exn opam_rules)))
+         | Some opam_rules ->
+           Gen_rules.map_rules rules ~f:(Gen_rules.Rules.combine_exn opam_rules))
     and+ melange_rules = Melange_rules.setup_emit_js_rules sctx ~dir in
     Gen_rules.combine melange_rules rules
 ;;
