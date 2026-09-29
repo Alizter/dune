@@ -455,8 +455,17 @@ let dune_files context =
 ;;
 
 let source_tree_dir ~dir =
-  let* project = find_loaded_project ~dir in
-  Loaded_project.source_tree_dir project dir
+  match Path.Build.extract_build_context dir with
+  | None -> Memo.return None
+  | Some (context, _) ->
+    let* valid =
+      Per_context.valid (Context_name.of_string (Filename.to_string context))
+    in
+    if not valid
+    then Memo.return None
+    else
+      let* project = find_loaded_project ~dir in
+      Loaded_project.source_tree_dir project dir
 ;;
 
 let find_loaded_project_by_identity ~context ~identity =
