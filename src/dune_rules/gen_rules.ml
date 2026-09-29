@@ -382,7 +382,10 @@ let gen_rules_source_only sctx ~dir source_dir =
     let* sctx = sctx in
     let+ () = gen_common_directory_rules sctx ~dir (Some source_dir)
     and+ () =
-      define_all_alias ~dir ~js_targets:[] ~project:(Source_tree.Dir.project source_dir)
+      define_all_alias
+        ~dir
+        ~js_targets:[]
+        ~project:(Source_tree.Rules.Dir.project source_dir)
     in
     ())
 ;;
@@ -618,10 +621,9 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
         | None, Some src_dir -> Source_tree.find_dir (Path.Source.parent_exn src_dir)
       in
       let* has_nearest_source_dir =
-        match nearest_src_dir, mounted, source_tree_dir with
-        | Some _, _, _ | None, true, Some _ -> Memo.return true
-        | None, false, _ -> Memo.return false
-        | None, true, None ->
+        match source_tree_dir with
+        | Some _ -> Memo.return true
+        | None ->
           (match Path.Build.parent dir with
            | None -> Memo.return false
            | Some parent ->
@@ -634,10 +636,10 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
               dir_status
               ~jsoo_enabled:Jsoo_rules.jsoo_enabled
               ~dir
-          and+ mounted_source_subdirs =
-            (match mounted, source_tree_dir with
-             | false, _ | _, None -> Filename.Set.empty
-             | true, Some source_dir ->
+          and+ source_subdirs =
+            (match source_tree_dir with
+             | None -> Filename.Set.empty
+             | Some source_dir ->
                Source_tree.Rules.Dir.sub_dir_names source_dir
                |> Filename.Array.Set.to_list
                |> Filename.Set.of_list)
@@ -661,9 +663,7 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
                   ; Filename.of_string_exn Dune_lang.Oxcaml.parameterised_dir
                   ]
             in
-            Filename.Set.union
-              mounted_source_subdirs
-              (Filename.Set.union automatic toplevel)
+            Filename.Set.union source_subdirs (Filename.Set.union automatic toplevel)
           in
           fun rules ->
             let rules =
@@ -685,21 +685,17 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
                   (Rules.union (Rules.union project_rules automatic_subdir_rules) rules)
               in
               let+ compile_commands_rules =
-                (* Generate compile_commands.json only for the merlin
-                   context at the workspace root. Mounted package dispatch
-                   also gives package roots an empty [components] list. *)
-                if mounted
-                then Memo.return Rules.empty
-                else (
-                  match components with
-                  | [] ->
-                    let* sctx = sctx in
-                    if Context.merlin (Super_context.context sctx)
-                    then
-                      Rules.collect_unit (fun () ->
-                        Compile_commands.gen_rules sctx ~rules)
-                    else Memo.return Rules.empty
-                  | _ -> Memo.return Rules.empty)
+                let { Build_context.build_dir; _ } =
+                  Build_partition.build_context (Loaded_project.partition loaded_project)
+                in
+                if Path.Build.equal dir build_dir
+                then
+                  let* sctx = sctx in
+                  if Context.merlin (Super_context.context sctx)
+                  then
+                    Rules.collect_unit (fun () -> Compile_commands.gen_rules sctx ~rules)
+                  else Memo.return Rules.empty
+                else Memo.return Rules.empty
               in
               Rules.union rules compile_commands_rules
             in
