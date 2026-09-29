@@ -161,7 +161,14 @@ module Build_config = struct
           ?(directory_targets = Rules.empty.directory_targets)
           rules
       =
-      let rules = { Rules.build_dir_only_sub_dirs; directory_targets; rules } in
+      let rules =
+        { Rules.build_dir_only_sub_dirs
+        ; source_sub_dirs = Path.Build.Map.empty
+        ; source_files = Path.Build.Map.empty
+        ; directory_targets
+        ; rules
+        }
+      in
       Gen_rules_result.rules_here rules
     ;;
 
@@ -175,9 +182,18 @@ module Build_config = struct
 
     type result = Gen_rules_result.t
 
-    let rules_for ?directory_targets ~dir ~allowed_subdirs rules =
+    let rules_for
+          ?directory_targets
+          ~dir
+          ~source_subdirs
+          ~source_files
+          ~allowed_subdirs
+          rules
+      =
       Rules.create
         ?directory_targets
+        ~source_sub_dirs:(Path.Build.Map.singleton dir source_subdirs)
+        ~source_files
         ~build_dir_only_sub_dirs:
           (Build_only_sub_dirs.singleton ~dir (Subdir_set.of_set allowed_subdirs))
         rules

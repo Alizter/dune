@@ -1236,7 +1236,12 @@ let setup_pkg_install_alias =
           in
           Rules.Produce.Alias.add_deps alias deps)
       in
-      Gen_rules.rules_for ~dir ~allowed_subdirs:Filename.Set.empty rule
+      Gen_rules.rules_for
+        ~dir
+        ~source_subdirs:Filename.Set.empty
+        ~source_files:Path.Build.Map.empty
+        ~allowed_subdirs:Filename.Set.empty
+        rule
       |> Gen_rules.rules_here
 ;;
 

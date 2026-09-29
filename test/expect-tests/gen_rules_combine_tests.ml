@@ -13,6 +13,8 @@ let%expect_test "empty generated rule combinations remain deferred" =
   let calls = ref 0 in
   let effectful =
     Generated_rules.create
+      ~source_sub_dirs:Path.Build.Map.empty
+      ~source_files:Path.Build.Map.empty
       (Memo.of_thunk (fun () ->
          incr calls;
          Memo.return Rules.empty))
@@ -49,7 +51,11 @@ let%expect_test "empty generated rules retain subdirectory declarations" =
     Build_config.Gen_rules.Build_only_sub_dirs.singleton ~dir Subdir_set.empty
   in
   let declared =
-    Generated_rules.create ~build_dir_only_sub_dirs (Memo.return Rules.empty)
+    Generated_rules.create
+      ~build_dir_only_sub_dirs
+      ~source_sub_dirs:Path.Build.Map.empty
+      ~source_files:Path.Build.Map.empty
+      (Memo.return Rules.empty)
   in
   List.iter
     [ "empty left", Generated_rules.empty, declared
@@ -68,5 +74,81 @@ let%expect_test "empty generated rules retain subdirectory declarations" =
     {|
     empty left: declaration=true directory_targets_empty=true
     empty right: declaration=true directory_targets_empty=true
+    |}]
+;;
+
+let%expect_test "source subdirectory metadata is combined without evaluating rules" =
+  let dir = Path.Build.relative Path.Build.root "default/source" in
+  let calls = ref 0 in
+  let declared name =
+    Generated_rules.create
+      ~source_sub_dirs:
+        (Path.Build.Map.singleton
+           dir
+           (Filename.Set.singleton (Filename.of_string_exn name)))
+      ~source_files:Path.Build.Map.empty
+      (Memo.of_thunk (fun () ->
+         incr calls;
+         Memo.return Rules.empty))
+  in
+  let left = declared "left" in
+  let right = declared "right" in
+  List.iter
+    [ "empty left", Generated_rules.empty, left
+    ; "empty right", left, Generated_rules.empty
+    ; "both declared", left, right
+    ]
+    ~f:(fun (name, left, right) ->
+      let { Generated_rules.source_sub_dirs; _ } =
+        Generated_rules.combine_exn left right
+      in
+      let subdirs =
+        Path.Build.Map.find_exn source_sub_dirs dir
+        |> Filename.Set.to_list
+        |> List.map ~f:Filename.to_string
+        |> String.concat ~sep:","
+      in
+      printfn "%s: subdirs=%s calls=%d" name subdirs !calls);
+  [%expect
+    {|
+    empty left: subdirs=left calls=0
+    empty right: subdirs=left calls=0
+    both declared: subdirs=left,right calls=0
+    |}]
+;;
+
+let%expect_test "source file inventories do not force materialization" =
+  let dir = Path.Build.relative Path.Build.root "default/source" in
+  let calls = ref 0 in
+  let declared name =
+    let file = Filename.of_string_exn name in
+    let materialization =
+      Memo.of_thunk (fun () ->
+        incr calls;
+        Load_rules.source_file_copy
+          ~src:(Path.Source.relative_fname Path.Source.root file)
+          ~dst:(Path.Build.relative_fname dir file)
+        |> Memo.return)
+    in
+    Generated_rules.create
+      ~source_sub_dirs:Path.Build.Map.empty
+      ~source_files:
+        (Path.Build.Map.singleton dir (Filename.Map.singleton file materialization))
+      (Memo.return Rules.empty)
+  in
+  let { Generated_rules.source_files; _ } =
+    Generated_rules.combine_exn (declared "left") (declared "right")
+  in
+  let files = Path.Build.Map.find_exn source_files dir in
+  printfn
+    "files=%s calls=%d"
+    (Filename.Map.keys files |> Filename.L.to_string |> String.concat ~sep:",")
+    !calls;
+  let (_ : Rule.t) = run (Filename.Map.find_exn files (Filename.of_string_exn "left")) in
+  printfn "after selecting left: calls=%d" !calls;
+  [%expect
+    {|
+    files=left,right calls=0
+    after selecting left: calls=1
     |}]
 ;;

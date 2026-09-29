@@ -550,5 +550,11 @@ let gen_rules sctx ~dir ~nearest_src_dir ~src_dir =
              in
              ())
          in
-         Some (Gen_rules.rules_for ~allowed_subdirs ~dir rules)))
+         Some
+           (Gen_rules.rules_for
+              ~allowed_subdirs
+              ~source_subdirs:Filename.Set.empty
+              ~source_files:Path.Build.Map.empty
+              ~dir
+              rules)))
 ;;
