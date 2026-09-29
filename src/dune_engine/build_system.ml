@@ -531,7 +531,11 @@ module Internal = struct
                 | Normal_rule -> fun (_ : Path.Build.t) -> false
                 | Anonymous_action { stamp_file; _ } -> Path.Build.equal stamp_file
               in
-              Sandbox.move_targets_to_build_dir sandbox ~should_be_skipped ~targets)
+              Sandbox.move_targets_to_build_dir
+                sandbox
+                ~promotion:(Execution_parameters.promotion execution_parameters)
+                ~should_be_skipped
+                ~targets)
           in
           match Targets.Produced.of_validated targets with
           | Ok produced_targets -> { Exec_result.produced_targets; action_exec_result }
@@ -565,12 +569,12 @@ module Internal = struct
       ~targets
       ~f:execute_action
 
-  and promote_targets ~rule_mode ~targets ~promote_source =
+  and promote_targets ~promotion ~rule_mode ~targets ~promote_source =
     match rule_mode, !Clflags.promote with
     | (Rule.Mode.Standard | Fallback | Ignore_source_files), _ | Promote _, Some Never ->
       Fiber.return ()
     | Promote promote, (Some Automatically | None) ->
-      Target_promotion.promote ~targets ~promote ~promote_source
+      Target_promotion.promote ~promotion ~targets ~promote ~promote_source
 
   and execute_rule_impl ~rule_kind rule =
     let { Rule.id = _; targets; mode; action; info } = rule in
@@ -582,6 +586,18 @@ module Internal = struct
         Code_error.raise
           "invalid dir for rule execution"
           [ "dir", Path.Build.to_dyn targets.root ]
+    in
+    let* contexts = Memo.Lazy.force (Build_config.get ()).contexts in
+    let workspace_sources =
+      Context_name.Map.filter_map contexts ~f:(fun (_, context_type) ->
+        match (context_type : Build_config.Context_type.t) with
+        | Empty -> None
+        | With_sources { build_only_sub_dirs } -> Some build_only_sub_dirs)
+    in
+    let execution_parameters =
+      Execution_parameters.set_promotion
+        (Execution_parameters.Promotion.for_rule ~workspace_sources ~dir:targets.root)
+        execution_parameters
     in
     (* Note: we do not run the below in parallel with the above: if we fail to
        compute action execution parameters, we have no use for the action and
@@ -750,6 +766,7 @@ module Internal = struct
       in
       let+ () =
         promote_targets
+          ~promotion:(Execution_parameters.promotion execution_parameters)
           ~rule_mode:mode
           ~targets:produced_targets
           ~promote_source:config.promote_source

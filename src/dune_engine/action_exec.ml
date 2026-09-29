@@ -219,7 +219,12 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
     Fiber.return ()
   | Pipe (outputs, l) -> exec_pipe ~ectx ~eenv outputs l
   | Diff diff ->
-    Diff_action.exec ~sandbox:ectx.sandbox ~patch_back:None ectx.rule_loc diff
+    Diff_action.exec
+      ~promotion:ectx.promotion
+      ~sandbox:ectx.sandbox
+      ~patch_back:None
+      ectx.rule_loc
+      diff
   | Extension (module A) ->
     let metadata =
       { ectx.metadata with can_run_in_action_runner = A.Spec.can_run_in_action_runner }
@@ -327,7 +332,15 @@ let exec
       let+ facts = build_deps deps in
       dynamic_deps_stages := (deps, facts) :: !dynamic_deps_stages
     in
-    { targets; root; metadata; context; sandbox; rule_loc; build_deps }
+    { targets
+    ; root
+    ; metadata
+    ; context
+    ; sandbox
+    ; rule_loc
+    ; promotion = Execution_parameters.promotion execution_parameters
+    ; build_deps
+    }
   and eenv =
     let env =
       match

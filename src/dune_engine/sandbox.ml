@@ -343,7 +343,7 @@ let build_path_without_corrected_suffix path =
   Path.Build.relative_fname parent basename
 ;;
 
-let register_corrected_file_promotions t ~deps =
+let register_corrected_file_promotions t ~promotion ~deps =
   find_corrected_files t ~deps
   |> Fiber.parallel_iter ~f:(fun file2 ->
     let (_ : Path.Build.t option), file2_without_sandbox =
@@ -351,6 +351,7 @@ let register_corrected_file_promotions t ~deps =
     in
     let file1 = build_path_without_corrected_suffix file2_without_sandbox |> Path.build in
     Diff_action.exec
+      ~promotion
       ~sandbox:None
       ~patch_back:(Some (Path.build t.dir))
       t.loc
@@ -413,17 +414,15 @@ let rename_optional_file ~src ~dst =
      | () -> ())
 ;;
 
-let register_snapshot_promotion t (targets : Targets.Validated.t) ~old_snapshot =
+let register_snapshot_promotion t (targets : Targets.Validated.t) ~promotion ~old_snapshot
+  =
   let new_snapshot = snapshot t in
-  (* Same as promotion: make the file writable when copying to the source
-     tree. *)
-  let in_source_tree p =
-    Path.extract_build_context_dir_maybe_sandboxed p |> Option.value_exn |> snd
-  in
   let diffs = ref [] in
   let add_copy_file p = diffs := p :: !diffs in
   let deletes = ref [] in
-  let add_delete what file = deletes := (what, in_source_tree file) :: !deletes in
+  let add_delete what file =
+    deletes := (what, Path.drop_optional_sandbox_root file) :: !deletes
+  in
   let target_root_in_sandbox = map_real_path t targets.root in
   let () =
     Path.Map.iter2 old_snapshot new_snapshot ~f:(fun p before after ->
@@ -461,6 +460,7 @@ let register_snapshot_promotion t (targets : Targets.Validated.t) ~old_snapshot 
        Fiber.parallel_iter !diffs ~f:(fun path ->
          let source = Path.drop_optional_sandbox_root path in
          Diff_action.exec
+           ~promotion
            ~sandbox:None
            ~patch_back:(Some (Path.build t.dir))
            t.loc
@@ -472,7 +472,7 @@ let register_snapshot_promotion t (targets : Targets.Validated.t) ~old_snapshot 
            }))
     (fun () ->
        Fiber.parallel_iter !deletes ~f:(fun (what, path) ->
-         Diff_promotion.register_delete what path;
+         Diff_promotion.register_delete what ~promotion path;
          let what =
            match what with
            | `File -> "File"
@@ -482,7 +482,8 @@ let register_snapshot_promotion t (targets : Targets.Validated.t) ~old_snapshot 
            [ Pp.textf
                "%s %s should be deleted"
                what
-               (Path.Source.to_string_maybe_quoted path)
+               (Path.drop_optional_build_context_maybe_sandboxed path
+                |> Path.to_string_maybe_quoted)
            ]))
 ;;
 
@@ -493,7 +494,11 @@ let hint_delete_dir =
   ]
 ;;
 
-let move_real_targets_to_build_dir t ~should_be_skipped ~(targets : Targets.Validated.t)
+let move_real_targets_to_build_dir
+      t
+      ~promotion
+      ~should_be_skipped
+      ~(targets : Targets.Validated.t)
   : unit Fiber.t
   =
   let open Fiber.O in
@@ -501,12 +506,12 @@ let move_real_targets_to_build_dir t ~should_be_skipped ~(targets : Targets.Vali
   let* () =
     match t.corrections with
     | Ignore -> Fiber.return ()
-    | Produce -> register_corrected_file_promotions t ~deps:t.deps
+    | Produce -> register_corrected_file_promotions t ~promotion ~deps:t.deps
   in
   let+ () =
     match t.snapshot with
     | None -> Fiber.return ()
-    | Some old_snapshot -> register_snapshot_promotion t targets ~old_snapshot
+    | Some old_snapshot -> register_snapshot_promotion t targets ~promotion ~old_snapshot
   in
   let () =
     Targets.Validated.iter
@@ -544,10 +549,15 @@ let move_real_targets_to_build_dir t ~should_be_skipped ~(targets : Targets.Vali
     Dune_trace.Event.sandbox `Extract ~start ~stop ~queued:None t.loc ~dir:t.dir)
 ;;
 
-let move_targets_to_build_dir t ~should_be_skipped ~(targets : Targets.Validated.t) =
+let move_targets_to_build_dir
+      t
+      ~promotion
+      ~should_be_skipped
+      ~(targets : Targets.Validated.t)
+  =
   match t with
   | No_sandbox _ -> Fiber.return ()
-  | Sandboxed t -> move_real_targets_to_build_dir t ~should_be_skipped ~targets
+  | Sandboxed t -> move_real_targets_to_build_dir t ~promotion ~should_be_skipped ~targets
 ;;
 
 let failed_to_delete_sandbox dir reason =

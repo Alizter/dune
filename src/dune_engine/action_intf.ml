@@ -112,6 +112,7 @@ module Exec = struct
     ; metadata : Process_metadata.t
     ; sandbox : Process.Sandbox.t option
     ; rule_loc : Loc.t
+    ; promotion : Execution_parameters.Promotion.t
     ; build_deps : Dep.Set.t -> unit Fiber.t
     }
 
