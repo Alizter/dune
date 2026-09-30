@@ -271,7 +271,7 @@ module Internal = struct
         (rule : Rule.t)
         ~facts
         ~action
-        ~sandbox_mode
+        ~(sandbox_mode : Sandbox_mode.t)
         ~execution_parameters
     =
     let { Action.Full.action; props } = action in
@@ -292,6 +292,26 @@ module Internal = struct
         execution_parameters
         |> Execution_parameters.set_sandbox_actions false
         |> Execution_parameters.set_use_sandbox_policy false
+    in
+    let execution_parameters =
+      (* Target promotion runs after cache restoration. Only correction
+         registration is part of action execution. *)
+      let registers_promotions =
+        Action.may_register_promotions action
+        || (match corrections with
+            | Some Produce -> true
+            | Some Ignore | None -> false)
+        ||
+        match sandbox_mode with
+        | Some Patch_back_source_tree -> true
+        | _ -> false
+      in
+      if registers_promotions
+      then execution_parameters
+      else
+        Execution_parameters.set_promotion
+          Execution_parameters.Promotion.disabled
+          execution_parameters
     in
     let digest =
       let d = Digest.Manual.create () in
