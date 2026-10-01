@@ -3,7 +3,7 @@ the workspace/lockdir boundary. We require packages whose binaries we depend
 upon, to be explicitly declared.
 
 [p] (workspace) -> [q] (workspace) -> [r] (lockdir). The [q] -> [r] edge is
-allowed, so this builds and [r-tool] resolves from [p]'s stanza.
+allowed, but [r-tool] is not a direct dependency of [p].
 
   $ make_lockdir
 
@@ -37,7 +37,7 @@ A lockdir package [r] that installs [r-tool]:
   $ cat _build/default/p/r-avail
   false
 
-Declaring [r] directly on [p] works too:
+Declaring [r] directly on [p] makes it visible:
 
   $ make_dune_project 3.25
   $ cat >> dune-project <<'EOF'
@@ -49,18 +49,9 @@ Declaring [r] directly on [p] works too:
   $ cat _build/default/p/r-avail
   true
 
-Both blocks above continue to print [true]. Before narrowing was added, all
-lockdir packages were built, and so transitive deps worked correctly. The
-current narrowing handles the workspace -> lockdir dependencies edge correctly,
-and so both block still print [true].
-
-[p] (workspace) -> [q] (lockdir) -> [r] (workspace). Now the [q] -> [r] edge is
-a lockdir package depending on a workspace package. This is a lock-VALIDATION
-restriction, not a narrowing case: it is rejected before any binary resolution
-runs, so narrowing does not change it -- it flips only when the in-out work
-lifts the restriction (see [../lockdir-workspace-deps/basic.t] for the bare
-rejection), at which point [p] should resolve [r-tool], since [r] is then in
-[p]'s transitive closure.
+[p] (workspace) -> [q] (lockdir) -> [r] (workspace) is valid too. The opaque
+recipe for [q] receives [r], but that does not make [r-tool] a direct dependency
+of [p]. Crossing the workspace boundary must not bypass binary narrowing.
 
   $ rm -rf p q r dune.lock
   $ dune clean
@@ -91,13 +82,6 @@ rejection), at which point [p] should resolve [r-tool], since [r] is then in
   > (package (name r) (allow_empty) (dir r))
   > EOF
 
-  $ dune build p/r-avail 2>&1
-  File "_build/_private/default/.lock/dune.lock/q.pkg", line 2, characters
-  9-10:
-  The package "q" depends on the package "r", but "r" does not appear in the
-  lockdir _build/_private/default/.lock/dune.lock.
-  Error: At least one package dependency is itself not present as a package in
-  the lockdir _build/_private/default/.lock/dune.lock.
-  Hint: This could indicate that the lockdir is corrupted. Delete it and then
-  regenerate it by running: 'dune pkg lock'
-  [1]
+  $ dune build p/r-avail
+  $ cat _build/default/p/r-avail
+  false
