@@ -10,7 +10,6 @@ include struct
   module Local_package = Local_package
   module Resolved_package = Resolved_package
   module Version_preference = Version_preference
-  module Package_universe = Package_universe
   module Package_dependency = Package_dependency
   module Opam_solver = Opam_solver
   module Pin = Pin
@@ -35,7 +34,7 @@ module Spec = struct
     }
 
   let name = "lock"
-  let version = 1
+  let version = 2
   let runs_process = false
   let can_run_in_action_runner = false
   let bimap t f g = { t with lock_dir = f t.lock_dir; target = g t.target }
@@ -60,10 +59,12 @@ module Spec = struct
       [ "target", encode_target target
       ; "lock_dir", encode_path lock_dir
       ; ( "packages"
-        , match Package_universe.dependency_digest packages with
-          | None -> Atom "no packages"
-          | Some hash ->
-            List [ Atom "hash"; Atom (Local_package.Dependency_hash.to_string hash) ] )
+        , List
+            (Package_name.Map.values packages
+             |> List.map ~f:(fun package ->
+               Local_package.for_solver package
+               |> Local_package.For_solver.solver_metadata
+               |> fun metadata -> Sexp.Atom metadata)) )
       ; ( "repos"
         , List
             (List.map repos ~f:(fun repo ->
