@@ -919,8 +919,9 @@ let visible_packages t =
   let* lock_dir_active = Pkg_rules.lock_dir_active context in
   if not lock_dir_active
   then Memo.return Package.Name.Selection.All
-  else (
-    match Pkg_sources.package_of_artifact_path t.dir with
+  else
+    let* project = Dune_load.find_loaded_project ~dir:t.dir in
+    match Loaded_project.owner project with
     | Some name ->
       let* candidate = Pkg_sources.find_candidate context name in
       (match candidate with
@@ -935,7 +936,7 @@ let visible_packages t =
       (match Dune_project.exclusive_package t.project ~dir:t.source_dir with
        | None -> Memo.return Package.Name.Selection.All
        | Some pkg_id ->
-         let+ packages = Dune_load.packages ()
+         let+ packages = Dune_load.packages_for_context context
          and+ locked_packages =
            Lock_dir.get_exn context
            >>| fun lock_dir ->
@@ -955,6 +956,9 @@ let visible_packages t =
                 ~f:(fun acc (dep : Package_dependency.t) ->
                   Package.Name.Set.add acc dep.name)
             in
+            (* An effective depopt is one that was actually solved: either a
+               workspace package (always present) or a package the solver put in
+               the lock directory. *)
             let is_present dep_name =
               Package.Name.Map.mem packages dep_name
               || Package.Name.Set.mem locked_packages dep_name
@@ -964,7 +968,7 @@ let visible_packages t =
                  (Package.depopts pkg)
                  ~init:visible
                  ~f:(fun acc (dep : Package_dependency.t) ->
-                   if is_present dep.name then Package.Name.Set.add acc dep.name else acc)))))
+                   if is_present dep.name then Package.Name.Set.add acc dep.name else acc))))
 ;;
 
 let expand_pform_macro
