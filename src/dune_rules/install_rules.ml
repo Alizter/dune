@@ -43,7 +43,7 @@ module Package_paths = struct
     | Generated | Generated_with_diff ->
       let+ use_source_opam =
         if Profile.is_release (Context.profile context)
-        then Build_system.file_exists (Source_path.to_path opam_file)
+        then Opam_create.source_file_exists pkg
         else Memo.return false
       in
       Some (if use_source_opam then build_opam_file else generated_opam_file ctx pkg)
@@ -782,8 +782,6 @@ module Meta_and_dune_package : sig
     -> Dune_project.t
     -> dir:Path.Build.t
     -> unit Memo.t
-
-  val gen_odoc_config : Super_context.t -> Package.t -> unit Memo.t
 end = struct
   let sections ctx_name files pkg =
     let pkg_name = Package.name pkg in
@@ -1034,7 +1032,7 @@ end = struct
         |> sprintf "(packages %s)"
       in
       let action = Action_builder.write_file_dyn odoc_config_file action in
-      Super_context.add_rule sctx ~dir:ctx.build_dir action
+      Super_context.add_rule sctx ~dir:(Path.Build.parent_exn odoc_config_file) action
   ;;
 
   let gen_meta_file sctx ~dir (pkg : Package.t) entries =
@@ -1158,6 +1156,11 @@ end = struct
       | Some packages -> Package.Name.Set.mem packages name)
     |> Dune_lang.Package_name.Map.to_seq
     |> Memo.parallel_iter_seq ~f:(fun (name, pkg) ->
+      let* () =
+        if Path.Build.equal (Package_paths.build_dir ctx pkg) dir
+        then gen_odoc_config sctx pkg
+        else Memo.return ()
+      in
       if Path.Build.equal (Package_paths.metadata_dir ctx pkg) dir
       then (
         let entries = Scope.DB.lib_entries_of_package ctx.name name in
@@ -1689,7 +1692,6 @@ let gen_project_rules sctx project =
   Dune_project.packages project
   |> Dune_lang.Package_name.Map.to_seq
   |> Memo.parallel_iter_seq ~f:(fun (_name, package) ->
-    let* () = gen_odoc_config sctx package in
     let* () = gen_package_install_file_rules sctx package in
     gen_install_alias sctx package)
 ;;
