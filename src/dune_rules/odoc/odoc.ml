@@ -753,10 +753,10 @@ module Toplevel_index = struct
 end
 
 let setup_toplevel_index_rule sctx output =
-  let* packages = Dune_load.packages () in
+  let ctx = Super_context.context sctx in
+  let* packages = Dune_load.packages_for_context (Context.name ctx) in
   let index = Toplevel_index.of_packages packages output in
   let content = Toplevel_index.content output index in
-  let ctx = Super_context.context sctx in
   let path = Output_format.toplevel_index_path output ctx in
   add_rule sctx (Action_builder.write_file path content)
 ;;
@@ -1266,9 +1266,10 @@ let has_rules ?(directory_targets = Path.Build.Map.empty) m =
   Gen_rules.make ~directory_targets (Memo.return rules)
 ;;
 
-let with_package pkg ~f =
+let with_package sctx pkg ~f =
   let pkg = Package.Name.of_string pkg in
-  let* packages = Dune_load.packages () in
+  let context = Super_context.context sctx |> Context.name in
+  let* packages = Dune_load.packages_for_context context in
   match Package.Name.Map.find packages pkg with
   | Some pkg -> has_rules (f pkg)
   | None -> Memo.return Gen_rules.no_rules
@@ -1287,8 +1288,8 @@ let gen_rules sctx ~dir rest =
        >>> setup_toplevel_index_rule sctx Html
        >>> setup_toplevel_index_rule sctx Json)
   | [ "_markdown" ] ->
-    let* packages = Dune_load.packages () in
     let ctx = Super_context.context sctx in
+    let* packages = Dune_load.packages_for_context (Context.name ctx) in
     let all_package_dirs =
       Package.Name.Map.to_list packages
       |> List.map ~f:(fun (_, (pkg : Package.t)) ->
@@ -1310,12 +1311,12 @@ let gen_rules sctx ~dir rest =
     (* package directories are directory targets *)
     Memo.return Gen_rules.no_rules
   | [ "_mlds"; pkg ] ->
-    with_package pkg ~f:(fun pkg ->
+    with_package sctx pkg ~f:(fun pkg ->
       let pkg = Package.name pkg in
       let* _mlds, rules = package_mlds sctx ~pkg in
       Rules.produce rules)
   | [ "_odoc"; "pkg"; pkg ] ->
-    with_package pkg ~f:(fun pkg ->
+    with_package sctx pkg ~f:(fun pkg ->
       let pkg = Package.name pkg in
       setup_package_odoc_rules sctx ~pkg)
   | [ "_odocls"; lib_unique_name_or_pkg ] ->
@@ -1350,7 +1351,7 @@ let gen_rules sctx ~dir rest =
             | Public (_, pkg) | Private (_, Some pkg) ->
               setup_pkg_odocl_rules sctx ~pkg:(Package.name pkg) ~for_)
        and+ () =
-         let* packages = Dune_load.packages () in
+         let* packages = Dune_load.packages_for_context (Context.name ctx) in
          match
            Package.Name.Map.find packages (Package.Name.of_string lib_unique_name_or_pkg)
          with
@@ -1393,7 +1394,7 @@ let gen_rules sctx ~dir rest =
             | Public (_, pkg) | Private (_, Some pkg) ->
               setup_pkg_html_rules sctx ~pkg:(Package.name pkg) ~for_)
        and+ () =
-         let* packages = Dune_load.packages () in
+         let* packages = Dune_load.packages_for_context (Context.name ctx) in
          match
            Package.Name.Map.find packages (Package.Name.of_string lib_unique_name_or_pkg)
          with
