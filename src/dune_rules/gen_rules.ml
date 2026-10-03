@@ -823,6 +823,8 @@ let private_context ~dir components _ctx =
   | `Invalid_context -> Memo.return Gen_rules.unknown_context
   | `Shared_locks components -> Lock_rules.setup_rules ~dir ~components
   | `Valid (ctx, ".opam" :: rest) -> Opam_rules.gen_rules ctx ~dir rest
+  | `Valid (ctx, ".dune-source" :: rest) ->
+    Pkg_sources.gen_script_source_rules ctx ~dir rest
   | `Valid (ctx, components) ->
     let+ lock_rules = Lock_rules.setup_rules ~dir ~components
     and+ pkg_rules = Pkg_rules.setup_rules ctx ~dir ~components in
@@ -833,7 +835,8 @@ let private_context ~dir components _ctx =
          rules
          (Gen_rules.make_empty
             ~dir
-            (Subdir_set.of_list [ Filename.of_string_exn ".opam" ]))
+            (Subdir_set.of_list
+               [ Filename.of_string_exn ".opam"; Filename.of_string_exn ".dune-source" ]))
      | _ -> rules)
   | `Root ->
     let+ contexts = Per_context.list () in
