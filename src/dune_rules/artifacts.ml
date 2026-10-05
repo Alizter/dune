@@ -103,11 +103,7 @@ let analyze_binary t ~dir name =
         in
         (match opaque with
          | Some path -> Memo.return (Some path)
-         | None ->
-           Context.which_narrowed_to_packages
-             t.context
-             ~packages:t.visible_packages
-             lookup_name)
+         | None -> Context.which_narrowed_to_packages t.context ~packages lookup_name)
         >>| (function
          | None -> `None
          | Some path -> `Resolved path)
