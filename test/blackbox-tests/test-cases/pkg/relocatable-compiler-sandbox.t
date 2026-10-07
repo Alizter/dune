@@ -175,8 +175,5 @@ unless those rules make it available.
   > done
   $ unset OCAMLLIB
   $ dune build sha/c_flags.sexp ocaml-lmdb/c_flags.sexp
-  File "command line", line 1:
-  Error: Unbound module Stdlib
-  File "command line", line 1:
-  Error: Unbound module Stdlib
-  [1]
+  $ test -s _build/default/sha/c_flags.sexp
+  $ test -s _build/default/ocaml-lmdb/c_flags.sexp
