@@ -778,11 +778,9 @@ module Unprocessed = struct
   let add_lib_dirs sctx ~for_ libs =
     Memo.map_reduce
       libs
-      ~empty:(Path.Set.empty, Path.Set.empty, Path.Set.empty)
-      ~combine:(fun (src_dirs1, obj_dirs1, cmt_dirs1) (src_dirs2, obj_dirs2, cmt_dirs2) ->
-        ( Path.Set.union src_dirs1 src_dirs2
-        , Path.Set.union obj_dirs1 obj_dirs2
-        , Path.Set.union cmt_dirs1 cmt_dirs2 ))
+      ~empty:(Path.Set.empty, Path.Set.empty)
+      ~combine:(fun (src_dirs1, cmt_dirs1) (src_dirs2, cmt_dirs2) ->
+        Path.Set.union src_dirs1 src_dirs2, Path.Set.union cmt_dirs1 cmt_dirs2)
       ~f:(fun lib ->
         let+ src_dirs = src_dirs sctx lib ~for_ in
         let obj_dir = Lib.info lib |> Lib_info.obj_dir in
@@ -798,7 +796,7 @@ module Unprocessed = struct
           then Path.Set.empty
           else Path.Set.singleton cmt_dir
         in
-        src_dirs, Path.Set.singleton public_obj_dir, cmt_dirs)
+        src_dirs, cmt_dirs)
     |> Action_builder.of_memo
   ;;
 
@@ -870,19 +868,42 @@ module Unprocessed = struct
                in
                List.concat [ requires_compile; libs ])
       in
+      let requires_hidden = Resolve.peek requires_hidden |> Result.value ~default:[] in
       let+ flags = flags
+      and+ { Ocaml_toolchain.lib_config; _ } =
+        Action_builder.of_memo (Context.ocaml context)
       and+ indexes = Ocaml_index.context_indexes context ~for_
-      and+ deps_src_dirs, deps_obj_dirs, deps_cmt_dirs =
-        add_lib_dirs sctx ~for_ requires_compile
-      and+ hidden_src_dirs, hidden_obj_dirs, hidden_cmt_dirs =
-        let requires_hidden = Resolve.peek requires_hidden |> Result.value ~default:[] in
-        add_lib_dirs sctx ~for_ requires_hidden
-      in
+      and+ deps_src_dirs, deps_cmt_dirs = add_lib_dirs sctx ~for_ requires_compile
+      and+ hidden_src_dirs, hidden_cmt_dirs = add_lib_dirs sctx ~for_ requires_hidden in
       let parameters = Resolve.peek parameters |> Result.value ~default:[] in
       let src_dirs =
         Path.Set.of_list_map ~f:Path.source more_src_dirs |> Path.Set.union deps_src_dirs
       in
-      let obj_dirs = Path.Set.union deps_obj_dirs objs_dirs in
+      let include_paths libs =
+        Lib_flags.L.include_paths
+          ~project:(Expander.project expander)
+          libs
+          (match for_ with
+           | Ocaml -> Ocaml Byte
+           | Melange -> Melange)
+          lib_config
+      in
+      let hidden_obj_dirs =
+        Path.Map.foldi
+          (include_paths requires_hidden)
+          ~init:Path.Set.empty
+          ~f:(fun path _ acc -> Path.Set.add acc path)
+      in
+      let obj_dirs, hidden_obj_dirs =
+        Path.Map.foldi
+          (include_paths requires_compile)
+          ~init:(objs_dirs, hidden_obj_dirs)
+          ~f:(fun path flag (obj_dirs, hidden_obj_dirs) ->
+            match flag with
+            | Include -> Path.Set.add obj_dirs path, hidden_obj_dirs
+            | Hidden -> obj_dirs, Path.Set.add hidden_obj_dirs path)
+      in
+      let hidden_obj_dirs = Path.Set.diff hidden_obj_dirs obj_dirs in
       let cmt_dirs = Path.Set.union deps_cmt_dirs hidden_cmt_dirs in
       let source_root = Path.Source.root |> Path.source in
       { Processed.stdlib_dir
