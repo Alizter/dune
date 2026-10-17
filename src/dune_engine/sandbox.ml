@@ -183,7 +183,7 @@ let create_dir t dir =
 
 let create_dirs t dirs = Path.Build.Set.iter dirs ~f:(fun dir -> create_dir t dir)
 
-let link_function ~(mode : Sandbox_mode.some) =
+let link_function =
   let win32_error mode =
     let mode = Sandbox_mode.to_string (Some mode) in
     User_error.raise
@@ -192,20 +192,21 @@ let link_function ~(mode : Sandbox_mode.some) =
           mode
       ]
   in
-  Staged.stage
-    (match mode with
-     | Symlink ->
-       (match Sys.win32 with
-        | true -> win32_error mode
-        | false -> fun src dst -> Io.portable_symlink ~src ~dst)
-     | Copy -> fun src dst -> copy_recursively ~src ~dst
-     | Hardlink -> fun src dst -> Io.portable_hardlink ~src ~dst
-     | Patch_back_source_tree ->
-       (* We need to let the action modify its dependencies, so we copy
+  fun ~(mode : Sandbox_mode.some) ->
+    Staged.stage
+      (match mode with
+       | Symlink ->
+         (match Sys.win32 with
+          | true -> win32_error mode
+          | false -> fun src dst -> Io.portable_symlink ~src ~dst)
+       | Copy -> fun src dst -> copy_recursively ~src ~dst
+       | Hardlink -> fun src dst -> Io.portable_hardlink ~src ~dst
+       | Patch_back_source_tree ->
+         (* We need to let the action modify its dependencies, so we copy
           dependencies and make them writable. *)
-       (* CR-someday: this doesn't work with directory targets *)
-       let chmod = Permissions.add Permissions.write in
-       fun src dst -> Io.copy_file ~overwrite:false ~src ~dst ~chmod ())
+         (* CR-someday: this doesn't work with directory targets *)
+         let chmod = Permissions.add Permissions.write in
+         fun src dst -> Io.copy_file ~overwrite:false ~src ~dst ~chmod ())
 ;;
 
 let link_deps t ~deps =
