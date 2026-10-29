@@ -24,7 +24,24 @@ type input =
         one job slot. *)
   }
 
-(** Prepare the action environment, including its computed job-slot count. *)
+(** Return the prepared base environment, including the evaluated
+    [DUNE_JOB_SLOTS] value. *)
 val prepare_env : input -> build_deps:(Dep.Set.t -> unit Fiber.t) -> Env.t Fiber.t
 
 val exec : input -> build_deps:(Dep.Set.t -> unit Fiber.t) -> Exec_result.t Fiber.t
+
+(** Engine-owned snapshot for action-only replay in a live session. *)
+module Replay : sig
+  type t
+
+  (** Capture the prepared action for replay. *)
+  val create : input -> sandbox:Sandbox.t -> t
+
+  (** Trusted, same-executable session data; not a persistent file format. *)
+  val conv : t Stdune.Conv.value
+
+  (** Clear declared execution paths and replay the captured action using
+      [Env.initial]. Process restrictions are inherited from the launching shell.
+      Failures use ordinary action errors. *)
+  val exec : t -> unit Fiber.t
+end

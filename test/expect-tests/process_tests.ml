@@ -78,6 +78,7 @@ let%expect_test "unreported inherited process statuses" =
     let status =
       go (fun () ->
         Process.run_inherit_std_in_out_unreported
+          ~sandbox:None
           ~dir:Path.root
           ~env:Env.initial
           ~metadata:Process_metadata.default
@@ -110,6 +111,7 @@ let%expect_test "unreported execution preserves build cancellation" =
       Fiber.collect_errors (fun () ->
         Process.Build.with_ build (fun () ->
           Process.run_inherit_std_in_out_unreported
+            ~sandbox:None
             ~dir:Path.root
             ~env:Env.initial
             ~metadata:Process_metadata.default

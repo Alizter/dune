@@ -221,6 +221,24 @@ documentation for each command is available through ``dune COMMAND --help``.
 
    A command alias for ``dune runtest``.
 
+.. describe:: dune shell
+
+   Build a single concrete target's prerequisites, then open Bash in the
+   prepared rule-action environment without executing the selected action.
+   Use ``dune shell TARGET -- COMMAND ...`` to run a command instead.
+
+   The shell or command starts in the directory containing the rule's targets,
+   inside its sandbox if one is used. It receives the rule's prepared
+   environment. Directory and environment changes within the action apply only
+   when the action is run, not when the session starts.
+
+   With sandbox mode ``none``, the session runs in the real build directory,
+   and changes remain after exit. With ``copy``, it runs in a disposable
+   sandbox; replay outputs are not extracted into the real build directory.
+   With ``symlink`` or ``hardlink``, dependencies can reference shared build
+   artifacts, so writes may affect those artifacts. The rule's OS write policy
+   also applies to the session when enabled.
+
 .. describe:: dune shutdown
 
    Cancel and shutdown any builds in the current workspace.

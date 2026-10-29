@@ -213,6 +213,7 @@ val run_inherit_std_in_out_unreported
   :  dir:Path.t
   -> env:Env.t
   -> metadata:Process_metadata.t
+  -> sandbox:Sandbox.t option
   -> Path.t
   -> string list
   -> Unix.process_status Fiber.t

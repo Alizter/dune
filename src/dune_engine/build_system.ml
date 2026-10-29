@@ -1097,6 +1097,78 @@ let () =
             Option.some_if (not @@ Loc.is_none loc) loc)))
 ;;
 
+module Rule_shell = struct
+  type t =
+    { action : Action.t
+    ; env : Env.t
+    ; sandbox : Sandbox.t
+    ; process_sandbox : Process.Sandbox.t option
+    ; replay : Action_exec.Replay.t
+    ; session_dir : Path.t
+    }
+
+  let with_ (rule : Rule.t) ~f =
+    let { Rule.targets = original_targets; _ } = rule in
+    let loc = Rule.loc rule in
+    let* full_action, facts, execution_parameters = evaluate_rule_action rule in
+    if Action.is_dynamic full_action.action
+    then
+      User_error.raise
+        ~loc
+        [ Pp.text "dune shell does not support dynamic actions."
+        ; Pp.text
+            "The action can discover dependencies while it runs, after the shell \
+             environment has already been prepared."
+        ];
+    let { Action.Full.props; _ } = full_action in
+    let sandbox_mode =
+      select_sandbox_mode
+        ~loc
+        props.sandbox
+        ~sandboxing_preference:(Build_config.get ()).sandboxing_preference
+    in
+    let rule_digest =
+      compute_rule_digest
+        ~targets:original_targets
+        ~facts
+        ~action:full_action
+        ~sandbox_mode
+        ~execution_parameters
+    in
+    Memo.of_non_reproducible_fiber
+      (Path.mkdir_p (Path.build original_targets.root);
+       remove_rule_targets original_targets;
+       with_prepared_action_for_rule
+         ~rule_digest
+         ~action:full_action
+         ~facts
+         ~loc
+         ~execution_parameters
+         ~sandbox_mode
+         ~targets:original_targets
+         ~f:(fun { sandbox; input; _ } ->
+           let open Fiber.O in
+           let { Action_exec.action; sandbox = process_sandbox; _ } = input in
+           let build_deps deps =
+             let* facts = Memo.run (build_deps deps) in
+             Sandbox.add_deps
+               sandbox
+               facts
+               ~expand_aliases:
+                 (Execution_parameters.expand_aliases_in_sandbox execution_parameters)
+           in
+           let* env = Action_exec.prepare_env input ~build_deps in
+           let replay = Action_exec.Replay.create input ~sandbox in
+           Fiber.Temp.with_temp_dir
+             ~parent_dir:(Dtemp.action_temp_dir ())
+             ~prefix:"dune-shell"
+             ~suffix:"session"
+             ~f:(fun session_dir ->
+               let session_dir = Result.ok_exn session_dir in
+               f { action; env; sandbox; process_sandbox; replay; session_dir })))
+  ;;
+end
+
 (* Here we are doing a O(log |S|) lookup in a set S of files in the build
    directory [dir]. We could memoize these lookups, but it doesn't seem to be
    worth it, since we're unlikely to perform exactly the same lookup many times.
