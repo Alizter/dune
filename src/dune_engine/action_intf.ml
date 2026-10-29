@@ -1,12 +1,17 @@
 open Import
 
 module Exec = struct
+  type execution_mode =
+    | Build
+    | Shell_replay
+
   type context =
     { root : Path.t
     ; metadata : Process_metadata.t
     ; sandbox : Process.Sandbox.t option
     ; rule_loc : Loc.t
     ; build_deps : Dep.Set.t -> unit Fiber.t
+    ; mode : execution_mode
     }
 
   type env =

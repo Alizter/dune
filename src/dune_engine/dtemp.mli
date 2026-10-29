@@ -15,6 +15,10 @@ val action : Temp.what -> prefix:string -> suffix:string -> Path.t
     the action directory and internal jobs use Dune's directory. *)
 val add_to_env : Env.t -> purpose:Process_metadata.purpose -> Env.t
 
+(** Use the initiating build's temporary directory while replaying a [dune
+    shell] action. *)
+val with_temp_dir_for_shell : Path.t -> f:(unit -> 'a Fiber.t) -> 'a Fiber.t
+
 (** Destroy the temporary file or directory *)
 val destroy : Temp.what -> Path.t -> unit
 

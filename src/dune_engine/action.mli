@@ -105,6 +105,9 @@ val empty : t
 (** Checks, if action contains a [Dynamic_run]. *)
 val is_dynamic : t -> bool
 
+(** Return the name of the first action extension, if any. *)
+val find_extension_name : t -> string option
+
 (** Checks if executing the action may spawn a process. *)
 val runs_process : t -> bool
 

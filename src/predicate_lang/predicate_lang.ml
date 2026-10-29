@@ -93,13 +93,13 @@ and decode f = many f or_ []
 let rec encode f =
   let open Encoder in
   function
-  | True -> encode f (Or [])
-  | False -> encode f (And [])
+  | True -> encode f (And [])
+  | False -> encode f (Or [])
   | Element a -> f a
   | Not a -> constr "not" (encode f) a
   | Standard -> string ":standard"
-  | Or xs -> constr "or" (list (encode f)) xs
-  | And xs -> constr "and" (list (encode f)) xs
+  | Or xs -> List (atom "or" :: List.map xs ~f:(encode f))
+  | And xs -> List (atom "and" :: List.map xs ~f:(encode f))
 ;;
 
 let repr elt =

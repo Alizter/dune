@@ -15,12 +15,19 @@ end
 
 open Fiber.O
 
+exception Shell_replay_failed of Process.Failure_mode.raw_status
+
 let exec_run ~(ectx : context) ~(eenv : env) ~can_run_in_action_runner prog args =
+  let can_run_in_action_runner =
+    match ectx.mode with
+    | Build -> can_run_in_action_runner
+    | Shell_replay -> false
+  in
   let metadata = { ectx.metadata with can_run_in_action_runner } in
-  let+ (_ : (unit, int) result) =
+  let run failure_mode ~display =
     Process.run_with_array_args
-      ~display:!Clflags.display
-      (Accept eenv.exit_codes)
+      ~display
+      failure_mode
       ~dir:eenv.working_dir
       ~env:eenv.env
       ~stdout_to:eenv.stdout_to
@@ -31,7 +38,19 @@ let exec_run ~(ectx : context) ~(eenv : env) ~can_run_in_action_runner prog args
       prog
       args
   in
-  ()
+  match ectx.mode with
+  | Build ->
+    let+ (_ : (unit, int) result) =
+      run (Accept eenv.exit_codes) ~display:!Clflags.display
+    in
+    ()
+  | Shell_replay ->
+    let+ (), status = run Return_raw ~display:Quiet in
+    (match status with
+     | Process.Failure_mode.Exited exit_code ->
+       if not (Predicate.test eenv.exit_codes exit_code)
+       then raise (Shell_replay_failed status)
+     | Process.Failure_mode.Signaled _ -> raise (Shell_replay_failed status))
 ;;
 
 let bash_exn =
@@ -173,7 +192,10 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
     Fiber.return ()
   | Pipe (outputs, l) -> exec_pipe ~ectx ~eenv outputs l
   | Diff diff ->
-    Diff_action.exec ~sandbox:ectx.sandbox ~patch_back:None ectx.rule_loc diff
+    (match ectx.mode with
+     | Build -> Diff_action.exec ~sandbox:ectx.sandbox ~patch_back:None ectx.rule_loc diff
+     | Shell_replay ->
+       Diff_action.exec_without_promotion ~sandbox:ectx.sandbox ectx.rule_loc diff)
   | Extension (module A) ->
     let metadata =
       { ectx.metadata with can_run_in_action_runner = A.Spec.can_run_in_action_runner }
@@ -257,6 +279,78 @@ and exec_pipe outputs ts ~ectx ~eenv : unit Fiber.t =
     loop ~in_:out ts
 ;;
 
+type replay_input =
+  { targets : Targets.Validated.t
+  ; dir : Path.t
+  ; env : Env.t
+  ; rule_loc : Loc.t
+  ; action : Action.t
+  ; temp_dir : Path.t
+  ; sandbox_policy_root : Path.t option
+  }
+
+let replay { targets; dir; env; rule_loc; action; temp_dir; sandbox_policy_root } =
+  let () =
+    match Action.find_extension_name action with
+    | None -> ()
+    | Some name ->
+      Code_error.raise
+        "action extension passed to dune shell replay"
+        [ "extension", Dyn.string name ]
+  in
+  Dtemp.with_temp_dir_for_shell temp_dir ~f:(fun () ->
+    let sandbox =
+      Option.map sandbox_policy_root ~f:(fun root ->
+        let base =
+          Process.Sandbox.create_base ~action_trace_root:(Action_trace.root ())
+        in
+        Process.Sandbox.for_action base ~root)
+    in
+    Fiber.finalize
+      ~finally:(fun () ->
+        Option.iter sandbox ~f:Process.Sandbox.destroy;
+        Fiber.return ())
+      (fun () ->
+         let build_deps (_ : Dep.Set.t) =
+           Code_error.raise "dynamic dependencies in a static dune shell replay" []
+         in
+         let ectx =
+           let metadata =
+             Process_metadata.create
+               ~purpose:(Process_metadata.Build_job (Some targets))
+               ()
+           in
+           { root = dir; metadata; sandbox; rule_loc; build_deps; mode = Shell_replay }
+         in
+         let eenv =
+           { working_dir = dir
+           ; env
+           ; stdout_to = Process.Io.inherit_stdout
+           ; stderr_to = Process.Io.inherit_stderr
+           ; stdin_from = Process.Io.null In
+           ; exit_codes = Predicate.create (Int.equal 0)
+           }
+         in
+         let open Fiber.O in
+         Action.chdirs action
+         |> Path.Build.Set.iter ~f:(fun path -> Path.mkdir_p (Path.build path));
+         Fiber.collect_errors (fun () -> exec action ~ectx ~eenv)
+         >>= function
+         | Ok _ -> Fiber.return 0
+         | Error errors ->
+           let statuses, errors =
+             List.partition_map errors ~f:(fun ({ Exn_with_backtrace.exn; _ } as error) ->
+               match exn with
+               | Shell_replay_failed status -> Left status
+               | _ -> Right error)
+           in
+           (match statuses with
+            | [] -> Fiber.reraise_all errors
+            | status :: _ ->
+              List.iter errors ~f:Dune_util.Report_error.report;
+              Fiber.return (Process.Failure_mode.exit_code_of_raw_status status))))
+;;
+
 type input =
   { targets : Targets.Validated.t option (* Some Jane Street actions use [None] *)
   ; root : Path.t
@@ -300,52 +394,49 @@ let eval_job_slots job_slots ~ectx ~(eenv : env) =
          ])
 ;;
 
-let exec
+let prepare_base_env ~root ~env execution_parameters =
+  let env =
+    match
+      Execution_parameters.workspace_root_to_build_path_prefix_map execution_parameters
+    with
+    | Unset -> env
+    | Set target ->
+      Dune_util.Build_path_prefix_map.extend_build_path_prefix_map
+        env
+        `New_rules_have_precedence
+        (* TODO generify *)
+        [ Some { source = Path.to_absolute_filename root; target } ]
+  in
+  let var = Env.Var.of_string "DUNE_PROJECT_ROOT" in
+  match Execution_parameters.action_project_root execution_parameters with
+  | None -> Env.remove env ~var
+  | Some project_root ->
+    (match Path.as_in_build_dir root with
+     | None -> env
+     | Some root ->
+       let project_root = Path.Build.append_source root project_root in
+       Env.add env ~var ~value:(Path.to_absolute_filename (Path.build project_root)))
+;;
+
+let prepare
       { targets
       ; root
       ; env
       ; rule_loc
       ; execution_parameters
       ; sandbox
-      ; action = t
+      ; action = _
       ; job_slots
       }
       ~build_deps
   =
-  let dynamic_deps_stages = ref [] in
   let ectx =
     let metadata =
       Process_metadata.create ~purpose:(Process_metadata.Build_job targets) ()
     in
-    let build_deps deps =
-      let+ facts = build_deps deps in
-      dynamic_deps_stages := (deps, facts) :: !dynamic_deps_stages
-    in
-    { root; metadata; sandbox; rule_loc; build_deps }
+    { root; metadata; sandbox; rule_loc; build_deps; mode = Build }
   and eenv =
-    let env =
-      match
-        Execution_parameters.workspace_root_to_build_path_prefix_map execution_parameters
-      with
-      | Unset -> env
-      | Set target ->
-        Dune_util.Build_path_prefix_map.extend_build_path_prefix_map
-          env
-          `New_rules_have_precedence
-          (* TODO generify *)
-          [ Some { source = Path.to_absolute_filename root; target } ]
-    in
-    let env =
-      let var = Env.Var.of_string "DUNE_PROJECT_ROOT" in
-      match Execution_parameters.action_project_root execution_parameters with
-      | None -> Env.remove env ~var
-      | Some project_root ->
-        (match Path.as_in_build_dir root with
-         | None -> env
-         | Some root ->
-           let project_root = Path.Build.append_source root project_root in
-           Env.add env ~var ~value:(Path.to_absolute_filename (Path.build project_root)))
-    in
+    let env = prepare_base_env ~root ~env execution_parameters in
     { working_dir = Path.root
     ; env
     ; stdout_to =
@@ -362,20 +453,34 @@ let exec
     ; exit_codes = Predicate.create (Int.equal 0)
     }
   in
-  let open Fiber.O in
+  let* job_slots = eval_job_slots job_slots ~ectx ~eenv in
+  let ectx = { ectx with metadata = { ectx.metadata with job_slots } } in
+  let eenv =
+    { eenv with
+      env =
+        Env.add
+          eenv.env
+          ~var:(Env.Var.of_string "DUNE_JOB_SLOTS")
+          ~value:(Int.to_string job_slots)
+    }
+  in
+  Fiber.return (ectx, eenv)
+;;
+
+let prepare_env input ~build_deps =
+  let+ _, eenv = prepare input ~build_deps in
+  eenv.env
+;;
+
+let exec ({ action; _ } as input) ~build_deps =
+  let dynamic_deps_stages = ref [] in
+  let build_deps deps =
+    let+ facts = build_deps deps in
+    dynamic_deps_stages := (deps, facts) :: !dynamic_deps_stages
+  in
   Fiber.collect_errors (fun () ->
-    let* job_slots = eval_job_slots job_slots ~ectx ~eenv in
-    let ectx = { ectx with metadata = { ectx.metadata with job_slots } } in
-    let eenv =
-      { eenv with
-        env =
-          Env.add
-            eenv.env
-            ~var:(Env.Var.of_string "DUNE_JOB_SLOTS")
-            ~value:(Int.to_string job_slots)
-      }
-    in
-    exec t ~ectx ~eenv)
+    let* ectx, eenv = prepare input ~build_deps in
+    exec action ~ectx ~eenv)
   >>| function
   | Ok () -> Ok { Exec_result.dynamic_deps_stages = List.rev !dynamic_deps_stages }
   | Error exns -> Error exns

@@ -99,6 +99,8 @@ module Validated = struct
     }
   ;;
 
+  let relocate { root = _; files; dirs } ~root = { root; files; dirs }
+
   let iter { root; files; dirs } ~file ~dir =
     Filename.Set.iter files ~f:(fun fn -> file (Path.Build.relative_fname root fn));
     Filename.Set.iter dirs ~f:(fun dn -> dir (Path.Build.relative_fname root dn))

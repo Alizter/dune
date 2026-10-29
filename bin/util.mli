@@ -10,4 +10,9 @@ type checked =
 val find_in_path_exn : string -> Path.t
 val check_path : Context.t list -> Path.t -> checked
 val restore_cwd_and_execve : Workspace_root.t -> string -> string list -> Env.t -> 'a
+
+(** Resolve the Dune executable running this process, including when [argv[0]] was found
+    via [PATH]. *)
+val dune_executable : unit -> Path.t
+
 val setup : unit -> Dune_rules.Main.build_system Memo.t

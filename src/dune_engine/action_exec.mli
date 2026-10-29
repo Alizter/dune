@@ -31,7 +31,25 @@ type input =
         one job slot. *)
   }
 
+(** Prepare the action environment, including its computed job-slot count. *)
+val prepare_env : input -> build_deps:(Dep.Set.t -> unit Fiber.t) -> Env.t Fiber.t
+
 val exec
   :  input
   -> build_deps:(Dep.Set.t -> Dep.Fact.t Dep.Map.t Fiber.t)
   -> Exec_result.t Fiber.t
+
+type replay_input =
+  { targets : Targets.Validated.t
+  ; dir : Path.t
+  ; env : Env.t
+  ; rule_loc : Loc.t
+  ; action : Action.t
+  ; temp_dir : Path.t
+  ; sandbox_policy_root : Path.t option
+  }
+
+(** Replay a static standard action with inherited standard streams.
+    A rejected process exit code is returned directly instead of being reported
+    as a Dune error. *)
+val replay : replay_input -> int Fiber.t

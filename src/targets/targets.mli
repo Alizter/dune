@@ -38,6 +38,7 @@ module Validated : sig
     }
 
   val file : Path.Build.t -> t
+  val relocate : t -> root:Path.Build.t -> t
   val iter : t -> file:(Path.Build.t -> unit) -> dir:(Path.Build.t -> unit) -> unit
 
   val fold

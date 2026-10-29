@@ -317,6 +317,18 @@ let runs_process t =
     ~extension:(fun (module A) -> A.Spec.runs_process)
 ;;
 
+let find_extension_name =
+  let rec loop = function
+    | Extension (module A) -> Some A.Spec.name
+    | t ->
+      fold_one_step t ~init:None ~f:(fun found child ->
+        match found with
+        | Some _ -> found
+        | None -> loop child)
+  in
+  loop
+;;
+
 let maybe_sandbox_path sandbox p =
   match Path.as_in_build_dir p with
   | None -> p
