@@ -1958,7 +1958,13 @@ let run_capture_line
              ]))
 ;;
 
-let run_inherit_std_in_out_unreported ~dir ~env ~(metadata : Process_metadata.t) prog args
+let run_inherit_std_in_out_unreported
+      ~dir
+      ~env
+      ~(metadata : Process_metadata.t)
+      ~sandbox
+      prog
+      args
   =
   let start = Time.now () in
   let build = Build.get () in
@@ -1977,7 +1983,7 @@ let run_inherit_std_in_out_unreported ~dir ~env ~(metadata : Process_metadata.t)
         ~metadata
         ~setpgid:None
         ~build
-        ~sandbox:None
+        ~sandbox
         ~queued:(Time.diff (Time.now ()) start)
         Return
         prog

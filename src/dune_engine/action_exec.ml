@@ -46,7 +46,7 @@ let bash_exn =
 
 let zero = Predicate_lang.element 0
 
-let rec exec t ~ectx ~eenv : unit Fiber.t =
+let rec exec t ~ectx ~eenv ~promote : unit Fiber.t =
   match (t : Action.t) with
   | Run { prog = Error e; args = _; can_run_in_action_runner = _ } ->
     Action.Prog.Not_found.raise e
@@ -60,23 +60,25 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
       in
       { eenv with exit_codes }
     in
-    exec t ~ectx ~eenv
-  | Chdir (dir, t) -> exec t ~ectx ~eenv:{ eenv with working_dir = dir }
+    exec t ~ectx ~eenv ~promote
+  | Chdir (dir, t) -> exec t ~ectx ~eenv:{ eenv with working_dir = dir } ~promote
   | Setenv (var, value, t) ->
     exec
       t
       ~ectx
       ~eenv:{ eenv with env = Env.add eenv.env ~var:(Env.Var.of_string var) ~value }
+      ~promote
   | Redirect_out (Stdout, fn, perm, Echo s) ->
     let perm = File_perm.to_unix_perm perm in
     Io.write_file_exn ~perm (Path.build fn) (String.concat s ~sep:" ");
     Fiber.return ()
   | Redirect_out (outputs, fn, perm, t) ->
     let fn = Path.build fn in
-    redirect_out t ~ectx ~eenv outputs ~perm fn
-  | Redirect_in (inputs, fn, t) -> redirect_in t ~ectx ~eenv inputs fn
-  | Ignore (outputs, t) -> redirect_out t ~ectx ~eenv ~perm:Normal outputs Dev_null.path
-  | Progn ts -> exec_list ts ~ectx ~eenv
+    redirect_out t ~ectx ~eenv ~promote outputs ~perm fn
+  | Redirect_in (inputs, fn, t) -> redirect_in t ~ectx ~eenv ~promote inputs fn
+  | Ignore (outputs, t) ->
+    redirect_out t ~ectx ~eenv ~promote ~perm:Normal outputs Dev_null.path
+  | Progn ts -> exec_list ts ~ectx ~eenv ~promote
   | Concurrent ts ->
     Fiber.parallel_iter ts ~f:(fun t ->
       let eenv =
@@ -86,7 +88,7 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
         ; stdin_from = Process.Io.multi_use eenv.stdin_from
         }
       in
-      exec t ~ectx ~eenv)
+      exec t ~ectx ~eenv ~promote)
   | Echo strs ->
     let () =
       String.concat strs ~sep:" " |> output_string (Process.Io.out_channel eenv.stdout_to)
@@ -124,7 +126,7 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
       | _ -> copy_file ~src ~dst
     in
     Fiber.return ()
-  | Symlink (src, dst) when Sys.win32 -> exec (Copy (src, dst)) ~ectx ~eenv
+  | Symlink (src, dst) when Sys.win32 -> exec (Copy (src, dst)) ~ectx ~eenv ~promote
   | Symlink (src, dst) ->
     Io.portable_symlink ~overwrite:true ~src ~dst:(Path.build dst);
     Fiber.return ()
@@ -170,21 +172,24 @@ let rec exec t ~ectx ~eenv : unit Fiber.t =
   | Mkdir path ->
     Path.mkdir_p (Path.build path);
     Fiber.return ()
-  | Pipe (outputs, l) -> exec_pipe ~ectx ~eenv outputs l
+  | Pipe (outputs, l) -> exec_pipe ~ectx ~eenv ~promote outputs l
   | Diff diff ->
-    Diff_action.exec ~sandbox:ectx.sandbox ~patch_back:None ectx.rule_loc diff
+    if promote
+    then Diff_action.exec ~sandbox:ectx.sandbox ~patch_back:None ectx.rule_loc diff
+    else Diff_action.exec_without_promotion ~sandbox:ectx.sandbox ectx.rule_loc diff
   | Extension (module A) ->
     let metadata =
       { ectx.metadata with can_run_in_action_runner = A.Spec.can_run_in_action_runner }
     in
     A.Spec.action A.v ~ectx:{ ectx with metadata } ~eenv
 
-and redirect_out t ~ectx ~eenv ~perm outputs fn =
-  redirect t ~ectx ~eenv ~out:(outputs, fn, perm) ()
+and redirect_out t ~ectx ~eenv ~promote ~perm outputs fn =
+  redirect t ~ectx ~eenv ~promote ~out:(outputs, fn, perm) ()
 
-and redirect_in t ~ectx ~eenv inputs fn = redirect t ~ectx ~eenv ~in_:(inputs, fn) ()
+and redirect_in t ~ectx ~eenv ~promote inputs fn =
+  redirect t ~ectx ~eenv ~promote ~in_:(inputs, fn) ()
 
-and redirect t ~ectx ~eenv ?in_ ?out () =
+and redirect t ~ectx ~eenv ~promote ?in_ ?out () =
   let stdin_from, release_in =
     match in_ with
     | None -> eenv.stdin_from, ignore
@@ -205,22 +210,24 @@ and redirect t ~ectx ~eenv ?in_ ?out () =
       in
       stdout_to, stderr_to, fun () -> Process.Io.release out
   in
-  let+ () = exec t ~ectx ~eenv:{ eenv with stdin_from; stdout_to; stderr_to } in
+  let+ () = exec t ~ectx ~eenv:{ eenv with stdin_from; stdout_to; stderr_to } ~promote in
   release_in ();
   release_out ()
 
-and exec_list ts ~ectx ~eenv : unit Fiber.t =
+and exec_list ts ~ectx ~eenv ~promote : unit Fiber.t =
   match ts with
   | [] -> Fiber.return ()
-  | [ t ] -> exec t ~ectx ~eenv
+  | [ t ] -> exec t ~ectx ~eenv ~promote
   | t :: rest ->
     let stdout_to = Process.Io.multi_use eenv.stdout_to in
     let stderr_to = Process.Io.multi_use eenv.stderr_to in
     let stdin_from = Process.Io.multi_use eenv.stdin_from in
-    let* () = exec t ~ectx ~eenv:{ eenv with stdout_to; stderr_to; stdin_from } in
-    exec_list rest ~ectx ~eenv
+    let* () =
+      exec t ~ectx ~eenv:{ eenv with stdout_to; stderr_to; stdin_from } ~promote
+    in
+    exec_list rest ~ectx ~eenv ~promote
 
-and exec_pipe outputs ts ~ectx ~eenv : unit Fiber.t =
+and exec_pipe outputs ts ~ectx ~eenv ~promote : unit Fiber.t =
   let tmp_file () =
     Dtemp.file ~prefix:"dune-pipe-action-" ~suffix:("." ^ Outputs.to_string outputs)
   in
@@ -233,12 +240,14 @@ and exec_pipe outputs ts ~ectx ~eenv : unit Fiber.t =
         | Stderr -> { eenv with stdout_to = Process.Io.multi_use eenv.stderr_to }
         | _ -> eenv
       in
-      let+ () = redirect_in last_t ~ectx ~eenv Stdin in_ in
+      let+ () = redirect_in last_t ~ectx ~eenv ~promote Stdin in_ in
       Dtemp.destroy File in_
     | t :: ts ->
       let out = tmp_file () in
       let eenv = { eenv with stderr_to = Process.Io.multi_use eenv.stderr_to } in
-      let* () = redirect t ~ectx ~eenv ~in_:(Stdin, in_) ~out:(Stdout, out, Normal) () in
+      let* () =
+        redirect t ~ectx ~eenv ~promote ~in_:(Stdin, in_) ~out:(Stdout, out, Normal) ()
+      in
       Dtemp.destroy File in_;
       loop ~in_:out ts
   in
@@ -252,7 +261,7 @@ and exec_pipe outputs ts ~ectx ~eenv : unit Fiber.t =
       | Stdout -> { eenv with stderr_to = Process.Io.multi_use eenv.stderr_to }
       | Stderr -> { eenv with stdout_to = Process.Io.multi_use eenv.stdout_to }
     in
-    let* () = redirect_out t1 ~ectx ~eenv ~perm:Normal outputs out in
+    let* () = redirect_out t1 ~ectx ~eenv ~promote ~perm:Normal outputs out in
     loop ~in_:out ts
 ;;
 
@@ -285,7 +294,7 @@ let eval_job_slots job_slots ~ectx ~(eenv : env) =
       }
     in
     let out = Dtemp.file ~prefix:"dune-job-slots-" ~suffix:".stdout" in
-    let+ () = redirect_out t ~ectx ~eenv ~perm:Normal Stdout out in
+    let+ () = redirect_out t ~ectx ~eenv ~promote:true ~perm:Normal Stdout out in
     let stdout = String.trim (Io.read_file_exn out) in
     Dtemp.destroy File out;
     (match Int.of_string stdout with
@@ -373,12 +382,89 @@ let prepare
 ;;
 
 let prepare_env input ~build_deps =
-  let+ _, eenv = prepare input ~build_deps in
-  eenv.env
+  let+ _, { Action_intf.Exec.env; _ } = prepare input ~build_deps in
+  env
 ;;
+
+module Replay = struct
+  type t =
+    { targets : Targets.Validated.t
+    ; root : Path.Build.t
+    ; action : Action.t
+    ; rule_loc : Loc.t
+    }
+
+  let create ({ targets; action; rule_loc; _ } : input) ~sandbox =
+    let targets =
+      match targets with
+      | Some targets -> targets
+      | None -> Code_error.raise "rule-action replay requires declared targets" []
+    in
+    { targets; root = Sandbox.map_path sandbox Path.Build.root; action; rule_loc }
+  ;;
+
+  let conv : t Stdune.Conv.value =
+    Stdune.Conv.iso
+      Stdune.Conv.string
+      (fun data ->
+         match Marshal.from_string data with
+         | setup -> setup
+         | exception (Failure _ | Invalid_argument _) ->
+           Stdune.Conv.error
+             (Parse_error { message = "invalid action replay snapshot"; payload = [] }))
+      (fun setup -> Stdlib.Marshal.to_string setup [ Closures ])
+  ;;
+
+  let clear_targets { targets; root; _ } ~dir =
+    let cwd =
+      Path.of_filename_relative_to_initial_cwd "." |> Path.Expert.try_localize_external
+    in
+    let rec clear path =
+      match Path.Untracked.lstat path with
+      | Ok { Unix.st_kind = S_DIR; st_perm; _ }
+        when List.exists [ dir; cwd ] ~f:(fun cwd ->
+               Path.equal path cwd || Path.is_descendant cwd ~of_:path) ->
+        (* Keep the directory inode and ancestors used by the live shell. *)
+        Unix.chmod (Path.to_string path) (st_perm lor 0o700);
+        (match Path.Untracked.readdir_unsorted path with
+         | Ok entries ->
+           List.iter entries ~f:(fun name -> clear (Path.relative_fname path name))
+         | Error error -> Unix_error.Detailed.raise error)
+      | Ok _ | Error _ -> Path.rm_rf ~chmod:true path
+    in
+    let clear path = clear (Path.build (Path.Build.append root path)) in
+    Targets.Validated.iter targets ~file:clear ~dir:clear
+  ;;
+
+  let exec setup =
+    let { targets; root; action; rule_loc } = setup in
+    let { Targets.Validated.root = target_dir; _ } = targets in
+    let dir = Path.build (Path.Build.append root target_dir) in
+    clear_targets setup ~dir;
+    let build_deps (_ : Dep.Set.t) =
+      Code_error.raise "dynamic dependencies in a static dune shell replay" []
+    in
+    let metadata =
+      Process_metadata.create ~purpose:(Process_metadata.Build_job (Some targets)) ()
+    in
+    let ectx = { root = dir; metadata; sandbox = None; rule_loc; build_deps } in
+    let eenv =
+      { working_dir = dir
+      ; env = Env.initial
+      ; stdout_to = Process.Io.inherit_stdout
+      ; stderr_to = Process.Io.inherit_stderr
+      ; stdin_from = Process.Io.null In
+      ; exit_codes = Predicate.create (Int.equal 0)
+      }
+    in
+    Action.chdirs action
+    |> Path.Build.Set.iter ~f:(fun path -> Path.mkdir_p (Path.build path));
+    exec action ~ectx ~eenv ~promote:false
+  ;;
+end
 
 let exec ({ action; _ } as input) ~build_deps =
   Fiber.collect_errors (fun () ->
     let* ectx, eenv = prepare input ~build_deps in
-    exec action ~ectx ~eenv)
+    exec action ~ectx ~eenv ~promote:true)
 ;;
