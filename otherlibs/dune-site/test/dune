@@ -2,8 +2,10 @@
  (applies_to :whole_subtree)
  (deps
   (package dune)
+  (package dune-build-info)
   (package dune-site)
-  (package dune-private-libs)))
+  (package dune-private-libs)
+  (package result)))
 
 ; The test is broken, plugins of c are not found when running c from a rule that
 ; depends on (package c).
