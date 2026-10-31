@@ -815,6 +815,31 @@ let%expect_test "drop prefix with a trailing /" =
   [%expect {| Some "d/e" |}]
 ;;
 
+let%expect_test "external localization respects workspace component boundaries" =
+  let root = Path.to_absolute_filename Path.root in
+  List.iter
+    [ ""; "/input"; "/_build"; "/_build/default/input"; "-extra/input" ]
+    ~f:(fun suffix ->
+      printfn "root%s:" suffix;
+      let path = Path.of_string (root ^ suffix) |> Path.Expert.try_localize_external in
+      if Path.is_managed path
+      then Path.to_dyn path |> print_dyn
+      else print_endline "external");
+  [%expect
+    {|
+    root:
+    In_source_tree "."
+    root/input:
+    In_source_tree "input"
+    root/_build:
+    In_build_dir "."
+    root/_build/default/input:
+    In_build_dir "default/input"
+    root-extra/input:
+    In_source_tree "-extra/input"
+    |}]
+;;
+
 let%expect_test "external relative plain" =
   external_relative "/root" "foo/bar";
   [%expect {| /root/foo/bar |}]

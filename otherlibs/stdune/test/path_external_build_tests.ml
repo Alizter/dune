@@ -12,6 +12,32 @@ let () =
   Path.Build.set_build_dir (Path.Outside_build_dir.of_string "/external-build")
 ;;
 
+let%expect_test "external localization respects component boundaries" =
+  List.iter
+    [ "/workspace"
+    ; "/workspace/input"
+    ; "/workspace-extra/input"
+    ; "/external-build"
+    ; "/external-build/default/input"
+    ; "/external-build-extra/input"
+    ]
+    ~f:(fun path ->
+      Path.of_string path
+      |> Path.Expert.try_localize_external
+      |> Path.to_dyn
+      |> Dyn.pp
+      |> Format.printf "%a@." Pp.to_fmt);
+  [%expect
+    {|
+    In_source_tree "."
+    In_source_tree "input"
+    In_source_tree "-extra/input"
+    In_build_dir "."
+    In_build_dir "default/input"
+    In_build_dir "-extra/input"
+    |}]
+;;
+
 let%expect_test "Build.to_string root" =
   Path.Build.to_string Path.Build.root |> print_endline;
   [%expect {| /external-build |}]
