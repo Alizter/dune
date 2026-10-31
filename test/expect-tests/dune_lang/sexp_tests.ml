@@ -5,6 +5,64 @@ open Dune_tests_common
 let () = init ()
 let print_loc ppf (_ : Loc.t) = Format.pp_print_string ppf "<loc>"
 
+let%expect_test "predicate encoding preserves membership" =
+  let open Predicate_lang in
+  let accepts predicate =
+    List.map [ 0; 7; 9 ] ~f:(fun code ->
+      test predicate ~standard:(element 0) ~test:Int.equal code |> Bool.to_string)
+    |> String.concat ~sep:", "
+  in
+  List.iter
+    [ "true", true_
+    ; "false", false_
+    ; "element", element 7
+    ; "standard", standard
+    ; "not", not (element 0)
+    ; "or", or_ [ element 0; element 7 ]
+    ; "and", and_ [ not (element 0); element 7 ]
+    ; "nested", and_ [ or_ [ standard; element 7 ]; not (element 0) ]
+    ]
+    ~f:(fun (name, predicate) ->
+      let encoded =
+        encode Dune_lang.Encoder.int predicate
+        |> Dune_lang.pp
+        |> Format.asprintf "%a" Pp.to_fmt
+      in
+      printfn "%s: %s" name encoded;
+      printfn "before: %s" (accepts predicate);
+      let ast = Dune_lang.Parser.parse_string ~fname:"" ~mode:Single encoded in
+      match parse (decode_one int) Univ_map.empty ast with
+      | decoded -> printfn "after: %s" (accepts decoded)
+      | exception User_error.E _ -> print_endline "after: invalid encoding");
+  [%expect
+    {|
+    true: (or ())
+    before: true, true, true
+    after: false, false, false
+    false: (and ())
+    before: false, false, false
+    after: false, false, false
+    element: 7
+    before: false, true, false
+    after: false, true, false
+    standard: :standard
+    before: true, false, false
+    after: true, false, false
+    not: (not 0)
+    before: false, true, true
+    after: false, true, true
+    or: (or (0 7))
+    before: true, true, false
+    after: invalid encoding
+    and: (and ((not 0) 7))
+    before: false, true, false
+    after: false, true, true
+    nested: (and ((or (:standard 7)) (not 0)))
+    before: false, true, false
+    after: true, true, true
+    |}]
+;;
+
 let sexp =
   lazy
     (Dune_lang.Parser.parse_string
