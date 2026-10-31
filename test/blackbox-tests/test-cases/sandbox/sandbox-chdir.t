@@ -90,3 +90,37 @@ Show errors when [chdir]ing outside of the build directory.
   $TESTCASE_ROOT/../dir
   is outside the build directory. This is not allowed.
   [1]
+
+Shared action preparation preserves ordinary named rules and alias actions:
+working directories are created, environments are retained, and sandboxed
+outputs and anonymous-action stamps reach the build directory.
+
+  $ make_dune_project 3.23
+  $ cat > dune <<'EOF'
+  > (rule
+  >  (target prepared-output)
+  >  (deps prepared-source)
+  >  (action
+  >   (chdir action-dir
+  >    (setenv PREPARED prepared
+  >     (with-stdout-to ../prepared-output
+  >      (run sh -c "printf '%s: ' \"$PREPARED\"; cat ../prepared-source"))))))
+  > (rule
+  >  (alias prepared-alias)
+  >  (deps prepared-output)
+  >  (action (cat prepared-output)))
+  > EOF
+  $ echo initial > prepared-source
+  $ dune build --sandbox=copy @prepared-alias
+  prepared: initial
+  $ cat _build/default/prepared-output
+  prepared: initial
+
+An unchanged build is cached; changing the input rebuilds both actions.
+
+  $ dune build --sandbox=copy @prepared-alias
+  $ echo refreshed > prepared-source
+  $ dune build --sandbox=copy @prepared-alias
+  prepared: refreshed
+  $ cat _build/default/prepared-output
+  prepared: refreshed

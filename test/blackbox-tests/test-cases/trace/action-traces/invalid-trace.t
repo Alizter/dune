@@ -17,6 +17,11 @@ Invalid traces should be an error
   _build/REDACTED
   [1]
 
+Invalid trace data is cleaned up after reporting the error.
+
+  $ find _build/.action-trace -type d
+  _build/.action-trace
+
 A failed action still collects its trace event.
 
   $ cat >dune <<'EOF'
@@ -40,3 +45,8 @@ A failed action still collects its trace event.
       "digest": "REDACTED"
     }
   }
+
+The failed action's trace directory is removed too.
+
+  $ find _build/.action-trace -type d
+  _build/.action-trace

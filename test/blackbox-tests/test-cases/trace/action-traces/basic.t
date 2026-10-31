@@ -10,6 +10,11 @@ Dune's actions may produce trace events
 
   $ dune build @foo
 
+The action trace directory is removed after collection.
+
+  $ find _build/.action-trace -type d
+  _build/.action-trace
+
   $ dune trace cat | jq_dune -s 'redactedActionTraces'
   {
     "cat": "bar",
