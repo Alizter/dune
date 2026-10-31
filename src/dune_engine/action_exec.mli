@@ -24,4 +24,7 @@ type input =
         one job slot. *)
   }
 
+(** Prepare the action environment, including its computed job-slot count. *)
+val prepare_env : input -> build_deps:(Dep.Set.t -> unit Fiber.t) -> Env.t Fiber.t
+
 val exec : input -> build_deps:(Dep.Set.t -> unit Fiber.t) -> Exec_result.t Fiber.t
