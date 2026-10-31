@@ -36,10 +36,10 @@ let%expect_test "predicate encoding preserves membership" =
       | exception User_error.E _ -> print_endline "after: invalid encoding");
   [%expect
     {|
-    true: (or ())
+    true: (and)
     before: true, true, true
-    after: false, false, false
-    false: (and ())
+    after: true, true, true
+    false: (or)
     before: false, false, false
     after: false, false, false
     element: 7
@@ -51,15 +51,15 @@ let%expect_test "predicate encoding preserves membership" =
     not: (not 0)
     before: false, true, true
     after: false, true, true
-    or: (or (0 7))
+    or: (or 0 7)
     before: true, true, false
-    after: invalid encoding
-    and: (and ((not 0) 7))
+    after: true, true, false
+    and: (and (not 0) 7)
     before: false, true, false
-    after: false, true, true
-    nested: (and ((or (:standard 7)) (not 0)))
+    after: false, true, false
+    nested: (and (or :standard 7) (not 0))
     before: false, true, false
-    after: true, true, true
+    after: false, true, false
     |}]
 ;;
 
