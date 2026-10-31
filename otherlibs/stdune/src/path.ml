@@ -1020,12 +1020,9 @@ let is_broken_symlink = function
 
 module Expert = struct
   let drop_absolute_prefix ~prefix p =
-    match
-      String.drop_prefix ~prefix:(Outside_build_dir.to_absolute_filename prefix) p
-    with
-    | None -> None
-    | Some "" -> Some Local.root
-    | Some p -> Some (Local.of_string (if is_dir_sep p.[0] then String.drop p 1 else p))
+    drop_prefix
+      (of_string p)
+      ~prefix:(of_string (Outside_build_dir.to_absolute_filename prefix))
   ;;
 
   let try_localize_external ext =

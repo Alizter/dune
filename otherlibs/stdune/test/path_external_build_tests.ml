@@ -31,10 +31,10 @@ let%expect_test "external localization respects component boundaries" =
     {|
     In_source_tree "."
     In_source_tree "input"
-    In_source_tree "-extra/input"
+    External "/workspace-extra/input"
     In_build_dir "."
     In_build_dir "default/input"
-    In_build_dir "-extra/input"
+    External "/external-build-extra/input"
     |}]
 ;;
 

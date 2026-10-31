@@ -836,7 +836,7 @@ let%expect_test "external localization respects workspace component boundaries" 
     root/_build/default/input:
     In_build_dir "default/input"
     root-extra/input:
-    In_source_tree "-extra/input"
+    external
     |}]
 ;;
 
