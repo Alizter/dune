@@ -299,14 +299,38 @@ let eval_job_slots job_slots ~ectx ~(eenv : env) =
          ])
 ;;
 
-let exec
+let prepare_base_env ~root ~env execution_parameters =
+  let env =
+    match
+      Execution_parameters.workspace_root_to_build_path_prefix_map execution_parameters
+    with
+    | Unset -> env
+    | Set target ->
+      Dune_util.Build_path_prefix_map.extend_build_path_prefix_map
+        env
+        `New_rules_have_precedence
+        (* TODO generify *)
+        [ Some { source = Path.to_absolute_filename root; target } ]
+  in
+  let var = Env.Var.of_string "DUNE_PROJECT_ROOT" in
+  match Execution_parameters.action_project_root execution_parameters with
+  | None -> Env.remove env ~var
+  | Some project_root ->
+    (match Path.as_in_build_dir root with
+     | None -> env
+     | Some root ->
+       let project_root = Path.Build.append_source root project_root in
+       Env.add env ~var ~value:(Path.to_absolute_filename (Path.build project_root)))
+;;
+
+let prepare
       { targets
       ; root
       ; env
       ; rule_loc
       ; execution_parameters
       ; sandbox
-      ; action = t
+      ; action = _
       ; job_slots
       }
       ~build_deps
@@ -317,29 +341,7 @@ let exec
     in
     { root; metadata; sandbox; rule_loc; build_deps }
   and eenv =
-    let env =
-      match
-        Execution_parameters.workspace_root_to_build_path_prefix_map execution_parameters
-      with
-      | Unset -> env
-      | Set target ->
-        Dune_util.Build_path_prefix_map.extend_build_path_prefix_map
-          env
-          `New_rules_have_precedence
-          (* TODO generify *)
-          [ Some { source = Path.to_absolute_filename root; target } ]
-    in
-    let env =
-      let var = Env.Var.of_string "DUNE_PROJECT_ROOT" in
-      match Execution_parameters.action_project_root execution_parameters with
-      | None -> Env.remove env ~var
-      | Some project_root ->
-        (match Path.as_in_build_dir root with
-         | None -> env
-         | Some root ->
-           let project_root = Path.Build.append_source root project_root in
-           Env.add env ~var ~value:(Path.to_absolute_filename (Path.build project_root)))
-    in
+    let env = prepare_base_env ~root ~env execution_parameters in
     { working_dir = Path.root
     ; env
     ; stdout_to =
@@ -356,18 +358,27 @@ let exec
     ; exit_codes = Predicate.create (Int.equal 0)
     }
   in
-  let open Fiber.O in
+  let* job_slots = eval_job_slots job_slots ~ectx ~eenv in
+  let ectx = { ectx with metadata = { ectx.metadata with job_slots } } in
+  let eenv =
+    { eenv with
+      env =
+        Env.add
+          eenv.env
+          ~var:(Env.Var.of_string "DUNE_JOB_SLOTS")
+          ~value:(Int.to_string job_slots)
+    }
+  in
+  Fiber.return (ectx, eenv)
+;;
+
+let prepare_env input ~build_deps =
+  let+ _, eenv = prepare input ~build_deps in
+  eenv.env
+;;
+
+let exec ({ action; _ } as input) ~build_deps =
   Fiber.collect_errors (fun () ->
-    let* job_slots = eval_job_slots job_slots ~ectx ~eenv in
-    let ectx = { ectx with metadata = { ectx.metadata with job_slots } } in
-    let eenv =
-      { eenv with
-        env =
-          Env.add
-            eenv.env
-            ~var:(Env.Var.of_string "DUNE_JOB_SLOTS")
-            ~value:(Int.to_string job_slots)
-      }
-    in
-    exec t ~ectx ~eenv)
+    let* ectx, eenv = prepare input ~build_deps in
+    exec action ~ectx ~eenv)
 ;;
