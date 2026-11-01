@@ -58,6 +58,10 @@ module Io : sig
     -> output_limit:Action_output_limit.t
     -> output t
 
+  (** Inherited output descriptors that bypass Dune's output capture. *)
+  val inherit_stdout : output t
+
+  val inherit_stderr : output t
   val stdin : input t
   val null : 'a mode -> 'a t
 
@@ -202,6 +206,27 @@ val run_capture_zero_separated
   -> string list
   -> 'a Fiber.t
 
+(** Run with inherited standard streams and process group, returning the
+    termination status without rendering a Dune process diagnostic. Scheduling,
+    tracing, and cleanup are retained; scheduler cancellation still raises. *)
+val run_inherit_std_in_out_unreported
+  :  dir:Path.t
+  -> env:Env.t
+  -> metadata:Process_metadata.t
+  -> Path.t
+  -> string list
+  -> Unix.process_status Fiber.t
+
+(** Apply ordinary Dune diagnostics to an inherited-stream termination status.
+    Normal numeric exits are returned unchanged; signals are reported as errors. *)
+val report_inherited_status
+  :  dir:Path.t
+  -> metadata:Process_metadata.t
+  -> Path.t
+  -> string list
+  -> Unix.process_status
+  -> int
+
 (** [run_inherit_std_in_out] differs from the other [run] functions in the
     followings ways:
 
@@ -215,6 +240,7 @@ val run_capture_zero_separated
 val run_inherit_std_in_out
   :  ?dir:Path.t
   -> ?env:Env.t
+  -> metadata:Process_metadata.t
   -> Path.t
   -> string list
   -> int Fiber.t

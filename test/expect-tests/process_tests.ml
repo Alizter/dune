@@ -73,6 +73,62 @@ let%expect_test "returned and accepted numeric exits" =
     |}]
 ;;
 
+let%expect_test "unreported inherited process statuses" =
+  List.iter [ "exit 0"; "exit 7"; "kill -TERM $$" ] ~f:(fun script ->
+    let status =
+      go (fun () ->
+        Process.run_inherit_std_in_out_unreported
+          ~dir:Path.root
+          ~env:Env.initial
+          ~metadata:Process_metadata.default
+          (Lazy.force sh)
+          [ "-c"; script ])
+    in
+    match status with
+    | Unix.WEXITED code -> Printf.printf "exited: %d\n" code
+    | WSIGNALED signal ->
+      Printf.printf "signaled: %s\n" (Signal.name (Signal.of_int signal))
+    | WSTOPPED signal ->
+      Printf.printf "stopped: %s\n" (Signal.name (Signal.of_int signal)));
+  [%expect
+    {|
+    exited: 0
+    exited: 7
+    signaled: TERM
+    |}]
+;;
+
+let%expect_test "unreported execution preserves build cancellation" =
+  let cancellation = Fiber.Cancel.create () in
+  let build =
+    Process.Build.create ~action_runner:None ~run_id:Run_id.Batch ~cancellation
+  in
+  let result =
+    go (fun () ->
+      let open Fiber.O in
+      let* () = Fiber.Cancel.fire cancellation in
+      Fiber.collect_errors (fun () ->
+        Process.Build.with_ build (fun () ->
+          Process.run_inherit_std_in_out_unreported
+            ~dir:Path.root
+            ~env:Env.initial
+            ~metadata:Process_metadata.default
+            true_
+            [])))
+  in
+  let cancelled =
+    match result with
+    | Ok _ -> false
+    | Error errors ->
+      List.exists errors ~f:(fun { Exn_with_backtrace.exn; _ } ->
+        match exn with
+        | Memo.Non_reproducible Scheduler.Run.Build_cancelled -> true
+        | _ -> false)
+  in
+  Printf.printf "cancelled: %b\n" cancelled;
+  [%expect {| cancelled: true |}]
+;;
+
 let%expect_test "process timeout" =
   let result =
     go (fun () ->
