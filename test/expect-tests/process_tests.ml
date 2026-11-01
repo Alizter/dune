@@ -10,7 +10,7 @@ let go =
     ; watch_exclusions = []
     }
   in
-  Scheduler.Run.go config ~file_watcher:No_watcher
+  fun f -> Scheduler.Run.go config ~file_watcher:No_watcher f
 ;;
 
 let true_ = Bin.which "true" ~path:(Env_path.path Env.initial) |> Option.value_exn
@@ -41,6 +41,51 @@ let%expect_test "action and Dune temporary directories" =
     files before clear: true true
     files after clear: false false
     |}]
+;;
+
+let sh = lazy (Bin.which "sh" ~path:(Env_path.path Env.initial) |> Option.value_exn)
+
+let%expect_test "returned and accepted numeric exits" =
+  let sh = Lazy.force sh in
+  let (), code = go (fun () -> Process.run ~display:Quiet Return sh [ "-c"; "exit 7" ]) in
+  Printf.printf "returned: %d\n" code;
+  let accepted =
+    go (fun () ->
+      Process.run
+        ~display:Quiet
+        (Accept (Predicate.create (Int.equal 7)))
+        sh
+        [ "-c"; "exit 7" ])
+  in
+  (match accepted with
+   | Ok () -> print_endline "accepted: zero"
+   | Error code -> Printf.printf "accepted: %d\n" code);
+  let output, code =
+    go (fun () ->
+      Process.run_capture ~display:Quiet Return sh [ "-c"; "printf captured; exit 7" ])
+  in
+  Printf.printf "captured: %S, exit: %d\n" output code;
+  [%expect
+    {|
+    returned: 7
+    accepted: 7
+    captured: "captured", exit: 7
+    |}]
+;;
+
+let%expect_test "process timeout" =
+  let result =
+    go (fun () ->
+      Process.run
+        ~display:Quiet
+        (Timeout { timeout = Some (Time.Span.of_secs 0.01); failure_mode = Return })
+        (Lazy.force sh)
+        [ "-c"; "sleep 2" ])
+  in
+  (match result with
+   | Error `Timed_out -> print_endline "timed out"
+   | Ok (_, code) -> Printf.printf "finished: %d\n" code);
+  [%expect {| timed out |}]
 ;;
 
 let%expect_test "null input" =
