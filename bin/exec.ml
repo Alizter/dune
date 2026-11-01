@@ -207,6 +207,7 @@ let step ~prog ~args ~common ~no_rebuild ~context ~on_exit () =
   @@ Dune_engine.Process.run_inherit_std_in_out
        ~dir:(Path.of_string Fpath.initial_cwd)
        ~env
+       ~metadata:Dune_engine.Process_metadata.default
        path
        args
   >>| function
