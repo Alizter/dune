@@ -8,6 +8,10 @@ type checked =
   | External of Path.External.t
 
 val find_in_path_exn : string -> Path.t
+
+(** Resolve the current Dune executable, including when found via [PATH]. *)
+val dune_prog : unit -> Path.t
+
 val check_path : Context.t list -> Path.t -> checked
 val restore_cwd_and_execve : Workspace_root.t -> string -> string list -> Env.t -> 'a
 
