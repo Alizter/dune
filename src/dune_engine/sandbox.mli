@@ -5,6 +5,7 @@ open Import
 type t
 
 val root : t -> Path.t option
+val mode : t -> Sandbox_mode.some option
 
 (** [map_path t p] returns the path corresponding to [p] inside the sandbox. *)
 val map_path : t -> Path.Build.t -> Path.Build.t

@@ -70,6 +70,11 @@ let root = function
   | No_sandbox _ -> None
 ;;
 
+let mode = function
+  | Sandboxed { mode; _ } -> Some mode
+  | No_sandbox _ -> None
+;;
+
 let map_real_path t p = Path.Build.append t.dir p
 
 let map_path t p =

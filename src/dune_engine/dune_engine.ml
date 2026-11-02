@@ -9,6 +9,16 @@ module Utils = Utils
 module Dir_set = Dir_set
 module Subdir_set = Subdir_set
 module Sandbox_config = Sandbox_config
+
+module Sandbox : sig
+  type t = Sandbox.t
+
+  val root : t -> Stdune.Path.t option
+  val mode : t -> Stdune.Sandbox_mode.some option
+  val map_path : t -> Stdune.Path.Build.t -> Stdune.Path.Build.t
+end =
+  Sandbox
+
 module Process_metadata = Process_metadata
 module Process_runner = Process_runner
 module Process = Process
