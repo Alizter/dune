@@ -246,7 +246,8 @@ let build_prog_via_rpc_if_necessary ~dir ~config ~no_rebuild builder lock_held_b
           prog
       ];
     let path = Env_path.path Env.initial in
-    (match Bin.which ~path prog with
+    let dir = Path.of_string Fpath.initial_cwd in
+    (match Util.resolve_program ~path ~dir prog with
      | None -> not_found ~hints:[] ~prog
      | Some prog_path -> Fiber.return (Path.to_absolute_filename prog_path))
   | Relative_to_current_dir ->
