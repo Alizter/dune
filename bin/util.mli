@@ -12,6 +12,11 @@ val find_in_path_exn : string -> Path.t
 (** Resolve the current Dune executable, including when found via [PATH]. *)
 val dune_prog : unit -> Path.t
 
+(** Resolve a command using the supplied search path and working directory,
+    without consulting the build system. Returns [None] if PATH lookup fails.
+    Absolute and relative path operands are returned without checking existence. *)
+val resolve_program : path:Path.t list -> dir:Path.t -> string -> Path.t option
+
 val check_path : Context.t list -> Path.t -> checked
 val restore_cwd_and_execve : Workspace_root.t -> string -> string list -> Env.t -> 'a
 

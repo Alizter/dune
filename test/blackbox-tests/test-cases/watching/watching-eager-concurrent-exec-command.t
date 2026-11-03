@@ -30,6 +30,12 @@ Demonstrate running an executable from PATH:
   executable's name within your PATH only.
   bar
 
+Unknown PATH programs retain dune exec's diagnostic:
+  $ dune exec no-such-path-command >missing.stdout 2>missing.stderr
+  [1]
+  $ grep '^Error:' missing.stderr
+  Error: Program 'no-such-path-command' not found!
+
 Demonstrate trying to run exec in watch mode while another watch server is running:
   $ dune exec ./foo.exe --watch 2>&1 | tr '\n' ' ' | sed 's/(pid: [0-9]*)/(pid: PID)/'
   Error: Another instance of dune (pid: PID) has locked the _build directory. Refusing to start a new watch server until no other instances of dune are running. 

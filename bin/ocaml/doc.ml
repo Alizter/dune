@@ -50,7 +50,8 @@ let term =
       in
       let+ open_command =
         let path = Env_path.path Env.initial in
-        Bin.which ~path cmd_name
+        let dir = Path.of_string Fpath.initial_cwd in
+        Util.resolve_program ~path ~dir cmd_name
       in
       open_command, args @ [ relative_toplevel_index_path ]
     with

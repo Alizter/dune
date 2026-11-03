@@ -7,8 +7,17 @@ type checked =
   | In_source_dir of Path.Source.t
   | External of Path.External.t
 
+let resolve_program ~path ~dir program =
+  match Filename.analyze_program_name program with
+  | Absolute -> Some (Path.of_string program)
+  | Relative_to_current_dir -> Some (Path.relative dir program)
+  | In_path -> Bin.which ~path program
+;;
+
 let find_in_path_exn prog =
-  match Bin.which ~path:(Env_path.path Env.initial) prog with
+  let path = Env_path.path Env.initial in
+  let dir = Path.of_string Fpath.initial_cwd in
+  match resolve_program ~path ~dir prog with
   | Some path -> path
   | None -> User_error.raise [ Pp.textf "unable to find %s in PATH" prog ]
 ;;
