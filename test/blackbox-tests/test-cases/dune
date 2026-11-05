@@ -27,6 +27,16 @@
  (deps %{bin:dunepp}))
 
 (cram
+ (applies_to lint.t reason.t)
+ (deps
+  (package ppxlib)))
+
+(cram
+ (applies_to preprocessor-directory.t test-modes-byte.t)
+ (deps
+  (package ppx_inline_test)))
+
+(cram
  (applies_to :whole_subtree)
  (shell bash)
  (deps
@@ -49,7 +59,11 @@
  (alias runtest-windows))
 
 (cram
- (applies_to empty-meta-version-gh9176.t)
+ (applies_to
+  build-info-no-head-commit-gh4429.t
+  dune-build-info-in-ppx-github3336.t
+  empty-meta-version-gh9176.t
+  version-corruption.t)
  (deps
   (package dune-build-info)))
 
