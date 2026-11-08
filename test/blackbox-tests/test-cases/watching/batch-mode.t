@@ -34,3 +34,47 @@ single build executes the failed action only once.
       "process_count": 2
     }
   ]
+
+An anonymous action's memo identity must include its directory registrations,
+even when its literal PATH, action and dependencies have not changed.
+
+  $ mkdir anonymous-watch && cd anonymous-watch
+  $ make_dune_project 3.21
+  $ cat > helper.sh <<'EOF'
+  > #!/bin/sh
+  > echo helper
+  > EOF
+  $ chmod +x helper.sh
+  $ echo before > trigger
+  $ cat > dune <<EOF
+  > (alias (name idle))
+  > (rule
+  >  (alias probe)
+  >  (deps trigger (sandbox always) (universe))
+  >  (action
+  >   (setenv PATH "$PWD/_build/default/.bin"
+  >    (system
+  >     "\| if command -v helper >/dev/null; then
+  >     "\|   echo 'probe: leaked'
+  >     "\| else
+  >     "\|   echo 'probe: unavailable'
+  >     "\| fi
+  >   ))))
+  > EOF
+  $ mkdir -p _build/default/.bin
+  $ cp helper.sh _build/default/.bin/helper
+  $ start_dune @idle
+  $ build "(alias probe)"
+  Success
+  $ cat >> dune <<'EOF'
+  > (env
+  >  (_ (binaries (helper.sh as helper))))
+  > EOF
+  $ echo after > trigger
+  $ build "(alias probe)"
+  Success
+  $ stop_dune_quiet
+  $ grep '^probe:' .#dune-output
+  probe: leaked
+  probe: leaked
+
