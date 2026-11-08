@@ -10,4 +10,4 @@ Test that (deps (package ...)) adds lib/stublibs/ to CAML_LD_LIBRARY_PATH.
   $ baseline=$CAML_LD_LIBRARY_PATH
   $ dune build out
   $ env_added "$(cat _build/default/out)" "$baseline" | censor
-  $PWD/_build/install/default/.packages/$DIGEST/lib/stublibs
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.packages/$DIGEST2/lib/stublibs

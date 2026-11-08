@@ -20,7 +20,7 @@ tracked dep of the rule.
 The action's PATH includes the .binaries dir:
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/install/default/.binaries/$DIGEST
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.binaries/$DIGEST2
 
 The rule depends on the build artifact and the .binaries symlink:
 

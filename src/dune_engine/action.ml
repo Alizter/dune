@@ -323,28 +323,56 @@ let maybe_sandbox_path sandbox p =
   | Some p -> Path.build (Sandbox.map_path sandbox p)
 ;;
 
-let sandbox_path_map env sandbox =
-  List.fold_left (Env.local_bin_dirs env) ~init:String.Map.empty ~f:(fun acc dir ->
-    let original = Path.to_absolute_filename (Path.build dir) in
-    let relocated =
-      Sandbox.map_path sandbox dir |> Path.build |> Path.to_absolute_filename
-    in
-    String.Map.set acc original relocated)
+let sandbox_path_maps env sandbox =
+  List.fold_left
+    (Env.managed_dirs env)
+    ~init:Env.Var.Map.empty
+    ~f:(fun maps (var, sep, dirs) ->
+      let paths =
+        List.fold_left dirs ~init:String.Map.empty ~f:(fun acc dir ->
+          let original = Path.to_absolute_filename (Path.build dir) in
+          let relocated =
+            Sandbox.map_path sandbox dir |> Path.build |> Path.to_absolute_filename
+          in
+          String.Map.set acc original relocated)
+      in
+      Env.Var.Map.set maps var (sep, paths))
 ;;
 
-let sandbox_path_value paths value =
-  Bin.parse value
+let sandbox_path_value ~sep paths value =
+  Bin.parse ~sep value
   |> List.map ~f:(fun entry -> Option.value (String.Map.find paths entry) ~default:entry)
-  |> Bin.encode_strings
+  |> String.concat ~sep:(String.make 1 sep)
+;;
+
+let%expect_test "managed path relocation preserves separators and literal entries" =
+  let paths = String.Map.singleton "/managed" "/sandbox" in
+  List.iter [ ':'; ';' ] ~f:(fun sep ->
+    let value =
+      String.concat
+        ~sep:(String.make 1 sep)
+        [ ""; "/managed"; ""; "relative"; "/external"; "/managed/../other"; "" ]
+    in
+    print_endline (sandbox_path_value ~sep paths value);
+    Printf.printf "empty: %S\n" (sandbox_path_value ~sep paths ""));
+  [%expect
+    {|
+    :/sandbox::relative:/external:/managed/../other:
+    empty: ""
+    ;/sandbox;;relative;/external;/managed/../other;
+    empty: "" |}]
 ;;
 
 let sandbox_env env sandbox =
-  let paths = sandbox_path_map env sandbox in
-  Env.update env ~var:Env.Var._PATH ~f:(Option.map ~f:(sandbox_path_value paths))
+  Env.Var.Map.foldi
+    (sandbox_path_maps env sandbox)
+    ~init:env
+    ~f:(fun var (sep, paths) env ->
+      Env.update env ~var ~f:(Option.map ~f:(sandbox_path_value ~sep paths)))
 ;;
 
 let sandbox t ~env sandbox =
-  let paths = sandbox_path_map env sandbox in
+  let paths = sandbox_path_maps env sandbox in
   let path = maybe_sandbox_path sandbox in
   let target = Sandbox.map_path sandbox in
   let rec loop = function
@@ -353,9 +381,9 @@ let sandbox t ~env sandbox =
     | Chdir (dir, t) -> Chdir (path dir, loop t)
     | Setenv (var, value, t) ->
       let value =
-        if Ordering.is_eq (Env.Var.compare (Env.Var.of_string var) Env.Var._PATH)
-        then sandbox_path_value paths value
-        else value
+        match Env.Var.Map.find paths (Env.Var.of_string var) with
+        | None -> value
+        | Some (sep, paths) -> sandbox_path_value ~sep paths value
       in
       Setenv (var, value, loop t)
     | Redirect_out (outputs, fn, perm, t) ->

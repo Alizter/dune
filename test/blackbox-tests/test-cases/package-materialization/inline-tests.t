@@ -33,4 +33,4 @@ Custom backend that writes OCAMLPATH to a file outside the sandbox:
   $ baseline=$OCAMLPATH
   $ dune runtest 2>&1
   $ env_added "$(cat ocamlpath.out)" "$baseline" | censor
-  $PWD/_build/install/default/.packages/$DIGEST/lib
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.packages/$DIGEST2/lib

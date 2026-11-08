@@ -59,26 +59,31 @@ let%expect_test "setting an unchanged variable reuses the environment" =
 
 let path_dir path = Path.Build.of_local (Path.Local.of_string path)
 
-let print_local_bin_dirs env =
-  Env.local_bin_dirs env
+let print_managed_dirs env =
+  Env.managed_dirs env
+  |> List.concat_map ~f:(fun (_, _, dirs) -> dirs)
   |> List.map ~f:(fun path -> Path.Build.local path |> Path.Local.to_string)
   |> String.concat ~sep:","
   |> print_endline
 ;;
 
-let%expect_test "Scoped binary directories survive environment composition" =
+let%expect_test "Managed directories survive environment composition" =
   let first =
-    Env.add_local_bin_dirs
+    Env.add_managed_dirs
       (Env.add Env.empty ~var:a ~value:"one")
+      ~var:Env_path.var
+      ~sep:Bin.path_sep
       [ path_dir "default/.bin" ]
   in
   let second =
-    Env.add_local_bin_dirs
+    Env.add_managed_dirs
       (Env.add Env.empty ~var:b ~value:"two")
+      ~var:Env_path.var
+      ~sep:Bin.path_sep
       [ path_dir "default/nested/.bin" ]
   in
   let combined = Env.extend_env first second in
-  List.iter [ first; second; combined; Env.diff combined first ] ~f:print_local_bin_dirs;
+  List.iter [ first; second; combined; Env.diff combined first ] ~f:print_managed_dirs;
   [%expect
     {|
     default/.bin
@@ -87,17 +92,19 @@ let%expect_test "Scoped binary directories survive environment composition" =
     default/nested/.bin |}]
 ;;
 
-let%expect_test "Scoped binary directory metadata survives binding replacement" =
+let%expect_test "Managed directory metadata survives binding replacement" =
   let env =
-    Env.add_local_bin_dirs
+    Env.add_managed_dirs
       (Env.add Env.empty ~var:Env_path.var ~value:"/literal")
+      ~var:Env_path.var
+      ~sep:Bin.path_sep
       [ path_dir "default/.bin" ]
   in
   let removed = Env.remove env ~var:Env_path.var in
   print_endline (Bool.to_string (Env.is_empty removed));
   print_endline (Bool.to_string (List.is_empty (Env.to_unix removed)));
   let restored = Env.add removed ~var:Env_path.var ~value:"" in
-  print_local_bin_dirs restored;
+  print_managed_dirs restored;
   print_endline (find_assignment restored "PATH");
   [%expect
     {|
@@ -107,11 +114,15 @@ let%expect_test "Scoped binary directory metadata survives binding replacement" 
     PATH= |}]
 ;;
 
-let%expect_test "Scoped binary directory metadata participates in equality and hashing" =
+let%expect_test "Managed directory metadata participates in equality and hashing" =
   let plain = Env.add Env.empty ~var:a ~value:"one" in
   let dir = path_dir "default/.bin" in
-  let registered = Env.add_local_bin_dirs plain [ dir ] in
-  let repeated = Env.add_local_bin_dirs registered [ dir; dir ] in
+  let registered =
+    Env.add_managed_dirs plain ~var:Env_path.var ~sep:Bin.path_sep [ dir ]
+  in
+  let repeated =
+    Env.add_managed_dirs registered ~var:Env_path.var ~sep:Bin.path_sep [ dir; dir ]
+  in
   print_endline (Bool.to_string (Env.equal plain registered));
   print_endline (Bool.to_string (Env.equal registered repeated));
   print_endline (Bool.to_string (Int.equal (Env.hash registered) (Env.hash repeated)));
@@ -124,4 +135,26 @@ let%expect_test "Scoped binary directory metadata participates in equality and h
     true
     false
     true |}]
+;;
+
+let%expect_test "Managed directory variables and separators are distinct" =
+  let dir = path_dir "default/lib" in
+  let first = Env.add_managed_dirs Env.empty ~var:a ~sep:':' [ dir ] in
+  let second = Env.add_managed_dirs Env.empty ~var:b ~sep:';' [ dir ] in
+  let other_sep = Env.add_managed_dirs Env.empty ~var:a ~sep:';' [ dir ] in
+  print_endline (Bool.to_string (Env.equal first second));
+  print_endline (Bool.to_string (Env.equal first other_sep));
+  Env.managed_dirs (Env.extend_env first second)
+  |> List.iter ~f:(fun (var, sep, dirs) ->
+    Printf.printf "%s %c %d\n" (Env.Var.to_string var) sep (List.length dirs));
+  (match Env.extend_env first other_sep with
+   | _ -> print_endline "accepted conflicting separators"
+   | exception Code_error.E _ -> print_endline "rejected conflicting separators");
+  [%expect
+    {|
+    false
+    false
+    A : 1
+    B ; 1
+    rejected conflicting separators |}]
 ;;

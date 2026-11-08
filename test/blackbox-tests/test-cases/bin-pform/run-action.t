@@ -19,7 +19,7 @@ entry it adds a .binaries dir to the action's PATH.
   $ dune build path-output
   hello from mybin
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/install/default/.binaries/$DIGEST
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.binaries/$DIGEST2
 
 The rule's deps include the build artifact and the .binaries
 symlink:

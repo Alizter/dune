@@ -67,48 +67,68 @@ end
 
 type t =
   { vars : Value.t Map.t
-  ; local_bin_dirs : Path0.Build.Set.t
+  ; managed_dirs : (char * Path0.Build.Set.t) Map.t
   }
 
-let equal { vars; local_bin_dirs } t =
+let equal { vars; managed_dirs } t =
   Map.equal
     ~equal:(fun x y -> String.equal (Value.to_string x) (Value.to_string y))
     vars
     t.vars
-  && Path0.Build.Set.equal local_bin_dirs t.local_bin_dirs
+  && Map.equal
+       ~equal:(fun (sep, dirs) (other_sep, other_dirs) ->
+         Char.equal sep other_sep && Path0.Build.Set.equal dirs other_dirs)
+       managed_dirs
+       t.managed_dirs
 ;;
 
-let hash { vars; local_bin_dirs } =
+let hash { vars; managed_dirs } =
   let init =
     Map.foldi vars ~init:(Hash.create ()) ~f:(fun var value acc ->
       let acc = Hash.feed acc (Var.hash var) in
       Hash.feed acc (String.hash (Value.to_string value)))
   in
-  Path0.Build.Set.fold
-    local_bin_dirs
-    ~init:(Hash.feed init (Path0.Build.Set.cardinal local_bin_dirs))
-    ~f:(fun path acc -> Hash.feed acc (Path0.Build.hash path))
+  Map.foldi managed_dirs ~init ~f:(fun var (sep, dirs) acc ->
+    let acc = Hash.feed acc (Var.hash var) in
+    let acc = Hash.feed acc (Char.code sep) in
+    Path0.Build.Set.fold
+      dirs
+      ~init:(Hash.feed acc (Path0.Build.Set.cardinal dirs))
+      ~f:(fun path acc -> Hash.feed acc (Path0.Build.hash path)))
   |> Hash.hash
 ;;
 
-let of_map vars =
-  { vars = Map.map vars ~f:Value.of_string; local_bin_dirs = Path0.Build.Set.empty }
-;;
-
+let of_map vars = { vars = Map.map vars ~f:Value.of_string; managed_dirs = Map.empty }
 let empty = of_map Map.empty
-
-let is_empty { vars; local_bin_dirs } =
-  Map.is_empty vars && Path0.Build.Set.is_empty local_bin_dirs
-;;
-
+let is_empty { vars; managed_dirs } = Map.is_empty vars && Map.is_empty managed_dirs
 let vars { vars; _ } = Set.of_keys vars
 let get { vars; _ } var = Option.map (Map.find vars var) ~f:Value.to_string
-let local_bin_dirs { local_bin_dirs; _ } = Path0.Build.Set.to_list local_bin_dirs
 
-let add_local_bin_dirs t dirs =
-  { t with
-    local_bin_dirs = Path0.Build.Set.union t.local_bin_dirs (Path0.Build.Set.of_list dirs)
-  }
+let managed_dirs { managed_dirs; _ } =
+  Map.to_list_map managed_dirs ~f:(fun var (sep, dirs) ->
+    var, sep, Path0.Build.Set.to_list dirs)
+;;
+
+let union_managed_dirs var (sep, dirs) (other_sep, other_dirs) =
+  if not (Char.equal sep other_sep)
+  then
+    Code_error.raise
+      "inconsistent separators for managed environment paths"
+      [ "var", Var.to_dyn var; "sep", Dyn.char sep; "other_sep", Dyn.char other_sep ];
+  sep, Path0.Build.Set.union dirs other_dirs
+;;
+
+let add_managed_dirs t ~var ~sep dirs =
+  match dirs with
+  | [] -> t
+  | _ :: _ ->
+    let dirs = sep, Path0.Build.Set.of_list dirs in
+    let managed_dirs =
+      Map.update t.managed_dirs var ~f:(function
+        | None -> Some dirs
+        | Some old -> Some (union_managed_dirs var old dirs))
+    in
+    { t with managed_dirs }
 ;;
 
 let to_list { vars; _ } =
@@ -177,7 +197,11 @@ let extend_env x y =
   then y
   else
     { vars = Map.superpose y.vars x.vars
-    ; local_bin_dirs = Path0.Build.Set.union x.local_bin_dirs y.local_bin_dirs
+    ; managed_dirs =
+        Map.merge x.managed_dirs y.managed_dirs ~f:(fun var x y ->
+          match x, y with
+          | None, dirs | dirs, None -> dirs
+          | Some x, Some y -> Some (union_managed_dirs var x y))
     }
 ;;
 
@@ -189,7 +213,18 @@ let diff x y =
         match vy with
         | Some _ -> None
         | None -> vx)
-  ; local_bin_dirs = Path0.Build.Set.diff x.local_bin_dirs y.local_bin_dirs
+  ; managed_dirs =
+      Map.merge x.managed_dirs y.managed_dirs ~f:(fun _ x y ->
+        match x, y with
+        | None, _ -> None
+        | Some dirs, None -> Some dirs
+        | Some (sep, dirs), Some (other_sep, other_dirs) ->
+          let dirs =
+            if Char.equal sep other_sep
+            then Path0.Build.Set.diff dirs other_dirs
+            else dirs
+          in
+          if Path0.Build.Set.is_empty dirs then None else Some (sep, dirs))
   }
 ;;
 

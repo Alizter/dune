@@ -35,12 +35,12 @@ val to_env_without_path : 'a t -> relative:('a -> string -> 'a) -> (Env.Var.t * 
     [Install_layout.env]). *)
 val add_to_env : Path.Build.t t -> Env.t -> Env.t
 
-(** Returns the path separator for a given env var, if it's a known
-    path-like variable (e.g. OCAMLPATH uses [;] on all platforms). *)
+(** Returns the path separator for a given env var when it differs from the
+    default. Findlib variables use findlib's platform-specific separator. *)
 val sep : Env.Var.t -> char option
 
 (** Cons a build path onto a path-like env var, using the per-var separator
-    from {!sep}. *)
+    from {!sep}, and record it for relocation during sandboxed execution. *)
 val cons_path : Env.t -> var:Env.Var.t -> Path.Build.t -> Env.t
 
 (** The set of all path-like env vars managed by the install roots:

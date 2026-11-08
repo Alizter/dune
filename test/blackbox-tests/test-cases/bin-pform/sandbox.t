@@ -1,12 +1,7 @@
 %{bin:NAME} deps under sandboxing.
 
-This test pins an undesirable behavior that should be fixed: dune's
-sandbox does not relocate the PATH environment variable. The action's
-CWD is sandboxed, but PATH still points at the un-sandboxed .binaries
-dir outside the sandbox. It works locally only because absolute
-filesystem paths are still readable from inside the sandbox; it would
-break under remote action execution. Tracked as a follow-up to the
-.binaries PR.
+The generated .binaries PATH entry must be relocated into the sandbox,
+where the declared tools have been copied.
 
   $ make_mypkg_bin_project
 
@@ -18,13 +13,12 @@ break under remote action execution. Tracked as a follow-up to the
   >    (bash "pwd; command -v mybin; mybin"))))
   > EOF
 
-The action runs in the sandbox; pwd is sandboxed but the resolved
-mybin path is the un-sandboxed .binaries dir:
+Both the working directory and the resolved mybin path are sandboxed:
 
   $ dune build out --sandbox symlink 2>&1
   $ cat _build/default/out | censor
   $PWD/_build/.sandbox/$DIGEST1/default
-  $PWD/_build/install/default/.binaries/$DIGEST2/mybin
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.binaries/$DIGEST2/mybin
   hello from mybin
 
 The rule's deps include the build artifact and the .binaries

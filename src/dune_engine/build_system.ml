@@ -264,7 +264,7 @@ let digest_env_subset d deps env =
 
 (* The current version of the rule digest scheme. We should increment it when
    making any changes to the scheme, to avoid collisions. *)
-let rule_digest_version = 37
+let rule_digest_version = 38
 
 let compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_parameters =
   let { Action.Full.action; props } = action in
@@ -293,7 +293,10 @@ let compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_paramet
     (* Update when changing the rule digest scheme. *)
     Digest.Manual.repr d Sandbox_mode.repr sandbox_mode;
     Dep.Facts.digest facts d ~env;
-    Digest.Manual.repr d (Repr.list Path.Build.repr) (Env.local_bin_dirs env);
+    Digest.Manual.repr
+      d
+      Repr.(list (triple Env.Var.repr char (list Path.Build.repr)))
+      (Env.managed_dirs env);
     digest_target_paths d targets;
     Action.digest d action;
     Digest.Manual.bool d can_go_in_shared_cache;
@@ -839,7 +842,10 @@ and execute_anonymous_action { Rule.Anonymous_action.action; dir; loc } ~capture
          ticket for a longer discussion about the management of the
          environment: https://github.com/ocaml/dune/issues/4382 *)
       digest_env_subset d deps env;
-      Digest.Manual.repr d (Repr.list Path.Build.repr) (Env.local_bin_dirs env);
+      Digest.Manual.repr
+        d
+        Repr.(list (triple Env.Var.repr char (list Path.Build.repr)))
+        (Env.managed_dirs env);
       Dep.Set.digest deps d;
       Action.digest d action_ast;
       digest_locks d locks;

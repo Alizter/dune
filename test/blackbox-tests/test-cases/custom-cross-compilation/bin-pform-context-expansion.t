@@ -27,4 +27,4 @@ dir and the install bin dir, both under the host context.
   $ dune build _build/target/path-output
 
   $ env_added "$(cat _build/target/path-output)" "$PATH" | censor
-  $PWD/_build/install/host/.binaries/$DIGEST
+  $PWD/_build/.sandbox/$DIGEST1/install/host/.binaries/$DIGEST2

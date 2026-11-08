@@ -21,7 +21,7 @@ Test that (deps (package ...)) adds the package's bin/ to PATH.
   $ baseline=$PATH
   $ dune build out
   $ env_added "$(cat _build/default/out)" "$baseline" | censor
-  $PWD/_build/install/default/.packages/$DIGEST/bin
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.packages/$DIGEST2/bin
 
 All install-managed variables must refer to sandbox copies, not to undeclared
 files left in a previously materialised layout. The same holds for action-local
@@ -71,12 +71,12 @@ overrides of these variables.
   > done
   $ dune build initial --sandbox copy
   $ cat _build/default/initial
-  PATH: real, isolated
-  OCAMLPATH: real, isolated
-  CAML_LD_LIBRARY_PATH: real, leaked
-  OCAMLTOP_INCLUDE_PATH: real, leaked
-  MANPATH: real, leaked
-  OCAMLFIND_IGNORE_DUPS_IN: real, isolated
+  PATH: sandbox, isolated
+  OCAMLPATH: sandbox, isolated
+  CAML_LD_LIBRARY_PATH: sandbox, isolated
+  OCAMLTOP_INCLUDE_PATH: sandbox, isolated
+  MANPATH: sandbox, isolated
+  OCAMLFIND_IGNORE_DUPS_IN: sandbox, isolated
 
   $ layout="$PWD/$(echo _build/install/default/.packages/*)"
   $ cat >> dune <<EOF
@@ -95,9 +95,9 @@ overrides of these variables.
   > EOF
   $ dune build override --sandbox copy
   $ cat _build/default/override
-  PATH: real, isolated
-  OCAMLPATH: real, isolated
-  CAML_LD_LIBRARY_PATH: real, leaked
-  OCAMLTOP_INCLUDE_PATH: real, leaked
-  MANPATH: real, leaked
-  OCAMLFIND_IGNORE_DUPS_IN: real, isolated
+  PATH: sandbox, isolated
+  OCAMLPATH: sandbox, isolated
+  CAML_LD_LIBRARY_PATH: sandbox, isolated
+  OCAMLTOP_INCLUDE_PATH: sandbox, isolated
+  MANPATH: sandbox, isolated
+  OCAMLFIND_IGNORE_DUPS_IN: sandbox, isolated

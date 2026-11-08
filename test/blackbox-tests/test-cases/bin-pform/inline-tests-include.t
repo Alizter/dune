@@ -17,4 +17,4 @@ collection to drain the env contribution from Include_result.
   $ dune runtest 2>&1
 
   $ env_added "$(cat path.out)" "$PATH" | censor
-  $PWD/_build/install/default/.binaries/$DIGEST
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.binaries/$DIGEST2

@@ -19,10 +19,12 @@ names).
 
   $ dune build out1 out2
 
-Both rules show the same .binaries digest in PATH (no $DIGEST1 /
-$DIGEST2):
+Each action has a sandbox-local copy of the same binary layout:
 
-  $ env_added "$(cat _build/default/out1)" "$PATH" | censor
-  $PWD/_build/install/default/.binaries/$DIGEST
-  $ env_added "$(cat _build/default/out2)" "$PATH" | censor
-  $PWD/_build/install/default/.binaries/$DIGEST
+  $ one=$(env_added "$(cat _build/default/out1)" "$PATH")
+  $ two=$(env_added "$(cat _build/default/out2)" "$PATH")
+  $ echo "$one" | censor
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.binaries/$DIGEST2
+  $ echo "$two" | censor
+  $PWD/_build/.sandbox/$DIGEST1/install/default/.binaries/$DIGEST2
+  $ test "${one##*/}" = "${two##*/}"

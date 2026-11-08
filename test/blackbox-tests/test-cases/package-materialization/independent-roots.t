@@ -74,22 +74,23 @@ must not reject them as competing choices for a single executable.
   >  (target result)
   >  (deps (package roots))
   >  (action
-  >   (with-stdout-to %{target}
-  >    (run %{bin:ocamlfind} query -predicates byte -format "%d/%A"
-  >     virtual-support.default))))
+  >   (progn
+  >    (with-stdout-to %{target}
+  >     (run %{bin:ocamlfind} query -predicates byte -format "%d/%A"
+  >      virtual-support.default))
+  >    (system "test -f \"$(cat %{target})\""))))
   > (rule
   >  (target alternative-result)
   >  (deps (package roots))
   >  (action
-  >   (with-stdout-to %{target}
-  >    (run %{bin:ocamlfind} query -predicates byte -format "%d/%A"
-  >     alternative-support))))
+  >   (progn
+  >    (with-stdout-to %{target}
+  >     (run %{bin:ocamlfind} query -predicates byte -format "%d/%A"
+  >      alternative-support))
+  >    (system "test -f \"$(cat %{target})\""))))
   > EOF
 
-Both implementations and their archives are present in the scoped layout.
+Both actions check that their archives exist while the sandbox is alive.
 
   $ dune build result
-  $ test -f "$(cat _build/default/result)"
-
   $ dune build alternative-result
-  $ test -f "$(cat _build/default/alternative-result)"

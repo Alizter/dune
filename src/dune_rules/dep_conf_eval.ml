@@ -162,8 +162,8 @@ let make_bin_env expander bin_names =
      | None -> Action_builder.return Env.empty
      | Some (layout_dir, files) ->
        let+ () = Action_builder.paths files in
-       (* The layout dir on PATH is an absolute build-tree path; dune's
-          sandbox does not relocate PATH. See [bin-pform/sandbox.t]. *)
+       (* The layout's PATH contribution is relocated during sandboxed
+          execution. See [bin-pform/sandbox.t]. *)
        Install.Roots.cons_path Env.empty ~var:Env_path.var layout_dir)
 ;;
 

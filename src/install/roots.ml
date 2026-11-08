@@ -121,21 +121,21 @@ let path_vars =
      :: List.map ~f:fst (to_env_without_path (make_all ()) ~relative:(fun () _ -> ())))
 ;;
 
+let cons_path env ~var path =
+  let path_sep = Option.value (sep var) ~default:Bin.path_sep in
+  let env =
+    Env.update env ~var ~f:(fun _PATH ->
+      Some (Bin.cons_path ~path_sep (Path.build path) ~_PATH))
+  in
+  Env.add_managed_dirs env ~var ~sep:path_sep [ path ]
+;;
+
 let add_to_env t env =
   let env =
     to_env_without_path t ~relative:Path.Build.relative
-    |> List.fold_left ~init:env ~f:(fun env (var, path) ->
-      Env.update env ~var ~f:(fun _PATH ->
-        let path_sep = sep var in
-        Some (Bin.cons_path ?path_sep (Path.build path) ~_PATH)))
+    |> List.fold_left ~init:env ~f:(fun env (var, path) -> cons_path env ~var path)
   in
-  Env.update env ~var:Env_path.var ~f:(fun _PATH ->
-    Some (Bin.cons_path (Path.build t.bin) ~_PATH))
-;;
-
-let cons_path env ~var path =
-  Env.update env ~var ~f:(fun _PATH ->
-    Some (Bin.cons_path ?path_sep:(sep var) (Path.build path) ~_PATH))
+  cons_path env ~var:Env_path.var t.bin
 ;;
 
 (* CR-soon Alizter: path-like env var manipulation is spread across at
