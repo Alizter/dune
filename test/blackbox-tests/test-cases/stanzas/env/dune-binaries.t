@@ -23,8 +23,8 @@ Adds custom binaries through the `env` stanza.
 
   $ dune build ./message.txt
 
-A sandboxed rule currently finds an undeclared binary in the real build tree
-once another rule has built it.
+A sandboxed rule cannot use an undeclared binary, even after another rule has
+built it. Its generated PATH entry refers only to the sandbox.
 
   $ cat >> dune <<'EOF'
   > (rule
@@ -46,8 +46,7 @@ once another rule has built it.
   $ dune build sandboxed.txt
   $ cat _build/default/sandboxed.txt | censor
   $PWD/_build/.sandbox/$DIGEST/default
-  $PWD/_build/default/.bin/foobar
-  This is only a test.
+  unavailable
 
 A fresh build directory cannot find the undeclared binary.
 
@@ -103,10 +102,9 @@ keeps using the real build directory.
   > EOF
   $ dune build setenv.txt declared.txt unsandboxed.txt path-semantics.txt
   $ cat _build/default/setenv.txt | censor
-  $PWD/_build/default/.bin/foobar
-  This is only a test.
+  unavailable
   $ cat _build/default/declared.txt | censor
-  $PWD/_build/default/.bin/foobar
+  $PWD/_build/.sandbox/$DIGEST/default/.bin/foobar
   This is only a test.
   $ cat _build/default/unsandboxed.txt | censor
   $PWD/_build/default/.bin/foobar
@@ -220,6 +218,4 @@ which makes Dune reject its job-slot count.
   >   grep -q '"0"' job-slots.log || { cat job-slots.log; exit 1; }
   >   echo unprepared
   > fi
-  unprepared
-
-
+  prepared

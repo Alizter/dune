@@ -109,7 +109,10 @@ val is_dynamic : t -> bool
 val runs_process : t -> bool
 
 (** Re-root all the paths in the action to their sandbox version *)
-val sandbox : t -> Sandbox.t -> t
+val sandbox : t -> env:Env.t -> Sandbox.t -> t
+
+(** Relocate the scoped binary [PATH] entries recorded in [env]. *)
+val sandbox_env : Env.t -> Sandbox.t -> Env.t
 
 type is_useful =
   | Clearly_not

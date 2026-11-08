@@ -37,8 +37,9 @@ An env binary colliding with a lock-directory binary
 -----------------------------------------------------
 
 Env binaries take precedence over package binaries during artifact resolution,
-and they keep that precedence on the action's [PATH]. Create a locked package
-that installs another [mybin], plus a distinct binary used to force the package
+and declared env binaries keep that precedence on the action's [PATH].
+Create a locked package that installs another [mybin], plus a distinct binary
+used to force the package
 to be built before the action runs:
 
   $ make_lockpkg provider <<'EOF'
@@ -66,10 +67,10 @@ to be built before the action runs:
   > EOF
   $ cat >>dune <<'EOF'
   > (rule
-  >  (deps %{bin:force-provider})
+  >  (deps %{bin:mybin} %{bin:force-provider})
   >  (action (with-stdout-to mybin-from-path (system mybin))))
   > (rule
-  >  (deps (package provider))
+  >  (deps %{bin:mybin} (package provider))
   >  (action (with-stdout-to mybin-from-pkg-dep (system mybin))))
   > EOF
 
@@ -80,8 +81,8 @@ The pform still selects the env binding:
   $ cat _build/default/mybin-out
   from env binary
 
-A bare-name lookup preserves it too. Here [%{bin:force-provider}] stages a
-different binary, so nothing competes with the env binding on [PATH]:
+A bare-name lookup preserves the declared binding too. Here
+[%{bin:force-provider}] stages a different binary from the same package:
 
   $ cat _build/default/mybin-from-path
   from env binary

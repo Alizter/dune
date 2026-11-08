@@ -323,14 +323,41 @@ let maybe_sandbox_path sandbox p =
   | Some p -> Path.build (Sandbox.map_path sandbox p)
 ;;
 
-let sandbox t sandbox =
+let sandbox_path_map env sandbox =
+  List.fold_left (Env.local_bin_dirs env) ~init:String.Map.empty ~f:(fun acc dir ->
+    let original = Path.to_absolute_filename (Path.build dir) in
+    let relocated =
+      Sandbox.map_path sandbox dir |> Path.build |> Path.to_absolute_filename
+    in
+    String.Map.set acc original relocated)
+;;
+
+let sandbox_path_value paths value =
+  Bin.parse value
+  |> List.map ~f:(fun entry -> Option.value (String.Map.find paths entry) ~default:entry)
+  |> Bin.encode_strings
+;;
+
+let sandbox_env env sandbox =
+  let paths = sandbox_path_map env sandbox in
+  Env.update env ~var:Env.Var._PATH ~f:(Option.map ~f:(sandbox_path_value paths))
+;;
+
+let sandbox t ~env sandbox =
+  let paths = sandbox_path_map env sandbox in
   let path = maybe_sandbox_path sandbox in
   let target = Sandbox.map_path sandbox in
   let rec loop = function
     | Run ({ prog; _ } as run) -> Run { run with prog = Result.map prog ~f:path }
     | With_accepted_exit_codes (pred, t) -> With_accepted_exit_codes (pred, loop t)
     | Chdir (dir, t) -> Chdir (path dir, loop t)
-    | Setenv (var, value, t) -> Setenv (var, value, loop t)
+    | Setenv (var, value, t) ->
+      let value =
+        if Ordering.is_eq (Env.Var.compare (Env.Var.of_string var) Env.Var._PATH)
+        then sandbox_path_value paths value
+        else value
+      in
+      Setenv (var, value, loop t)
     | Redirect_out (outputs, fn, perm, t) ->
       Redirect_out (outputs, target fn, perm, loop t)
     | Redirect_in (inputs, fn, t) -> Redirect_in (inputs, path fn, loop t)

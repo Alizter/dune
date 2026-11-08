@@ -30,10 +30,10 @@ The rule depends on the .bin/ symlink:
   >   | jq_dune '.[] | ruleDepFilePaths'
   "_build/default/.bin/myothername"
 
-The action's PATH gets the .bin/ symlink directory:
+The action's PATH gets the sandboxed .bin/ symlink directory:
 
-  $ env_added "$(cat _build/default/path-output)" "$PATH"
-  $TESTCASE_ROOT/_build/default/.bin
+  $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
+  $PWD/_build/.sandbox/$DIGEST/default/.bin
 
 An include_subdirs child inherits the binary even though its ordinary rules
 come from the group root. Its generated .bin directory remains accessible.

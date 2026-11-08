@@ -76,5 +76,5 @@ even when its literal PATH, action and dependencies have not changed.
   $ stop_dune_quiet
   $ grep '^probe:' .#dune-output
   probe: leaked
-  probe: leaked
+  probe: unavailable
 

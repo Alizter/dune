@@ -65,27 +65,54 @@ end = struct
   let to_string t = t
 end
 
-type t = Value.t Map.t
+type t =
+  { vars : Value.t Map.t
+  ; local_bin_dirs : Path0.Build.Set.t
+  }
 
-let equal =
-  Map.equal ~equal:(fun x y -> String.equal (Value.to_string x) (Value.to_string y))
+let equal { vars; local_bin_dirs } t =
+  Map.equal
+    ~equal:(fun x y -> String.equal (Value.to_string x) (Value.to_string y))
+    vars
+    t.vars
+  && Path0.Build.Set.equal local_bin_dirs t.local_bin_dirs
 ;;
 
-let hash t =
-  Map.foldi t ~init:(Hash.create ()) ~f:(fun var value acc ->
-    let acc = Hash.feed acc (Var.hash var) in
-    Hash.feed acc (String.hash (Value.to_string value)))
+let hash { vars; local_bin_dirs } =
+  let init =
+    Map.foldi vars ~init:(Hash.create ()) ~f:(fun var value acc ->
+      let acc = Hash.feed acc (Var.hash var) in
+      Hash.feed acc (String.hash (Value.to_string value)))
+  in
+  Path0.Build.Set.fold
+    local_bin_dirs
+    ~init:(Hash.feed init (Path0.Build.Set.cardinal local_bin_dirs))
+    ~f:(fun path acc -> Hash.feed acc (Path0.Build.hash path))
   |> Hash.hash
 ;;
 
-let of_map vars = Map.map vars ~f:Value.of_string
-let empty = Map.empty
-let is_empty = Map.is_empty
-let vars = Set.of_keys
-let get t var = Option.map (Map.find t var) ~f:Value.to_string
+let of_map vars =
+  { vars = Map.map vars ~f:Value.of_string; local_bin_dirs = Path0.Build.Set.empty }
+;;
 
-let to_list t =
-  Map.foldi t ~init:[] ~f:(fun var value acc -> (var, Value.to_string value) :: acc)
+let empty = of_map Map.empty
+
+let is_empty { vars; local_bin_dirs } =
+  Map.is_empty vars && Path0.Build.Set.is_empty local_bin_dirs
+;;
+
+let vars { vars; _ } = Set.of_keys vars
+let get { vars; _ } var = Option.map (Map.find vars var) ~f:Value.to_string
+let local_bin_dirs { local_bin_dirs; _ } = Path0.Build.Set.to_list local_bin_dirs
+
+let add_local_bin_dirs t dirs =
+  { t with
+    local_bin_dirs = Path0.Build.Set.union t.local_bin_dirs (Path0.Build.Set.of_list dirs)
+  }
+;;
+
+let to_list { vars; _ } =
+  Map.foldi vars ~init:[] ~f:(fun var value acc -> (var, Value.to_string value) :: acc)
 ;;
 
 let render (var, value) = String.append_with_char (Var.to_string var) ~sep:'=' value
@@ -123,22 +150,47 @@ let initial = of_map (map_of_unix (Unix.environment ()))
 let of_unix u = of_map (map_of_unix u)
 
 let add t ~var ~value =
-  Map.update t var ~f:(function
-    | Some old when String.equal value (Value.to_string old) -> Some old
-    | None | Some _ -> Some (Value.of_string value))
+  let vars =
+    Map.update t.vars var ~f:(function
+      | Some old when String.equal value (Value.to_string old) -> Some old
+      | None | Some _ -> Some (Value.of_string value))
+  in
+  if vars == t.vars then t else { t with vars }
 ;;
 
-let mem t ~var = Map.mem t var
-let remove t ~var = if Map.mem t var then Map.remove t var else t
-let extend t ~vars = if Map.is_empty vars then t else Map.superpose (of_map vars) t
-let extend_env x y = if is_empty y then x else if is_empty x then y else Map.superpose y x
-let to_dyn t = Map.to_dyn (fun value -> Dyn.string (Value.to_string value)) t
+let mem { vars; _ } ~var = Map.mem vars var
+
+let remove t ~var =
+  if Map.mem t.vars var then { t with vars = Map.remove t.vars var } else t
+;;
+
+let extend t ~vars =
+  if Map.is_empty vars
+  then t
+  else { t with vars = Map.superpose (Map.map vars ~f:Value.of_string) t.vars }
+;;
+
+let extend_env x y =
+  if is_empty y
+  then x
+  else if is_empty x
+  then y
+  else
+    { vars = Map.superpose y.vars x.vars
+    ; local_bin_dirs = Path0.Build.Set.union x.local_bin_dirs y.local_bin_dirs
+    }
+;;
+
+let to_dyn { vars; _ } = Map.to_dyn (fun value -> Dyn.string (Value.to_string value)) vars
 
 let diff x y =
-  Map.merge x y ~f:(fun _ vx vy ->
-    match vy with
-    | Some _ -> None
-    | None -> vx)
+  { vars =
+      Map.merge x.vars y.vars ~f:(fun _ vx vy ->
+        match vy with
+        | Some _ -> None
+        | None -> vx)
+  ; local_bin_dirs = Path0.Build.Set.diff x.local_bin_dirs y.local_bin_dirs
+  }
 ;;
 
 let update t ~var ~f =
@@ -152,5 +204,8 @@ let of_string_map m =
   |> of_map
 ;;
 
-let iter t ~f = Map.iteri t ~f:(fun var value -> f var (Value.to_string value))
-let to_map t = Map.map t ~f:Value.to_string
+let iter { vars; _ } ~f =
+  Map.iteri vars ~f:(fun var value -> f var (Value.to_string value))
+;;
+
+let to_map { vars; _ } = Map.map vars ~f:Value.to_string

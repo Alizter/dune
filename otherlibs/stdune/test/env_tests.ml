@@ -56,3 +56,72 @@ let%expect_test "setting an unchanged variable reuses the environment" =
     true
     false |}]
 ;;
+
+let path_dir path = Path.Build.of_local (Path.Local.of_string path)
+
+let print_local_bin_dirs env =
+  Env.local_bin_dirs env
+  |> List.map ~f:(fun path -> Path.Build.local path |> Path.Local.to_string)
+  |> String.concat ~sep:","
+  |> print_endline
+;;
+
+let%expect_test "Scoped binary directories survive environment composition" =
+  let first =
+    Env.add_local_bin_dirs
+      (Env.add Env.empty ~var:a ~value:"one")
+      [ path_dir "default/.bin" ]
+  in
+  let second =
+    Env.add_local_bin_dirs
+      (Env.add Env.empty ~var:b ~value:"two")
+      [ path_dir "default/nested/.bin" ]
+  in
+  let combined = Env.extend_env first second in
+  List.iter [ first; second; combined; Env.diff combined first ] ~f:print_local_bin_dirs;
+  [%expect
+    {|
+    default/.bin
+    default/nested/.bin
+    default/.bin,default/nested/.bin
+    default/nested/.bin |}]
+;;
+
+let%expect_test "Scoped binary directory metadata survives binding replacement" =
+  let env =
+    Env.add_local_bin_dirs
+      (Env.add Env.empty ~var:Env_path.var ~value:"/literal")
+      [ path_dir "default/.bin" ]
+  in
+  let removed = Env.remove env ~var:Env_path.var in
+  print_endline (Bool.to_string (Env.is_empty removed));
+  print_endline (Bool.to_string (List.is_empty (Env.to_unix removed)));
+  let restored = Env.add removed ~var:Env_path.var ~value:"" in
+  print_local_bin_dirs restored;
+  print_endline (find_assignment restored "PATH");
+  [%expect
+    {|
+    false
+    true
+    default/.bin
+    PATH= |}]
+;;
+
+let%expect_test "Scoped binary directory metadata participates in equality and hashing" =
+  let plain = Env.add Env.empty ~var:a ~value:"one" in
+  let dir = path_dir "default/.bin" in
+  let registered = Env.add_local_bin_dirs plain [ dir ] in
+  let repeated = Env.add_local_bin_dirs registered [ dir; dir ] in
+  print_endline (Bool.to_string (Env.equal plain registered));
+  print_endline (Bool.to_string (Env.equal registered repeated));
+  print_endline (Bool.to_string (Int.equal (Env.hash registered) (Env.hash repeated)));
+  print_endline (Bool.to_string (Int.equal (Env.hash plain) (Env.hash registered)));
+  print_endline (Bool.to_string (Env.to_unix plain = Env.to_unix registered));
+  [%expect
+    {|
+    false
+    true
+    true
+    false
+    true |}]
+;;

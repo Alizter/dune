@@ -61,8 +61,10 @@ let make
   let env_without_local_bins =
     Memo.lazy_ ~name:"env-without-local-bins" (fun () ->
       let* env = Memo.Lazy.force base_env in
-      let+ bin_paths = lockdir_bin_paths in
-      Env_path.cons_multi env ~dirs:bin_paths)
+      let+ bin_paths = lockdir_bin_paths
+      and+ dirs = Memo.Lazy.force local_bin_dirs in
+      let env = Env_path.cons_multi env ~dirs:bin_paths in
+      Env.add_local_bin_dirs env (List.filter_map dirs ~f:Path.as_in_build_dir))
   in
   let external_env =
     Memo.lazy_ ~name:"external-env" (fun () ->

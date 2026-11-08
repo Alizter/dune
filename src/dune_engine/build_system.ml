@@ -264,7 +264,7 @@ let digest_env_subset d deps env =
 
 (* The current version of the rule digest scheme. We should increment it when
    making any changes to the scheme, to avoid collisions. *)
-let rule_digest_version = 36
+let rule_digest_version = 37
 
 let compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_parameters =
   let { Action.Full.action; props } = action in
@@ -293,6 +293,7 @@ let compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_paramet
     (* Update when changing the rule digest scheme. *)
     Digest.Manual.repr d Sandbox_mode.repr sandbox_mode;
     Dep.Facts.digest facts d ~env;
+    Digest.Manual.repr d (Repr.list Path.Build.repr) (Env.local_bin_dirs env);
     digest_target_paths d targets;
     Action.digest d action;
     Digest.Manual.bool d can_go_in_shared_cache;
@@ -469,7 +470,14 @@ and execute_action_for_rule
         then Some (Process.Sandbox.for_action (Lazy.force process_sandbox_base) ~root)
         else None
     in
-    let action = if is_sandboxed then Action.sandbox action sandbox else action in
+    let action, execution_env, job_slots =
+      if is_sandboxed
+      then
+        ( Action.sandbox action ~env sandbox
+        , Action.sandbox_env env sandbox
+        , Option.map job_slots ~f:(fun action -> Action.sandbox action ~env sandbox) )
+      else action, env, job_slots
+    in
     let action =
       (* We must add the creation of the stamp file after sandboxing it, as
          otherwise the stamp file would end up inside the sandbox. This is
@@ -483,8 +491,13 @@ and execute_action_for_rule
         else Action.progn [ action; Action.write_file stamp_file "" ]
     in
     let () =
-      Action.chdirs action
-      |> Path.Build.Set.iter ~f:(fun p -> Path.mkdir_p (Path.build p))
+      let dirs = Action.chdirs action in
+      let dirs =
+        match is_sandboxed, job_slots with
+        | true, Some action -> Path.Build.Set.union dirs (Action.chdirs action)
+        | false, _ | true, None -> dirs
+      in
+      Path.Build.Set.iter dirs ~f:(fun p -> Path.mkdir_p (Path.build p))
     in
     let context = Build_context.of_build_path targets.root in
     let root =
@@ -498,7 +511,7 @@ and execute_action_for_rule
         let dynamic_deps_stages = ref [] in
         let* action_exec_result =
           let input =
-            let env = Action_trace.add_to_env action_trace env in
+            let env = Action_trace.add_to_env action_trace execution_env in
             { Action_exec.root
             ; env
             ; targets = Some targets
@@ -826,6 +839,7 @@ and execute_anonymous_action { Rule.Anonymous_action.action; dir; loc } ~capture
          ticket for a longer discussion about the management of the
          environment: https://github.com/ocaml/dune/issues/4382 *)
       digest_env_subset d deps env;
+      Digest.Manual.repr d (Repr.list Path.Build.repr) (Env.local_bin_dirs env);
       Dep.Set.digest deps d;
       Action.digest d action_ast;
       digest_locks d locks;

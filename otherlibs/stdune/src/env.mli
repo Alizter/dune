@@ -33,7 +33,10 @@ include Comparable_intf.S with type key := Var.t
 
 val equal : t -> t -> bool
 val empty : t
+
+(** Whether both bindings and scoped binary directory metadata are empty. *)
 val is_empty : t -> bool
+
 val vars : t -> Var.Set.t
 
 (** The environment when the process started *)
@@ -47,6 +50,13 @@ val to_windows_block : t -> string
 
 val of_unix : string array -> t
 val get : t -> Var.t -> string option
+
+(** Scoped [(env (binaries ...))] directories, retained across binding updates
+    and environment merges. Metadata only: these are not file dependencies and
+    are not exported to processes. *)
+val local_bin_dirs : t -> Path0.Build.t list
+
+val add_local_bin_dirs : t -> Path0.Build.t list -> t
 
 (** [extend env ~vars] adds all variables from [vars] to [env] overwriting any
     existing values of those variables in [env] *)
