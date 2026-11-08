@@ -20,8 +20,8 @@
     }
   },
   "latest": {
-    "tag": "5.2.0minus-39",
-    "rev": "dd4e8507373d22fb295422eb6dd3d997c76c47cb",
-    "narHash": "sha256-IXgxNbNS5JlZeR3loZt2SRKrOI7hrOfC//mQHGafhxY="
+    "tag": "5.4.0-ox15",
+    "rev": "64f098b4b9d154798864e08a60117e6e2cd67eab",
+    "narHash": "sha256-1jkfhwnJx+zuLaJEo/HjGRLDMhc0D9xksH133GlCoP8="
   }
 }

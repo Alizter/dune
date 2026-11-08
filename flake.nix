@@ -334,6 +334,7 @@
                 ;
             })
             bootstrap-ox
+            bootstrap-ox-latest
             ox-minimal
             ox-minimal-trunk
             ox

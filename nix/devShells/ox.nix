@@ -1,7 +1,5 @@
-# OxCaml-related devShells: `bootstrap-ox`, `ox-minimal`,
-# `ox-minimal-trunk`, and `ox`. All consume `nix/oxcaml.nix` for the
-# compiler + package-set wiring; only `ox-minimal-trunk` is impure
-# (needs `--impure` because of fetchGit main).
+# Release tests use the opam-published compiler. The latest tag and
+# trunk smoke tests build OxCaml with Dune from this source tree.
 {
   pkgs,
   makeDuneDevShell,
@@ -61,6 +59,18 @@ in
     meta.description = ''
       Provides a minimal shell environment with OxCaml in order to
       test the bootstrapping script.
+    '';
+  };
+
+  bootstrap-ox-latest = pkgs.mkShell {
+    inherit INSIDE_NIX;
+    buildInputs = [
+      pkgs.gnumake
+      (compilerWithSourceDune oxcaml-setup.latestCompiler)
+    ];
+    meta.description = ''
+      Builds the latest tagged OxCaml with this Dune, then tests
+      bootstrapping Dune with that compiler.
     '';
   };
 

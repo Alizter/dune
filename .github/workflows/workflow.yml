@@ -138,6 +138,20 @@ jobs:
           gc-max-store-size-linux: 2G
       - run: nix develop -i .#bootstrap-ox -c make release
 
+  nix-build-ox-latest:
+    name: Bootstrap with OxCaml (latest tag)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: nixbuild/nix-quick-install-action@v35
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: |
+            nix-${{ runner.os }}-${{ github.job }}--${{ hashFiles('**/*.nix', '**/flake.lock', 'nix/oxcaml.json', 'nix/patches/**') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ github.job }}--
+          gc-max-store-size-linux: 2G
+      - run: nix develop -i .#bootstrap-ox-latest -c make test-bootstrap
+
 #
 # Stage 2
 #
