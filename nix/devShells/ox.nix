@@ -30,6 +30,26 @@ let
       sed -i '/^(name dune)$/i(version ${duneVersion})' dune-project
     '';
   });
+  compilerWithSourceDune =
+    compiler:
+    (compiler.override {
+      withMerlin = false;
+      withAstDependentLibs = false;
+      withJsoo = false;
+    }).overrideAttrs
+      (old: {
+        NIX_CFLAGS_COMPILE = "-std=gnu17";
+        patches = (old.patches or [ ]) ++ [ ../patches/oxcaml-test-paths.patch ];
+        passthru = (old.passthru or { }) // pkgs.ocamlPackages.ocaml.passthru;
+        meta = (old.meta or { }) // pkgs.ocamlPackages.ocaml.meta;
+        nativeBuildInputs = [
+          sourceDuneForOx
+        ]
+        ++ builtins.filter (input: pkgs.lib.getName input != "dune") old.nativeBuildInputs;
+        postFixup = ''
+          remove-references-to -t ${sourceDuneForOx} $out/lib/ocaml/Makefile.config
+        '';
+      });
 in
 {
   bootstrap-ox = pkgs.mkShell {
@@ -74,26 +94,8 @@ in
         ocaml =
           let
             oxcamlFlake = builtins.getFlake "github:oxcaml/oxcaml/main";
-            oxcaml = oxcamlFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;
           in
-          (oxcaml.override {
-            withMerlin = false;
-            withAstDependentLibs = false;
-            withJsoo = false;
-          }).overrideAttrs
-            (old: {
-              NIX_CFLAGS_COMPILE = "-std=gnu17";
-              patches = (old.patches or [ ]) ++ [ ../patches/oxcaml-test-paths.patch ];
-              passthru = (old.passthru or { }) // pkgs.ocamlPackages.ocaml.passthru;
-              meta = (old.meta or { }) // pkgs.ocamlPackages.ocaml.meta;
-              nativeBuildInputs = [
-                sourceDuneForOx
-              ]
-              ++ builtins.filter (input: pkgs.lib.getName input != "dune") old.nativeBuildInputs;
-              postFixup = ''
-                remove-references-to -t ${sourceDuneForOx} $out/lib/ocaml/Makefile.config
-              '';
-            });
+          compilerWithSourceDune oxcamlFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;
       };
     meta.description = ''
       Like ox-minimal but with the OxCaml trunk compiler.
