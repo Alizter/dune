@@ -76,19 +76,24 @@ in
             oxcamlFlake = builtins.getFlake "github:oxcaml/oxcaml/main";
             oxcaml = oxcamlFlake.packages.${pkgs.stdenv.hostPlatform.system}.default;
           in
-          oxcaml.overrideAttrs (old: {
-            NIX_CFLAGS_COMPILE = "-std=gnu17";
-            patches = (old.patches or [ ]) ++ [ ../patches/oxcaml-test-paths.patch ];
-            passthru = (old.passthru or { }) // pkgs.ocamlPackages.ocaml.passthru;
-            meta = (old.meta or { }) // pkgs.ocamlPackages.ocaml.meta;
-            nativeBuildInputs = [
-              sourceDuneForOx
-            ]
-            ++ builtins.filter (input: pkgs.lib.getName input != "dune") old.nativeBuildInputs;
-            postFixup = ''
-              remove-references-to -t ${sourceDuneForOx} $out/lib/ocaml/Makefile.config
-            '';
-          });
+          (oxcaml.override {
+            withMerlin = false;
+            withAstDependentLibs = false;
+            withJsoo = false;
+          }).overrideAttrs
+            (old: {
+              NIX_CFLAGS_COMPILE = "-std=gnu17";
+              patches = (old.patches or [ ]) ++ [ ../patches/oxcaml-test-paths.patch ];
+              passthru = (old.passthru or { }) // pkgs.ocamlPackages.ocaml.passthru;
+              meta = (old.meta or { }) // pkgs.ocamlPackages.ocaml.meta;
+              nativeBuildInputs = [
+                sourceDuneForOx
+              ]
+              ++ builtins.filter (input: pkgs.lib.getName input != "dune") old.nativeBuildInputs;
+              postFixup = ''
+                remove-references-to -t ${sourceDuneForOx} $out/lib/ocaml/Makefile.config
+              '';
+            });
       };
     meta.description = ''
       Like ox-minimal but with the OxCaml trunk compiler.
