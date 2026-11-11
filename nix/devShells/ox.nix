@@ -78,6 +78,7 @@ in
           in
           oxcaml.overrideAttrs (old: {
             NIX_CFLAGS_COMPILE = "-std=gnu17";
+            patches = (old.patches or [ ]) ++ [ ../patches/oxcaml-test-paths.patch ];
             passthru = (old.passthru or { }) // pkgs.ocamlPackages.ocaml.passthru;
             meta = (old.meta or { }) // pkgs.ocamlPackages.ocaml.meta;
             nativeBuildInputs = [
