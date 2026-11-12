@@ -25,7 +25,7 @@ jobs:
       - name: Simulate a transient network failure
         env:
           RUN_ATTEMPT: ${{ github.run_attempt }}
-          INITIAL_DELAY: '0'
+          INITIAL_DELAY: '60'
         run: |
           echo "Workflow attempt $RUN_ATTEMPT"
           if [ "$RUN_ATTEMPT" = 1 ]; then
@@ -33,5 +33,5 @@ jobs:
             echo '::error::Simulated transient network failure'
             exit 1
           fi
-          sleep 120
+          sleep 20
           echo 'Automatic retry succeeded.'
