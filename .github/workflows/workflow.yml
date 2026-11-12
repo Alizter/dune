@@ -140,7 +140,7 @@ jobs:
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: |
-            nix-${{ runner.os }}-${{ github.job }}--${{ hashFiles('**/*.nix', '**/flake.lock') }}
+            nix-${{ runner.os }}-${{ github.job }}--${{ hashFiles('**/*.nix', '**/flake.lock', 'nix/oxcaml.json', 'nix/patches/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ github.job }}--
           gc-max-store-size-linux: 2G
       - run: nix develop -i .#bootstrap-ox -c make release
@@ -436,16 +436,7 @@ jobs:
             oxcaml: "git+https://github.com/oxcaml/opam-repository.git#${{ steps.release.outputs.repository }}"
             default: "git+https://github.com/ocaml/opam-repository.git"
           opam-pin: false
-
-      - name: Load opam cache when not Windows
-        if: runner.os != 'Windows'
-        id: opam-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/.opam
-            ~/work/dune/dune/_opam
-          key: opam-ox-${{ hashFiles('nix/oxcaml.json', 'nix/patches/**', '**.opam') }}
+          cache-prefix: opam-ox-${{ hashFiles('nix/oxcaml.json', 'nix/patches/**', '**.opam') }}
 
       - name: Install Node
         uses: actions/setup-node@v7
@@ -496,15 +487,6 @@ jobs:
       - name: Run OxCaml tests
         run: opam exec -- ./dune.exe test ./test/blackbox-tests/test-cases/oxcaml
 
-      - name: Save cache when not Windows
-        uses: actions/cache/save@v6
-        if: steps.opam-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
-        with:
-          path: |
-            ~/.opam
-            ~/work/dune/dune/_opam
-          key: opam-ox-${{ hashFiles('nix/oxcaml.json', 'nix/patches/**', '**.opam') }}
-
   nix-oxcaml:
     name: OxCaml Tests (Nix)
     needs: nix-build
@@ -517,7 +499,7 @@ jobs:
       - uses: nix-community/cache-nix-action@v7
         with:
           primary-key: |
-            nix-${{ runner.os }}-${{ github.job }}--${{ hashFiles('**/*.nix', '**/flake.lock') }}
+            nix-${{ runner.os }}-${{ github.job }}--${{ hashFiles('**/*.nix', '**/flake.lock', 'nix/oxcaml.json', 'nix/patches/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-${{ github.job }}--
           gc-max-store-size-linux: 2G
       - name: Build and test with OxCaml
