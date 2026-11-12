@@ -5,8 +5,8 @@
   },
   "release": {
     "version": "5.4.0-ox9",
-    "tag": "5.4.0-ox9",
     "variant": "5.4.0+ox",
+    "tag": "5.4.0-ox9",
     "rev": "c4aac9393f6763c9697206a972e112eb89bcc244",
     "narHash": "sha256-9JcNBPHqfR4Ga+4G4cSH2unoeQaLYDtbMC4pSsGAAIM="
   },
