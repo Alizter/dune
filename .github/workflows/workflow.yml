@@ -482,10 +482,10 @@ jobs:
             ppx_inline_test menhir js_of_ocaml wasm_of_ocaml-compiler
 
       - name: Build dune
-        run: opam exec -- make bootstrap
+        run: opam exec -- make dev
 
       - name: Run OxCaml tests
-        run: opam exec -- ./dune.exe test ./test/blackbox-tests/test-cases/oxcaml
+        run: opam exec -- make test-ox
 
   nix-oxcaml:
     name: OxCaml Tests (Nix)
