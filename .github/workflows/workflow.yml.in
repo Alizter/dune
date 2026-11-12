@@ -124,15 +124,8 @@ jobs:
       - run: nix develop -i .#bootstrap-check_4_14 -c make release
 
   nix-build-ox:
-    # This builds OxCaml with the flake version which is typically ahead of the
-    # OxCaml opam repository
-    name: Bootstrap with OxCaml
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-    runs-on: ${{ matrix.os }}
+    name: Bootstrap with OxCaml (opam release)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: nixbuild/nix-quick-install-action@v35
@@ -413,7 +406,7 @@ jobs:
         run: make release
 
   oxcaml:
-    name: OxCaml Tests (opam)
+    name: OxCaml Tests (opam release)
     needs: nix-build
     runs-on: ubuntu-latest
     steps:
