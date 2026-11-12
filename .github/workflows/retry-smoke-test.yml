@@ -1,0 +1,37 @@
+# Match the retry allowlist without starting the full CI pipeline.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: >-
+    ${{ github.workflow }} @
+    ${{ github.event.pull_request.head.label || github.head_ref || github.ref }} @
+    ${{ github.run_attempt == 1 && 'initial' || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  retry-smoke-test:
+    if: >-
+      github.repository == 'Alizter/dune' &&
+      github.head_ref == 'ci-retry-smoke-test'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate a transient network failure
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          INITIAL_DELAY: '0'
+        run: |
+          echo "Workflow attempt $RUN_ATTEMPT"
+          if [ "$RUN_ATTEMPT" = 1 ]; then
+            sleep "$INITIAL_DELAY"
+            echo '::error::Simulated transient network failure'
+            exit 1
+          fi
+          sleep 20
+          echo 'Automatic retry succeeded.'

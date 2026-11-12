@@ -1,6 +1,7 @@
 name: Changelog
 on:
   pull_request:
+    paths-ignore: ['.github/workflows/**']
     types: [opened, synchronize, reopened, labeled, unlabeled]
     branches:
       - main
