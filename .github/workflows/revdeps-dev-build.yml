@@ -5,6 +5,8 @@
 name: Revdeps development build
 
 on:
+  schedule:
+    - cron: '0 6 * * *'
   workflow_dispatch:
   push:
     branches:
