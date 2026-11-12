@@ -1,57 +1,55 @@
 # OxCaml package set — builds packages from the oxcaml opam repository.
-{ pkgs
-, lib
-, oxcamlOpamRepo
-,
+{
+  pkgs,
+  lib,
+  oxcamlOpamRepo,
 }:
 
 oself: osuper:
 let
   pins = builtins.fromJSON (builtins.readFile ./oxcaml.json);
   packagesDir = "${oxcamlOpamRepo}/packages";
-  overlay = import ./opam-overlay.nix
-    {
-      inherit pkgs lib packagesDir;
+  overlay = import ./opam-overlay.nix {
+    inherit pkgs lib packagesDir;
 
-      virtualPackages = [
-        "ocaml"
-        "dune"
-        "ocaml-variants"
-        "ocaml-options-vanilla"
-        "ocaml-base-compiler"
-        "base-unix"
-        "base-bigarray"
-        "base-threads"
-        "base-domains"
-        "base-nnp"
-      ]
-      ++ (builtins.filter (n: lib.hasPrefix "conf-" n) (
-        builtins.attrNames (builtins.readDir packagesDir)
-      ));
+    virtualPackages = [
+      "ocaml"
+      "dune"
+      "ocaml-variants"
+      "ocaml-options-vanilla"
+      "ocaml-base-compiler"
+      "base-unix"
+      "base-bigarray"
+      "base-threads"
+      "base-domains"
+      "base-nnp"
+    ]
+    ++ (builtins.filter (n: lib.hasPrefix "conf-" n) (
+      builtins.attrNames (builtins.readDir packagesDir)
+    ));
 
-      nonDunePackages = [
-        "obuild"
-        "ocamlbuild"
-        "ocamlfind"
-        "topkg"
-        "uutf"
-        "zarith"
-      ];
+    nonDunePackages = [
+      "obuild"
+      "ocamlbuild"
+      "ocamlfind"
+      "topkg"
+      "uutf"
+      "zarith"
+    ];
 
-      skipPackages = [
-        "mdx"
-        "odoc"
-        "odoc-parser"
-      ];
+    skipPackages = [
+      "mdx"
+      "odoc"
+      "odoc-parser"
+    ];
 
-      nameMap = {
-        "ocamlfind" = "findlib";
-      };
-    }
-    oself
-    osuper;
+    nameMap = {
+      "ocamlfind" = "findlib";
+    };
+  } oself osuper;
 in
-overlay // {
+overlay
+// {
   # menhir is a build tool but the opam file doesn't mark it {build},
   # so opam-overlay puts it in propagatedBuildInputs instead of
   # nativeBuildInputs, making it unavailable in PATH during the build.
