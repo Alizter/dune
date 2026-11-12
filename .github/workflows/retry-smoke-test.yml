@@ -33,5 +33,5 @@ jobs:
             echo '::error::Simulated transient network failure'
             exit 1
           fi
-          sleep 90
+          sleep 120
           echo 'Automatic retry succeeded.'
