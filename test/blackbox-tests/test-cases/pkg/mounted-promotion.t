@@ -208,8 +208,8 @@ lands in the workspace.
   generated
   $ test ! -e .pkg
 
-Anonymous actions used for inferred interfaces currently bypass the mounted
-promotion restriction. A missing interface is registered and written back.
+Anonymous actions used for inferred interfaces report mismatches without
+registering promotions, whether the interface is missing or outdated.
 
   $ mkdir _source/inferred
   $ cat > _source/inferred/dune <<'EOF'
@@ -221,15 +221,32 @@ promotion restriction. A missing interface is registered and written back.
   $ grep '^+val' inferred-output
   +val value : int
   $ dune promotion list
-  .pkg/foo/inferred/foo.mli
+  $ dune promote
   $ test ! -e .pkg
   $ dune ocaml inferred-mli --auto-promote .pkg/foo/inferred/foo.ml > auto-inferred-output 2>&1
   [1]
   $ grep '^+val' auto-inferred-output
   +val value : int
-  $ cat .pkg/foo/inferred/foo.mli
-  val value : int
-  $ rm -r .pkg
+  $ dune promotion list
+  $ test ! -e .pkg
+
+  $ echo 'val value : string' > _source/inferred/foo.mli
+  $ dune ocaml inferred-mli .pkg/foo/inferred/foo.ml > outdated-output 2>&1
+  [1]
+  $ grep '^[-+]val' outdated-output
+  -val value : string
+  +val value : int
+  $ dune promotion list
+  $ dune promote
+  $ dune ocaml inferred-mli --auto-promote .pkg/foo/inferred/foo.ml > auto-outdated-output 2>&1
+  [1]
+  $ grep '^[-+]val' auto-outdated-output
+  -val value : string
+  +val value : int
+  $ dune promotion list
+  $ test ! -e .pkg
+  $ cat _source/inferred/foo.mli
+  val value : string
 
 The invariant is not tied to a context named default.
 

@@ -158,7 +158,7 @@ let create ~context ~host_env_tree ~default_env ~root_expander ~artifacts ~conte
   Non_rec.Rec.env_tree ()
 ;;
 
-let extend_action_env t ~dir action =
+let extend_action_properties t ~dir action =
   let open Action_builder.O in
   let+ (action : Action.Full.t) = action
   and+ env, local_bin_dirs =
@@ -178,23 +178,23 @@ let extend_action_env t ~dir action =
      added last: a binary staged by [(deps (package ...))] must not shadow one
      the user bound explicitly. *)
   let env = Env_path.cons_multi env ~dirs:local_bin_dirs in
+  let action =
+    (* Nothing in a locked package is promoted. *)
+    match Pkg_sources.package_of_artifact_path dir with
+    | None -> action
+    | Some _ -> Action.Full.disable_promotion action
+  in
   Action.Full.add_env env action
 ;;
 
 let execute_action_stdout t ~loc ~dir action =
-  let action = extend_action_env t ~dir action in
+  let action = extend_action_properties t ~dir action in
   Rule.Anonymous_action.make ~loc ~dir action |> Build_system.execute_action_stdout
 ;;
 
 let extend_action t ~dir action =
-  extend_action_env t ~dir action
+  extend_action_properties t ~dir action
   |> Action_builder.map ~f:(fun action ->
-    let action =
-      (* Nothing in a locked package is promoted. *)
-      match Pkg_sources.package_of_artifact_path dir with
-      | None -> action
-      | Some _ -> Action.Full.disable_promotion action
-    in
     Action.Full.map action ~f:(function
       | Chdir _ as a -> a
       | a -> Chdir (Path.build (Context.build_dir t.context), a)))
