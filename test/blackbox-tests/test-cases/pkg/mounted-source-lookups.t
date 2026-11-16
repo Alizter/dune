@@ -298,6 +298,33 @@ The dune-package of a natively built locked package records, under
    (orig_src_dir
     $TESTCASE_ROOT/_build/default/.pkg/foo/stubs)
 
+A lib-private reference across projects names both projects (lib.t). A
+project without packages is named by its directory: the workspace directory
+in the workspace, and in a mount a workspace directory that does not exist
+instead of the build path.
+
+  $ mkdir -p _source/nested
+  $ echo '(lang dune 3.25)' > _source/nested/dune-project
+  $ cat > _source/nested/dune <<'EOF'
+  > (rule
+  >  (alias from-nested)
+  >  (action (echo "%{lib-private:foo.stubs:stubs.ml}")))
+  > EOF
+  $ (cd _source && dune build --root . @nested/from-nested 2>&1)
+  File "nested/dune", line 3, characters 16-49:
+  3 |  (action (echo "%{lib-private:foo.stubs:stubs.ml}")))
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Error: The variable "lib-private" can only refer to libraries within the same
+  project. The current project's name is "<anonymous nested>", but the
+  reference is to "foo".
+  [1]
+  $ dune build @$mount/nested/from-nested 2>&1
+  File "_build/default/.pkg/foo/nested/dune", line 3, characters 16-49:
+  Error: The variable "lib-private" can only refer to libraries within the same
+  project. The current project's name is "<anonymous .pkg/foo/nested>", but the
+  reference is to "foo".
+  [1]
+
 A compilation error in the package. The location is relative to the context
 directory, so it does not name a file under the workspace root.
 
