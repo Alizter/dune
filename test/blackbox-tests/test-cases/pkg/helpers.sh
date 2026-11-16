@@ -500,6 +500,40 @@ make_lockpkg() {
   cat > "$f"
 }
 
+# Exercise installable Dune sources through either backend. A harmless
+# substitution forces the opaque recipe; the native recipe must never run.
+make_dune_source_lockpkg() {
+  local backend="$1"
+  local pkg="$2"
+  local source="$3"
+
+  case "$backend" in
+    native)
+      make_lockpkg "$pkg" <<- EOF
+	(version 0.0.1)
+	(source (copy "$source"))
+	(build (run false))
+	EOF
+      ;;
+    opaque)
+      printf 'opaque\n' > "$source/opaque-recipe.in" || return 1
+      make_lockpkg "$pkg" <<- EOF
+	(version 0.0.1)
+	(source (copy "$source"))
+	(build
+	 (progn
+	  (run mkdir -p %{prefix})
+	  (substitute opaque-recipe.in %{prefix}/opaque-recipe)
+	  (run dune build --release --promote-install-file=true . @install)))
+	EOF
+      ;;
+    *)
+      printf 'Unknown package backend: %s\n' "$backend" >&2
+      return 1
+      ;;
+  esac
+}
+
 append_to_lockpkg() {
   local pkg="${1}"
   cat >> "${source_lock_dir}/${pkg}.pkg"
