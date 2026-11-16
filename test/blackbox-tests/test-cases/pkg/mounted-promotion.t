@@ -208,6 +208,29 @@ lands in the workspace.
   generated
   $ test ! -e .pkg
 
+Anonymous actions used for inferred interfaces currently bypass the mounted
+promotion restriction. A missing interface is registered and written back.
+
+  $ mkdir _source/inferred
+  $ cat > _source/inferred/dune <<'EOF'
+  > (library (name foo))
+  > EOF
+  $ echo 'let value = 42' > _source/inferred/foo.ml
+  $ dune ocaml inferred-mli .pkg/foo/inferred/foo.ml > inferred-output 2>&1
+  [1]
+  $ grep '^+val' inferred-output
+  +val value : int
+  $ dune promotion list
+  .pkg/foo/inferred/foo.mli
+  $ test ! -e .pkg
+  $ dune ocaml inferred-mli --auto-promote .pkg/foo/inferred/foo.ml > auto-inferred-output 2>&1
+  [1]
+  $ grep '^+val' auto-inferred-output
+  +val value : int
+  $ cat .pkg/foo/inferred/foo.mli
+  val value : int
+  $ rm -r .pkg
+
 The invariant is not tied to a context named default.
 
   $ cat > dune-workspace <<'EOF'
