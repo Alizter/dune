@@ -62,6 +62,16 @@ This is now fixed
   $ build_pkg bar
   content
 
+The built source tree contains both entries and the real directory's contents:
+
+  $ ls -d \
+  >   _build/default/.pkg/bar/link_to_dir \
+  >   _build/default/.pkg/bar/real_dir
+  _build/default/.pkg/bar/link_to_dir
+  _build/default/.pkg/bar/real_dir
+  $ cat _build/default/.pkg/bar/real_dir/file.txt
+  content
+
 
 --------------------------------------------------------------------------------
 
