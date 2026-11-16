@@ -227,8 +227,8 @@ the install file can be generated again.
   $ sed -i '/using melange/d' _source/dune-project
 
 A documentation stanza naming an mld file that does not exist. The workspace
-message names the workspace directory; the mounted message names a workspace
-directory that does not exist instead of the build path.
+message names the workspace directory; the mounted message names the build
+path.
 
   $ mkdir _source/manual
   $ echo '(documentation (mld_files missing))' > _source/manual/dune
@@ -240,7 +240,7 @@ directory that does not exist instead of the build path.
   [1]
   $ dune build $mount/foo.install 2>&1
   File "_build/default/.pkg/foo/manual/dune", line 1, characters 26-33:
-  Error: missing doesn't exist in .pkg/foo/manual
+  Error: missing doesn't exist in _build/default/.pkg/foo/manual
   [1]
   $ rm -r _source/manual
 

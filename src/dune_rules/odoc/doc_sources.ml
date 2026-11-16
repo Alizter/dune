@@ -50,8 +50,7 @@ let from_mld_files mlds (doc : Documentation.t) dir =
           [ Pp.textf
               "%s doesn't exist in %s"
               s
-              (Path.to_string_maybe_quoted
-                 (Path.drop_optional_build_context (Path.build dir)))
+              (Path.to_string_maybe_quoted (Pkg_sources.source_location dir))
           ])
   |> String.Map.map ~f:(fun in_doc ->
     let path = Path.Build.relative dir in_doc in
