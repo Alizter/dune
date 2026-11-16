@@ -115,7 +115,7 @@
 
 (cram
  (deps %{bin:odoc} %{bin:sherlodoc})
- (applies_to mounted-rule-parity.t))
+ (applies_to mounted-documentation.t))
 
 (cram
  (deps %{bin:ocaml_index})
