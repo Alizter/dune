@@ -143,6 +143,45 @@ for a mounted package it is an error.
   installed files from escaping that package's install directories.
   [1]
 
+An alias dependency on an alias that is not defined, and on a directory that
+does not exist. The workspace messages name the workspace directory. The
+mounted messages name a workspace directory that does not exist instead of
+the mounted directory's build path.
+
+  $ mkdir _source/aliases
+  $ cat > _source/aliases/dune <<'EOF'
+  > (rule
+  >  (target not-defined)
+  >  (deps (alias_rec nothing))
+  >  (action (with-stdout-to %{target} (echo ok))))
+  > (rule
+  >  (target no-directory)
+  >  (deps (alias_rec nowhere/default))
+  >  (action (with-stdout-to %{target} (echo ok))))
+  > EOF
+  $ (cd _source && dune build --root . aliases/not-defined 2>&1)
+  File "aliases/dune", line 3, characters 18-25:
+  3 |  (deps (alias_rec nothing))
+                        ^^^^^^^
+  Error: This alias is empty.
+  Alias "nothing" is not defined in aliases or any of its descendants.
+  [1]
+  $ (cd _source && dune build --root . aliases/no-directory 2>&1)
+  File "aliases/dune", line 7, characters 18-33:
+  7 |  (deps (alias_rec nowhere/default))
+                        ^^^^^^^^^^^^^^^
+  Error: Don't know about directory aliases/nowhere!
+  [1]
+  $ dune build $mount/aliases/not-defined 2>&1
+  File "_build/default/.pkg/foo/aliases/dune", line 3, characters 18-25:
+  Error: This alias is empty.
+  Alias "nothing" is not defined in .pkg/foo/aliases or any of its descendants.
+  [1]
+  $ dune build $mount/aliases/no-directory 2>&1
+  File "_build/default/.pkg/foo/aliases/dune", line 7, characters 18-33:
+  Error: Don't know about directory .pkg/foo/aliases/nowhere!
+  [1]
+
 A compilation error in the package. The location is relative to the context
 directory, so it does not name a file under the workspace root.
 
