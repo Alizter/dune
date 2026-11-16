@@ -244,6 +244,45 @@ path.
   [1]
   $ rm -r _source/manual
 
+A ppx receives the location filename of a dialect-converted module. The driver
+below prints the filename it is given and fails. The workspace filename is
+relative to the workspace; the mounted filename names a workspace file that
+does not exist instead of the build path.
+
+  $ cat >> _source/dune-project <<'EOF'
+  > (dialect
+  >  (name mlx)
+  >  (implementation (extension mlx) (preprocess (run cat %{input-file})))
+  >  (interface (extension mlxi) (preprocess (run cat %{input-file}))))
+  > EOF
+  $ mkdir -p _source/ppx _source/mlx
+  $ cat > _source/ppx/dune <<'EOF'
+  > (library
+  >  (name showloc_driver)
+  >  (modules ())
+  >  (ppx.driver
+  >   (main "(fun () -> let a = Sys.argv in Array.iteri (fun i x -> if x = \"-loc-filename\" then prerr_endline a.(i + 1)) a; exit 1)")))
+  > (library
+  >  (name showloc)
+  >  (modules ())
+  >  (libraries showloc_driver)
+  >  (kind ppx_rewriter))
+  > EOF
+  $ cat > _source/mlx/dune <<'EOF'
+  > (library (name uses) (preprocess (pps showloc)))
+  > EOF
+  $ echo 'let x = 1' > _source/mlx/uses.mlx
+  $ (cd _source && dune build --root . mlx/uses.cma 2>&1)
+  File "mlx/dune", line 1, characters 33-46:
+  1 | (library (name uses) (preprocess (pps showloc)))
+                                       ^^^^^^^^^^^^^
+  mlx/uses.mlx
+  [1]
+  $ dune build $mount/mlx/uses.cma 2>&1
+  File "_build/default/.pkg/foo/mlx/dune", line 1, characters 33-46:
+  .pkg/foo/mlx/uses.mlx
+  [1]
+
 A compilation error in the package. The location is relative to the context
 directory, so it does not name a file under the workspace root.
 
