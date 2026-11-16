@@ -246,8 +246,7 @@ path.
 
 A ppx receives the location filename of a dialect-converted module. The driver
 below prints the filename it is given and fails. The workspace filename is
-relative to the workspace; the mounted filename names a workspace file that
-does not exist instead of the build path.
+relative to the workspace; the mounted filename is the build path.
 
   $ cat >> _source/dune-project <<'EOF'
   > (dialect
@@ -280,7 +279,7 @@ does not exist instead of the build path.
   [1]
   $ dune build $mount/mlx/uses.cma 2>&1
   File "_build/default/.pkg/foo/mlx/dune", line 1, characters 33-46:
-  .pkg/foo/mlx/uses.mlx
+  _build/default/.pkg/foo/mlx/uses.mlx
   [1]
 
 A compilation error in the package. The location is relative to the context

@@ -29,11 +29,14 @@ let pp_input_path m ~ml_kind =
 let loc_filename_arg_for_pp ~input_path ~loc_filename =
   if Path.equal input_path loc_filename
   then Command.Args.empty
-  else
-    S
-      [ A "-loc-filename"
-      ; A (Path.drop_optional_build_context_maybe_sandboxed loc_filename |> Path.to_string)
-      ]
+  else (
+    let loc_filename =
+      match Path.as_in_build_dir loc_filename with
+      | Some file when Option.is_some (Pkg_sources.package_of_artifact_path file) ->
+        loc_filename
+      | _ -> Path.drop_optional_build_context_maybe_sandboxed loc_filename
+    in
+    S [ A "-loc-filename"; A (Path.to_string loc_filename) ])
 ;;
 
 let pp_corrected_path m ~ml_kind ~suffix =
