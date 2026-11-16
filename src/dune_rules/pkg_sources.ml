@@ -1,0 +1,538 @@
+open Import
+open Memo.O
+
+let package_of_dir_in_context dir =
+  match Path.Local.explode dir |> Filename.L.to_string with
+  | root :: name :: _
+    when String.equal root (Filename.to_string Filename.pkg_dir_basename) ->
+    Package.Name.of_string_opt name
+  | _ -> None
+;;
+
+let package_of_artifact_path path =
+  match Path.Build.split_first_component path with
+  | None -> None
+  | Some (_, dir) -> package_of_dir_in_context dir
+;;
+
+let source_location path =
+  match package_of_artifact_path path with
+  | Some _ -> Path.build path
+  | None -> Path.Build.drop_build_context_exn path |> Path.source
+;;
+
+module Source_input = struct
+  type t =
+    { files : (Path.t * Path.Local.t) list
+    ; directories : Path.Local.t list
+    }
+end
+
+module Candidate = struct
+  type t =
+    { lock_pkg : Dune_pkg.Lock_dir.Pkg.t
+    ; source_root : Path.Build.t option
+    ; files_dir : Path.Build.t
+    ; artifact_root : Path.Build.t
+    }
+
+  let name t = t.lock_pkg.info.name
+  let source_root t = t.source_root
+  let lock_pkg t = t.lock_pkg
+  let files_dir t = t.files_dir
+  let artifact_root t = t.artifact_root
+
+  let dependencies t =
+    let+ platform = Lock_dir.Sys_vars.solver_env in
+    Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform t.lock_pkg.depends ~platform
+    |> Option.value ~default:[]
+    |> Package.Name.Set.of_list_map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) ->
+      dep.name)
+  ;;
+
+  let make context (lock_pkg : Dune_pkg.Lock_dir.Pkg.t) ~files_dir =
+    let source_root =
+      Option.map lock_pkg.info.source ~f:(fun source ->
+        Fetch_rules.make_target ~kind:Dir source)
+    in
+    let artifact_root =
+      Path.Build.L.relative
+        (Context_name.build_dir context)
+        [ Filename.to_string Filename.pkg_dir_basename
+        ; Package.Name.to_string lock_pkg.info.name
+        ]
+    in
+    { lock_pkg; source_root; files_dir; artifact_root }
+  ;;
+end
+
+let candidates =
+  Per_context.create_by_name ~name:"mounted-package-candidates" (fun context ->
+    Memo.lazy_ ~name:"mounted-package-candidates" (fun () ->
+      let* active = Lock_dir.lock_dir_active context in
+      if not active
+      then Memo.return []
+      else
+        let+ lock_dir = Lock_dir.get_exn context
+        and+ lock_dir_path = Lock_dir.get_path context >>| Option.value_exn
+        and+ platform = Lock_dir.Sys_vars.solver_env in
+        Log.info "Package source candidates" [ "context", Context_name.to_dyn context ];
+        Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform
+        |> Package.Name.Map.values
+        |> List.map ~f:(fun (lock_pkg : Dune_pkg.Lock_dir.Pkg.t) ->
+          let version =
+            Option.some_if
+              (Dune_pkg.Lock_dir.uses_versioned_paths lock_dir)
+              lock_pkg.info.version
+          in
+          let files_dir =
+            Dune_pkg.Lock_dir.Pkg.files_dir
+              lock_pkg.info.name
+              version
+              ~lock_dir:lock_dir_path
+            |> Path.as_in_build_dir_exn
+          in
+          Candidate.make context lock_pkg ~files_dir))
+    |> Memo.Lazy.force)
+  |> Staged.unstage
+;;
+
+let find_candidate context name =
+  let+ candidates = candidates context in
+  List.find candidates ~f:(fun candidate ->
+    Package.Name.equal name (Candidate.name candidate))
+;;
+
+let listing root =
+  let rec loop local =
+    let dir = Path.Build.append_local root local in
+    let* contents = Build_system.directory_target_contents_opt ~dir in
+    let files, dirs =
+      match contents with
+      | Some contents -> contents
+      | None ->
+        Code_error.raise
+          "Package source directory was not produced"
+          [ "dir", Path.Build.to_dyn dir ]
+    in
+    let files =
+      Filename.Array.Set.to_list files
+      |> List.map ~f:(fun file ->
+        ( Path.build (Path.Build.relative_fname dir file)
+        , Path.Local.relative_fname local file ))
+    in
+    let+ subdirs =
+      Filename.Array.Set.to_list dirs
+      |> Memo.List.map ~f:(fun dir -> loop (Path.Local.relative_fname local dir))
+    in
+    { Source_input.files =
+        files @ List.concat_map subdirs ~f:(fun { Source_input.files; _ } -> files)
+    ; directories =
+        local
+        :: List.concat_map subdirs ~f:(fun { Source_input.directories; _ } -> directories)
+    }
+  in
+  loop Path.Local.root
+;;
+
+let listing =
+  let memo = Memo.create "package-source-listing" ~input:(module Path.Build) listing in
+  Memo.exec memo
+;;
+
+let source candidate =
+  let* empty_directories =
+    match (Candidate.lock_pkg candidate).info.source with
+    | None -> Memo.return None
+    | Some source ->
+      Lock_dir.source_kind source
+      >>| User_error.ok_exn
+      >>= (function
+       | `Local (`File, _) | `Fetch -> Memo.return None
+       | `Local (`Directory, dir) ->
+         let+ files, dirs = Fetch_rules.local_source_contents ~loc:(fst source.url) dir in
+         Option.some_if (List.is_empty files) dirs)
+  in
+  match empty_directories, Candidate.source_root candidate with
+  | Some directories, _ ->
+    (* Empty inputs cannot be represented by an engine directory target. *)
+    Memo.return { Source_input.files = []; directories }
+  | None, None -> Memo.return { Source_input.files = []; directories = [] }
+  | None, Some root -> listing root
+;;
+
+module Mounted = struct
+  type loaded =
+    { tree : Source_tree.Rules.Mounted.t
+    ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
+    }
+
+  type t =
+    { candidate : Candidate.t
+    ; loaded : (loaded option, User_message.t list) result
+    }
+
+  let candidate t = t.candidate
+
+  let kind t =
+    Result.map t.loaded ~f:(function
+      | None -> `Opam
+      | Some _ -> `Dune)
+  ;;
+
+  let kind_exn t =
+    match kind t with
+    | Ok kind -> Memo.return kind
+    | Error messages ->
+      List.map messages ~f:(fun message ->
+        Exn_with_backtrace.capture (User_error.E message))
+      |> Fiber.reraise_all
+      |> Memo.of_reproducible_fiber
+  ;;
+
+  let tree t =
+    match t.loaded with
+    | Ok (Some loaded) -> Some loaded.tree
+    | Ok None | Error _ -> None
+  ;;
+
+  let projects t =
+    match t.loaded with
+    | Ok (Some loaded) -> loaded.projects
+    | Ok None | Error _ -> []
+  ;;
+end
+
+module Package_action = Dune_lang.Action
+
+let dune_value : OpamVariable.variable_contents -> Value.t list = function
+  | B b -> [ String (Bool.to_string b) ]
+  | S s -> [ String s ]
+  | L s -> List.map s ~f:(fun x -> Value.String x)
+;;
+
+type variable_resolution =
+  | Resolved of OpamVariable.variable_contents option
+  | Requires_package_build
+
+let resolve_package_variable
+      candidates
+      candidate
+      { Dune_pkg.Package_variable.scope; name }
+  =
+  let package =
+    match scope with
+    | Self -> Candidate.name candidate
+    | Package package -> package
+  in
+  match
+    List.find candidates ~f:(fun candidate ->
+      Package.Name.equal (Candidate.name candidate) package)
+  with
+  | None ->
+    let+ { Dune_load_workspace.packages; _ } = Dune_load_workspace.load ()
+    and+ direct = Candidate.dependencies candidate in
+    if Package.Name.Set.mem direct package && Package.Name.Map.mem packages package
+    then Requires_package_build
+    else (
+      let value =
+        match Package_variable_name.to_string name with
+        | "build-id" -> None
+        | _ -> Lock_dir.default_package_variable ~present:false name
+      in
+      Resolved value)
+  | Some package ->
+    let variables =
+      Dune_pkg.Lock_dir.Pkg_info.variables (Candidate.lock_pkg package).info
+    in
+    Memo.return
+      (match
+         Option.first_some
+           (Package_variable_name.Map.find variables name)
+           (Lock_dir.default_package_variable ~present:true name)
+       with
+       | Some value -> Resolved (Some value)
+       | None -> Requires_package_build)
+;;
+
+let rec action_contains_source_transformation = function
+  | Package_action.Patch _ | Substitute _ -> true
+  | Progn actions | Concurrent actions | Pipe (_, actions) ->
+    List.exists actions ~f:action_contains_source_transformation
+  | With_accepted_exit_codes (_, action)
+  | Chdir (_, action)
+  | Setenv (_, _, action)
+  | Redirect_out (_, _, _, action)
+  | Redirect_in (_, _, action)
+  | Ignore (_, action)
+  | No_infer action
+  | Withenv (_, action)
+  | When (_, action) -> action_contains_source_transformation action
+  | _ -> false
+;;
+
+let rec flatten_progn = function
+  | Package_action.Progn actions -> List.concat_map actions ~f:flatten_progn
+  | Withenv (_, action) -> flatten_progn action
+  | action -> [ action ]
+;;
+
+let expand_condition_pform candidates candidate solver_env unsupported ~source = function
+  | Pform.Var (Pkg variable) ->
+    let values =
+      match Lock_dir.global_variable ~solver_env variable with
+      | Some value -> dune_value value
+      | None ->
+        unsupported := true;
+        [ Value.String "" ]
+    in
+    Memo.return (Ok values)
+  | Macro ({ macro = Pkg | Pkg_self; _ } as invocation) ->
+    let loc = Dune_sexp.Template.Pform.loc source in
+    let variable =
+      match Dune_pkg.Package_variable.of_macro_invocation ~loc invocation with
+      | Ok variable -> variable
+      | Error `Unexpected_macro -> Code_error.raise "Unexpected package variable macro" []
+    in
+    let* resolution = resolve_package_variable candidates candidate variable in
+    (match resolution with
+     | Resolved (Some value) -> dune_value value |> Result.ok |> Memo.return
+     | Resolved None -> Memo.return (Error (`Undefined_pkg_var variable.name))
+     | Requires_package_build ->
+       unsupported := true;
+       Memo.return (Ok [ Value.String "" ]))
+  | _ ->
+    unsupported := true;
+    Memo.return (Ok [ Value.String "" ])
+;;
+
+let eval_source_condition candidates candidate solver_env condition =
+  let unsupported = ref false in
+  let expand sw =
+    String_expander.Memo.expand_result_deferred_concat
+      sw
+      ~mode:Many
+      ~f:(expand_condition_pform candidates candidate solver_env unsupported)
+  in
+  let+ enabled =
+    Slang_expand.eval_blang
+      condition
+      ~dir:(Path.build (Candidate.artifact_root candidate))
+      ~f:expand
+  in
+  if !unsupported then None else Some enabled
+;;
+
+let local_path path =
+  String_with_vars.text_only path
+  |> Option.map ~f:(Path.Local.parse_string_exn ~loc:(String_with_vars.loc path))
+;;
+
+(* The patches a recipe applies before doing anything else. Substitutions read
+   package variables while they run, so a recipe containing one is left to its
+   opaque build. *)
+let leading_patches candidates candidate solver_env = function
+  | None | Some Dune_pkg.Lock_dir.Build_command.Dune -> Memo.return ([], [], true)
+  | Some (Action action) ->
+    let rec loop patches actions =
+      let stop () =
+        Memo.return
+          ( List.rev patches
+          , actions
+          , not (List.exists actions ~f:action_contains_source_transformation) )
+      in
+      match actions with
+      | Package_action.Patch path :: rest ->
+        (match local_path path with
+         | Some patch -> loop ((String_with_vars.loc path, patch) :: patches) rest
+         | None -> stop ())
+      | Package_action.When (condition, action) :: rest
+        when action_contains_source_transformation action ->
+        let condition = Slang.Blang.remove_locs condition |> Slang.simplify_blang in
+        eval_source_condition candidates candidate solver_env condition
+        >>= (function
+         | None -> stop ()
+         | Some true -> loop patches (flatten_progn action @ rest)
+         | Some false -> loop patches rest)
+      | _ -> stop ()
+    in
+    loop [] (flatten_progn action)
+;;
+
+module Scan_dune_files = Source_tree.Rules.Dir.Make_map_reduce (Memo) (Monoid.Exists)
+
+let prepared_source context name =
+  Path.Build.L.relative
+    Private_context.t.build_dir
+    [ Context_name.to_string context
+    ; ".dune-source"
+    ; Package.Name.to_string name
+    ; "source"
+    ]
+;;
+
+module Preparation = struct
+  type t =
+    | Opaque
+    | Plain of
+        { dir : Path.Build.t
+        ; native : bool
+        }
+    | Prepared of
+        { dir : Path.Build.t
+        ; patches : (Loc.t * Path.Local.t) list
+        ; rest : Package_action.t list
+        ; native : bool
+        }
+end
+
+let preparation_of_candidate context candidates candidate =
+  let* direct = Candidate.dependencies candidate in
+  let candidates =
+    List.filter candidates ~f:(fun other ->
+      let name = Candidate.name other in
+      Package.Name.equal name (Candidate.name candidate)
+      || Package.Name.Set.mem direct name)
+  in
+  let* platform = Lock_dir.Sys_vars.solver_env in
+  let lock_pkg = Candidate.lock_pkg candidate in
+  let build =
+    Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
+      lock_pkg.build_command
+      ~platform
+  in
+  let* patches, rest, native = leading_patches candidates candidate platform build in
+  let* has_files =
+    Build_system.directory_target_contents_opt ~dir:(Candidate.files_dir candidate)
+    >>| function
+    | None -> false
+    | Some (files, dirs) ->
+      not (Filename.Array.Set.is_empty files && Filename.Array.Set.is_empty dirs)
+  in
+  if
+    has_files
+    || List.is_non_empty lock_pkg.info.extra_sources
+    || List.is_non_empty patches
+  then
+    Memo.return
+      (Preparation.Prepared
+         { dir = prepared_source context (Candidate.name candidate)
+         ; patches
+         ; rest
+         ; native
+         })
+  else (
+    match Candidate.source_root candidate with
+    | None -> Memo.return Preparation.Opaque
+    | Some dir ->
+      let+ input = source candidate in
+      if List.is_empty input.files then Preparation.Opaque else Plain { dir; native })
+;;
+
+let preparations =
+  Per_context.create_by_name ~name:"package-source-preparations" (fun context ->
+    Memo.lazy_ ~name:"package-source-preparations" (fun () ->
+      let+ candidates = candidates context in
+      Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
+        ( Candidate.name candidate
+        , Memo.lazy_ ~name:"package-source-preparation" (fun () ->
+            preparation_of_candidate context candidates candidate) )))
+    |> Memo.Lazy.force)
+  |> Staged.unstage
+;;
+
+let preparation context name =
+  let* preparations = preparations context in
+  match Package.Name.Map.find preparations name with
+  | None -> Memo.return None
+  | Some preparation -> Memo.Lazy.force preparation >>| Option.some
+;;
+
+let mount_backing context name =
+  preparation context name
+  >>| function
+  | None | Some Opaque -> None
+  | Some (Plain { dir; native = _ } | Prepared { dir; patches = _; rest = _; native = _ })
+    -> Some dir
+;;
+
+let prepare context candidate =
+  let name = Candidate.name candidate in
+  Log.info
+    "Prepare package sources"
+    [ "context", Context_name.to_dyn context; "package", Package.Name.to_dyn name ];
+  let* preparation = preparation context name >>| Option.value_exn in
+  match
+    match preparation with
+    | Opaque
+    | Plain { dir = _; native = false }
+    | Prepared { dir = _; patches = _; rest = _; native = false } -> None
+    | Plain { dir; native = true }
+    | Prepared { dir; patches = _; rest = _; native = true } -> Some dir
+  with
+  | None -> Memo.return None
+  | Some backing_root ->
+    let logical_root = Candidate.artifact_root candidate in
+    let* tree = Source_tree.Rules.Mounted.load ~logical_root ~backing_root in
+    let projects = Source_tree.Rules.Mounted.projects tree in
+    let* has_dune_file =
+      Scan_dune_files.map_reduce
+        (Source_tree.Rules.Mounted.root tree)
+        ~traverse:Source_dir_status.Set.all
+        ~trace_event_name:"Package source classification"
+        ~f:(fun dir ->
+          match Source_tree.Rules.Dir.dune_file dir with
+          | None -> Memo.return false
+          | Some _ ->
+            let project = Source_tree.Rules.Dir.project dir in
+            (match
+               Package.Name.Map.find (Dune_project.including_hidden_packages project) name
+             with
+             | None -> Memo.return false
+             | Some package -> Dune_load_workspace.package_enabled package))
+    in
+    if not has_dune_file
+    then Memo.return None
+    else (
+      let version = (Candidate.lock_pkg candidate).info.version in
+      let projects =
+        List.map projects ~f:(fun (project, dir) ->
+          Dune_project.set_package_version project ~package:name ~version, dir)
+      in
+      Memo.return (Some { Mounted.tree; projects }))
+;;
+
+let mounted_by_name =
+  Per_context.create_by_name ~name:"mounted-packages" (fun context ->
+    Memo.lazy_ ~name:"mounted-packages" (fun () ->
+      let+ candidates = candidates context in
+      Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
+        let loaded =
+          Memo.lazy_ ~name:"prepare-mounted-package" (fun () ->
+            let+ loaded = Memo.collect_user_errors (prepare context candidate) in
+            { Mounted.candidate; loaded })
+        in
+        Candidate.name candidate, loaded))
+    |> Memo.Lazy.force)
+  |> Staged.unstage
+;;
+
+let mounted context =
+  let* mounted = mounted_by_name context in
+  Package.Name.Map.values mounted |> Memo.parallel_map ~f:Memo.Lazy.force
+;;
+
+let find_mounted context name =
+  let* mounted = mounted_by_name context in
+  match Package.Name.Map.find mounted name with
+  | None -> Memo.return None
+  | Some mounted -> Memo.Lazy.force mounted >>| Option.some
+;;
+
+let opaque_names context =
+  let+ mounted = mounted context in
+  List.fold_left mounted ~init:Package.Name.Set.empty ~f:(fun names mounted ->
+    match Mounted.kind mounted with
+    | Ok `Dune | Error _ -> names
+    | Ok `Opam -> Package.Name.Set.add names (Mounted.candidate mounted |> Candidate.name))
+;;

@@ -33,22 +33,16 @@ let artifacts_host t ~dir =
   t.get_node dir >>= Env_node.artifacts
 ;;
 
-let scope_host ~scope (context : Context.t) =
-  match Context.for_host context with
-  | None -> scope
-  | Some host ->
-    let* dir =
-      let* scope = scope in
-      let+ host = host in
-      set_context host (Scope.root scope)
-    in
-    Scope.DB.find_by_dir dir
-;;
-
 let expander_for_artifacts t ~dir =
   let external_env = t.get_node dir >>= Env_node.external_env in
   let scope = Scope.DB.find_by_dir dir in
-  let scope_host = scope_host ~scope t.context in
+  let scope_host =
+    match Context.for_host t.context with
+    | None -> scope
+    | Some host ->
+      let* host = host in
+      Scope.DB.find_by_dir (set_context host dir)
+  in
   let+ project = Dune_load.find_project ~dir in
   Expander.extend_env t.root_expander ~env:external_env
   |> Expander.set_scope ~dir ~project ~scope ~scope_host
@@ -72,8 +66,8 @@ let get_env_stanza ~dir =
 let get_impl t dir =
   let inherit_from =
     Memo.lazy_ ~name:"inherited-environment-node" (fun () ->
-      let* scope_root = Dune_load.find_project ~dir >>| Dune_project.root in
-      if Path.Source.equal (Path.Build.drop_build_context_exn dir) scope_root
+      let* project = Dune_load.find_loaded_project ~dir in
+      if Path.Build.equal dir (Loaded_project.output_root project)
       then Memo.Lazy.force t.default_env
       else (
         match Path.Build.parent dir with
@@ -195,6 +189,12 @@ let execute_action_stdout t ~loc ~dir action =
 let extend_action t ~dir action =
   extend_action_env t ~dir action
   |> Action_builder.map ~f:(fun action ->
+    let action =
+      (* Nothing in a locked package is promoted. *)
+      match Pkg_sources.package_of_artifact_path dir with
+      | None -> action
+      | Some _ -> Action.Full.disable_promotion action
+    in
     Action.Full.map action ~f:(function
       | Chdir _ as a -> a
       | a -> Chdir (Path.build (Context.build_dir t.context), a)))
@@ -202,6 +202,12 @@ let extend_action t ~dir action =
 
 let make_rule t ?mode ?loc ~dir { Action_builder.With_targets.build; targets } =
   let build = extend_action t build ~dir in
+  let mode =
+    (* Nothing in a locked package is promoted. *)
+    match mode, Pkg_sources.package_of_artifact_path dir with
+    | Some (Rule.Mode.Promote _), Some _ -> Some Rule.Mode.Ignore_source_files
+    | mode, _ -> mode
+  in
   Rule.make ?mode ~info:(Rule.Info.of_loc_opt loc) ~targets build
 ;;
 
@@ -226,6 +232,21 @@ let add_alias_action t aliases ~dir ~loc action =
 let resolve_program_memo t ~dir ?where ?hint ~loc bin =
   let* artifacts = artifacts_host t ~dir in
   Artifacts.binary ?hint ?where ~dir ~loc artifacts bin
+;;
+
+(* A rule only builds the opaque packages its directory declares. The command
+   line has no such list, so a program that the workspace does not define is
+   looked for in every opaque package. *)
+let resolve_command_line_program t ~dir bin =
+  let context = Context.name t.context in
+  let* artifacts = artifacts_host t ~dir
+  and* opaque =
+    Lock_dir.lock_dir_active context
+    >>= function
+    | false -> Memo.return Package.Name.Set.empty
+    | true -> Pkg_sources.opaque_names context
+  in
+  Artifacts.binary (Artifacts.add_package_deps artifacts opaque) ~dir ~loc:None bin
 ;;
 
 let resolve_program t ~dir ?where ?hint ~loc bin =
@@ -300,27 +321,15 @@ let create ~(context : Context.t) ~(host : t option) ~packages ~stanzas =
   in
   let artifacts = Artifacts_db.get context in
   let+ root_expander =
-    let public_libs = Scope.DB.public_libs context_name in
-    let artifacts_host, public_libs_host, host_build_dir =
+    let artifacts_host, host_build_dir =
       match Context.for_host context with
-      | None -> artifacts, public_libs, Memo.return (Context.build_dir context)
-      | Some host ->
-        let artifacts = host >>= Artifacts_db.get in
-        let public_libs = host >>| Context.name >>= Scope.DB.public_libs in
-        artifacts, public_libs, host >>| Context.build_dir
+      | None -> artifacts, Memo.return (Context.build_dir context)
+      | Some host -> host >>= Artifacts_db.get, host >>| Context.build_dir
     in
     let scope = Scope.DB.find_by_dir (Context.build_dir context) in
     let scope_host = host_build_dir >>= Scope.DB.find_by_dir in
     let+ project = Dune_load.find_project ~dir:(Context.build_dir context) in
-    Expander.make_root
-      ~project
-      ~scope
-      ~scope_host
-      ~context
-      ~env
-      ~public_libs
-      ~artifacts_host
-      ~public_libs_host
+    Expander.make_root ~project ~scope ~scope_host ~context ~env ~artifacts_host
   in
   (* Env node that represents the environment configured for the workspace. It
      is used as default at the root of every project in the workspace. *)

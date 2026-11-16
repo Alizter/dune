@@ -103,19 +103,21 @@ let gen_rules sctx t ~dir ~scope =
   in
   let loc = t.loc in
   (* Files checked by cinaps *)
-  let* cinapsed_files =
-    Source_tree.files_of (Path.Build.drop_build_context_exn dir)
-    >>| Path.Source.Set.to_list
-    >>| List.filter_map ~f:(fun p ->
-      if
-        Predicate_lang.Glob.test
-          t.files
-          (Path.Source.basename p |> Filename.to_string)
-          ~standard:Predicate_lang.true_
-      then
-        Some
-          (Path.Build.append_source (Super_context.context sctx |> Context.build_dir) p)
-      else None)
+  let* source_tree_dir = Dune_load.source_tree_dir ~dir in
+  let cinapsed_files =
+    match source_tree_dir with
+    | None -> []
+    | Some source_dir ->
+      Source_tree.Rules.Dir.filenames source_dir
+      |> Filename.Array.Set.to_list
+      |> List.filter_map ~f:(fun filename ->
+        if
+          Predicate_lang.Glob.test
+            t.files
+            (Filename.to_string filename)
+            ~standard:Predicate_lang.true_
+        then Some (Path.Build.relative_fname dir filename)
+        else None)
   in
   let cinaps_dir =
     let stamp =

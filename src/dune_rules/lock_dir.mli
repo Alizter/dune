@@ -54,3 +54,15 @@ val source_kind
        , User_message.t )
        result
        Memo.t
+
+(** Values of package variables that do not depend on the package's build. *)
+val default_package_variable
+  :  present:bool
+  -> Package_variable_name.t
+  -> OpamVariable.variable_contents option
+
+(** Build-independent values. Paths and install sections have no value here. *)
+val global_variable
+  :  solver_env:Dune_pkg.Solver_env.t
+  -> Pform.Var.Pkg.t
+  -> OpamVariable.variable_contents option

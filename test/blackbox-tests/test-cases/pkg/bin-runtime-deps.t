@@ -16,8 +16,15 @@ beside that executable changes.
   > EOF
 
   $ make_dune_project 3.24
-  $ provider_target="$(get_build_pkg_dir provider)/target"
-  $ runtime_target="$(get_build_pkg_dir runtime)/target"
+  $ cat >>dune-project <<'EOF'
+  > (package
+  >  (name consumer)
+  >  (allow_empty)
+  >  (dir .)
+  >  (depends provider))
+  > EOF
+  $ provider_target="$(get_build_pkg_dir provider)/_install"
+  $ runtime_target="$(get_build_pkg_dir runtime)/_install"
   $ provider_data="$PWD/$provider_target/share/provider/data.txt"
 
   $ make_lockpkg_file provider mybin <<EOF

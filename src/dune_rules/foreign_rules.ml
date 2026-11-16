@@ -2,7 +2,7 @@ open Import
 open Memo.O
 
 module Source_tree_map_reduce =
-  Source_tree.Dir.Make_map_reduce
+  Source_tree.Rules.Dir.Make_map_reduce
     (Action_builder)
     (Monoid.Appendable_list (struct
          type t = Command.Args.without_targets Command.Args.t
@@ -167,12 +167,13 @@ let include_dir_flags ~expander ~dir ~include_dirs =
              |> Dep.Set.singleton
            in
            Command.Args.Hidden_deps deps
-         | Some (build_dir, source_dir) ->
+         | Some (build_dir, _) ->
            Action_builder.return
            @@ Command.Args.Dyn
                 ((* This branch corresponds to a source directory. We
                     track its contents recursively. *)
-                 Action_builder.of_memo (Source_tree.find_dir source_dir)
+                 Action_builder.of_memo
+                   (Dune_load.source_tree_dir ~dir:(Path.as_in_build_dir_exn include_dir))
                  >>= function
                  | None ->
                    User_error.raise
@@ -190,7 +191,10 @@ let include_dir_flags ~expander ~dir ~include_dirs =
                        ~f:(fun t ->
                          let deps =
                            let dir =
-                             Path.append_source build_dir (Source_tree.Dir.path t)
+                             Source_tree.Rules.Dir.source_path t
+                             |> Path.Build.append_local
+                                  (Path.as_in_build_dir_exn build_dir)
+                             |> Path.build
                            in
                            File_selector.of_predicate_lang ~dir Predicate_lang.true_
                            |> Dep.file_selector
@@ -307,11 +311,7 @@ let build_c ~sctx ~dir ~expander ~include_flags (loc, (src : Foreign.Source.t), 
       let has_standard = Ordered_set_lang.Unexpanded.has_standard flags in
       let* project = Dune_load.find_project ~dir in
       let use_standard_flags = Dune_project.use_standard_c_and_cxx_flags project in
-      let+ is_vendored =
-        match Path.Build.drop_build_context dir with
-        | Some src_dir -> Source_tree.is_vendored src_dir
-        | None -> Memo.return false
-      in
+      let+ is_vendored = Dune_load.vendored_warnings ~dir in
       if
         Dune_project.dune_version project >= (2, 8)
         && Option.is_none use_standard_flags

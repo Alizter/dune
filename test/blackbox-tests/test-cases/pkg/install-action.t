@@ -9,8 +9,6 @@ Testing install actions
   $ build_pkg test
   foobar
 
-  $ export BUILD_PATH_PREFIX_MAP="/PKG_ROOT=test/target:$BUILD_PATH_PREFIX_MAP"
-
   $ show_pkg_targets test
   
   /bin
@@ -31,17 +29,13 @@ Testing install actions
 
   $ show_pkg_cookie test
   { files =
-      [ (LIB_ROOT,
-         [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/lib/xxx"
-         ])
-      ]
+      [ (LIB_ROOT, [ In_build_dir "default/.pkg/test/_install/lib/xxx" ]) ]
   ; variables = []
   }
 
-An install manifest should take precedence over the install action's scanner.
-Currently, executable permissions cause the scanner to classify the same file
-as libexec, so the cookie incorrectly records it in both lib and libexec.
+An install manifest takes precedence over the install action's scanner.
+Executable permissions must not cause a file declared in lib to also appear
+in libexec.
 
   $ make_lockpkg overlap <<'EOF'
   > (version 1.0)
@@ -56,13 +50,8 @@ as libexec, so the cookie incorrectly records it in both lib and libexec.
   $ show_pkg_cookie overlap
   { files =
       [ (LIB,
-         [ In_build_dir
-             "_private/default/.pkg/overlap.1.0-$DIGEST/target/lib/overlap/payload"
-         ])
-      ; (LIBEXEC,
-         [ In_build_dir
-             "_private/default/.pkg/overlap.1.0-$DIGEST/target/lib/overlap/payload"
-         ])
+         [ In_build_dir "default/.pkg/overlap/_install/lib/overlap/payload" ])
+      ; (LIBEXEC, [])
       ]
   ; variables = []
   }

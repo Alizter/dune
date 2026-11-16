@@ -71,16 +71,16 @@ Section variables expanded via (system) produce relative paths:
   > EOF
 
   $ build_pkg system-consumer 2>&1 | censor
-  ../../dep.0.0.1-$DIGEST/target/lib/dep
-  ../../dep.0.0.1-$DIGEST/target/lib/dep
-  ../../dep.0.0.1-$DIGEST/target/bin
-  ../../dep.0.0.1-$DIGEST/target/sbin
-  ../../dep.0.0.1-$DIGEST/target/share/dep
-  ../../dep.0.0.1-$DIGEST/target/etc/dep
-  ../../dep.0.0.1-$DIGEST/target/doc/dep
-  ../../dep.0.0.1-$DIGEST/target/man
-  ../../dep.0.0.1-$DIGEST/target/lib/toplevel
-  ../../dep.0.0.1-$DIGEST/target/lib/stublibs
+  ../../../_private/default/.packages/$DIGEST/lib/dep
+  ../../../_private/default/.packages/$DIGEST/lib/dep
+  ../../../_private/default/.packages/$DIGEST/bin
+  ../../../_private/default/.packages/$DIGEST/sbin
+  ../../../_private/default/.packages/$DIGEST/share/dep
+  ../../../_private/default/.packages/$DIGEST/etc/dep
+  ../../../_private/default/.packages/$DIGEST/doc/dep
+  ../../../_private/default/.packages/$DIGEST/man
+  ../../../_private/default/.packages/$DIGEST/lib/toplevel
+  ../../../_private/default/.packages/$DIGEST/lib/stublibs
   lib-data
   libexec-data
   bin-data
@@ -124,16 +124,16 @@ These currently expand to absolute paths instead of relative ones:
   > EOF
 
   $ build_pkg run-consumer 2>&1 | censor | dune_cmd subst '/[^ ]*/cat:' 'cat:'
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/bin
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/sbin
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/share/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/etc/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/doc/dep
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/man
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/toplevel
-  $PWD/_build/.sandbox/$DIGEST1/_private/default/.pkg/dep.0.0.1-$DIGEST2/target/lib/stublibs
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/lib/dep
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/lib/dep
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/bin
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/sbin
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/share/dep
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/etc/dep
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/doc/dep
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/man
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/lib/toplevel
+  $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/lib/stublibs
   lib-data
   libexec-data
   bin-data
@@ -144,3 +144,50 @@ These currently expand to absolute paths instead of relative ones:
   man-data
   toplevel-data
   stublibs-data
+
+An install action and an install file can describe the same installed artifact.
+A dependency consumes that artifact once, rather than colliding with itself.
+
+  $ make_lockpkg overlap <<'EOF'
+  > (version 1.0)
+  > (build
+  >  (progn
+  >   (write-file tool installed)
+  >   (write-file overlap.install "bin: [ \"tool\" {\"shared-tool\"} ]")))
+  > (install
+  >  (progn
+  >   (run mkdir -p %{pkg-self:bin})
+  >   (run cp tool %{pkg-self:bin}/shared-tool)))
+  > EOF
+  $ make_lockpkg overlap-consumer <<'EOF'
+  > (version 1.0)
+  > (depends overlap)
+  > (build (run cat %{pkg:overlap:bin}/shared-tool))
+  > EOF
+  $ build_pkg overlap-consumer
+  installed
+
+Different packages installing the same destination are still a real collision.
+
+  $ for package in left right; do
+  >   make_lockpkg "$package" <<EOF
+  > (version 1.0)
+  > (build
+  >  (progn
+  >   (write-file tool $package)
+  >   (write-file $package.install "bin: [ \"tool\" {\"shared-tool\"} ]")))
+  > EOF
+  > done
+  $ make_lockpkg conflict-consumer <<'EOF'
+  > (version 1.0)
+  > (depends left right)
+  > (build (run echo must-not-run))
+  > EOF
+  $ build_pkg conflict-consumer
+  Error: "left" and "right" both install "shared-tool" to section bin.
+  The lib_root, share_root, and libexec_root sections install directly to the
+  section root with no per-package subdirectory, so file names must be unique
+  across the set of packages a rule depends on.
+  -> required by _build/default/.pkg/conflict-consumer/_install
+  Hint: Rename one of the install entries.
+  [1]

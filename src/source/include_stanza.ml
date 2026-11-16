@@ -13,11 +13,10 @@ module type Path = sig
 end
 
 module Source = struct
-  include Path.Source
+  include Source_tree_file.File
 
-  let relative t loc f = relative ~error_loc:loc t f
-  let file_exists t = Fs_memo.file_exists (In_source_dir t)
-  let with_lexbuf_from_file t ~f = Fs_memo.with_lexbuf_from_file (In_source_dir t) ~f
+  let to_string_maybe_quoted t = diagnostic_name t |> String.maybe_quoted
+  let file_exists = exists
 end
 
 module Build = struct

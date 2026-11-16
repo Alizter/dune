@@ -74,7 +74,12 @@ let build_mlds_map stanzas ~dir ~files expander =
     let from_mld_files = from_mld_files (Lazy.force mlds) doc dir in
     let+ from_files =
       let expand = Expander.No_deps.expand expander ~mode:Single in
-      Install_entry.File.to_file_bindings_expanded doc.files ~expand ~dir
+      let* source_tree_root = Expander.source_tree_root expander in
+      Install_entry.File.to_file_bindings_expanded
+        doc.files
+        ~expand
+        ~dir
+        ~source_tree_root
       >>| of_file_bindings
     in
     let mlds = from_mld_files @ from_files in

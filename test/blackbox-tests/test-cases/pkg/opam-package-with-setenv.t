@@ -75,10 +75,10 @@ Appended without leading sep
   > append_with_leading_sep="foo:bar" \
   > build_pkg deps-on-with-setenv 
   Hello from the other package!
-  Prepended without trailing sep
-  Prepended with trailing sep:
-  Appended without leading sep
-  :Appended with leading sep
+  Prepended without trailing sep:foo:bar
+  Prepended with trailing sep:foo:bar
+  foo:bar:Appended without leading sep
+  foo:bar:Appended with leading sep
 
 We now make a third package that updates the env in a similar way, in order to see the
 difference between a propagated export_env versus the initial env.
@@ -112,7 +112,7 @@ We can now observe how the environment updates are applied a second time.
 
 We currently have the following issues:
 - The leading and trailing separators are missing.
-- The initial environment is missing.
+- The initial environment is kept, where opam drops it for these updates.
 - The order of applying environment updates is different from opam's.
 
 The output of opam when building the equivalent package is:
@@ -130,8 +130,8 @@ Appended 2nd time without leading sep:Appended without leading sep
   > append_with_leading_sep="foo:bar" \
   > build_pkg deps-on-with-setenv-2
   Hello from the second package!
-  Prepended 2nd time without trailing sep:Prepended without trailing sep
-  Prepended 2nd time with sep:Prepended with trailing sep:
-  Appended without leading sep:Appended 2nd time without leading sep
-  :Appended with leading sep:Appended 2nd time with leading sep
+  Prepended 2nd time without trailing sep:Prepended without trailing sep:foo:bar
+  Prepended 2nd time with sep:Prepended with trailing sep:foo:bar
+  foo:bar:Appended without leading sep:Appended 2nd time without leading sep
+  foo:bar:Appended with leading sep:Appended 2nd time with leading sep
 

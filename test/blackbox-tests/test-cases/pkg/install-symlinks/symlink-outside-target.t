@@ -33,12 +33,12 @@ Create a package with a symlink pointing outside target:
 
 The symlink is resolved to a hardlink to the external file:
 
-  $ dune_cmd stat kind $(get_build_pkg_dir foo)/target/lib/foo/external.txt
+  $ dune_cmd stat kind $(get_build_pkg_dir foo)/_install/lib/foo/external.txt
   regular file
 
 The content is accessible:
 
-  $ cat $(get_build_pkg_dir foo)/target/lib/foo/external.txt
+  $ cat $(get_build_pkg_dir foo)/_install/lib/foo/external.txt
   outside content
 
 Since the symlink was resolved to a hardlink, caching works:

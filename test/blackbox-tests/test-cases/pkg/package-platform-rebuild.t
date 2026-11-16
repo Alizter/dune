@@ -1,12 +1,12 @@
 Package build keys should describe the selected platform, not inactive branches
-or the lock directory's representation. Record the current extra builds.
+or the lock directory's representation. The key changes, but nothing is rebuilt.
 
   $ export DUNE_TRACE=+cache
   $ misses() {
   >   dune trace cat | jq -cs '
   >     [ .[]
   >       | select(.cat == "cache" and .name == "workspace_local_miss")
-  >       | select(.args.target | contains("foo.") and endswith("/target"))
+  >       | select(.args.target | endswith("/foo/_install"))
   >       | .args.reason | split(":")[0]
   >     ]
   >   '
@@ -43,9 +43,9 @@ Editing only the macOS command currently changes the Linux package key.
   [1]
   $ build_pkg foo
   $ misses
-  ["never seen this target before"]
+  []
 
-Adding another supported platform also invalidates the unchanged Linux build.
+Adding another supported platform also changes the Linux package key.
 
   $ digest=$(dune pkg print-digest foo)
   $ cat > dune.lock/lock.dune <<EOF
@@ -56,7 +56,7 @@ Adding another supported platform also invalidates the unchanged Linux build.
   [1]
   $ build_pkg foo
   $ misses
-  ["never seen this target before"]
+  []
 
 An equivalent non-portable lock directory should reuse the build.
 
@@ -70,7 +70,7 @@ An equivalent non-portable lock directory should reuse the build.
   [1]
   $ build_pkg foo
   $ misses
-  ["never seen this target before"]
+  []
 
 Spelling out an empty dependency list should have no effect either.
 
@@ -80,4 +80,4 @@ Spelling out an empty dependency list should have no effect either.
   [1]
   $ build_pkg foo
   $ misses
-  ["never seen this target before"]
+  []

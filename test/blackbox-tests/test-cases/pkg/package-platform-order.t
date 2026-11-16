@@ -6,7 +6,7 @@ Use no-op build actions and inspect cache misses for its target rule.
   >   dune trace cat | jq -cs '
   >     [ .[]
   >       | select(.cat == "cache" and .name == "workspace_local_miss")
-  >       | select(.args.target | contains("foo.") and endswith("/target"))
+  >       | select(.args.target | endswith("/foo/_install"))
   >       | .args.reason | split(":")[0]
   >     ]
   >   '
@@ -29,8 +29,8 @@ Use no-op build actions and inspect cache misses for its target rule.
   $ misses
   []
 
-Only the platform order changes. Currently this changes the package key and
-causes a new target-rule miss.
+Only the platform order changes. Currently this changes the package key,
+but there is no new target-rule miss.
 
   $ cat > dune.lock/lock.dune <<EOF
   > (lang package 0.1)
@@ -40,7 +40,7 @@ causes a new target-rule miss.
   [1]
   $ build_pkg foo
   $ misses
-  ["never seen this target before"]
+  []
 
 The order of alternatives within an explicit platform condition also should
 not matter.
@@ -54,7 +54,7 @@ not matter.
   $ digest=$(dune pkg print-digest foo)
   $ build_pkg foo
   $ misses
-  ["never seen this target before"]
+  ["rule or dependencies changed"]
   $ make_lockpkg foo <<EOF
   > (version 1)
   > (build
@@ -65,4 +65,4 @@ not matter.
   [1]
   $ build_pkg foo
   $ misses
-  ["never seen this target before"]
+  []

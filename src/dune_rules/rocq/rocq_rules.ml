@@ -1229,7 +1229,7 @@ let install_rules ~sctx ~dir s =
 
 let setup_rocqpp_rules ~sctx ~dir ({ loc; modules } : Rocq_stanza.Rocqpp.t) =
   let* rocq = rocq ~loc ~sctx ~dir
-  and* mlg_files = Rocq_sources.mlg_files ~sctx ~dir ~modules in
+  and* mlg_files = Rocq_sources.mlg_files ~dir ~modules in
   let mlg_rule m =
     let source = Path.build m in
     let target = Path.Build.set_extension m ~ext:Filename.Extension.ml in

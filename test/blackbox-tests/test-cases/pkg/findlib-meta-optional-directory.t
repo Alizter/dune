@@ -58,8 +58,7 @@ Clearer error here as we really depend on non-existing 'no'
   File "dune", line 2, characters 12-20:
   2 |  (libraries mypkg.no)
                   ^^^^^^^^
-  Error: Library "mypkg.no" in
-  _build/_private/default/.pkg/mypkg.0.0.1-$DIGEST/target/lib/mypkg/no
+  Error: Library "mypkg.no" in _build/default/.pkg/mypkg/_install/lib/mypkg/no
   is hidden (unsatisfied 'exists_if').
   -> required by _build/default/.foo.eobjs/native/dune__exe__Foo.cmx
   -> required by _build/default/foo.exe

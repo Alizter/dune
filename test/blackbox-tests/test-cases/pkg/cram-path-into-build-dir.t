@@ -64,7 +64,7 @@ stale output:
 
   $ sed -i.bak 's/v1/v2/' ${default_lock_dir}/provider.pkg
   $ build_pkg provider
-  $ $(get_build_pkg_dir provider)/target/bin/helper
+  $ $(get_build_pkg_dir provider)/_install/bin/helper
   v2
   $ dune test
   File "t.t", line 1, characters 0-0:

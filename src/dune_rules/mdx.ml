@@ -271,20 +271,18 @@ let () =
 
 (** Returns the list of files (in _build) to be passed to mdx for the given
     stanza and context *)
-let files_to_mdx t ~sctx ~dir =
-  let must_mdx src_path =
-    let file = Path.Source.basename src_path |> Filename.to_string in
-    let standard = default_files_of_version t.version in
-    Predicate_lang.Glob.test t.files ~standard file
+let files_to_mdx t ~dir ~source_tree_dir =
+  let standard = default_files_of_version t.version in
+  let must_mdx filename =
+    Predicate_lang.Glob.test t.files ~standard (Filename.to_string filename)
   in
-  let build_path src_path =
-    Path.Build.append_source (Context.build_dir (Super_context.context sctx)) src_path
-  in
-  Path.Build.drop_build_context_exn dir
-  |> Source_tree.files_of
-  >>| Path.Source.Set.to_list
-  >>| List.filter_map ~f:(fun src_path ->
-    if must_mdx src_path then Some (build_path src_path) else None)
+  match source_tree_dir with
+  | None -> []
+  | Some source_dir ->
+    Source_tree.Rules.Dir.filenames source_dir
+    |> Filename.Array.Set.to_list
+    |> List.filter_map ~f:(fun filename ->
+      if must_mdx filename then Some (Path.Build.relative_fname dir filename) else None)
 ;;
 
 (** Generates the rules for a single [src] file covered covered by the given
@@ -521,7 +519,10 @@ let mdx_prog_gen t ~sctx ~dir ~scope ~mdx_prog =
 (** Generates the rules for a given mdx stanza *)
 let gen_rules t ~sctx ~dir ~scope ~expander =
   let register_rules () =
-    let* files_to_mdx = files_to_mdx t ~sctx ~dir in
+    let* files_to_mdx =
+      Dune_load.source_tree_dir ~dir
+      >>| fun source_tree_dir -> files_to_mdx t ~dir ~source_tree_dir
+    in
     let mdx_prog =
       Super_context.resolve_program
         sctx
@@ -544,8 +545,10 @@ let gen_rules t ~sctx ~dir ~scope ~expander =
     match t.package with
     | None -> Memo.return true
     | Some package ->
-      let+ mask = Dune_load.mask () in
-      Only_packages.mem_all mask || Only_packages.mem mask (Package.name package)
+      let+ project = Dune_load.find_loaded_project ~dir in
+      (match Loaded_project.stanza_mask project with
+       | None -> true
+       | Some packages -> Package.Name.Set.mem packages (Package.name package))
   in
   Memo.when_ do_it register_rules
 ;;

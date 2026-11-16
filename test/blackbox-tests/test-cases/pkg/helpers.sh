@@ -11,7 +11,7 @@ export DUNE_CONFIG__SYS_OCAML_VERSION=5.4.0+fake
 
 dune="dune"
 
-pkg_root="_build/_private/default/.pkg"
+pkg_root="_build/default/.pkg"
 
 default_lock_dir="dune.lock"
 source_lock_dir="${default_lock_dir}"
@@ -22,18 +22,12 @@ default_repo_path() {
   echo "file://$(pwd)/mock-opam-repository"
 }
 
-# Prints the directory containing the package target and source dirs within the
-# _build directory.
+# Prints the opaque recipe's working and install directory within the mount.
 get_build_pkg_dir() {
   local package_name=$1
-  local digest
-  digest=$($dune pkg print-digest "$package_name")
-  local status=$?
-  if [ "$status" -eq "0" ]; then
-    echo "$pkg_root/$digest"
-  else
-    return 1
-  fi
+  # Checks that the package is one the project locks.
+  $dune pkg print-digest "$package_name" > /dev/null || return 1
+  echo "$pkg_root/$package_name"
 }
 
 build_pkg() {
@@ -42,7 +36,7 @@ build_pkg() {
   prefix="$(get_build_pkg_dir "$pkg")"
   local status=$?
   if [ "$status" -eq "0" ]; then
-    $dune build "$prefix/target"
+    $dune build "$prefix/_install"
   else
     return 1
   fi
@@ -58,13 +52,13 @@ show_pkg() {
 show_pkg_targets() {
   local pkg=$1
   local prefix
-  prefix="$(get_build_pkg_dir "$pkg")/target"
+  prefix="$(get_build_pkg_dir "$pkg")/_install"
   find "$prefix" | sort | dune_cmd subst "$prefix" ""
 }
 
 show_pkg_cookie() {
   local pkg=$1
-  $dune internal dump "$(get_build_pkg_dir "$pkg")/target/cookie" 2>&1 | censor
+  $dune internal dump "$(get_build_pkg_dir "$pkg")/_install/cookie" 2>&1 | censor
 }
 
 mkrepo() {

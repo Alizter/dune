@@ -1,0 +1,77 @@
+Editing a lock file changes how its package is built without leaving stale
+results behind.
+
+  $ make_lockdir
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name main) (dir .) (depends foo))
+  > EOF
+  $ echo '(executable (name main) (libraries foo))' > dune
+  $ echo 'let () = print_endline Foo.message' > main.ml
+  $ mkdir _source
+  $ cat > _source/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name foo))
+  > EOF
+  $ echo '(library (public_name foo))' > _source/dune
+  $ echo 'let message = "native"' > _source/foo.ml
+  $ echo 'unused' > _source/template.in
+  $ make_lockpkg foo <<EOF
+  > (version 1.0)
+  > (source (copy $PWD/_source))
+  > (build (run false))
+  > EOF
+
+The package is a Dune project, so it is built natively and its recipe does not
+run.
+
+  $ dune build main.exe @pkg-install
+  $ _build/default/main.exe
+  native
+  $ find _build/default -name META.foo -exec grep '^version' {} \;
+  version = "1.0"
+
+A new version in the lock file reaches the generated metadata.
+
+  $ make_lockpkg foo <<EOF
+  > (version 2.0)
+  > (source (copy $PWD/_source))
+  > (build (run false))
+  > EOF
+  $ dune build main.exe @pkg-install
+  $ find _build/default -name META.foo -exec grep '^version' {} \;
+  version = "2.0"
+
+Adding a substitution makes the package opaque: its recipe now runs.
+
+  $ make_lockpkg foo <<EOF
+  > (version 2.0)
+  > (source (copy $PWD/_source))
+  > (build
+  >  (progn
+  >   (substitute template.in template)
+  >   (run false)))
+  > EOF
+  $ dune build main.exe 2>&1 | grep -v '^ *$'
+  File "dune.lock/foo.pkg", line 6, characters 7-12:
+  6 |   (run false)))
+             ^^^^^
+  Error: Logs for package foo
+  [1]
+
+The natively generated metadata is gone.
+
+  $ find _build/default -name META.foo
+
+Removing it again returns to the native build.
+
+  $ make_lockpkg foo <<EOF
+  > (version 2.0)
+  > (source (copy $PWD/_source))
+  > (build (run false))
+  > EOF
+  $ dune build main.exe @pkg-install
+  $ _build/default/main.exe
+  native
+  $ find _build/default -name META.foo -exec grep '^version' {} \;
+  version = "2.0"

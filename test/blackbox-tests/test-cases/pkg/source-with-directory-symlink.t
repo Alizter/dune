@@ -28,16 +28,19 @@ We could potentially resolve them during the copy.
 
   $ build_pkg foo 2>&1 | censor
   Error: Is a directory
-  -> required by
-     _build/_private/default/.pkg/foo.0.0.1-$DIGEST/source/link_to_dir
-  -> required by
-     _build/_private/default/.pkg/foo.0.0.1-$DIGEST/target
+  -> required by _build/_fetch/url-$DIGEST-dir
   [1]
 
-Only the real directory was partially copied:
+The failed copy leaves the original directory and symlink intact:
 
-  $ ls _build/_private/default/.pkg/foo.*/source
+  $ ls _src_local
+  link_to_dir
   real_dir
+
+Remove the failing package. Building any package currently prepares the
+sources of all of them (S7 in PLAN.md), so it would fail the cases below.
+
+  $ rm ${default_lock_dir}/foo.pkg
 
 --------------------------------------------------------------------------------
 
@@ -54,18 +57,13 @@ Case 2: Tarball source containing a directory symlink.
   > (source
   >  (fetch
   >   (url file://$PWD/_src.tar.gz)))
-  > (build (run cat real_dir/file.txt))
+  > (build (run cat link_to_dir/file.txt))
   > EOF
 
 This is now fixed
   $ build_pkg bar
   content
 
-
-The tarball was fully extracted (including the symlink):
-  $ ls _build/_private/default/.pkg/bar.*/source
-  link_to_dir
-  real_dir
 
 --------------------------------------------------------------------------------
 

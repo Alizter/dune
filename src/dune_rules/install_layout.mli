@@ -1,14 +1,23 @@
+(** Install-layout rules and materialization, independent of [Context] loading. *)
+
 open Import
 
 val set_entry_resolver
-  :  (Context_name.t -> Package.Name.t -> Install.Entry.Sourced.Unexpanded.t list Memo.t)
+  :  (Context_name.t -> Package.Name.t -> Path.t Install.Entry.Expanded.t list Memo.t)
   -> unit
 
-(** Env extension for an action depending on a package set. Returns an env
-    with PATH, OCAMLPATH, etc. prepended for the layout root, and registers
-    the action's dependency on every install entry the layout produces for
-    the set. *)
-val env : Context_name.t -> Package.Name.Set.t -> Env.t Action_builder.t
+(** Root of the materialized install layout for the package set. *)
+val root : Context_name.t -> Package.Name.Set.t -> Path.Build.t
+
+(** Depend on every file the layout produces for the package set. *)
+val deps : Context_name.t -> Package.Name.Set.t -> unit Action_builder.t
+
+(** Files of one package inside the layout at [root], by install section. *)
+val files_by_section
+  :  Context_name.t
+  -> root:Path.Build.t
+  -> Package.Name.t
+  -> Path.t list Section.Map.t Memo.t
 
 (** Engine dispatch for [_build/_private/<context>/.packages/<rest>]. Called
     from [Gen_rules]; the layout dir is owned by this module. Resolves to:

@@ -11,6 +11,15 @@ module Kind : sig
     | Dir
 end
 
+(** Where a source is fetched to. *)
+val make_target : kind:Kind.t -> Dune_pkg.Source.t -> Path.Build.t
+
+(** The files and directories of a local source directory. *)
+val local_source_contents
+  :  loc:Loc.t
+  -> Path.Outside_build_dir.t
+  -> (Path.Local.t list * Path.Local.t list) Memo.t
+
 val fetch
   :  target:Path.Build.t
   -> Kind.t

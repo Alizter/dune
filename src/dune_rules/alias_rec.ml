@@ -27,18 +27,19 @@ module In_melange_target_dir = struct
 end
 
 include Alias_builder.Alias_rec (struct
-    module Map_reduce = Source_tree.Dir.Make_map_reduce (Action_builder) (Alias_status)
+    module Map_reduce =
+      Source_tree.Rules.Dir.Make_map_reduce (Action_builder) (Alias_status)
 
     let traverse dir ~f =
       let open Action_builder.O in
-      let ctx_name, src_dir = Path.Build.extract_build_context_exn dir in
+      let ctx_name, _ = Path.Build.extract_build_context_exn dir in
       let f =
         let build_dir =
           Context_name.build_dir (Context_name.of_string (Filename.to_string ctx_name))
         in
         fun dir ->
           let build_path =
-            Path.Build.append_source build_dir (Source_tree.Dir.path dir)
+            Source_tree.Rules.Dir.source_path dir |> Path.Build.append_local build_dir
           in
           let* { Alias_build_info.alias_status = found_in_source
                ; allowed_build_only_subdirs = _
@@ -67,7 +68,7 @@ include Alias_builder.Alias_rec (struct
               ~init:found_in_source
               ~f:Alias_status.combine
       in
-      Source_tree.find_dir src_dir
+      Dune_load.source_tree_dir ~dir
       |> Action_builder.of_memo
       >>= function
       | None -> Action_builder.return Alias_builder.Alias_status.Not_defined

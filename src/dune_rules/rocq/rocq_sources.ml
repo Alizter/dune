@@ -173,25 +173,23 @@ let expected_file ~rocq_lang_version t m =
   else None
 ;;
 
-let mlg_files ~sctx ~dir ~modules =
+let mlg_files ~dir ~modules =
   let open Memo.O in
-  let+ standard =
+  let+ source_tree_dir = Dune_load.source_tree_dir ~dir in
+  let standard =
     (* All .mlg files in the current directory *)
-    let filter_mlg file =
-      if
-        Filename.Extension.Or_empty.check
-          (Path.Source.extension file)
-          Filename.Extension.mlg
-      then
-        Some
-          (Path.Build.append_source
-             (Super_context.context sctx |> Context.build_dir)
-             file)
-      else None
-    in
-    Source_tree.files_of (Path.Build.drop_build_context_exn dir)
-    >>| Path.Source.Set.to_list
-    >>| List.filter_map ~f:filter_mlg
+    match source_tree_dir with
+    | None -> []
+    | Some source_dir ->
+      Source_tree.Rules.Dir.filenames source_dir
+      |> Filename.Array.Set.to_list
+      |> List.filter_map ~f:(fun filename ->
+        if
+          Filename.Extension.Or_empty.check
+            (Filename.extension filename)
+            Filename.Extension.mlg
+        then Some (Path.Build.relative_fname dir filename)
+        else None)
   in
   let parse ~loc:_ file = Path.Build.relative dir (file ^ ".mlg") in
   Ordered_set_lang.eval modules ~standard ~parse ~eq:Path.Build.equal

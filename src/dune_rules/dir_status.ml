@@ -12,14 +12,14 @@ module Group_component = struct
   type t =
     { dir : Path.Build.t
     ; path_to_group_root : Filename.t list
-    ; source_dir : Source_tree.Dir.t
+    ; source_dir : Source_tree.Rules.Dir.t
     ; stanzas : Stanza.t list
     }
 end
 
 module Group_root = struct
   type t =
-    { source_dir : Source_tree.Dir.t
+    { source_dir : Source_tree.Rules.Dir.t
     ; qualification : Loc.t * Include_subdirs.qualification
     ; dune_file : Dune_file.t
     ; components : Group_component.t list Memo.t
@@ -28,11 +28,11 @@ end
 
 module T = struct
   type t =
-    | Lock_dir of Source_tree.Dir.t
+    | Lock_dir of Source_tree.Rules.Dir.t
     | Generated
-    | Source_only of Source_tree.Dir.t
+    | Source_only of Source_tree.Rules.Dir.t
     | (* Directory not part of a multi-directory group *)
-      Standalone of Source_tree.Dir.t * Dune_file.t
+      Standalone of Source_tree.Rules.Dir.t * Dune_file.t
     | (* Directory with [(include_subdirs x)] where [x] is not [no] *)
       Group_root of Group_root.t
     | (* Sub-directory of a [Group_root _] *)
@@ -258,10 +258,10 @@ end = struct
                  })
     and walk_children st_dir ~dir ~local =
       (* TODO take account of directory targets *)
-      Source_tree.Dir.sub_dirs st_dir
+      Source_tree.Rules.Dir.sub_dirs st_dir
       |> Filename.Array.Map.to_list
       |> Memo.parallel_map ~f:(fun (basename, st_dir) ->
-        let* st_dir = Source_tree.Dir.sub_dir_as_t st_dir in
+        let* st_dir = Source_tree.Rules.Dir.sub_dir_as_t st_dir in
         let dir = Path.Build.relative_fname dir basename in
         let local = basename :: local in
         walk st_dir ~dir ~local)
@@ -309,26 +309,24 @@ end = struct
   ;;
 
   let build_dir_is_project_root st_dir =
-    let project_root = Source_tree.Dir.project st_dir |> Dune_project.root in
-    Source_tree.Dir.path st_dir |> Path.Source.equal project_root
+    let project_root = Source_tree.Rules.Dir.project st_dir |> Dune_project.root in
+    Source_tree.Rules.Dir.source_path st_dir |> Path.Local.equal project_root
   ;;
 
   let get_impl dir =
     (match Path.Build.extract_build_context dir with
      | None -> Memo.return None
-     | Some (ctx, dir) ->
-       Source_tree.find_dir dir
-       >>| (function
-        | None -> None
-        | Some src_dir -> Some (ctx, src_dir)))
+     | Some (ctx, _) ->
+       let* loaded_project = Dune_load.find_loaded_project ~dir in
+       Loaded_project.source_tree_dir loaded_project dir
+       >>| Option.map ~f:(fun st_dir -> ctx, st_dir))
     >>= function
     | None -> group_component_or ~dir Generated
     | Some (ctx, st_dir) ->
-      let src_dir = Source_tree.Dir.path st_dir in
       Pkg_rules.lock_dir_path (Context_name.of_string (Filename.to_string ctx))
       >>| (function
        | None -> false
-       | Some of_ -> Path.is_descendant ~of_ (Path.source src_dir))
+       | Some of_ -> Path.is_descendant ~of_ (Source_tree.Rules.Dir.path st_dir))
       >>= (function
        | true -> Memo.return (Lock_dir st_dir)
        | false ->

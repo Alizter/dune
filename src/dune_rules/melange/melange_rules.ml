@@ -200,7 +200,7 @@ let impl_only_modules_defined_in_this_lib ~sctx ~scope ~info lib =
             | Some dune_file -> Dune_file.find_stanzas dune_file Library.key
           in
           let lib_id = Lib_info.lib_id info |> Lib_id.to_local_exn in
-          let src_dir = Path.Build.drop_build_context_exn dir in
+          let src_dir = Dune_project.dir_in_context dir in
           let library =
             List.find stanzas ~f:(fun library ->
               Lib_id.Local.equal (Library.to_lib_id ~src_dir library) lib_id)
@@ -449,12 +449,16 @@ let compute_promote_in_source ~promote_in_source ~project ~dir ~mode ~output ~sr
            in
            Path.reach ~from:dst_dir into_dir
          | Public_library { lib_dir; output_dir; target_dir = _ } ->
+           let root = Dune_project.root project in
+           if Option.is_some (Pkg_sources.package_of_dir_in_context root)
+           then
+             User_error.raise
+               [ Pp.text "Promotion is not supported for mounted package sources." ];
            let into_dir =
-             let root = Dune_project.root project in
-             let into_dir = Path.Source.append_local root output_dir in
-             let segment = Path.drop_prefix_exn src_dir ~prefix:lib_dir in
-             Path.Source.append_local into_dir segment
+             Path.Source.append_local (Path.Source.of_local root) output_dir
            in
+           let segment = Path.drop_prefix_exn src_dir ~prefix:lib_dir in
+           let into_dir = Path.Source.append_local into_dir segment in
            let from = Path.drop_build_context_exn dst_dir |> Path.source in
            Path.reach ~from (Path.source into_dir)
        in
@@ -654,6 +658,8 @@ let setup_emit_cmj_rules
     in
     ( cctx
     , Merlin.make
+        ~scope
+        ~expander
         ~requires_compile
         ~requires_hidden
         ~stdlib_dir

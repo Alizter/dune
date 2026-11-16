@@ -1,6 +1,6 @@
 %{bin:X} and %{bin-available:X} lookups are narrowed to the packages declared
-in the (depends ...) and (depopts ...) fields. Binaries provided by packages
-not in the dependency list are not resolved.
+in the (depends ...) and (depopts ...) fields and their dependencies. Binaries
+provided by packages outside that closure are not resolved.
 
   $ make_lockdir
 
@@ -85,10 +85,10 @@ narrowing kicks in):
   $ cat _build/default/direct-out
   true
 
-[transitive-bin] is not available:
+[transitive-bin] is available through [direct]:
 
   $ cat _build/default/transitive-out
-  false
+  true
 
 [other-bin] (package not in the deps closure) is not available:
 
@@ -98,13 +98,14 @@ narrowing kicks in):
 The package [other] was *not* built:
 
   $ dune trace cat | jq 'select(.cat == "process" and .name == "finish" and .args.target_dirs[]?) | .args.target_dirs[]' | sort -u | censor
-  "_build/_private/default/.pkg/direct.0.0.1-$DIGEST1/target"
-  "_build/_private/default/.pkg/transitive.0.0.1-$DIGEST2/target"
+  "_build/default/.pkg/direct/_install"
+  "_build/default/.pkg/transitive/_install"
 
 Only the bin directories of the declared dependencies are added to $PATH:
 
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/direct.0.0.1-$DIGEST/target/bin
+  $PWD/_build/default/.pkg/direct/_install/bin
+  $PWD/_build/default/.pkg/transitive/_install/bin
 
 Narrowing shrinks the build-dependency set, not just the visibility and PATH
 shown above. Previously, expanding a %{bin:X}/%{bin-available:X} pform forced
@@ -115,13 +116,13 @@ target no longer pulls in [other], a package outside that closure:
 
   $ dune clean
   $ dune build direct-out
-  $ if test -f "$(get_build_pkg_dir other)/target/cookie"
+  $ if test -f "$(get_build_pkg_dir other)/_install/cookie"
   >  then echo "other *was* built"; else echo "other was not built"; fi
   other was not built
 
 [transitive] (in [direct]'s closure) is built too, as it must be:
 
-  $ if test -f "$(get_build_pkg_dir transitive)/target/cookie"
+  $ if test -f "$(get_build_pkg_dir transitive)/_install/cookie"
   >  then echo "transitive *was* built"; else echo "transitive was not built"; fi
   transitive *was* built
 

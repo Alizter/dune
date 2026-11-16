@@ -19,17 +19,21 @@ the package being downloaded has a symlink.
   $ make_fetch_cache_project tar-contents tar-symlink
 
 The first build should succeed, fetching the source, populating the cache and
-disabling the download of the source a second time.
+disabling the download of the source a second time. The target is requested
+directly: [build_pkg] first runs [dune pkg print-digest], which currently
+fetches the source itself (S7 in PLAN.md) and would take one of the cache
+stores counted below.
 
-  $ build_pkg test
+  $ target=_build/default/.pkg/test/_install
+  $ dune build $target
 
 We see no cache store errors and the cache store events for the fetched dir,
-pkg-$DIGEST/source and pkg-$DIGEST/target in the trace:
+the package's source files in its mount and its install directory in the trace:
 
   $ dune trace cat | jq -s '[.[] | select(.args.message == "cache store target creation errors") ] | length'
   0
   $ dune trace cat | jq -s '[.[] | select(.args.message == "cache store success") ] | length'
-  3
+  5
 
 Cleaning the project to force rebuilding. This no longer triggers an attempt to
 re-download the source after the change to turn symlinks in the fetched source
@@ -37,4 +41,4 @@ into hardlinks:
 
   $ dune clean
   $ export DUNE_CACHE=enabled
-  $ build_pkg test
+  $ dune build $target

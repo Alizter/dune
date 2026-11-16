@@ -245,10 +245,7 @@ let format_config ~dir =
       Memo.return t.format_config)
   and+ default =
     (* we always force the default for error checking *)
-    Path.Build.drop_build_context_exn dir
-    |> Source_tree.nearest_dir
-    >>| Source_tree.Dir.project
-    >>| Dune_project.format_config
+    Scope.DB.find_by_dir dir >>| Scope.project >>| Dune_project.format_config
   in
   Option.value value ~default
 ;;

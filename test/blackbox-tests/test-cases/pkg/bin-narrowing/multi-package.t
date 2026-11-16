@@ -65,9 +65,9 @@ pkg-b (depends tool-b) sees bin-b, but not bin-a:
 Only the bin directories of the listed dependencies are on $PATH:
 
   $ env_added "$(cat _build/default/a/a-path)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/tool-a.0.0.1-$DIGEST/target/bin
+  $PWD/_build/default/.pkg/tool-a/_install/bin
   $ env_added "$(cat _build/default/b/b-path)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/tool-b.0.0.1-$DIGEST/target/bin
+  $PWD/_build/default/.pkg/tool-b/_install/bin
 
 The narrowing is ultimately about the build-dependency set, not just the
 visibility and PATH shown above. Previously, a lookup forced every lockdir
@@ -76,7 +76,7 @@ package's cookie. With the current narrowing, only the packages listed in
 
   $ dune clean
   $ dune build a/a-sees-a
-  $ if test -f "$(get_build_pkg_dir tool-b)/target/cookie"
+  $ if test -f "$(get_build_pkg_dir tool-b)/_install/cookie"
   >  then echo "tool-b *was* built"; else echo "tool-b was not built"; fi
   tool-b was not built
 

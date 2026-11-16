@@ -100,6 +100,39 @@ module Sys_vars = struct
   ;;
 end
 
+let default_package_variable ~present name =
+  match Package_variable_name.to_string name with
+  | "pinned" -> Some (OpamVariable.B false)
+  | "enable" -> Some (OpamVariable.S (if present then "enable" else "disable"))
+  | "installed" -> Some (OpamVariable.B present)
+  | "build-id" ->
+    (* Dune does not cache across Opam switches. This dummy value cannot
+       collide with real Opam build IDs. *)
+    Some (OpamVariable.S "d00ed00ed00ed00ed00ed00ed00ed00e")
+  | _ -> None
+;;
+
+let global_variable ~solver_env (variable : Pform.Var.Pkg.t) =
+  let system name =
+    Dune_pkg.Solver_env.get solver_env name
+    |> Option.map ~f:Dune_pkg.Variable_value.to_opam_variable_contents
+    |> Option.value ~default:(OpamVariable.S "")
+    |> Option.some
+  in
+  match variable with
+  | Switch -> Some (OpamVariable.S "dune")
+  | Jobs -> Some (OpamVariable.S (Int.to_string !Clflags.concurrency))
+  | User -> Some (OpamVariable.S (Unix.getlogin ()))
+  | Group -> Some (OpamVariable.S (Unix.getgid () |> Unix.getgrgid).gr_name)
+  | Os Os -> system Package_variable_name.os
+  | Os Os_version -> system Package_variable_name.os_version
+  | Os Os_distribution -> system Package_variable_name.os_distribution
+  | Os Os_family -> system Package_variable_name.os_family
+  | Arch -> system Package_variable_name.arch
+  | Sys_ocaml_version -> system Package_variable_name.sys_ocaml_version
+  | Build | Prefix | Section_dir _ -> None
+;;
+
 module Load = Make_load (struct
     include Memo
 
@@ -250,11 +283,20 @@ let get_with_path =
 let get ctx = get_with_path ctx >>| Result.map ~f:snd
 let get_exn ctx = get ctx >>| User_error.ok_exn
 
+(* Dev tool lock directories are closed: no workspace package supplies their
+   dependencies. *)
+let load_dev_tool_exn path =
+  let+ t = Load.load_exn path in
+  check_dependencies t ~lock_dir_path:path ~local_packages:Package.Name.Set.empty
+  |> User_error.ok_exn;
+  t
+;;
+
 let of_dev_tool dev_tool =
   let path = dev_tool |> dev_tool_external_lock_dir |> Path.external_ in
   (* Ensure the internal lock dir is built so copy rules run *)
   let* () = Build_system.build_dir (dev_tool_lock_dir dev_tool) in
-  Load.load_exn path
+  load_dev_tool_exn path
 ;;
 
 let of_dev_tool_if_lock_dir_exists dev_tool =
@@ -266,7 +308,7 @@ let of_dev_tool_if_lock_dir_exists dev_tool =
   in
   if exists
   then
-    let+ t = Load.load_exn path in
+    let+ t = load_dev_tool_exn path in
     Some t
   else Memo.return None
 ;;

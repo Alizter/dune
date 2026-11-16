@@ -403,12 +403,17 @@ module Run (P : PARAMS) = struct
         | Standard | Promote _ | Ignore_source_files -> Memo.return impl_deps
         | Fallback ->
           let { Ml_kind.Dict.impl; intf = _ } = Module.Source.files_by_ml_kind target in
-          let source =
-            Module.File.path (Option.value_exn impl)
-            |> Path.drop_optional_build_context_src_exn
+          let source = Module.File.path (Option.value_exn impl) in
+          let+ source_dir =
+            Dune_load.source_tree_dir
+              ~dir:(Path.parent_exn source |> Path.as_in_build_dir_exn)
           in
-          let+ files = Source_tree.files_of (Path.Source.parent_exn source) in
-          if Path.Source.Set.mem files source then Action_builder.return [] else impl_deps
+          (match source_dir with
+           | Some dir
+             when Filename.Array.Set.mem
+                    (Source_tree.Rules.Dir.filenames dir)
+                    (Path.basename source) -> Action_builder.return []
+           | Some _ | None -> impl_deps)
       in
       let path = Module.Source.path target in
       let obj_dir = Compilation_context.obj_dir cctx in

@@ -19,7 +19,12 @@ correctly under both default and copy sandboxing.
   >  ))
   > EOF
 
-  $ make_dune_project 3.25
+The binary is visible to the package that depends on its provider.
+
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name main) (dir .) (allow_empty) (depends provider))
+  > EOF
 
   $ cat >dune <<'EOF'
   > (rule

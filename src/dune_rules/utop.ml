@@ -31,7 +31,8 @@ module Libs_and_ppxs =
          type t = Loc.t * Lib_name.t
        end))
 
-module Source_tree_map_reduce = Source_tree.Dir.Make_map_reduce (Memo) (Libs_and_ppxs)
+module Source_tree_map_reduce =
+  Source_tree.Rules.Dir.Make_map_reduce (Memo) (Libs_and_ppxs)
 
 let for_ = Compilation_mode.Ocaml
 
@@ -103,9 +104,9 @@ let add_stanza db ~dir (acc, pps) stanza =
 ;;
 
 let libs_and_ppx_under_dir sctx ~db ~dir =
-  (match Path.drop_build_context dir with
+  (match Path.as_in_build_dir dir with
    | None -> Memo.return None
-   | Some dir -> Source_tree.find_dir dir)
+   | Some dir -> Dune_load.source_tree_dir ~dir)
   >>= function
   | None -> Memo.return ([], [])
   | Some dir ->
@@ -116,7 +117,9 @@ let libs_and_ppx_under_dir sctx ~db ~dir =
         ~traverse:Source_dir_status.Set.all
         ~trace_event_name:"Utop rules loading"
         ~f:(fun dir ->
-          let dir = Path.Build.append_source build_dir (Source_tree.Dir.path dir) in
+          let dir =
+            Source_tree.Rules.Dir.source_path dir |> Path.Build.append_local build_dir
+          in
           Dune_load.stanzas_in_dir dir
           >>= function
           | None -> Memo.return Libs_and_ppxs.empty

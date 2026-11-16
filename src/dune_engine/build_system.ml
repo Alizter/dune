@@ -264,7 +264,7 @@ let digest_env_subset d deps env =
 
 (* The current version of the rule digest scheme. We should increment it when
    making any changes to the scheme, to avoid collisions. *)
-let rule_digest_version = 37
+let rule_digest_version = 38
 
 let compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_parameters =
   let { Action.Full.action; props } = action in
@@ -274,6 +274,7 @@ let compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_paramet
       ; can_use_sandbox_policy
       ; sandbox = _ (* already taken into account in [sandbox_mode] *)
       ; corrections
+      ; promotion
       ; job_slots = _ (* the number of job slots does not change the result *)
       }
     =
@@ -299,6 +300,7 @@ let compute_rule_digest ~targets ~facts ~action ~sandbox_mode ~execution_paramet
     Digest.Manual.bool d can_use_sandbox_policy;
     digest_locks d locks;
     Digest.Manual.repr d Repr.(option Corrections.repr) corrections;
+    Digest.Manual.bool d promotion;
     Digest.Manual.digest d (Execution_parameters.digest execution_parameters);
     Digest.Manual.get d
   in
@@ -449,6 +451,7 @@ and execute_action_for_rule
       ; can_use_sandbox_policy
       ; sandbox = _
       ; corrections
+      ; promotion
       ; job_slots
       }
     =
@@ -505,6 +508,7 @@ and execute_action_for_rule
             ; rule_loc = loc
             ; execution_parameters
             ; sandbox = process_sandbox
+            ; promotion
             ; action
             ; job_slots
             }
@@ -540,7 +544,7 @@ and execute_action_for_rule
             | Normal_rule -> Path.Build.Set.empty
             | Anonymous_action { stamp_file; _ } -> Path.Build.Set.singleton stamp_file
           in
-          Sandbox.move_targets_to_build_dir sandbox ~skip_files ~targets
+          Sandbox.move_targets_to_build_dir sandbox ~promotion ~skip_files ~targets
         in
         match Targets.Produced.of_validated targets with
         | Ok produced_targets ->
@@ -809,6 +813,7 @@ and execute_anonymous_action { Rule.Anonymous_action.action; dir; loc } ~capture
         ; can_use_sandbox_policy
         ; sandbox
         ; corrections
+        ; promotion
         ; job_slots = _ (* the number of job slots does not change the result *)
         }
       =
@@ -835,6 +840,7 @@ and execute_anonymous_action { Rule.Anonymous_action.action; dir; loc } ~capture
       Digest.Manual.bool d can_use_sandbox_policy;
       digest_sandbox_config d sandbox;
       Digest.Manual.repr d Repr.(option Corrections.repr) corrections;
+      Digest.Manual.bool d promotion;
       Digest.Manual.get d
     in
     digest
@@ -1100,6 +1106,21 @@ let files_of ~dir =
       | None -> Filename.Array.Set.empty
     in
     Filename_set.create ~dir filenames
+;;
+
+let directory_target_contents_opt ~dir =
+  Load_rules.load_dir ~dir:(Path.build dir)
+  >>= function
+  | Build_under_directory_target { directory_target_ancestor } ->
+    let+ produced = build_directory_targets (Path.build directory_target_ancestor) in
+    (match Targets.Produced.find_any produced dir with
+     | Some (Right { files; subdirs }) ->
+       Some (Filename.Array.Map.keys files, Filename.Array.Map.keys subdirs)
+     | Some (Left _) | None -> None)
+  | Source _ | External _ | Build _ ->
+    Code_error.raise
+      "Build_system.directory_target_contents_opt: path is not under a directory target"
+      [ "dir", Path.Build.to_dyn dir ]
 ;;
 
 let caused_by_cancellation (exn : Exn_with_backtrace.t) =

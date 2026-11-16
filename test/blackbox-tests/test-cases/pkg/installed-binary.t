@@ -41,29 +41,26 @@ Test that installed binaries are visible in dependent packages
   /share/lib_rootxxx
   $ show_pkg_cookie test
   { files =
-      [ (LIB,
-         [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/lib/test/libxxx"
-         ])
+      [ (LIB, [ In_build_dir "default/.pkg/test/_install/lib/test/libxxx" ])
       ; (LIB_ROOT,
-         [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/lib/lib_rootxxx"
-         ])
-      ; (BIN,
-         [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/bin/foo"
-         ])
+         [ In_build_dir "default/.pkg/test/_install/lib/lib_rootxxx" ])
+      ; (BIN, [ In_build_dir "default/.pkg/test/_install/bin/foo" ])
       ; (SHARE_ROOT,
-         [ In_build_dir
-             "_private/default/.pkg/test.0.0.1-$DIGEST/target/share/lib_rootxxx"
-         ])
+         [ In_build_dir "default/.pkg/test/_install/share/lib_rootxxx" ])
       ]
   ; variables = []
   }
 
-It should also be visible in the workspace:
+It should also be visible in a workspace package that declares the dependency:
 
-  $ make_dune_project 3.9
+  $ make_dune_project 3.24
+  $ cat >>dune-project <<'EOF'
+  > (package
+  >  (name consumer)
+  >  (allow_empty)
+  >  (dir .)
+  >  (depends test))
+  > EOF
 
   $ cat >dune <<EOF
   > (rule
