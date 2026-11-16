@@ -266,8 +266,9 @@ reads it from this file.
   $ dune build _build/default/.pkg/foo/foo.dune-package _build/default/.pkg/foo/META.foo
   $ grep '^ (name foo' _build/default/.pkg/foo/foo.dune-package
    (name foo)
+   (name foo.support)
   $ grep 'package "support"' _build/default/.pkg/foo/META.foo
-  [1]
+  package "support" (
 
 Library-file pforms name installed files, which need not have the same name or
 location in the source tree.

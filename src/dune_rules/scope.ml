@@ -644,10 +644,10 @@ module DB = struct
       | None -> true
       | Some visible -> Package.Name.Set.mem visible name
     in
-    (* The locked package named like a library, when the requester sees it. A
-       dune package defines only libraries named after it. *)
-    let named name =
-      let package = Lib_name.package_name name in
+    (* A locked package the requester sees: the public libraries of its mount
+       when it is a dune package, or the fact that it is opaque. [`None] for
+       one that is not mounted, not visible or fails to load. *)
+    let mounted_libs package =
       let* visible = visible package in
       if not visible
       then Memo.return `None
@@ -658,7 +658,7 @@ module DB = struct
         | Some mounted ->
           (match Pkg_sources.Mounted.kind mounted with
            | Error _ -> Memo.return `None
-           | Ok `Opam -> Memo.return (`Opaque package)
+           | Ok `Opam -> Memo.return `Opaque
            | Ok `Dune ->
              let* errors = Dune_load.package_errors context package in
              if List.is_non_empty errors
@@ -666,6 +666,16 @@ module DB = struct
              else
                let+ public = partition (Some package) in
                `Native public)
+    in
+    (* The locked package named like a library. A dune package defines only
+       libraries named after it. *)
+    let named name =
+      let package = Lib_name.package_name name in
+      mounted_libs package
+      >>| function
+      | `Opaque -> `Opaque package
+      | `None -> `None
+      | `Native public -> `Native public
     in
     (* The visible locked packages, by lock metadata. *)
     let candidate_names () =
@@ -767,18 +777,33 @@ module DB = struct
                 then Memo.return results
                 else errors candidates
     in
-    let resolve_lib_id lib_id =
-      let* public = partition None in
-      match Lib_id.Map.find public.by_id lib_id with
-      | Some rt ->
-        let+ results =
-          visible_candidates [ rt ]
-          >>= Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
+    let resolve_lib_id (lib_id : Lib_id.t) =
+      match lib_id with
+      | External (loc, name) ->
+        Memo.return (Lib.DB.Resolve_result.redirect_in_the_same_db (loc, name))
+      | Local id ->
+        (* A local id names a library by its local name and its directory,
+           which says which partition defines it. *)
+        let* public =
+          match Pkg_sources.package_of_dir_in_context (Lib_id.Local.src_dir id) with
+          | None -> partition None >>| Option.some
+          | Some package ->
+            mounted_libs package
+            >>| (function
+             | `Native public -> Some public
+             | `None | `Opaque -> None)
         in
-        List.hd_opt results |> Option.value ~default:Lib.DB.Resolve_result.not_found
-      | None ->
-        Memo.return
-          (Lib.DB.Resolve_result.redirect_in_the_same_db (Loc.none, Lib_id.name lib_id))
+        (match public with
+         | None -> Memo.return Lib.DB.Resolve_result.not_found
+         | Some public ->
+           (match Lib_id.Map.find public.by_id lib_id with
+            | None -> Memo.return Lib.DB.Resolve_result.not_found
+            | Some rt ->
+              let+ results =
+                visible_candidates [ rt ]
+                >>= Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
+              in
+              List.hd_opt results |> Option.value ~default:Lib.DB.Resolve_result.not_found))
     in
     let all () =
       let* workspace = partition None >>= visible_names in

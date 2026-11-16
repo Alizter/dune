@@ -35,6 +35,7 @@ module Local = struct
   let make ~loc ~src_dir name = { name; loc; src_dir }
   let name t = t.name
   let loc t = t.loc
+  let src_dir t = t.src_dir
 end
 
 module T = struct
