@@ -32,9 +32,6 @@ Git
   and the repository exists.
   Error: Failed to run external command:
   'git ls-remote "file://$PWD/dummy"'
-  -> required by _build/_fetch/url-$DIGEST-dir
-  -> required by _build/_private/default/.pkg/foo/source
-  -> required by _build/_private/default/.pkg/foo/target
   Hint: Check that this Git URL in the project configuration is correct:
   "file://$PWD/dummy"
   [1]

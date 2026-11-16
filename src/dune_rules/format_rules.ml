@@ -245,10 +245,7 @@ let format_config ~dir =
       Memo.return t.format_config)
   and+ default =
     (* we always force the default for error checking *)
-    Path.Build.drop_build_context_exn dir
-    |> Source_tree.nearest_dir
-    >>| Source_tree.Dir.project
-    >>| Dune_project.format_config
+    Scope.DB.find_by_dir dir >>| Scope.project >>| Dune_project.format_config
   in
   Option.value value ~default
 ;;
@@ -270,7 +267,7 @@ let setup_alias sctx ~dir =
     let format =
       let open Action_builder.O in
       let expander = Super_context.expander sctx ~dir in
-      let* project = Action_builder.of_memo (Dune_load.find_project ~dir) in
+      let* project = Action_builder.of_memo (Partitions.find_project ~dir) in
       let dialects = Dune_project.dialects project in
       let version = Dune_project.dune_version project in
       gen_format_alias sctx config ~version ~dialects ~expander ~dir

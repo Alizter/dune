@@ -404,6 +404,7 @@ module Full = struct
       ; can_use_sandbox_policy : bool
       ; sandbox : Sandbox_config.t
       ; corrections : Corrections.t option
+      ; promotion : bool
       ; job_slots : action option
       }
 
@@ -414,6 +415,7 @@ module Full = struct
       ; can_use_sandbox_policy = true
       ; sandbox = Sandbox_config.default
       ; corrections = None
+      ; promotion = true
       ; job_slots = None
       }
     ;;
@@ -445,6 +447,7 @@ module Full = struct
           ; can_use_sandbox_policy
           ; sandbox
           ; corrections
+          ; promotion
           ; job_slots
           }
           t
@@ -455,6 +458,7 @@ module Full = struct
       ; can_use_sandbox_policy = can_use_sandbox_policy && t.can_use_sandbox_policy
       ; sandbox = Sandbox_config.inter sandbox t.sandbox
       ; corrections = combine_corrections corrections t.corrections
+      ; promotion = promotion && t.promotion
       ; job_slots = combine_job_slots job_slots t.job_slots
       }
     ;;
@@ -466,6 +470,7 @@ module Full = struct
       ; can_use_sandbox_policy = true
       ; sandbox
       ; corrections
+      ; promotion = true
       ; job_slots = None
       }
     ;;
@@ -483,6 +488,7 @@ module Full = struct
     ;;
 
     let disable_sandbox_policy t = { t with can_use_sandbox_policy = false }
+    let disable_promotion t = { t with promotion = false }
 
     let add_sandbox t sandbox =
       { t with sandbox = Sandbox_config.inter t.sandbox sandbox }
@@ -538,6 +544,7 @@ module Full = struct
   ;;
 
   let disable_sandbox_policy t = { t with props = Props.disable_sandbox_policy t.props }
+  let disable_promotion t = { t with props = Props.disable_promotion t.props }
   let add_sandbox sandbox t = { t with props = Props.add_sandbox t.props sandbox }
 
   let add_corrections corrections t =

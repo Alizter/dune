@@ -21,16 +21,21 @@ The rule depends on the lock-file package cookie and the resolved file:
   >  (action (with-stdout-to %{target} (echo %{pkg:lockpkg:share:data.txt}))))
   > EOF
 
-CR-someday alizter: inspecting the rule requires a prior build because
+CR-someday alizter: dune rules --deps requires a prior build because
 Install_cookie.load_exn runs eagerly during dep evaluation.
 
   $ dune build _build/default/output 2>&1
 
-  $ prefix="$(get_build_pkg_dir lockpkg)/target/"
-  $ dune rules --format=json _build/default/output |
-  >   jq_dune -r --arg prefix "$prefix" '.[] | ruleDepFilePaths | ltrimstr($prefix)'
-  cookie
-  share/lockpkg/data.txt
+  $ dune rules --deps _build/default/output 2>&1 | censor
+  ((Env CAML_LD_LIBRARY_PATH)
+   (Env MANPATH)
+   (Env OCAMLFIND_IGNORE_DUPS_IN)
+   (Env OCAMLPATH)
+   (Env OCAMLTOP_INCLUDE_PATH)
+   (Env PATH)
+   (File (In_build_dir _build/default/.pkg/lockpkg/_install/cookie))
+   (File
+    (In_build_dir _build/default/.pkg/lockpkg/_install/share/lockpkg/data.txt)))
 
 Requesting a file that doesn't exist in the lock-file package is rejected:
 

@@ -27,17 +27,13 @@ file in the package's source.
 
   $ build_pkg foo
 
-Even without a build or install action, preparing extra sources must not
-modify the package's source directory:
-
-  $ cat _build/_private/default/.pkg/foo/source/foo.txt
-  from source
+Make sure that the package's source keeps its version of foo.txt:
   $ cat foo-source/foo.txt
   from source
 
 If foo.txt exists in both the main source and extra_sources, a build action
-must read the extra_sources version. The workspace file and the file in the
-prepared source directory must retain their original contents.
+must read the extra_sources version. Both original inputs must retain their
+contents.
 
   $ make_lockpkg foo <<EOF
   > (version 1)
@@ -48,9 +44,12 @@ prepared source directory must retain their original contents.
   > EOF
   $ echo 'share: [ "observed" ]' > foo-source/foo.install
   $ build_pkg foo
-  $ cat _build/_private/default/.pkg/foo/target/share/foo/observed
+  $ cat "$(get_build_pkg_dir foo)/_install/share/foo/observed"
   from extra source
   $ cat foo-source/foo.txt
   from source
-  $ cat _build/_private/default/.pkg/foo/source/foo.txt
-  from source
+
+The mount contains the overlay, while the original source remains unchanged:
+
+  $ cat _build/default/.pkg/foo/foo.txt
+  from extra source

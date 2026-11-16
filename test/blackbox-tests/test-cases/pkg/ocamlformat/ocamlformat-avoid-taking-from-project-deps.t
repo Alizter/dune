@@ -29,16 +29,13 @@ Lock and build the project to make OCamlFormat from the project dependencies ava
   Solution for dune.lock:
   - ocamlformat.0.26.2
 
-Run "dune fmt" without the dev-tools feature enabled. This should invoke the ocamlformat
-executable from the package dependencies (ie., 'ocamlformat.0.26.2').
+Run "dune fmt" without the dev-tools feature enabled. The project depends on
+ocamlformat.0.26.2, but its root directory belongs to no package, so it does
+not see the binaries of locked packages (binary lookup decision in PLAN.md) and
+the ambient ocamlformat runs instead.
   $ dune fmt --preview
-  File "foo.ml", line 1, characters 0-0:
-  --- foo.ml
-  +++ foo.ml.corrected
-  @@ -1 +1 @@
-  -let () = print_endline "Hello, world"
-  +formatted with version 0.26.2
-  [1]
+  File "./foo.ml", line 1:
+  Warning: Ocamlformat disabled because [--enable-outside-detected-project] is not set and no [.ocamlformat] was found within the project (root: ../../../ocamlformat)
 
 Format using the dev-tools feature, it does not invoke the OCamlFormat binary from
 the project dependencies (0.26.2) but instead builds and runs the OCamlFormat binary as a
@@ -57,16 +54,12 @@ dev-tool (0.26.3).
   $ cat foo.ml
   formatted with version 0.26.3
 
-Retry, without dev-tools feature and without cleaning. This time it uses the OCamlFormat
-binary from the project dependencies rather than the dev-tool. This exercises the
-behavior when OCamlFormat is installed simultaneously as both a dev-tool and as a
-regular package dependency.
+Retry, without dev-tools feature and without cleaning. The dev tool is gone
+and the project dependency is still not visible from the root directory, so
+the ambient ocamlformat runs again. This exercises the behavior when
+OCamlFormat is installed simultaneously as both a dev-tool and as a regular
+package dependency.
   $ rm -r "${dev_tool_lock_dir}"
   $ dune fmt --preview
-  File "foo.ml", line 1, characters 0-0:
-  --- foo.ml
-  +++ foo.ml.corrected
-  @@ -1 +1 @@
-  -formatted with version 0.26.3
-  +formatted with version 0.26.2
-  [1]
+  File "./foo.ml", line 1:
+  Warning: Ocamlformat disabled because [--enable-outside-detected-project] is not set and no [.ocamlformat] was found within the project (root: ../../../ocamlformat)

@@ -108,7 +108,37 @@ We should observe the same behaviour that when running test above.
   - app.0.0.1
   - plugin1.0.0.1
   $ dune build @runtest 2>&1 | dune_cmd sanitize
-  Main app starts...
+  File "dune", line 7, characters 7-10:
+  7 |   (run app)))
+             ^^^
+  Error: Program app not found in the tree or in PATH
+   (context: default)
+  [1]
+
+The root directory belongs to no package, so it sees no locked binary, native
+or opaque (binary lookup decision in PLAN.md). A rule declaring the packages
+finds the app, which is a dune project and is loaded natively. Its libraries
+are restricted to the packages of the lock directory, which does not contain
+dune-site here, so it no longer builds (narrowing decision, A9 in PLAN.md).
+
+  $ cat > dune <<EOF
+  > (library
+  >  (public_name foo))
+  > 
+  > (rule
+  >  (alias runtest)
+  >  (deps (package app) (package plugin1))
+  >  (action
+  >   (run app)))
+  > EOF
+  $ dune build @runtest 2>&1 | dune_cmd sanitize
+  File "_build/default/.pkg/app/dune", line 6, characters 35-52:
+  Error: Library "dune-site.plugins" not found.
+  -> required by _build/default/.pkg/app/app.bc
+  -> required by alias runtest in dune:4
+  File "_build/default/.pkg/app/dune", line 16, characters 10-23:
+  Error: Unknown package
+  [1]
 
 Should have printed:
 ```

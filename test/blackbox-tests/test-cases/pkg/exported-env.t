@@ -1,7 +1,7 @@
 Packages can export environment variables.
 
-Inspect the final rule, not just rebuilds: digest-qualified paths currently
-mask missing environment dependencies. These checks should report true.
+Inspect the final rule, not just rebuilds: the package rule records its
+dependency on the exported environment.
 
   $ export UNRELATED_ENV=present
   $ make_lockdir
@@ -35,9 +35,9 @@ mask missing environment dependencies. These checks should report true.
   OPAM_PACKAGE_NAME=usetest
   OPAM_PACKAGE_VERSION=1.2.3
   OPAMSWITCH=dune
-  $ cat "$(get_build_pkg_dir usetest)/target/environment"
+  $ cat "$(get_build_pkg_dir usetest)/_install/environment"
   bar/1.2.3
-  $ dune rules --format=json "$(get_build_pkg_dir usetest)/target" \
+  $ dune rules --format=json "$(get_build_pkg_dir usetest)/_install" \
   >   | jq '.[] | .deps | index({Env: "FOO"}) != null'
   true
 
@@ -52,9 +52,9 @@ Changing only a dependency's exported environment must rebuild its consumer.
   >  (:= BAR zzz))
   > EOF
   $ build_pkg usetest > /dev/null 2>&1
-  $ cat "$(get_build_pkg_dir usetest)/target/environment"
+  $ cat "$(get_build_pkg_dir usetest)/_install/environment"
   baz/1.2.3
-  $ dune rules --format=json "$(get_build_pkg_dir usetest)/target" \
+  $ dune rules --format=json "$(get_build_pkg_dir usetest)/_install" \
   >   | jq '.[] | .deps | index({Env: "FOO"}) != null'
   true
 
@@ -63,7 +63,7 @@ Changing the package version also invalidates the build.
   $ dune_cmd subst '1[.]2[.]3' '1.2.4' < dune.lock/usetest.pkg > updated.pkg
   $ mv updated.pkg dune.lock/usetest.pkg
   $ build_pkg usetest > /dev/null 2>&1
-  $ cat "$(get_build_pkg_dir usetest)/target/environment"
+  $ cat "$(get_build_pkg_dir usetest)/_install/environment"
   baz/1.2.4
 
 Workspace rules receive exports both through explicit package dependencies

@@ -48,7 +48,7 @@ and emits a rule whose action reports the [PATH] the action itself is given:
 The action is given the lock directory's bin directory:
 
   $ env_added "$(cat _build/default/action-path)" "$PATH" | censor
-  $PWD/_build/_private/default/.pkg/provider/target/bin
+  $PWD/_build/default/.pkg/provider/_install/bin
 
 The plugin, evaluated through [Context.installed_env], is not:
 

@@ -144,9 +144,9 @@ module Paths = struct
 
   let install_paths roots package ~relative = Install.Paths.make ~relative ~package ~roots
 
-  let of_root name ~root ~relative =
-    let source_dir = relative root "source" in
-    let target_dir = relative root "target" in
+  let of_root name ~root ~source_dir ~install_dir ~relative =
+    let source_dir = relative root source_dir in
+    let target_dir = relative root install_dir in
     let extra_sources = relative root "extra_source" in
     let install_roots = lazy (install_roots ~target_dir ~relative) in
     let install_paths = lazy (install_paths (Lazy.force install_roots) name ~relative) in
@@ -157,6 +157,17 @@ module Paths = struct
     ; install_paths
     ; install_roots
     ; prefix = target_dir
+    }
+  ;;
+
+  let with_prefix t prefix =
+    let roots = lazy (install_roots ~target_dir:prefix ~relative:Path.relative) in
+    { t with
+      target_dir = prefix
+    ; prefix
+    ; install_roots = roots
+    ; install_paths =
+        lazy (install_paths (Lazy.force roots) t.name ~relative:Path.relative)
     }
   ;;
 
@@ -176,7 +187,12 @@ module Paths = struct
       | Dev_tool dev_tool -> Pkg_dev_tool.universe_install_path dev_tool
     in
     let root = Path.Build.relative universe_root (Package.Name.to_string name) in
-    of_root name ~root ~relative:Path.Build.relative
+    of_root
+      name
+      ~root
+      ~source_dir:"source"
+      ~install_dir:"target"
+      ~relative:Path.Build.relative
   ;;
 
   let make_install_cookie target_dir ~relative = relative target_dir "cookie"
@@ -201,6 +217,15 @@ module Paths = struct
   let install_roots t = Lazy.force t.install_roots
   let target_dir t = t.target_dir
 end
+
+let candidate_paths candidate =
+  Paths.of_root
+    (Pkg_sources.Candidate.name candidate)
+    ~root:(Pkg_sources.Candidate.artifact_root candidate)
+    ~source_dir:"."
+    ~install_dir:"_install"
+    ~relative:Path.Build.relative
+;;
 
 module Install_cookie = struct
   (* The install cookie represents a serialized representation of all the
@@ -255,6 +280,53 @@ module Install_cookie = struct
     let path = Paths.install_cookie paths in
     let+ () = path |> Dep.file |> Action_builder.dep in
     load_exn path
+  ;;
+end
+
+module Dependency = struct
+  type t =
+    { paths : Path.t Paths.t
+    ; files : Path.t list Section.Map.t
+    ; variables : Variable.value Package_variable_name.Map.t
+    ; exported_env : String_with_vars.t Dune_lang.Action.Env_update.t list
+    ; export_paths : Path.t Paths.t
+    }
+
+  let load paths ~variables ~exported_env =
+    let open Action_builder.O in
+    let* { Install_cookie.Gen.files; variables = installed_variables } =
+      Install_cookie.read paths
+    in
+    let+ () = Section.Map.values files |> List.concat |> Action_builder.paths in
+    let variables =
+      Package_variable_name.Map.superpose
+        (Package_variable_name.Map.of_list_exn installed_variables)
+        variables
+    in
+    { paths; files; variables; exported_env; export_paths = paths }
+  ;;
+
+  let native paths ~prefix ~variables ~exported_env =
+    let paths = Paths.with_prefix paths prefix in
+    { paths; files = Section.Map.empty; variables; exported_env; export_paths = paths }
+  ;;
+
+  let lib_root { paths; _ } = (Paths.install_roots paths).lib_root
+  let info { paths; variables; _ } = paths.name, (variables, paths)
+
+  let install_entries { paths; files; _ } =
+    Section.Map.to_list files
+    |> List.concat_map ~f:(fun (section, files) ->
+      let prefix = Install.Paths.get (Paths.install_paths paths) section in
+      List.map files ~f:(fun src ->
+        let dst = Path.reach src ~from:prefix in
+        Install.Entry.Expanded.make section ~dst ~kind:File src))
+  ;;
+
+  let binaries { paths; files; _ } =
+    let { Install.Roots.bin; _ } = Paths.install_roots paths in
+    Section.Map.Multi.find files Bin
+    |> List.filter ~f:(fun path -> Path.equal (Path.parent_exn path) bin)
   ;;
 end
 
@@ -368,17 +440,52 @@ module Env_update = struct
   ;;
 end
 
+module Source_input = Pkg_sources.Source_input
+
+module Layout = struct
+  type t =
+    { context : Context_name.t
+    ; root : Path.Build.t
+    ; dependencies : Dependency.t list
+    }
+
+  let dependencies { dependencies; _ } = dependencies
+
+  let materialize context dependencies =
+    let open Action_builder.O in
+    let packages =
+      Package.Name.Set.of_list_map dependencies ~f:(fun (dep : Dependency.t) ->
+        dep.paths.name)
+    in
+    let+ files_by_package = Install_layout.deps context packages in
+    let root = Install_layout.root context packages in
+    let prefix = Path.build root in
+    let dependencies =
+      List.map dependencies ~f:(fun (dependency : Dependency.t) ->
+        let files =
+          Package.Name.Map.find files_by_package dependency.paths.name
+          |> Option.value ~default:Section.Map.empty
+        in
+        { dependency with paths = Paths.with_prefix dependency.paths prefix; files })
+    in
+    { context; root; dependencies }
+  ;;
+end
+
 module Pkg = struct
   module Id = Id.Make ()
 
   type t =
     { id : Id.t
+    ; context : Context_name.t
+    ; mounted : bool
     ; build_command : Build_command.t option
     ; install_command : Dune_lang.Action.t option
     ; depends : t list
     ; depends_on_dune : bool
       (* whether the package declares a dependency on Dune, even if Dune is stripped from [depends] *)
     ; depexts : Depexts.t list
+    ; lock_exported_env : String_with_vars.t Env_update.t list
     ; info : Pkg_info.t
     ; paths : Path.t Paths.t
     ; write_paths : Path.Build.t Paths.t
@@ -402,12 +509,92 @@ module Pkg = struct
   ;;
 
   let deps_closure t = top_closure t.depends
-  let dep t = Dep.file t.paths.target_dir
 
-  let package_deps t =
-    deps_closure t
-    |> List.fold_left ~init:Dep.Set.empty ~f:(fun acc t -> dep t |> Dep.Set.add acc)
+  let native_dependencies context packages =
+    match packages with
+    | [] -> Action_builder.return []
+    | _ ->
+      let names = Package.Name.Set.of_list_map packages ~f:(fun t -> t.info.name) in
+      let prefix = Install_layout.root context names |> Path.build in
+      let dependencies =
+        List.map packages ~f:(fun t ->
+          Dependency.native
+            t.paths
+            ~prefix
+            ~variables:(Pkg_info.variables t.info)
+            ~exported_env:t.lock_exported_env)
+      in
+      let open Action_builder.O in
+      let+ layout = Layout.materialize context dependencies in
+      Layout.dependencies layout
   ;;
+
+  let kind t =
+    match t.mounted with
+    | false -> Memo.return `Opam
+    | true ->
+      Pkg_sources.find_mounted_kind t.context t.info.name
+      >>| (function
+       | None -> `Opam
+       | Some (_, kind) -> kind)
+  ;;
+
+  let classify packages =
+    Memo.parallel_map packages ~f:(fun t ->
+      let+ kind = kind t in
+      t, kind)
+  ;;
+
+  let partition classified =
+    List.partition_map classified ~f:(function
+      | t, `Dune -> Left t
+      | t, `Opam -> Right t)
+  ;;
+
+  let dependency t =
+    let open Action_builder.O in
+    let* kind = Action_builder.of_memo (kind t) in
+    match kind with
+    | `Opam ->
+      Dependency.load
+        t.paths
+        ~variables:(Pkg_info.variables t.info)
+        ~exported_env:t.lock_exported_env
+    | `Dune ->
+      let+ dependencies = native_dependencies t.context [ t ] in
+      List.hd dependencies
+  ;;
+
+  let dep t =
+    let open Action_builder.O in
+    let* kind = Action_builder.of_memo (kind t) in
+    match kind with
+    | `Opam -> Action_builder.path t.paths.target_dir
+    | `Dune -> Action_builder.ignore (dependency t)
+  ;;
+
+  let deps context packages =
+    let open Action_builder.O in
+    let* native, opaque = Action_builder.of_memo (classify packages) >>| partition in
+    let* (_ : Dependency.t list) = native_dependencies context native in
+    Action_builder.List.iter opaque ~f:dep
+  ;;
+
+  let dependencies context packages =
+    let open Action_builder.O in
+    let* native, _ = Action_builder.of_memo (classify packages) >>| partition in
+    let* native = native_dependencies context native in
+    let native =
+      Package.Name.Map.of_list_map_exn native ~f:(fun dependency ->
+        dependency.paths.name, dependency)
+    in
+    Action_builder.List.map packages ~f:(fun t ->
+      match Package.Name.Map.find native t.info.name with
+      | Some dependency -> Action_builder.return dependency
+      | None -> dependency t)
+  ;;
+
+  let package_deps t = deps t.context (deps_closure t)
 
   let install_roots t =
     let default_install_roots = Paths.install_roots t.paths in
@@ -439,10 +626,41 @@ module Pkg = struct
       List.fold_left t.exported_env ~init:env ~f:Env_update.set)
   ;;
 
+  let build_env_of_classified classified =
+    let native_roots =
+      match partition classified |> fst with
+      | [] -> None
+      | first :: _ as native ->
+        let names = Package.Name.Set.of_list_map native ~f:(fun t -> t.info.name) in
+        let prefix = Install_layout.root first.context names |> Path.build in
+        Some (Install.Roots.opam_from_prefix prefix ~relative:Path.relative)
+    in
+    List.fold_left
+      classified
+      ~init:(Env.Map.empty, native_roots)
+      ~f:(fun (env, native_roots) (t, kind) ->
+        let roots, native_roots =
+          match kind with
+          | `Dune -> native_roots, None
+          | `Opam -> Some (install_roots t), native_roots
+        in
+        let env =
+          match roots with
+          | None -> env
+          | Some roots ->
+            let init = Value_list_env.add_path env Env_path.var roots.bin in
+            let vars = Install.Roots.to_env_without_path roots ~relative:Path.relative in
+            List.fold_left vars ~init ~f:(fun acc (var, path) ->
+              Value_list_env.add_path acc var path)
+        in
+        List.fold_left t.exported_env ~init:env ~f:Env_update.set, native_roots)
+    |> fst
+  ;;
+
   (* [build_env t] returns an env containing paths containing all the
      tools and libraries required to build the package [t] inside the
      faux opam directory contained in the _build dir. *)
-  let build_env t = build_env_of_deps @@ deps_closure t
+  let build_env t = classify (deps_closure t) >>| build_env_of_classified
 
   let base_env t =
     Env.Map.of_list_exn
@@ -458,12 +676,12 @@ module Pkg = struct
       ]
   ;;
 
-  let package_env t = build_env t |> Env.Map.superpose (base_env t)
+  let package_env t = build_env t >>| Env.Map.superpose (base_env t)
 
   (* [exported_value_env t] returns the complete env that will be used
      to build the package [t] *)
   let exported_value_env t =
-    let package_env = package_env t in
+    let+ package_env = package_env t in
     (* TODO: Run actions in a constrained environment. [Global.env ()] is the
        environment from which dune was executed, and some of the environment
        variables may affect builds in unintended ways and make builds less
@@ -474,7 +692,7 @@ module Pkg = struct
     Value_list_env.extend_concat_path (Lazy.force Value_list_env.global) package_env
   ;;
 
-  let exported_env t = Value_list_env.to_env @@ exported_value_env t
+  let exported_env t = exported_value_env t >>| Value_list_env.to_env
 end
 
 module Action_expander = struct
@@ -491,6 +709,7 @@ module Action_expander = struct
       ; context : Context_name.t
       ; version : Package_version.t
       ; env : Value.t list Env.Map.t
+      ; path : Path.t list
       }
 
     let map_exe _ x =
@@ -528,39 +747,19 @@ module Action_expander = struct
       | Stublibs -> Path.relative roots.lib_root "stublibs"
     ;;
 
-    let sys_poll_var accessor =
-      accessor Lock_dir.Sys_vars.poll
-      |> Memo.Lazy.force
-      >>| function
-      | Some v -> [ Value.String v ]
-      | None ->
-        (* TODO: in OPAM an unset variable evaluates to false, but we
-           can't represent that in a string so it evaluates to an empty
-           string instead *)
-        [ Value.String "" ]
-    ;;
-
     let expand_pkg (paths : Path.t Paths.t) (pform : Pform.Var.Pkg.t) =
       match pform with
-      | Switch -> Memo.return [ Value.String "dune" ]
-      | Os Os -> sys_poll_var (fun { os; _ } -> os)
-      | Os Os_version -> sys_poll_var (fun { os_version; _ } -> os_version)
-      | Os Os_distribution -> sys_poll_var (fun { os_distribution; _ } -> os_distribution)
-      | Os Os_family -> sys_poll_var (fun { os_family; _ } -> os_family)
-      | Sys_ocaml_version ->
-        sys_poll_var (fun { sys_ocaml_version; _ } -> sys_ocaml_version)
       | Build -> Memo.return [ Value.Dir paths.source_dir ]
       | Prefix -> Memo.return [ Value.Dir paths.prefix ]
-      | User -> Memo.return [ Value.String (Unix.getlogin ()) ]
-      | Jobs -> Memo.return [ Value.String (Int.to_string !Clflags.concurrency) ]
-      | Arch -> sys_poll_var (fun { arch; _ } -> arch)
-      | Group ->
-        let group = Unix.getgid () |> Unix.getgrgid in
-        Memo.return [ Value.String group.gr_name ]
       | Section_dir section ->
         let roots = Paths.install_roots paths in
         let dir = section_dir_of_root roots section in
         Memo.return [ Value.Dir dir ]
+      | Switch | Os _ | Sys_ocaml_version | User | Jobs | Arch | Group ->
+        let+ solver_env = Lock_dir.Sys_vars.solver_env in
+        Lock_dir.global_variable ~solver_env pform
+        |> Option.value_exn
+        |> Variable.dune_value
     ;;
 
     let expand_pkg_macro ~loc (paths : _ Paths.t) deps macro_invocation =
@@ -589,17 +788,9 @@ module Action_expander = struct
       | None ->
         let present = Option.is_some paths in
         (* TODO we should be looking it up in all packages now *)
-        (match Package_variable_name.to_string variable_name with
-         | "pinned" -> Memo.return @@ Ok [ Value.false_ ]
-         | "enable" ->
-           Memo.return @@ Ok [ Value.String (if present then "enable" else "disable") ]
-         | "installed" -> Memo.return @@ Ok [ Value.String (Bool.to_string present) ]
-         | "build-id" ->
-           (* build-id is used by some packages (e.g., relocatable-compiler) for
-              caching across opam switches. Since dune doesn't do this, we use a
-              fixed dummy value that won't collide with real opam build-ids. *)
-           Memo.return @@ Ok [ Value.String "d00ed00ed00ed00ed00ed00ed00ed00e" ]
-         | _ ->
+        (match Lock_dir.default_package_variable ~present variable_name with
+         | Some v -> Memo.return @@ Ok (Variable.dune_value v)
+         | None ->
            (match paths with
             | None -> Memo.return (Error (`Undefined_pkg_var variable_name))
             | Some paths ->
@@ -615,7 +806,15 @@ module Action_expander = struct
     ;;
 
     let expand_pform
-          { env = _; paths; artifacts = _; context; depends; version = _; depexts = _ }
+          { env = _
+          ; paths
+          ; artifacts = _
+          ; context
+          ; path
+          ; depends
+          ; version = _
+          ; depexts = _
+          }
           ~source
           (pform : Pform.t)
       : (Value.t list, [ `Undefined_pkg_var of Package_variable_name.t ]) result Memo.t
@@ -626,10 +825,7 @@ module Action_expander = struct
       | Var Context_name ->
         Memo.return (Ok [ Value.String (Context_name.to_string context) ])
       | Var Make ->
-        let+ make =
-          let path = Env_path.path (Global.env ()) in
-          Make_prog.which loc context ~path
-        in
+        let+ make = Make_prog.which loc context ~path in
         Ok [ Value.Path make ]
       | Macro ({ macro = Pkg | Pkg_self; _ } as macro_invocation) ->
         expand_pkg_macro ~loc paths depends macro_invocation
@@ -705,8 +901,7 @@ module Action_expander = struct
                 (match Filename.Map.find artifacts program with
                  | Some s -> Memo.return @@ Ok s
                  | None ->
-                   (let path = Global.env () |> Env_path.path in
-                    Which.which ~path program)
+                   Which.which ~path:t.path program
                    >>= (function
                     | Some p -> Memo.return (Ok p)
                     | None ->
@@ -749,7 +944,7 @@ module Action_expander = struct
         }
 
       let name = "substitute"
-      let version = 4
+      let version = 5
       let runs_process = false
       let can_run_in_action_runner = false
       let bimap t f g = { t with src = f t.src; dst = g t.dst }
@@ -786,7 +981,7 @@ module Action_expander = struct
           paths_repr
           Repr.(list (pair Filename.repr Path.repr))
           Repr.(list (pair variable_map_repr paths_repr))
-          Package_version.repr
+          Repr.(pair Package_version.repr (list Path.repr))
       ;;
 
       let encode { expander; depends; artifacts; src; dst } input output : Sexp.t =
@@ -797,7 +992,7 @@ module Action_expander = struct
             ( paths expander.paths
             , Filename.Map.to_list artifacts
             , Package.Name.Map.to_list_map depends ~f:(fun _ (m, p) -> m, paths p)
-            , expander.version )
+            , (expander.version, expander.path) )
           |> Digest.to_string_raw
         in
         List [ Atom e; input src; output dst ]
@@ -975,6 +1170,62 @@ module Action_expander = struct
       Action.Setenv (Env.Var.to_string k, v, action))
   ;;
 
+  let for_recipe
+        (paths : Path.t Paths.t)
+        { Lock_dir.Pkg.info; depexts; _ }
+        ~context
+        ~path
+        ~env
+        ~direct
+        ~dependencies
+    =
+    let { Pkg_info.version; _ } = info in
+    let variables = Pkg_info.variables info in
+    let env =
+      Env.add
+        env
+        ~var:(Env.Var.of_string "OPAM_PACKAGE_NAME")
+        ~value:(Package.Name.to_string paths.name)
+      |> Env.add
+           ~var:(Env.Var.of_string "OPAM_PACKAGE_VERSION")
+           ~value:(Package_version.to_string version)
+      |> Env.add ~var:(Env.Var.of_string "OPAMCLI") ~value:"2.0"
+      |> Env.add ~var:(Env.Var.of_string "OPAMSWITCH") ~value:"dune"
+      |> Env.add ~var:(Env.Var.of_string "CDPATH") ~value:""
+      |> Env.add ~var:(Env.Var.of_string "MAKELEVEL") ~value:""
+      |> Env.add
+           ~var:Opam_switch.opam_switch_prefix_var_name
+           ~value:(Path.to_absolute_filename paths.prefix)
+    in
+    let direct_dependencies =
+      List.filter dependencies ~f:(fun (dep : Dependency.t) ->
+        Package.Name.Set.mem direct dep.paths.name)
+    in
+    let depends =
+      List.map direct_dependencies ~f:Dependency.info
+      |> Package.Name.Map.of_list_exn
+      |> fun deps -> Package.Name.Map.add_exn deps paths.name (variables, paths)
+    in
+    let artifacts =
+      List.concat_map dependencies ~f:Dependency.binaries
+      |> List.fold_left ~init:Filename.Map.empty ~f:(fun acc path ->
+        Filename.Map.set
+          acc
+          (Filename.of_string_exn
+             (Bin.strip_exe (Filename.to_string (Path.basename path))))
+          path)
+    in
+    { Expander.paths
+    ; depends = Memo.return depends
+    ; artifacts = Memo.return artifacts
+    ; depexts
+    ; context
+    ; path
+    ; version
+    ; env = Env.to_map env |> Env.Map.map ~f:(fun value -> [ Value.String value ])
+    }
+  ;;
+
   module Artifacts_and_deps = struct
     type artifacts_and_deps =
       { binaries : Path.t Filename.Map.t
@@ -986,17 +1237,19 @@ module Action_expander = struct
     let empty = { binaries = Filename.Map.empty; dep_info = Package.Name.Map.empty }
 
     let of_closure closure =
-      Memo.parallel_map closure ~f:(fun (pkg : Pkg.t) ->
-        let cookie = Install_cookie.read pkg.paths in
-        Action_builder.evaluate_and_collect_facts cookie
-        |> Memo.map ~f:(fun ((cookie : Install_cookie.t), _) -> pkg, cookie))
-      |> Memo.map ~f:(fun (cookies : (Pkg.t * Install_cookie.t) list) ->
+      (match closure with
+       | [] -> Memo.return []
+       | (first : Pkg.t) :: _ ->
+         Action_builder.evaluate_and_collect_facts
+           (Pkg.dependencies first.context closure)
+         >>| fst)
+      |> Memo.map ~f:(fun dependencies ->
         List.fold_left
-          cookies
+          dependencies
           ~init:empty
-          ~f:(fun { binaries; dep_info } ((pkg : Pkg.t), (cookie : Install_cookie.t)) ->
+          ~f:(fun { binaries; dep_info } (dependency : Dependency.t) ->
             let binaries =
-              Section.Map.Multi.find cookie.files Bin
+              Section.Map.Multi.find dependency.files Bin
               |> List.fold_left ~init:binaries ~f:(fun acc bin ->
                 Filename.Map.set
                   acc
@@ -1005,18 +1258,16 @@ module Action_expander = struct
                   bin)
             in
             let dep_info =
-              let variables =
-                Package_variable_name.Map.superpose
-                  (Package_variable_name.Map.of_list_exn cookie.variables)
-                  (Pkg_info.variables pkg.info)
-              in
-              Package.Name.Map.add_exn dep_info pkg.info.name (variables, pkg.paths)
+              let name, info = Dependency.info dependency in
+              Package.Name.Map.add_exn dep_info name info
             in
             { binaries; dep_info }))
     ;;
   end
 
-  let expander context (pkg : Pkg.t) =
+  (* Expanding a package's variables does not read [env]; only [withenv]
+     and the recipe's own environment do. *)
+  let expander context (pkg : Pkg.t) ~env =
     let closure =
       Memo.lazy_
         ~name:"package-dependency-closure"
@@ -1026,7 +1277,6 @@ module Action_expander = struct
             (Package.Name.to_string pkg.info.name))
         (fun () -> Pkg.deps_closure pkg |> Artifacts_and_deps.of_closure)
     in
-    let env = Pkg.exported_value_env pkg in
     let depends =
       Memo.Lazy.map
         ~name:"package-dependency-info"
@@ -1045,6 +1295,7 @@ module Action_expander = struct
     { Expander.paths = pkg.paths
     ; artifacts
     ; context
+    ; path = Env_path.path (Global.env ())
     ; depends
     ; depexts = pkg.depexts
     ; version = pkg.info.version
@@ -1052,11 +1303,13 @@ module Action_expander = struct
     }
   ;;
 
+  let expand_action = expand
   let sandbox = Sandbox_mode.Set.singleton Sandbox_mode.copy
 
   let expand context (pkg : Pkg.t) action =
     let+ action =
-      let expander = expander context pkg in
+      let* env = Pkg.exported_value_env pkg in
+      let expander = expander context pkg ~env in
       expand action ~expander >>| Action.chdir pkg.paths.source_dir
     in
     (* TODO copying is needed for build systems that aren't dune and those
@@ -1091,6 +1344,44 @@ module Action_expander = struct
   ;;
 end
 
+let layout_env { Layout.context; root; dependencies } ~path ~base =
+  let open Action_builder.O in
+  let roots = Install.Roots.opam_from_prefix root ~relative:Path.Build.relative in
+  let env =
+    Install.Roots.add_to_env roots Env.empty
+    |> Install.Roots.extend_env_concat_path_vars base
+  in
+  let depends =
+    List.map dependencies ~f:Dependency.info |> Package.Name.Map.of_list_exn
+  in
+  Action_builder.List.fold_left dependencies ~init:env ~f:(fun env (dep : Dependency.t) ->
+    let expander =
+      let paths =
+        Paths.map_path dep.export_paths ~f:(fun path ->
+          Path.of_string (Path.to_absolute_filename path))
+      in
+      let depends = Package.Name.Map.set depends paths.name (dep.variables, paths) in
+      { Action_expander.Expander.paths
+      ; artifacts = Memo.return Filename.Map.empty
+      ; depends = Memo.return depends
+      ; depexts = []
+      ; context
+      ; path
+      ; version = Dune_pkg.Package_version.dev
+      ; env = Env.to_map env |> Env.Map.map ~f:(fun value -> [ Value.String value ])
+      }
+    in
+    let* updates =
+      Action_builder.of_memo
+        (Memo.List.map dep.exported_env ~f:(Action_expander.exported_env expander))
+    in
+    let+ () =
+      Action_builder.List.iter updates ~f:(fun { Env_update.var; _ } ->
+        Action_builder.dep (Dep.env var))
+    in
+    List.fold_left updates ~init:expander.env ~f:Env_update.set |> Value_list_env.to_env)
+;;
+
 module DB = struct
   let default_system_provided = Package.Name.Set.singleton Dune_pkg.Dune_dep.name
 
@@ -1110,6 +1401,9 @@ module DB = struct
 
     let of_lock_dir (lock_dir : Dune_pkg.Lock_dir.t) ~platform ~system_provided =
       let pkgs_by_name = Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform in
+      Log.info
+        "Package digest index"
+        [ "packages", Dyn.int (Package.Name.Map.cardinal pkgs_by_name) ];
       let cache = Package.Name.Table.create 10 in
       let rec compute_entry (pkg : Pkg.t) ~seen_set ~seen_list =
         if Package.Name.Set.mem seen_set pkg.info.name
@@ -1173,31 +1467,61 @@ module DB = struct
         "pkg-db"
         ~input:(module Package_universe)
         (fun universe ->
-           let* () =
+           let* system_provided =
              match (universe : Package_universe.t) with
-             | Dev_tool _ -> Memo.return ()
+             | Dev_tool _ -> Memo.return default_system_provided
              | Dependencies ctx ->
                Per_context.valid ctx
                >>= (function
-                | true -> Memo.return ()
                 | false ->
                   Code_error.raise
                     "invalid context"
-                    [ "context", Context_name.to_dyn ctx ])
+                    [ "context", Context_name.to_dyn ctx ]
+                | true ->
+                  (* Lock packages may depend on workspace packages, which are
+                     not in the lock directory. *)
+                  let+ packages = Dune_load.packages () in
+                  Package.Name.Set.union
+                    default_system_provided
+                    (Package.Name.Set.of_keys packages))
            in
            let+ lock_dir = Package_universe.lock_dir universe
            and+ platform = Lock_dir.Sys_vars.solver_env in
-           let pkg_table =
-             Pkg_table.of_lock_dir
-               lock_dir
-               ~platform
-               ~system_provided:default_system_provided
-           in
+           let pkg_table = Pkg_table.of_lock_dir lock_dir ~platform ~system_provided in
            { id = Id.gen (); pkg_table })
     in
     fun universe -> Memo.exec memo universe
   ;;
 end
+
+let relocate action =
+  let string_with_vars =
+    String_with_vars.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree
+  in
+  let slang = Slang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
+  let blang = Slang.Blang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
+  Dune_lang.Action.map action ~string_with_vars ~slang ~blang
+;;
+
+let relocate_build b =
+  match (b : Build_command.t) with
+  | Dune -> Build_command.Dune
+  | Action a -> Build_command.Action (relocate a)
+;;
+
+let is_relocatable_compiler_marker name =
+  let relocatable_compiler = Package.Name.of_string "relocatable-compiler" in
+  let relocatable = Package.Name.of_string "relocatable" in
+  Package.Name.equal name relocatable_compiler || Package.Name.equal name relocatable
+;;
+
+let is_compiler_version_relocatable (info : Pkg_info.t) =
+  Pkg_toolchain.is_compiler_package_with_toolchains_enabled info.name
+  &&
+  match Package_version.compare info.version (Package_version.of_string "5.5.0") with
+  | Lt -> false
+  | Eq | Gt -> true
+;;
 
 module rec Resolve : sig
   val resolve : DB.t -> Loc.t -> Package.Name.t -> Package_universe.t -> Pkg.t Memo.t
@@ -1224,40 +1548,11 @@ end = struct
     let to_dyn = Dyn.opaque
   end
 
-  let relocate action =
-    let string_with_vars =
-      String_with_vars.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree
-    in
-    let slang = Slang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
-    let blang = Slang.Blang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
-    Dune_lang.Action.map action ~string_with_vars ~slang ~blang
-  ;;
-
-  let relocate_build b =
-    match (b : Build_command.t) with
-    | Dune -> Build_command.Dune
-    | Action a -> Build_command.Action (relocate a)
-  ;;
-
-  let is_relocatable_compiler_marker name =
-    let relocatable_compiler = Package.Name.of_string "relocatable-compiler" in
-    let relocatable = Package.Name.of_string "relocatable" in
-    Package.Name.equal name relocatable_compiler || Package.Name.equal name relocatable
-  ;;
-
   let has_relocatable_compiler_marker (info : Pkg_info.t) depends =
     is_relocatable_compiler_marker info.name
     || Pkg.top_closure depends
        |> List.exists ~f:(fun (pkg : Pkg.t) ->
          is_relocatable_compiler_marker pkg.info.name)
-  ;;
-
-  let is_compiler_version_relocatable (info : Pkg_info.t) =
-    Pkg_toolchain.is_compiler_package_with_toolchains_enabled info.name
-    &&
-    match Package_version.compare info.version (Package_version.of_string "5.5.0") with
-    | Lt -> false
-    | Eq | Gt -> true
   ;;
 
   let resolve_impl { Input.db; package; universe = package_universe } =
@@ -1293,8 +1588,18 @@ end = struct
         Dune_pkg.Lock_dir.Pkg.files_dir info.name version ~lock_dir:lock_dir_path
         |> Path.as_in_build_dir_exn
       in
+      let* mounted =
+        match package_universe with
+        | Dev_tool _ -> Memo.return None
+        | Dependencies context -> Pkg_sources.find_candidate context info.name
+      in
+      let context = Package_universe.context_name package_universe in
       let id = Pkg.Id.gen () in
-      let write_paths = Paths.make package_universe package in
+      let write_paths =
+        match mounted with
+        | Some candidate -> candidate_paths candidate
+        | None -> Paths.make package_universe package
+      in
       let install_command = choose_for_current_platform install_command in
       let install_command = Option.map install_command ~f:relocate in
       let build_command = choose_for_current_platform build_command in
@@ -1327,15 +1632,24 @@ end = struct
           { paths with
             prefix = Path.outside_build_dir prefix
           ; install_roots = Lazy.from_val install_roots
+          ; install_paths =
+              lazy
+                (Install.Paths.make
+                   ~relative:Path.relative
+                   ~package:info.name
+                   ~roots:install_roots)
           })
       in
       let t =
         { Pkg.id
+        ; context
+        ; mounted = Option.is_some mounted
         ; build_command
         ; install_command
         ; depends
         ; depends_on_dune = has_dune_dep
         ; depexts
+        ; lock_exported_env = exported_env
         ; paths
         ; write_paths
         ; info
@@ -1344,9 +1658,7 @@ end = struct
         }
       in
       let+ exported_env =
-        let expander =
-          Action_expander.expander (Package_universe.context_name package_universe) t
-        in
+        let expander = Action_expander.expander context t ~env:Env.Map.empty in
         Memo.parallel_map exported_env ~f:(Action_expander.exported_env expander)
       in
       Some { t with exported_env }
@@ -1404,7 +1716,7 @@ module Install_action = struct
       }
 
     let name = "install-file-run"
-    let version = 1
+    let version = 2
     let runs_process = false
     let can_run_in_action_runner = false
 
@@ -1727,6 +2039,8 @@ module Install_action = struct
               Paths.of_root
                 package
                 ~root:(Path.parent_exn target_dir)
+                ~source_dir:"source"
+                ~install_dir:(Filename.to_string (Path.basename target_dir))
                 ~relative:Path.relative
               |> Paths.install_paths
             in
@@ -1772,12 +2086,16 @@ module Install_action = struct
             in
             map
         in
-        (* Combine the artifacts declared in the .install, and the ones we discovered
-           by runing the install action *)
-        (* TODO we should make sure that overwrites aren't allowed *)
+        let declared =
+          Section.Map.values from_install_file |> List.concat |> Path.Set.of_list
+        in
+        let from_install_action =
+          Section.Map.map from_install_action ~f:(fun files ->
+            List.filter files ~f:(fun file -> not (Path.Set.mem declared file)))
+        in
         Section.Map.union from_install_action from_install_file ~f:(fun _ x y ->
           Some (x @ y))
-        |> Section.Map.map ~f:(List.sort ~compare:Path.compare)
+        |> Section.Map.map ~f:(List.sort_uniq ~compare:Path.compare)
       in
       let* cookies =
         let+ variables = Async.async (fun () -> read_variables config_file) in
@@ -1809,6 +2127,95 @@ module Install_action = struct
       }
   ;;
 end
+
+module Copy_source = struct
+  module Spec = struct
+    type ('path, 'target) t = 'path * 'target
+
+    let name = "copy-package-source"
+    let version = 1
+    let is_useful_to_memoize = true
+    let runs_process = false
+    let can_run_in_action_runner = false
+    let bimap (src, dst) f g = f src, g dst
+    let encode (src, dst) input output = Sexp.List [ input src; output dst ]
+
+    let action (src, dst) ~ectx:_ ~eenv:_ =
+      Async.async (fun () ->
+        Io.copy_file
+          ~overwrite:true
+          ~chmod:(Permissions.add Permissions.write)
+          ~src
+          ~dst:(Path.build dst)
+          ())
+    ;;
+  end
+
+  include Action_ext.Make (Spec)
+end
+
+let execute ~expander ~write_paths ~source ~build ~install =
+  let copies = Action_builder.map source ~f:Action.Full.make in
+  let install_dirs =
+    match install with
+    | [] -> []
+    | _ ->
+      let paths = Paths.install_paths write_paths in
+      [ Install_action.installable_sections
+        |> List.map ~f:(fun section -> Action.mkdir (Install.Paths.get paths section))
+        |> Action.progn
+        |> Action.Full.make
+        |> Action_builder.With_targets.return
+      ]
+  in
+  let finish =
+    Install_action.action
+      write_paths
+      (match install with
+       | [] -> `No_install_action
+       | _ -> `Has_install_action)
+      ~prefix_outside_build_dir:
+        (Path.as_outside_build_dir expander.Action_expander.Expander.paths.prefix)
+    |> Action.Full.make
+    |> Action_builder.With_targets.return
+  in
+  Action_builder.progn
+    ((Action_builder.with_no_targets copies :: build)
+     @ install_dirs
+     @ install
+     @ [ finish ])
+  |> Action_builder.With_targets.map ~f:(fun action ->
+    Action.Full.add_env (Value_list_env.to_env expander.env) action
+    |> Action.Full.add_sandbox Action_expander.sandbox
+    |> Action.Full.disable_sandbox_policy)
+;;
+
+let execute_recipe ~build ~install ~expander ~write_paths ~source =
+  let { Action_expander.Expander.paths; _ } = expander in
+  let expand action =
+    let+ action = Action_expander.expand_action action ~expander in
+    Action.chdir paths.source_dir action
+    |> Action.Full.make
+    |> Action_builder.With_targets.return
+  in
+  let* build =
+    match build with
+    | None -> Memo.return []
+    | Some (Build_command.Action action) -> expand action >>| List.singleton
+    | Some Dune ->
+      Command.run_dyn_prog
+        (Action_builder.return (Ok (Path.of_string Sys.executable_name)))
+        ~dir:paths.source_dir
+        [ A "build"; A "-p"; A (Package.Name.to_string paths.name) ]
+      |> List.singleton
+      |> Memo.return
+  and* install =
+    match install with
+    | None -> Memo.return []
+    | Some action -> expand action >>| List.singleton
+  in
+  execute ~expander ~write_paths ~source ~build ~install |> Memo.return
+;;
 
 let add_env env action =
   Action_builder.With_targets.map action ~f:(Action.Full.add_env env)
@@ -1991,7 +2398,96 @@ let dune_dep =
   lazy (Sys.executable_name |> Path.External.of_string |> Path.external_ |> Dep.file)
 ;;
 
+(* The fetched source of a package with its lock directory files and extra
+   sources laid over it. *)
+let candidate_source_input candidate =
+  let open Action_builder.O in
+  let* source = Action_builder.of_memo (Pkg_sources.source candidate) in
+  let files_dir = Pkg_sources.Candidate.files_dir candidate in
+  let+ files =
+    Action_builder.of_memo
+      (Memo.of_thunk (fun () ->
+         let deps, files = files files_dir in
+         Memo.return (files, deps)))
+    |> Action_builder.dyn_deps
+  in
+  let files =
+    source.Source_input.files
+    @ Path.Set.to_list_map files ~f:(fun src ->
+      src, Path.drop_prefix_exn src ~prefix:(Path.build files_dir))
+    @ List.map
+        (Pkg_sources.Candidate.lock_pkg candidate).info.extra_sources
+        ~f:(fun (local, source) ->
+          let path =
+            match Dune_pkg.Source.kind source with
+            | `Directory_or_archive path -> Path.external_ path
+            | `Fetch -> Fetch_rules.make_target ~kind:File source |> Path.build
+          in
+          path, local)
+  in
+  { source with files }
+;;
+
+let prepared_source_rule candidate ~target ~patches =
+  let build =
+    let open Action_builder.O in
+    let* { Source_input.files; directories } = candidate_source_input candidate in
+    let+ () = Action_builder.paths (List.map files ~f:fst) in
+    let copies =
+      Action.progn
+        (List.map (Path.Local.root :: directories) ~f:(fun local ->
+           Action.mkdir (Path.Build.append_local target local))
+         @ List.map files ~f:(fun (src, local) ->
+           let dst = Path.Build.append_local target local in
+           Action.progn
+             [ Action.mkdir (Path.Build.parent_exn dst)
+             ; Action.remove_tree dst
+             ; Copy_source.action (src, dst)
+             ]))
+    in
+    let patches =
+      List.map patches ~f:(fun (_loc, patch) ->
+        Dune_patch.action ~patch:(Path.build (Path.Build.append_local target patch))
+        |> Action.chdir (Path.build target))
+    in
+    Action.progn (copies :: patches)
+    |> Action.Full.make ~sandbox:Sandbox_config.needs_sandboxing
+  in
+  Action_builder.with_no_targets build
+  |> Action_builder.With_targets.add_directories ~directory_targets:[ target ]
+  |> rule
+       ~loc:
+         (match patches with
+          | (loc, _) :: _ -> Dune_pkg.Lock_dir.loc_in_source_tree loc
+          | [] -> Loc.none)
+;;
+
+let gen_prepared_source_rules context ~dir components =
+  let module Gen_rules = Build_config.Gen_rules in
+  match components with
+  | [] -> Gen_rules.make_empty ~dir Subdir_set.all |> Memo.return
+  | [ name ] ->
+    let name = Package.Name.of_string name in
+    let+ candidate = Pkg_sources.find_candidate context name
+    and+ preparation = Pkg_sources.preparation context name in
+    (match
+       ( candidate
+       , match preparation with
+         | None | Some Opaque -> None
+         | Some (Plain _) -> Some []
+         | Some (Prepared { patches; rest = _; native = _ }) -> Some patches )
+     with
+     | Some candidate, Some patches ->
+       let target = Pkg_sources.prepared_source context name in
+       Gen_rules.make
+         ~directory_targets:(Path.Build.Map.singleton target Loc.none)
+         (Rules.collect_unit (fun () -> prepared_source_rule candidate ~target ~patches))
+     | _ -> Gen_rules.no_rules)
+  | _ -> Gen_rules.Redirect_to_parent Gen_rules.Rules.empty |> Memo.return
+;;
+
 let build_rule context_name ~source_deps (pkg : Pkg.t) =
+  let* exported_env = Pkg.exported_env pkg in
   let+ build_action =
     let+ copy_action, build_action, install_action =
       let+ copy_action =
@@ -2095,10 +2591,10 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
   let open Action_builder.With_targets.O in
   (let deps =
      let open Action_builder.O in
-     let+ source_deps = source_deps in
-     let deps = Dep.Set.union source_deps (Pkg.package_deps pkg) in
+     let+ source_deps = source_deps
+     and+ package_env = Action_builder.of_memo (Pkg.package_env pkg) in
      let deps =
-       Env.Map.foldi (Pkg.package_env pkg) ~init:deps ~f:(fun var _ deps ->
+       Env.Map.foldi package_env ~init:source_deps ~f:(fun var _ deps ->
          Dep.Set.add deps (Dep.env var))
      in
      let deps =
@@ -2108,8 +2604,9 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
      in
      (), deps
    in
-   Action_builder.with_no_targets (Action_builder.dyn_deps deps))
-  >>> add_env (Pkg.exported_env pkg) build_action
+   Action_builder.O.(Action_builder.dyn_deps deps >>> Pkg.package_deps pkg)
+   |> Action_builder.with_no_targets)
+  >>> add_env exported_env build_action
   |> Action_builder.With_targets.map ~f:(fun action ->
     Action.Full.add_sandbox Action_expander.sandbox action
     |> Action.Full.disable_sandbox_policy)
@@ -2172,12 +2669,12 @@ let setup_pkg_install_alias =
     let* packages =
       Action_builder.of_memo
         (let open Memo.O in
-         let+ db = DB.get (Dependencies ctx_name) in
-         Package.Name.Map.keys db.pkg_table)
+         let* db = DB.get (Dependencies ctx_name) in
+         Package.Name.Map.keys db.pkg_table
+         |> Memo.parallel_map ~f:(fun package ->
+           Resolve.resolve db Loc.none package (Dependencies ctx_name)))
     in
-    List.map packages ~f:(fun package ->
-      Paths.make (Dependencies ctx_name) package |> Paths.target_dir |> Path.build)
-    |> Action_builder.paths
+    Pkg.deps ctx_name packages
   in
   fun ~dir ctx_name ->
     (* We only need to build when the build_dir is the root of the context *)
@@ -2228,14 +2725,9 @@ let setup_rules ~components ~dir ctx =
     setup_package_rules db ~package_universe (Package.Name.Map.keys db.pkg_table)
   | true, [ ".dev-tool" ] -> Gen_rules.make_empty ~dir Subdir_set.all |> Memo.return
   | _, [ ".pkg" ] ->
-    (* Only generate pkg rules if there is a lock dir for that context *)
-    let* lock_dir_active = Lock_dir.lock_dir_active ctx in
-    (match lock_dir_active with
-     | false -> Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
-     | true ->
-       let package_universe = Package_universe.Dependencies ctx in
-       let* db = DB.get package_universe in
-       setup_package_rules db ~package_universe (Package.Name.Map.keys db.pkg_table))
+    (* A context's lock packages are all mounted at [.pkg/<name>] in the
+       context itself, so nothing is built here. *)
+    Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
   | _, ".pkg" :: _ :: _ ->
     Memo.return (Gen_rules.Redirect_to_parent Gen_rules.Rules.empty)
   | true, ".dev-tool" :: _ :: _ :: _ ->
@@ -2258,6 +2750,152 @@ let resolve_pkg_dep context (loc, package_name) =
   Resolve.resolve db loc package_name package_universe
 ;;
 
+let mounted_paths context candidate =
+  let ({ Lock_dir.Pkg.info; _ } as lock_pkg) = Pkg_sources.Candidate.lock_pkg candidate in
+  let paths = Paths.map_path (candidate_paths candidate) ~f:Path.build in
+  let+ relocatable =
+    if
+      (not (Pkg_toolchain.is_compiler_package_with_toolchains_enabled info.name))
+      || is_compiler_version_relocatable info
+    then Memo.return true
+    else
+      let+ dependencies = Pkg_sources.dependencies context in
+      let rec depends_on_marker seen = function
+        | [] -> false
+        | name :: names ->
+          if is_relocatable_compiler_marker name
+          then true
+          else if Package.Name.Set.mem seen name
+          then depends_on_marker seen names
+          else
+            depends_on_marker
+              (Package.Name.Set.add seen name)
+              (Option.value (Package.Name.Map.find dependencies name) ~default:[] @ names)
+      in
+      depends_on_marker Package.Name.Set.empty [ info.name ]
+  in
+  if relocatable
+  then paths
+  else (
+    (* A compiler that cannot be moved is installed in the user's toolchain
+       directory, so that is its prefix. *)
+    let prefix = Pkg_toolchain.installation_prefix lock_pkg in
+    let install_roots =
+      Pkg_toolchain.install_roots ~prefix |> Install.Roots.map ~f:Path.outside_build_dir
+    in
+    { paths with
+      prefix = Path.outside_build_dir prefix
+    ; install_roots = Lazy.from_val install_roots
+    ; install_paths =
+        lazy
+          (Install.Paths.make
+             ~relative:Path.relative
+             ~package:info.name
+             ~roots:install_roots)
+    })
+;;
+
+let dependency context candidate =
+  let open Action_builder.O in
+  let* paths = Action_builder.of_memo (mounted_paths context candidate) in
+  let { Lock_dir.Pkg.info; exported_env; _ } = Pkg_sources.Candidate.lock_pkg candidate in
+  Dependency.load paths ~variables:(Pkg_info.variables info) ~exported_env
+;;
+
+let find_opaque context name =
+  let* mounted = Pkg_sources.find_mounted_kind context name in
+  match mounted with
+  | None | Some (_, `Dune) -> Memo.return None
+  | Some (mounted, `Opam) ->
+    let candidate = Pkg_sources.Mounted.candidate mounted in
+    let root = (candidate_paths candidate).target_dir in
+    Memo.return (Some (root, dependency context candidate))
+;;
+
+let gen_mounted_rule context candidate ~dependencies =
+  let name = Pkg_sources.Candidate.name candidate in
+  let ({ Lock_dir.Pkg.info; build_command; install_command; _ } as lock_pkg) =
+    Pkg_sources.Candidate.lock_pkg candidate
+  in
+  let write_paths = candidate_paths candidate in
+  let* paths = mounted_paths context candidate
+  and* depends = Pkg_sources.Candidate.dependencies candidate
+  and* platform = Lock_dir.Sys_vars.solver_env
+  and* preparation = Pkg_sources.preparation context name
+  and* backing = Pkg_sources.mount_backing context name in
+  let choose field =
+    Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform field ~platform
+  in
+  let install = choose install_command |> Option.map ~f:relocate in
+  (* A mounted source already has the recipe's leading patches applied. *)
+  let build =
+    match preparation, choose build_command |> Option.map ~f:relocate_build with
+    | Some (Prepared { rest; patches = _; native = _ }), Some (Action _) ->
+      Some (Build_command.Action (Progn rest))
+    | _, build -> build
+  in
+  let source =
+    let open Action_builder.O in
+    match backing with
+    | None -> Action_builder.return (Action.mkdir write_paths.source_dir)
+    | Some backing ->
+      let* { Source_input.files; directories = _ } =
+        Action_builder.of_memo
+          (Pkg_sources.listing ~loc:(Pkg_sources.Candidate.source_loc candidate) backing)
+      in
+      let+ () =
+        List.map files ~f:(fun (_, local) ->
+          Path.build (Path.Build.append_local write_paths.source_dir local))
+        |> Action_builder.paths
+      in
+      Action.progn []
+  in
+  let expander =
+    let open Action_builder.O in
+    let* direct, layout = dependencies in
+    let path = Env_path.path (Global.env ()) in
+    let+ env =
+      match Layout.dependencies layout with
+      | [] -> Action_builder.return (Global.env ())
+      | _ -> layout_env layout ~path ~base:(Global.env ())
+    in
+    Action_expander.for_recipe
+      paths
+      lock_pkg
+      ~context
+      ~path
+      ~env
+      ~direct
+      ~dependencies:(Layout.dependencies layout)
+  in
+  let progress =
+    Pkg_build_progress.progress_action info.name info.version `Building
+    |> Action.Full.make
+    |> Action_builder.With_targets.return
+  in
+  let build =
+    let open Action_builder.O in
+    let* expander = expander in
+    let* action =
+      Action_builder.of_memo
+        (execute_recipe ~build ~install ~expander ~write_paths ~source)
+    in
+    let* () =
+      if Package.Name.Set.mem depends Dune_pkg.Dune_dep.name
+      then Action_builder.deps (Dep.Set.singleton (Lazy.force dune_dep))
+      else Action_builder.return ()
+    in
+    let { Action_builder.With_targets.build; targets = _ } =
+      Action_builder.progn [ progress; action ]
+    in
+    build
+  in
+  Action_builder.with_no_targets build
+  |> Action_builder.With_targets.add_directories
+       ~directory_targets:[ write_paths.target_dir ]
+  |> rule ~loc:Loc.none
+;;
+
 let ocaml_toolchain context =
   Memo.push_stack_frame ~human_readable_description:(fun () ->
     Pp.textf
@@ -2276,7 +2914,8 @@ let ocaml_toolchain context =
         Action_builder.List.fold_left
           ~init:(Global.env (), Path.Set.empty)
           ~f:(fun (env, binaries) pkg ->
-            let env = Env.extend_env env (Pkg.exported_env pkg) in
+            let* pkg_env = Action_builder.of_memo (Pkg.exported_env pkg) in
+            let env = Env.extend_env env pkg_env in
             let+ cookie = Install_cookie.read pkg.paths in
             let binaries =
               Section.Map.find cookie.files Bin
@@ -2291,6 +2930,15 @@ let ocaml_toolchain context =
       Action_builder.of_memo @@ Ocaml_toolchain.of_binaries ~path context env binaries
     in
     Some (Action_builder.memoize "ocaml_toolchain" toolchain)
+;;
+
+(* Every caller must get the same memoized builder: building the toolchain runs
+   the compiler to read its configuration. *)
+let ocaml_toolchain =
+  let memo =
+    Memo.create "pkg-ocaml-toolchain" ~input:(module Context_name) ocaml_toolchain
+  in
+  Memo.exec memo
 ;;
 
 let all_deps universe =
@@ -2327,6 +2975,30 @@ module Context_and_packages = struct
   let hash = Tuple.T2.hash Context_name.hash Package.Name.Selection.hash
 end
 
+let compiler_packages =
+  Memo.create
+    "compiler-packages"
+    ~input:(module Context_name)
+    (fun context ->
+       let* lock_dir = Lock_dir.get_exn context in
+       match lock_dir.ocaml with
+       | None -> Memo.return Package.Name.Set.empty
+       | Some ocaml ->
+         let+ pkg = resolve_pkg_dep context ocaml in
+         Package.Name.Set.of_list_map
+           (pkg :: Pkg.deps_closure pkg)
+           ~f:(fun (pkg : Pkg.t) -> pkg.info.name))
+;;
+
+(* [packages] with the package installing the compiler and its dependencies.
+   Their binaries are visible from every directory, whatever it declares. *)
+let declared_packages context (packages : Package.Name.Selection.t) =
+  let+ compiler = Memo.exec compiler_packages context in
+  match packages with
+  | All -> compiler
+  | Only packages -> Package.Name.Set.union packages compiler
+;;
+
 let lock_dir_binaries =
   Memo.create
     "lock-directory-binaries"
@@ -2338,8 +3010,13 @@ let lock_dir_binaries =
            (describe_packages packages)
            (Context_name.to_string context)))
     (fun (context, packages) ->
+       (* A lookup never builds an opaque package to see what it installs:
+          only those the directory declares, and the compiler. *)
+       let* declared = declared_packages context packages in
+       let* packages = project_deps ~packages:(Only declared) context in
+       let* _, opaque = Pkg.classify packages >>| Pkg.partition in
        let+ { binaries; dep_info = _ } =
-         project_deps ~packages context >>= Action_expander.Artifacts_and_deps.of_closure
+         Action_expander.Artifacts_and_deps.of_closure opaque
        in
        binaries)
 ;;
@@ -2347,6 +3024,43 @@ let lock_dir_binaries =
 let which ~packages context program =
   let+ binaries = Memo.exec lock_dir_binaries (context, packages) in
   Filename.Map.find binaries program
+;;
+
+(* For each locked package whose dependency closure reaches the workspace, the
+   workspace packages it reaches. Building such a package while generating the
+   rules of one of those packages would re-enter them. *)
+let workspace_dependencies =
+  let memo =
+    Memo.create
+      "locked-packages-workspace-dependencies"
+      ~input:(module Context_name)
+      (fun context ->
+         let+ depends = Pkg_sources.dependencies context
+         and+ workspace = Dune_load.packages () in
+         let step reached =
+           Package.Name.Map.filter_map depends ~f:(fun depends ->
+             let workspace_deps =
+               List.fold_left depends ~init:Package.Name.Set.empty ~f:(fun acc dep ->
+                 if Package.Name.Map.mem workspace dep
+                 then Package.Name.Set.add acc dep
+                 else (
+                   match Package.Name.Map.find reached dep with
+                   | None -> acc
+                   | Some deps -> Package.Name.Set.union acc deps))
+             in
+             Option.some_if
+               (not (Package.Name.Set.is_empty workspace_deps))
+               workspace_deps)
+         in
+         let rec loop reached =
+           let next = step reached in
+           if Package.Name.Map.equal ~equal:Package.Name.Set.equal next reached
+           then reached
+           else loop next
+         in
+         loop Package.Name.Map.empty)
+  in
+  Memo.exec memo
 ;;
 
 let ocamlpath universe =
@@ -2373,7 +3087,7 @@ let dev_tool_env tool =
   @@ fun () ->
   let package_universe = Package_universe.Dev_tool tool in
   let* db = DB.get package_universe in
-  let+ pkg = Resolve.resolve db Loc.none package_name package_universe in
+  let* pkg = Resolve.resolve db Loc.none package_name package_universe in
   Pkg.exported_env pkg
 ;;
 
@@ -2412,7 +3126,15 @@ let find_package ctx pkg =
   | false -> Memo.return None
   | true ->
     let+ pkg = resolve_pkg_dep ctx (Loc.none, pkg) in
-    Some (Action_builder.deps (Dep.Set.add (Pkg.package_deps pkg) (Pkg.dep pkg)))
+    let dependencies =
+      Pkg.deps_closure pkg
+      |> Package.Name.Set.of_list_map ~f:(fun (pkg : Pkg.t) -> pkg.info.name)
+    in
+    Some
+      ( dependencies
+      , let open Action_builder.O in
+        let* () = Pkg.package_deps pkg in
+        Pkg.dep pkg )
 ;;
 
 let package_prefixes ctx =
@@ -2420,17 +3142,17 @@ let package_prefixes ctx =
   >>= function
   | false -> Memo.return []
   | true ->
-    all_project_deps ctx
-    >>| List.map ~f:(fun { Pkg.info = { name; _ }; paths = { Paths.prefix; _ }; _ } ->
+    Pkg_sources.candidates ctx
+    >>| Package.Name.Map.values
+    >>= Memo.parallel_map ~f:(fun candidate ->
+      let+ { Paths.prefix; name; _ } = mounted_paths ctx candidate in
       prefix, name)
 ;;
 
 let resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file =
   let open Action_builder.O in
-  let* { paths; _ } =
-    Action_builder.of_memo (resolve_pkg_dep context_name (loc, pkg_name))
-  in
-  let* { files; _ } = Install_cookie.read paths in
+  let* pkg = Action_builder.of_memo (resolve_pkg_dep context_name (loc, pkg_name)) in
+  let* { Dependency.paths; files; _ } = Pkg.dependency pkg in
   let section_dir =
     let install_paths = Lazy.force paths.install_paths in
     Install.Paths.get install_paths section
@@ -2461,7 +3183,7 @@ let resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file =
 let all_filtered_depexts context =
   let* all_project_deps = all_project_deps context in
   Memo.List.map all_project_deps ~f:(fun (pkg : Pkg.t) ->
-    let expander = Action_expander.expander context pkg in
+    let expander = Action_expander.expander context pkg ~env:Env.Map.empty in
     Action_expander.Expander.filtered_depexts expander)
   >>| List.concat
   >>| List.sort_uniq ~compare:String.compare

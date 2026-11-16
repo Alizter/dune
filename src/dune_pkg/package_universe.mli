@@ -14,37 +14,12 @@ val create
   -> Lock_dir.t
   -> (t, User_message.t) result
 
-(** Like [create], but doesn't check that the lockdir is the exact solution for
-    the local packages, so the lockdir may contain packages which no local
-    package needs. Raises if a package is both local and in the lockdir. *)
-val create_unvalidated
-  :  platform:Solver_env.t
-  -> Local_package.t Package_name.Map.t
-  -> Lock_dir.t
-  -> t
+(** Reject duplicate definitions across the workspace and the lock directory. *)
+val check_package_names : Lock_dir.t -> local_packages:Loc.t Package_name.Map.t -> unit
 
-(** The packages which the solver selects as dependencies of a local package:
-    the packages of its dependency formula, with filters evaluated against the
-    solver variables of the lockdir, and its optional dependencies present in
-    the universe. Raises a [User_error] if the formula can't be satisfied from
-    the universe. *)
-val selected_dependencies_of_local_package
-  :  t
-  -> Package_name.t
-  -> with_test:bool
-  -> Package_name.t list
-
-val dependency_digest
-  :  Local_package.t Package_name.Map.t
-  -> Local_package.Dependency_hash.t option
-
-(** Verifies if the dependencies described in the project file are still
-    synchronized with the dependencies selected in the lock directroy. If it is
-    not the case, it returns the hash of the new dependency set. *)
-val up_to_date
-  :  Local_package.t Package_name.Map.t
-  -> dependency_hash:Local_package.Dependency_hash.t option
-  -> [ `Valid | `Invalid ]
+(** Check requirements and any supplied workspace metadata referenced by the
+    lockdir. Hand-written lockdirs without a dependency hash remain accepted. *)
+val up_to_date : Local_package.t Package_name.Map.t -> Lock_dir.t -> [ `Valid | `Invalid ]
 
 (** Returns the dependencies of the specified package within the package
     universe *)

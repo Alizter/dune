@@ -25,7 +25,7 @@ package build rules. This bug reruns auto-locking, not the package build.
   >         lock: ($misses | map(select(
   >           endswith("/.lock/dune.lock"))) | length),
   >         package: ($misses | map(select(
-  >           contains("/.pkg/foo/") and endswith("/target"))) | length)
+  >           endswith("/.pkg/foo/_install"))) | length)
   >       }
   >   '
   > }

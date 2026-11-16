@@ -33,12 +33,12 @@ A lockdir package [r] that installs [r-tool]:
 
   $ dune build p/r-avail
 
-[r] is not visible through the workspace package [q], since [p] doesn't list it:
+[r] is visible through the workspace package [q]:
 
   $ cat _build/default/p/r-avail
-  false
+  true
 
-Declaring [r] directly on [p] works too:
+Declaring [r] directly on [p] makes it visible:
 
   $ make_dune_project 3.25
   $ cat >> dune-project <<'EOF'
@@ -50,18 +50,11 @@ Declaring [r] directly on [p] works too:
   $ cat _build/default/p/r-avail
   true
 
-The first block prints [false] because [p] doesn't list [r], even though [q]
-does. The second prints [true] because [r] is listed on [p] directly. The
-workspace -> lockdir edge is narrowed like any other: only the packages [p]
-lists are searched.
+Both blocks print [true]: [p] sees the dependencies of the packages it lists,
+whether it reaches [r] through [q] or lists it directly.
 
-[p] (workspace) -> [q] (lockdir) -> [r] (workspace). Now the [q] -> [r] edge is
-a lockdir package depending on a workspace package. This is a lock-VALIDATION
-restriction, not a narrowing case: it is rejected before any binary resolution
-runs, so narrowing does not change it -- it flips only when the in-out work
-lifts the restriction (see [../lockdir-workspace-deps/basic.t] for the bare
-rejection). Even then, [p] would only resolve [r-tool] if it listed [r]
-directly.
+[p] (workspace) -> [q] (lockdir) -> [r] (workspace) is valid too. The opaque
+recipe for [q] receives [r], and [r-tool] is in the dependency closure of [p].
 
   $ rm -rf p q r dune.lock
   $ dune clean
@@ -92,13 +85,6 @@ directly.
   > (package (name r) (allow_empty) (dir r))
   > EOF
 
-  $ dune build p/r-avail 2>&1
-  File "_build/_private/default/.lock/dune.lock/q.pkg", line 2, characters
-  9-10:
-  The package "q" depends on the package "r", but "r" does not appear in the
-  lockdir _build/_private/default/.lock/dune.lock.
-  Error: At least one package dependency is itself not present as a package in
-  the lockdir _build/_private/default/.lock/dune.lock.
-  Hint: This could indicate that the lockdir is corrupted. Delete it and then
-  regenerate it by running: 'dune pkg lock'
-  [1]
+  $ dune build p/r-avail
+  $ cat _build/default/p/r-avail
+  true

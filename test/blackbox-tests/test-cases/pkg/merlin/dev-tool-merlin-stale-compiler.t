@@ -115,8 +115,8 @@ rebuilds the project compiler despite it already being built.
   $ grep "build compiler" merlin-output
   build compiler d00ed00ed00ed00ed00ed00ed00ed00e relocatable-compiler enabled
 
-The project and dev-tool package universes are isolated, so @pkg-install does
-not build the stale dev-tool compiler dependency.
+The stale dev-tool closure is not part of @pkg-install, so its old compiler
+dependency is not built again.
 
   $ dune build @pkg-install >output 2>&1
   $ grep "building old compiler dependency" output

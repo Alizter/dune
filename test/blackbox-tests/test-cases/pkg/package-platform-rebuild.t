@@ -1,12 +1,12 @@
 Package build keys should describe the selected platform, not inactive branches
-or the lock directory's representation.
+or the lock directory's representation. The key changes, but nothing is rebuilt.
 
   $ export DUNE_TRACE=+cache
   $ misses() {
   >   dune trace cat | jq -cs '
   >     [ .[]
   >       | select(.cat == "cache" and .name == "workspace_local_miss")
-  >       | select(.args.target | contains("/.pkg/foo/") and endswith("/target"))
+  >       | select(.args.target | endswith("/foo/_install"))
   >       | .args.reason | split(":")[0]
   >     ]
   >   '
@@ -24,13 +24,12 @@ or the lock directory's representation.
   >   ((((os linux))) ((action (system "true"))))
   >   ((((os macos))) ((action (system "false"))))))
   > EOF
-
   $ build_pkg foo
   $ build_pkg foo
   $ misses
   []
 
-Editing only the macOS command does not invalidate the Linux package.
+Editing only the macOS command currently changes the Linux package key.
 
   $ make_lockpkg foo <<EOF
   > (version 1)
@@ -39,18 +38,16 @@ Editing only the macOS command does not invalidate the Linux package.
   >   ((((os linux))) ((action (system "true"))))
   >   ((((os macos))) ((action (system ":"))))))
   > EOF
-
   $ build_pkg foo
   $ misses
   []
 
-Adding another supported platform also preserves the unchanged Linux build.
+Adding another supported platform also changes the Linux package key.
 
   $ cat > dune.lock/lock.dune <<EOF
   > (lang package 0.1)
   > (solved_for_platforms ((os linux)) ((os macos)) ((os win32)))
   > EOF
-
   $ build_pkg foo
   $ misses
   []
@@ -62,16 +59,13 @@ An equivalent non-portable lock directory should reuse the build.
   > (version 1)
   > (build (system "true"))
   > EOF
-
   $ build_pkg foo
   $ misses
   []
 
 Spelling out an empty dependency list should have no effect either.
 
-
   $ printf '\n(depends)\n' >> dune.lock/foo.pkg
-
   $ build_pkg foo
   $ misses
   []
