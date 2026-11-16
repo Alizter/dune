@@ -55,3 +55,19 @@ in libexec.
       ]
   ; variables = []
   }
+
+An install action may leave both "tool" and "tool.exe" in bin, as Windows
+builds do. Once the extension is stripped for lookup, the two names coincide;
+a dependent package's recipe must still be set up.
+
+  $ make_lockpkg both <<'EOF'
+  > (version 1.0)
+  > (install (system "mkdir -p %{bin}; touch %{bin}/tool %{bin}/tool.exe"))
+  > EOF
+  $ make_lockpkg both-consumer <<'EOF'
+  > (version 1.0)
+  > (depends both)
+  > (build (run echo ok))
+  > EOF
+  $ build_pkg both-consumer
+  ok
