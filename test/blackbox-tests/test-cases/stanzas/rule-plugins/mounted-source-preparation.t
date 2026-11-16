@@ -4,7 +4,7 @@ without modifying the original source or the logical mount.
 
 Build the plugin before enabling the lock directory, so its RPC dependencies
 need not be duplicated in the fixture's lock. Copy the executable into the
-source; host/target executable selection is outside this test.
+source; compiling the plugin from mounted source is outside this test.
 
   $ cat > dune-project <<'EOF'
   > (lang dune 3.26)
@@ -96,3 +96,35 @@ that this is a native mount, not an opaque package build.
   overlay
   $ test ! -e _source/tools/generator/scratch
   $ test ! -e _build/default/.pkg/foo/tools/generator/scratch
+
+A plugin's package must also be mounted in the host context. Its presence in
+only the target lock must not make Dune build or run the target executable.
+
+  $ source_lock_dir=host.lock make_lockdir
+  $ cat > dune-workspace <<'EOF'
+  > (lang dune 3.26)
+  > (pkg enabled)
+  > (context (default (name host) (lock_dir host.lock)))
+  > (context (default (name target) (host host) (lock_dir dune.lock)))
+  > EOF
+  $ dune build _build/target/.pkg/foo/use/result
+  Error: No rule found for .pkg/foo/tools/generator/rules.exe (context host)
+  -> required by rule plugin generate
+  [1]
+  $ test ! -e _build/target/.pkg/foo/tools/generator/rules.exe
+  $ test ! -e _build/target/.pkg/foo/use/result
+
+Adding the package to the host lock restores rule generation. Only the host
+copy of the executable is built, while the generated target is in the target
+context and still sees the prepared overlay.
+
+  $ cp dune.lock/foo.pkg host.lock/foo.pkg
+  $ cp -R dune.lock/foo.files host.lock/foo.files
+  $ dune build _build/target/.pkg/foo/use/result
+  $ cat _build/target/.pkg/foo/use/result
+  patched
+  $ test -f _build/host/.pkg/foo/tools/generator/rules.exe
+  $ test ! -e _build/target/.pkg/foo/tools/generator/rules.exe
+  $ test ! -e _source/tools/generator/scratch
+  $ test ! -e _build/host/.pkg/foo/tools/generator/scratch
+  $ test ! -e _build/target/.pkg/foo/tools/generator/scratch
