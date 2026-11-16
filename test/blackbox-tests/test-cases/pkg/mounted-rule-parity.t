@@ -217,6 +217,68 @@ workspace behaviour is covered by stanzas/copy_files/test6.t.
   $ cat _build/default/.pkg/foo/copies/generated.txt
   generated
 
+Copy-with-line-directive actions and globs retain workspace source locations,
+including when sandboxed. Mounted copies currently drop the build context too,
+leaving paths that cannot be opened from the workspace root.
+
+  $ mkdir -p _source/line-directives/input
+  $ echo 'let value = 42' > _source/line-directives/input/value.ml
+  $ echo 'int value = 42;' > _source/line-directives/input/value.c
+  $ cat > _source/line-directives/dune <<'EOF'
+  > (rule
+  >  (target copied.ml)
+  >  (deps (sandbox always))
+  >  (action (copy# input/value.ml %{target})))
+  > (rule
+  >  (target copied.c)
+  >  (deps (sandbox always))
+  >  (action (copy# input/value.c %{target})))
+  > (copy_files# input/*.ml)
+  > (copy_files# (only_sources) (files input/*.c))
+  > EOF
+  $ (cd _source && dune build --root . --only-packages foo --sandbox copy \
+  >   line-directives/copied.ml line-directives/value.ml \
+  >   line-directives/copied.c line-directives/value.c)
+  $ for file in copied.ml value.ml copied.c value.c; do
+  >   cat _source/_build/default/line-directives/$file
+  > done
+  # 1 "line-directives/input/value.ml"
+  let value = 42
+  # 1 "line-directives/input/value.ml"
+  let value = 42
+  #line 1 "line-directives/input/value.c"
+  int value = 42;
+  #line 1 "line-directives/input/value.c"
+  int value = 42;
+  $ dune build \
+  >   _build/default/.pkg/foo/line-directives/copied.ml \
+  >   _build/default/.pkg/foo/line-directives/value.ml \
+  >   _build/default/.pkg/foo/line-directives/copied.c \
+  >   _build/default/.pkg/foo/line-directives/value.c
+  $ for file in copied.ml value.ml copied.c value.c; do
+  >   cat _build/default/.pkg/foo/line-directives/$file
+  > done
+  # 1 ".pkg/foo/line-directives/input/value.ml"
+  let value = 42
+  # 1 ".pkg/foo/line-directives/input/value.ml"
+  let value = 42
+  #line 1 ".pkg/foo/line-directives/input/value.c"
+  int value = 42;
+  #line 1 ".pkg/foo/line-directives/input/value.c"
+  int value = 42;
+  $ dune trace cat | jq -s '
+  >   any(.[]; .cat == "sandbox" and .name == "create"
+  >     and ((.args.loc // "") | contains(".pkg/foo/line-directives/")))'
+  true
+  $ dune build --sandbox none \
+  >   _build/default/.pkg/foo/line-directives/value.ml \
+  >   _build/default/.pkg/foo/line-directives/value.c
+  $ for file in value.ml value.c; do
+  >   grep '^#' _build/default/.pkg/foo/line-directives/$file
+  > done
+  # 1 ".pkg/foo/line-directives/input/value.ml"
+  #line 1 ".pkg/foo/line-directives/input/value.c"
+
 Only-sources globs exclude generated inputs and remove stale copied targets.
 Adding a source file updates the glob.
 
