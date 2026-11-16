@@ -199,6 +199,33 @@ the build paths.
      _build/default/.pkg/foo/cyc/a
   [1]
 
+A public library whose melange runtime dependencies escape its directory. The
+workspace hint names the workspace directory
+(melange/installed-library-with-runtime-deps-nested-errors.t); the mounted
+hint names a workspace directory that does not exist instead of the build
+path. The escaping install stanza above is removed so the install file can be
+generated again.
+
+  $ rm _source/escape/dune
+  $ echo '(using melange 1.0)' >> _source/dune-project
+  $ mkdir -p _source/mel/src
+  $ echo 'function f() {}' > _source/mel/runtime.js
+  $ cat > _source/mel/src/dune <<'EOF'
+  > (library
+  >  (public_name foo.mel)
+  >  (name mel)
+  >  (modes melange)
+  >  (melange.runtime_deps ../runtime.js))
+  > EOF
+  $ dune build $mount/foo.install 2>&1
+  File "_build/default/.pkg/foo/mel/src/dune", line 5, characters 23-36:
+  Error: Public library `foo.mel' depends on assets outside its source tree.
+  This is not allowed.
+  Hint: Move the offending dependency somewhere inside `.pkg/foo/mel/src'.
+  [1]
+  $ rm -r _source/mel
+  $ sed -i '/using melange/d' _source/dune-project
+
 A compilation error in the package. The location is relative to the context
 directory, so it does not name a file under the workspace root.
 
