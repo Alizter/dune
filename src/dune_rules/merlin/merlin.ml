@@ -1271,7 +1271,9 @@ module Unprocessed = struct
                List.concat [ requires_compile; libs ])
       in
       let+ flags = flags
-      and+ indexes, indexes_digest = Ocaml_index.context_indexes context ~for_
+      and+ indexes, indexes_digest =
+        let owner = Loaded_project.owner (Scope.loaded_project scope) in
+        Ocaml_index.context_indexes context ~for_ ~owner
       and+ use_hidden_includes =
         let+ ocaml = Action_builder.of_memo (Context.ocaml context) in
         Ocaml.Version.supports_hidden_includes ocaml.version

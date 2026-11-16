@@ -18,12 +18,14 @@ let rocq_libs t = t.rocq_db
 module DB = struct
   type scope = t
 
+  (* The scopes of one partition of a context: the workspace, or one mounted
+     package. *)
   type t =
     { by_dir : scope Path.Build.Map.t
     ; by_package : scope Package.Name.Map.t
-    ; dependency_libs_by_package : Lib.DB.t Package.Name.Map.t
-    ; public_libs_by_package : Lib.DB.t Package.Name.Map.t
     }
+
+  type partition = t
 
   let find_by_dir t dir =
     let scope = Find_closest_source_dir.find_by_dir_exn t.by_dir ~dir in
@@ -259,66 +261,22 @@ module DB = struct
         }
     | Name of (Loc.t * Lib_name.t)
 
-  (* Create a database from the public libraries defined in the stanzas *)
-  let public_libs =
-    let resolve_redirect_to t rt =
-      match rt with
-      | Project { project; lib_id; enabled; _ } ->
-        let+ enabled =
-          let+ toggle = enabled in
-          Toggle.enabled toggle
-        in
-        if enabled
-        then (
-          let scope = find_by_project (Fdecl.get t) project in
-          Lib.DB.Resolve_result.redirect_by_id scope.db (Local lib_id))
-        else Lib.DB.Resolve_result.not_found
-      | Name name -> Memo.return (Lib.DB.Resolve_result.redirect_in_the_same_db name)
-    in
-    fun t ~context ~installed_libs ~instrument_with stanzas ->
-      let opam_libraries =
-        Memo.create
-          "opam-package-libraries"
-          ~input:(module Package.Name)
-          (fun name ->
-             let* package = Pkg_rules.find_opaque context name in
-             match package with
-             | None -> Memo.return None
-             | Some (_, dependency) ->
-               let* dependency, _ =
-                 Action_builder.evaluate_and_collect_facts dependency
-               in
-               let roots = Pkg_rules.Paths.install_roots dependency.paths in
-               let* findlib =
-                 Findlib.create_for_package context ~package:name ~lib_root:roots.lib_root
-               in
-               let resolve library =
-                 let+ entry = Findlib.find findlib library in
-                 Lib.DB.Resolve_result.of_findlib entry
-               in
-               let parent =
-                 Package.Name.Map.find_exn (Fdecl.get t).dependency_libs_by_package name
-               in
-               let db =
-                 Lib.DB.create
-                   ()
-                   ~parent:(Some parent)
-                   ~resolve:(fun name -> resolve name >>| List.singleton)
-                   ~resolve_lib_id:(fun id -> resolve (Lib_id.name id))
-                   ~all:(fun () ->
-                     Findlib.all_packages findlib >>| List.map ~f:Dune_package.Entry.name)
-                   ~instrument_with
-               in
-               Memo.return (Some (findlib, db)))
-        |> Memo.exec
-      in
-      let by_name, by_id, mounted_by_name =
+  (* The public libraries one partition defines, resolving into its scopes. *)
+  module Public_libs = struct
+    type t =
+      { by_name : (Package.Name.t option * redirect_to) list Lib_name.Map.t
+      ; by_id : (Package.Name.t option * redirect_to) Lib_id.Map.t
+      ; scopes : partition Fdecl.t
+      }
+
+    let of_stanzas ~scopes stanzas =
+      let by_name, by_id =
         List.fold_left
           stanzas
-          ~init:(Lib_name.Map.empty, Lib_id.Map.empty, Lib_name.Map.empty)
+          ~init:(Lib_name.Map.empty, Lib_id.Map.empty)
           ~f:
             (fun
-              (by_name, by_id, mounted_by_name)
+              (by_name, by_id)
               ((loaded_dir, stanza) : Loaded_dir.t * Library_related_stanza.t)
             ->
             let dir = Loaded_dir.output_dir loaded_dir in
@@ -345,7 +303,7 @@ module DB = struct
                   (Deprecated_library_name.old_public_name s, Name s.new_public_name, None)
             in
             match candidate with
-            | None -> by_name, by_id, mounted_by_name
+            | None -> by_name, by_id
             | Some (public_name, r2, lib_id2) ->
               let owner = Loaded_project.owner (Loaded_dir.project loaded_dir) in
               let r2 = owner, r2 in
@@ -359,221 +317,84 @@ module DB = struct
                 | None -> by_id
                 | Some lib_id2 -> Lib_id.Map.add_exn by_id (Local lib_id2) r2
               in
-              let mounted_by_name =
-                match owner with
-                | None -> mounted_by_name
-                | Some _ -> Lib_name.Map.add_multi mounted_by_name public_name r2
-              in
-              by_name, by_id, mounted_by_name)
+              by_name, by_id)
       in
-      Staged.stage (fun ~owner ~include_owner ->
-        let visible_packages =
-          Memo.lazy_ ~name:"library-visible-packages" (fun () ->
-            match owner with
-            | None -> Memo.return (None, None)
-            | Some owner ->
-              let* visible =
-                Dune_load.package_closure_for_context
-                  context
-                  (Package.Name.Set.singleton owner)
-              and* workspace = Dune_load.packages () in
-              let declared =
-                if include_owner then visible else Package.Name.Set.remove visible owner
-              in
-              let+ visible =
-                if not (Package.Name.Map.mem workspace owner)
-                then Memo.return visible
-                else
-                  let+ managed = Pkg_sources.candidates context in
-                  List.fold_left managed ~init:visible ~f:(fun visible candidate ->
-                    let name = Pkg_sources.Candidate.name candidate in
-                    if Package.Name.Map.mem workspace name
-                    then visible
-                    else Package.Name.Set.add visible name)
-              in
-              ( Some declared
-              , Some
-                  (if include_owner
-                   then visible
-                   else Package.Name.Set.remove visible owner) ))
+      { by_name; by_id; scopes }
+    ;;
+
+    let resolve_redirect_to t rt =
+      match rt with
+      | Project { project; lib_id; enabled; _ } ->
+        let+ enabled =
+          let+ toggle = enabled in
+          Toggle.enabled toggle
         in
-        let visible_candidates candidates =
-          let+ _, visible = Memo.Lazy.force visible_packages in
-          List.filter_map candidates ~f:(fun (owner, candidate) ->
-            match owner, visible with
-            | Some owner, Some visible when not (Package.Name.Set.mem visible owner) ->
-              None
-            | _ -> Some candidate)
-        in
-        let resolve_candidates candidates =
-          let* candidates = visible_candidates candidates in
-          Memo.List.map candidates ~f:(resolve_redirect_to t)
-        in
-        let visible_names by_name =
-          Lib_name.Map.to_list by_name
-          |> Memo.List.filter_map ~f:(fun (name, candidates) ->
-            let+ candidates = visible_candidates candidates in
-            Option.some_if (List.is_non_empty candidates) name)
-        in
-        let installed_libs =
-          if Lib_name.Map.is_empty mounted_by_name
-          then installed_libs
-          else (
-            let resolve name =
-              Lib_name.Map.find mounted_by_name name
-              |> Option.value ~default:[]
-              |> resolve_candidates
-            in
-            let mounted_libs =
-              Lib.DB.create
-                ()
-                ~parent:None
-                ~resolve
-                ~resolve_lib_id:(fun id ->
-                  let+ results = resolve (Lib_id.name id) in
-                  match results with
-                  | [ result ] -> result
-                  | _ -> Lib.DB.Resolve_result.not_found)
-                ~all:(fun () -> visible_names mounted_by_name)
-                ~instrument_with
-            in
-            Lib.DB.with_parent installed_libs ~parent:(Some mounted_libs))
-        in
-        let candidates =
-          Memo.lazy_ ~name:"opaque-library-candidates" (fun () ->
-            let+ packages = Pkg_sources.opaque_names context
-            and+ declared, visible = Memo.Lazy.force visible_packages
-            and+ reverse = Pkg_rules.workspace_dependencies context in
-            let packages =
-              match visible with
-              | None -> packages
-              | Some visible -> Package.Name.Set.inter packages visible
-            in
-            (* Scanning a package builds it. One that needs the workspace is
-               only scanned for a requester that declares it and that it does
-               not need. *)
-            Package.Name.Set.filter packages ~f:(fun name ->
-              match Package.Name.Map.find reverse name with
-              | None -> true
-              | Some reached ->
-                (match owner, declared with
-                 | Some owner, Some declared ->
-                   Package.Name.Set.mem declared name
-                   && not (Package.Name.Set.mem reached owner)
-                 | None, _ | _, None -> false))
-            |> Package.Name.Set.to_list)
-        in
-        let resolve_opam name =
-          let* candidates = Memo.Lazy.force candidates
-          and* declared, visible = Memo.Lazy.force visible_packages in
-          let preferred, other =
-            match declared with
-            | None -> candidates, []
-            | Some declared ->
-              List.partition_map candidates ~f:(fun package ->
-                if Package.Name.Set.mem declared package
-                then Left package
-                else Right package)
+        if enabled
+        then (
+          let scope = find_by_project (Fdecl.get t.scopes) project in
+          Lib.DB.Resolve_result.redirect_by_id scope.db (Local lib_id))
+        else Lib.DB.Resolve_result.not_found
+      | Name name -> Memo.return (Lib.DB.Resolve_result.redirect_in_the_same_db name)
+    ;;
+  end
+
+  (* What every library database of a context shares. *)
+  module Context_libs = struct
+    type t =
+      { context : Context.t
+      ; installed_libs : Lib.DB.t
+      ; lib_config : Lib_config.t
+      ; instrument_with : Lib_name.t list
+      }
+
+    let get =
+      Per_context.create_by_name ~name:"scope-context-libs" (fun context_name ->
+        Memo.lazy_ ~name:"scope-context-libs" (fun () ->
+          let* context = Context.DB.get context_name in
+          let* lib_config =
+            let+ ocaml = Context.ocaml context in
+            ocaml.lib_config
           in
-          let search packages =
-            Memo.parallel_map packages ~f:(fun package ->
-              let* libraries = opam_libraries package in
-              match libraries with
-              | None -> Memo.return None
-              | Some (findlib, db) ->
-                let+ entry = Findlib.find findlib name in
-                (match entry with
-                 | Error Not_found -> None
-                 | Ok _ | Error (Invalid_dune_package _) ->
-                   Some (Lib.DB.Resolve_result.redirect_by_name db (Loc.none, name))))
-            >>| List.filter_opt
+          let+ installed_libs =
+            let* active = Pkg_rules.lock_dir_active context_name in
+            if active
+            then
+              let* paths = Context.default_ocamlpath context in
+              Lib.DB.of_paths context ~paths
+            else Lib.DB.installed context
           in
-          (* Looking in an opaque package builds it. So first the package
-             named like the library, then the compiler's own libraries, and
-             only then the others. *)
-          let named = Lib_name.package_name name in
-          let* results =
-            if List.mem candidates named ~equal:Package.Name.equal
-            then search [ named ]
-            else Memo.return []
-          in
-          if List.is_non_empty results
-          then Memo.return results
-          else
-            let* installed = Lib.DB.available installed_libs name in
-            if installed
-            then Memo.return []
-            else
-              let* results = search preferred in
-              if List.is_non_empty results
-              then Memo.return results
-              else
-                let* errors = Dune_load.package_errors context in
-                let invalid selection =
-                  Package.Name.Map.to_list errors
-                  |> List.concat_map ~f:(fun (package, messages) ->
-                    match selection with
-                    | Some selected when not (Package.Name.Set.mem selected package) -> []
-                    | None | Some _ -> List.map messages ~f:Lib.DB.Resolve_result.invalid)
-                in
-                let failed = invalid declared in
-                if List.is_non_empty failed
-                then Memo.return failed
-                else
-                  let+ results = search other in
-                  if List.is_non_empty results then results else invalid visible
-        in
-        let all_opam () =
-          let* candidates = Memo.Lazy.force candidates in
-          Memo.List.concat_map candidates ~f:(fun name ->
-            let* libraries = opam_libraries name in
-            match libraries with
-            | None -> Memo.return []
-            | Some (findlib, _) ->
-              Findlib.all_packages findlib >>| List.map ~f:Dune_package.Entry.name)
-        in
-        let opaque_libs =
-          Lib.DB.create
-            ()
-            ~parent:(Some installed_libs)
-            ~resolve:resolve_opam
-            ~resolve_lib_id:(fun lib_id ->
-              Memo.return
-                (Lib.DB.Resolve_result.redirect_in_the_same_db
-                   (Loc.none, Lib_id.name lib_id)))
-            ~all:all_opam
-            ~instrument_with
-        in
-        let resolve_lib_id lib_id =
-          match Lib_id.Map.find by_id lib_id with
-          | None -> Memo.return Lib.DB.Resolve_result.not_found
-          | Some rt ->
-            let+ results = resolve_candidates [ rt ] in
-            List.hd_opt results |> Option.value ~default:Lib.DB.Resolve_result.not_found
-        in
-        let resolve name =
-          Lib_name.Map.find by_name name |> Option.value ~default:[] |> resolve_candidates
-        in
-        Lib.DB.create
-          ~parent:(Some opaque_libs)
-          ~resolve
-          ~resolve_lib_id
-          ~all:(fun () ->
-            let+ libraries = all_opam ()
-            and+ native = visible_names by_name in
-            List.sort_uniq (native @ libraries) ~compare:Lib_name.compare)
-          ~instrument_with
-          ())
-  ;;
+          { context
+          ; installed_libs
+          ; lib_config
+          ; instrument_with = Context.instrument_with context
+          })
+        |> Memo.Lazy.force)
+      |> Staged.unstage
+    ;;
+  end
+
+  module Context_and_owner = struct
+    type t = Context_name.t * Package.Name.t option
+
+    let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn (Dyn.option Package.Name.to_dyn)
+    let equal = Tuple.T2.equal Context_name.equal (Option.equal Package.Name.equal)
+    let hash = Tuple.T2.hash Context_name.hash (Option.hash Package.Name.hash)
+  end
+
+  module Context_and_package = struct
+    type t = Context_name.t * Package.Name.t
+
+    let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn Package.Name.to_dyn
+    let equal = Tuple.T2.equal Context_name.equal Package.Name.equal
+    let hash = Tuple.T2.hash Context_name.hash Package.Name.hash
+  end
 
   let scopes_by_dir
         ~scopes
         ~package_scopes
         ~lib_config
         ~projects_by_root
-        ~public_libs
-        ~public_libs_by_package
-        ~dependency_libs_by_package
+        ~owner_libs
         ~instrument_with
         context
         stanzas
@@ -599,24 +420,22 @@ module DB = struct
     let db_by_project_dir =
       Path.Build.Map.map make_db_by_project_dir ~f:(fun (project, make_db) ->
         let owner = Loaded_project.owner project in
-        let public_libs =
-          match owner with
-          | None -> public_libs
-          | Some name -> Package.Name.Map.find_exn public_libs_by_package name
-        in
-        project, make_db ~scopes ~owner ~public_libs ~instrument_with ~package_scopes)
+        let public_libs = owner_libs owner in
+        ( project
+        , public_libs
+        , make_db ~scopes ~owner ~public_libs ~instrument_with ~package_scopes ))
     in
     let rocq_scopes =
-      Rocq_scope.make context ~public_libs rocq_stanzas ~db_by_project_dir
+      Rocq_scope.make
+        context
+        ~public_libs:(owner_libs None)
+        rocq_stanzas
+        ~db_by_project_dir:
+          (Path.Build.Map.map db_by_project_dir ~f:(fun (project, _, db) -> project, db))
     in
     let by_dir =
-      Path.Build.Map.map db_by_project_dir ~f:(fun (loaded_project, db) ->
+      Path.Build.Map.map db_by_project_dir ~f:(fun (loaded_project, public_libs, db) ->
         let rocq_db = Rocq_scope.find rocq_scopes ~project:loaded_project in
-        let public_libs =
-          match Loaded_project.owner loaded_project with
-          | None -> public_libs
-          | Some name -> Package.Name.Map.find_exn public_libs_by_package name
-        in
         { loaded_project; db; public_libs; rocq_db })
     in
     let by_package =
@@ -625,7 +444,7 @@ module DB = struct
         let scope = Path.Build.Map.find_exn by_dir dir in
         Loaded_project.packages project
         |> Package.Name.Map.to_list_map ~f:(fun name _ ->
-          let public_libs = Package.Name.Map.find_exn public_libs_by_package name in
+          let public_libs = owner_libs (Some name) in
           let db =
             make_db
               ~scopes
@@ -637,143 +456,412 @@ module DB = struct
           name, { scope with db; public_libs }))
       |> Package.Name.Map.of_list_exn
     in
-    { by_dir; by_package; dependency_libs_by_package; public_libs_by_package }
+    { by_dir; by_package }
   ;;
 
-  let create ~context ~projects_by_root stanzas rocq_stanzas =
-    let t = Fdecl.create Dyn.opaque in
-    let* mounted = Pkg_sources.mounted context in
-    let package_scopes =
+  let library_related_stanzas dune_files =
+    Dune_file.fold_static_stanzas
+      dune_files
+      ~init:([], [])
+      ~f:(fun dune_file stanza (acc, rocq_acc) ->
+        let loaded_dir = Dune_file.loaded_dir dune_file in
+        match Stanza.repr stanza with
+        | Library.T lib ->
+          (loaded_dir, Library_related_stanza.Library lib) :: acc, rocq_acc
+        | Deprecated_library_name.T d ->
+          (loaded_dir, Deprecated_library_name d) :: acc, rocq_acc
+        | Library_redirect.Local.T d -> (loaded_dir, Library_redirect d) :: acc, rocq_acc
+        | Rocq_stanza.Theory.T rocq_lib ->
+          ( acc
+          , (Loaded_dir.project loaded_dir, Loaded_dir.output_dir loaded_dir, rocq_lib)
+            :: rocq_acc )
+        | _ -> acc, rocq_acc)
+  ;;
+
+  (* The scopes of a partition, with its public libraries: the workspace for
+     [None], or the mounted package named. Loading a mount fetches its source,
+     so only a lookup naming the package forces it. Each partition's databases
+     reach the others on demand, by package name. *)
+  let rec partition =
+    lazy
+      (Memo.create
+         "scope-partition"
+         ~input:(module Context_and_owner)
+         (fun (context, owner) ->
+            let* ctx = Context_libs.get context in
+            let* loaded =
+              match owner with
+              | None -> Dune_load.workspace context >>| Option.some
+              | Some package -> Dune_load.mount context package
+            in
+            match loaded with
+            | None -> Memo.return None
+            | Some loaded ->
+              let+ candidates = Pkg_sources.candidates context in
+              let scopes = Fdecl.create Dyn.opaque in
+              let stanzas, rocq_stanzas =
+                library_related_stanzas (Dune_load.Partition.dune_files loaded)
+              in
+              let public = Public_libs.of_stanzas ~scopes stanzas in
+              let package_scopes = package_scopes ctx candidates in
+              let value =
+                scopes_by_dir
+                  ~scopes
+                  ~package_scopes
+                  ~lib_config:ctx.lib_config
+                  ~projects_by_root:(Dune_load.Partition.projects_by_output_root loaded)
+                  ~owner_libs:(fun owner ->
+                    owner_db ctx ~package_scopes ~owner ~include_owner:true)
+                  ~instrument_with:ctx.instrument_with
+                  ctx.context
+                  stanzas
+                  rocq_stanzas
+              in
+              Fdecl.set scopes value;
+              Some (value, public)))
+
+  (* An opaque package reveals its libraries once it is installed, so looking
+     in one builds it. *)
+  and opaque_libs =
+    lazy
+      (Memo.create
+         "opaque-package-libraries"
+         ~input:(module Context_and_package)
+         (fun (context, name) ->
+            let* package = Pkg_rules.find_opaque context name in
+            match package with
+            | None -> Memo.return None
+            | Some (_, dependency) ->
+              let* dependency, _ = Action_builder.evaluate_and_collect_facts dependency in
+              let roots = Pkg_rules.Paths.install_roots dependency.paths in
+              let* findlib =
+                Findlib.create_for_package context ~package:name ~lib_root:roots.lib_root
+              in
+              let* ctx = Context_libs.get context in
+              let+ candidates = Pkg_sources.candidates context in
+              let resolve library =
+                let+ entry = Findlib.find findlib library in
+                Lib.DB.Resolve_result.of_findlib entry
+              in
+              let parent =
+                owner_db
+                  ctx
+                  ~package_scopes:(package_scopes ctx candidates)
+                  ~owner:(Some name)
+                  ~include_owner:false
+              in
+              let db =
+                Lib.DB.create
+                  ()
+                  ~parent:(Some parent)
+                  ~resolve:(fun name -> resolve name >>| List.singleton)
+                  ~resolve_lib_id:(fun id -> resolve (Lib_id.name id))
+                  ~all:(fun () ->
+                    Findlib.all_packages findlib >>| List.map ~f:Dune_package.Entry.name)
+                  ~instrument_with:ctx.instrument_with
+              in
+              Some (findlib, db)))
+
+  (* Transitive libraries installed by an opaque package are checked in that
+     package's own database; see [Lib.DB.with_package_scopes]. *)
+  and package_scopes ctx candidates =
+    let rec package_scopes =
       lazy
-        (let scopes = Fdecl.get t in
-         List.fold_left mounted ~init:Package.Name.Map.empty ~f:(fun acc mounted ->
-           match Pkg_sources.Mounted.kind mounted with
-           | Ok `Dune | Error _ -> acc
-           | Ok `Opam ->
-             let candidate = Pkg_sources.Mounted.candidate mounted in
-             let name = Pkg_sources.Candidate.name candidate in
-             let root = (Pkg_rules.candidate_paths candidate).target_dir |> Path.build in
-             Package.Name.Map.add_exn
-               acc
-               name
-               (root, Package.Name.Map.find_exn scopes.public_libs_by_package name)))
+        (Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
+           let name = Pkg_sources.Candidate.name candidate in
+           let root = (Pkg_rules.candidate_paths candidate).target_dir |> Path.build in
+           ( name
+           , (root, owner_db ctx ~package_scopes ~owner:(Some name) ~include_owner:true) )))
     in
-    let* context = Context.DB.get context in
-    let* lib_config =
-      let+ ocaml = Context.ocaml context in
-      ocaml.lib_config
+    package_scopes
+
+  (* The libraries a requester sees. The workspace's public libraries come
+     first, then those of the locked package named like the library, then
+     the compiler's, then the opaque packages the requester declares, then
+     the remaining visible ones. [owner] is the requester's package; [None]
+     sees everything. *)
+  and owner_db (ctx : Context_libs.t) ~package_scopes ~owner ~include_owner =
+    let context = Context.name ctx.context in
+    let visible_packages =
+      Memo.lazy_ ~name:"library-visible-packages" (fun () ->
+        match owner with
+        | None -> Memo.return (None, None)
+        | Some owner ->
+          let* visible =
+            Dune_load.package_closure_for_context
+              context
+              (Package.Name.Set.singleton owner)
+          and* workspace = Dune_load.packages () in
+          let declared =
+            if include_owner then visible else Package.Name.Set.remove visible owner
+          in
+          let+ visible =
+            if not (Package.Name.Map.mem workspace owner)
+            then Memo.return visible
+            else
+              let+ managed = Pkg_sources.candidates context in
+              List.fold_left managed ~init:visible ~f:(fun visible candidate ->
+                let name = Pkg_sources.Candidate.name candidate in
+                if Package.Name.Map.mem workspace name
+                then visible
+                else Package.Name.Set.add visible name)
+          in
+          ( Some declared
+          , Some
+              (if include_owner then visible else Package.Name.Set.remove visible owner) ))
     in
-    let instrument_with = Context.instrument_with context in
-    let+ make_public_libs =
-      let* active = Pkg_rules.lock_dir_active (Context.name context) in
-      let+ installed_libs =
-        if active
-        then
-          let* paths = Context.default_ocamlpath context in
-          Lib.DB.of_paths context ~paths
-        else Lib.DB.installed context
+    let visible_candidates candidates =
+      let+ _, visible = Memo.Lazy.force visible_packages in
+      List.filter_map candidates ~f:(fun (owner, candidate) ->
+        match owner, visible with
+        | Some owner, Some visible when not (Package.Name.Set.mem visible owner) -> None
+        | _ -> Some candidate)
+    in
+    let resolve_in (public : Public_libs.t) name =
+      Lib_name.Map.find public.by_name name
+      |> Option.value ~default:[]
+      |> visible_candidates
+      >>= Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
+    in
+    let visible_names (public : Public_libs.t) =
+      Lib_name.Map.to_list public.by_name
+      |> Memo.List.filter_map ~f:(fun (name, candidates) ->
+        let+ candidates = visible_candidates candidates in
+        Option.some_if (List.is_non_empty candidates) name)
+    in
+    let partition owner =
+      Memo.exec (Lazy.force partition) (context, owner)
+      >>| function
+      | Some (_, public) -> public
+      | None ->
+        Code_error.raise
+          "Scope.DB.owner_db: no partition"
+          [ "owner", Dyn.option Package.Name.to_dyn owner ]
+    in
+    let visible name =
+      let+ _, visible = Memo.Lazy.force visible_packages in
+      match visible with
+      | None -> true
+      | Some visible -> Package.Name.Set.mem visible name
+    in
+    (* The locked package named like a library, when the requester sees it. A
+       dune package defines only libraries named after it. *)
+    let named name =
+      let package = Lib_name.package_name name in
+      let* visible = visible package in
+      if not visible
+      then Memo.return `None
+      else
+        let* mounted = Pkg_sources.find_mounted context package in
+        match mounted with
+        | None -> Memo.return `None
+        | Some mounted ->
+          (match Pkg_sources.Mounted.kind mounted with
+           | Error _ -> Memo.return `None
+           | Ok `Opam -> Memo.return (`Opaque package)
+           | Ok `Dune ->
+             let* errors = Dune_load.package_errors context package in
+             if List.is_non_empty errors
+             then Memo.return `None
+             else
+               let+ public = partition (Some package) in
+               `Native public)
+    in
+    (* The visible locked packages, by lock metadata. *)
+    let candidate_names () =
+      let+ candidates = Pkg_sources.candidates context
+      and+ _, visible = Memo.Lazy.force visible_packages in
+      List.filter_map candidates ~f:(fun candidate ->
+        let name = Pkg_sources.Candidate.name candidate in
+        match visible with
+        | Some visible when not (Package.Name.Set.mem visible name) -> None
+        | _ -> Some name)
+    in
+    let kinds names =
+      Memo.parallel_map names ~f:(fun name ->
+        let+ mounted = Pkg_sources.find_mounted context name in
+        name, Option.map mounted ~f:Pkg_sources.Mounted.kind)
+    in
+    (* Scanning a package builds it. One that needs the workspace is only
+       scanned for a requester that declares it and that it does not need. *)
+    let opaque names =
+      if List.is_empty names
+      then Memo.return []
+      else
+        let* reverse = Pkg_rules.workspace_dependencies context
+        and* declared, _ = Memo.Lazy.force visible_packages in
+        List.filter names ~f:(fun name ->
+          match Package.Name.Map.find reverse name with
+          | None -> true
+          | Some reached ->
+            (match owner, declared with
+             | Some owner, Some declared ->
+               Package.Name.Set.mem declared name
+               && not (Package.Name.Set.mem reached owner)
+             | None, _ | _, None -> false))
+        |> kinds
+        >>| List.filter_map ~f:(fun (name, kind) ->
+          match kind with
+          | Some (Ok `Opam) -> Some name
+          | Some (Ok `Dune | Error _) | None -> None)
+    in
+    let errors names =
+      kinds names
+      >>= Memo.List.concat_map ~f:(fun (name, kind) ->
+        match kind with
+        | None | Some (Ok `Opam) -> Memo.return []
+        | Some (Error messages) -> Memo.return messages
+        | Some (Ok `Dune) -> Dune_load.package_errors context name)
+      >>| List.map ~f:Lib.DB.Resolve_result.invalid
+    in
+    let search name packages =
+      Memo.parallel_map packages ~f:(fun package ->
+        let* libraries = Memo.exec (Lazy.force opaque_libs) (context, package) in
+        match libraries with
+        | None -> Memo.return None
+        | Some (findlib, db) ->
+          let+ entry = Findlib.find findlib name in
+          (match entry with
+           | Error Not_found -> None
+           | Ok _ | Error (Invalid_dune_package _) ->
+             Some (Lib.DB.Resolve_result.redirect_by_name db (Loc.none, name))))
+      >>| List.filter_opt
+    in
+    let resolve name =
+      let* results = partition None >>= fun public -> resolve_in public name in
+      if List.is_non_empty results
+      then Memo.return results
+      else
+        let* results =
+          named name
+          >>= function
+          | `None -> Memo.return []
+          | `Native public -> resolve_in public name
+          | `Opaque package -> search name [ package ]
+        in
+        if List.is_non_empty results
+        then Memo.return results
+        else
+          let* installed = Lib.DB.available ctx.installed_libs name in
+          if installed
+          then Memo.return []
+          else
+            let* candidates = candidate_names ()
+            and* declared, _ = Memo.Lazy.force visible_packages in
+            let preferred, other =
+              match declared with
+              | None -> candidates, []
+              | Some declared ->
+                List.partition candidates ~f:(Package.Name.Set.mem declared)
+            in
+            let* results = opaque preferred >>= search name in
+            if List.is_non_empty results
+            then Memo.return results
+            else
+              let* failed = errors preferred in
+              if List.is_non_empty failed
+              then Memo.return failed
+              else
+                let* results = opaque other >>= search name in
+                if List.is_non_empty results
+                then Memo.return results
+                else errors candidates
+    in
+    let resolve_lib_id lib_id =
+      let* public = partition None in
+      match Lib_id.Map.find public.by_id lib_id with
+      | Some rt ->
+        let+ results =
+          visible_candidates [ rt ]
+          >>= Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
+        in
+        List.hd_opt results |> Option.value ~default:Lib.DB.Resolve_result.not_found
+      | None ->
+        Memo.return
+          (Lib.DB.Resolve_result.redirect_in_the_same_db (Loc.none, Lib_id.name lib_id))
+    in
+    let all () =
+      let* workspace = partition None >>= visible_names in
+      let+ locked =
+        candidate_names ()
+        >>= kinds
+        >>= Memo.List.concat_map ~f:(fun (name, kind) ->
+          match kind with
+          | None | Some (Error _) -> Memo.return []
+          | Some (Ok `Dune) -> partition (Some name) >>= visible_names
+          | Some (Ok `Opam) ->
+            Memo.exec (Lazy.force opaque_libs) (context, name)
+            >>= (function
+             | None -> Memo.return []
+             | Some (findlib, _) ->
+               Findlib.all_packages findlib >>| List.map ~f:Dune_package.Entry.name))
       in
-      public_libs
-        t
-        ~context:(Context.name context)
-        ~instrument_with
-        ~installed_libs
-        stanzas
-      |> Staged.unstage
+      List.sort_uniq (workspace @ locked) ~compare:Lib_name.compare
     in
-    let public_libs = make_public_libs ~owner:None ~include_owner:true in
-    let package_names =
-      let projects =
-        Path.Build.Map.values projects_by_root
-        |> List.concat_map ~f:(fun project ->
-          Loaded_project.packages project |> Package.Name.Map.keys)
-      in
-      let mounted =
-        List.map mounted ~f:(fun mounted ->
-          Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.name)
-      in
-      List.sort_uniq (projects @ mounted) ~compare:Package.Name.compare
-    in
-    let public_libs_by_package =
-      Package.Name.Map.of_list_map_exn package_names ~f:(fun name ->
-        name, make_public_libs ~owner:(Some name) ~include_owner:true)
-    in
-    let dependency_libs_by_package =
-      Package.Name.Map.of_list_map_exn package_names ~f:(fun name ->
-        name, make_public_libs ~owner:(Some name) ~include_owner:false)
-    in
-    let value =
-      scopes_by_dir
-        ~scopes:t
-        ~package_scopes
-        ~lib_config
-        ~projects_by_root
-        ~public_libs
-        ~public_libs_by_package
-        ~dependency_libs_by_package
-        ~instrument_with
-        context
-        stanzas
-        rocq_stanzas
-    in
-    Fdecl.set t value;
-    value, public_libs
+    Lib.DB.create
+      ()
+      ~parent:(Some ctx.installed_libs)
+      ~resolve
+      ~resolve_lib_id
+      ~all
+      ~instrument_with:ctx.instrument_with
+    |> Lib.DB.with_package_scopes ~package_scopes
   ;;
 
-  let create_from_stanzas ~projects_by_root ~(context : Context_name.t) stanzas =
-    let stanzas, rocq_stanzas =
-      Dune_file.fold_static_stanzas
-        stanzas
-        ~init:([], [])
-        ~f:(fun dune_file stanza (acc, rocq_acc) ->
-          let loaded_dir = Dune_file.loaded_dir dune_file in
-          match Stanza.repr stanza with
-          | Library.T lib ->
-            (loaded_dir, Library_related_stanza.Library lib) :: acc, rocq_acc
-          | Deprecated_library_name.T d ->
-            (loaded_dir, Deprecated_library_name d) :: acc, rocq_acc
-          | Library_redirect.Local.T d ->
-            (loaded_dir, Library_redirect d) :: acc, rocq_acc
-          | Rocq_stanza.Theory.T rocq_lib ->
-            ( acc
-            , (Loaded_dir.project loaded_dir, Loaded_dir.output_dir loaded_dir, rocq_lib)
-              :: rocq_acc )
-          | _ -> acc, rocq_acc)
-    in
-    create ~projects_by_root ~context stanzas rocq_stanzas
+  let partition context owner = Memo.exec (Lazy.force partition) (context, owner)
+
+  let workspace context =
+    partition context None
+    >>| function
+    | Some (scopes, _) -> scopes
+    | None ->
+      Code_error.raise "Scope.DB.workspace" [ "context", Context_name.to_dyn context ]
   ;;
 
-  let all =
-    Per_context.create_by_name ~name:"scope" (fun context ->
-      Memo.Lazy.create ~name:"scope" (fun () ->
-        let* projects_by_root = Dune_load.projects_by_output_root context
-        and* stanzas = Dune_load.dune_files context in
-        create_from_stanzas ~projects_by_root ~context stanzas)
-      |> Memo.Lazy.force)
-    |> Staged.unstage
+  (* The partition holding a build directory: a mount with projects, or the
+     workspace. *)
+  let of_dir context dir =
+    match Pkg_sources.package_of_artifact_path dir with
+    | None -> workspace context
+    | Some package ->
+      partition context (Some package)
+      >>= (function
+       | Some (scopes, _) when not (Path.Build.Map.is_empty scopes.by_dir) ->
+         Memo.return scopes
+       | Some _ | None -> workspace context)
   ;;
-
-  let create_from_stanzas (context : Context_name.t) = all context
 
   let with_all context ~f =
-    let+ scopes, _ = create_from_stanzas (Context.name context) in
+    let+ scopes = workspace (Context.name context) in
     let find = find_by_project scopes in
     f find
   ;;
 
   let public_libs context =
-    let+ _, public_libs = create_from_stanzas context in
-    public_libs
+    let+ scopes = workspace context in
+    let root = Context_name.build_dir context in
+    (Find_closest_source_dir.find_by_dir_exn scopes.by_dir ~dir:root).public_libs
   ;;
 
   let find_by_dir dir =
     let* context = Context.DB.by_dir dir in
-    let+ scopes, _ = create_from_stanzas (Context.name context) in
+    let+ scopes = of_dir (Context.name context) dir in
     find_by_dir scopes dir
   ;;
 
   let find_by_project context project =
-    let+ scopes, _ = create_from_stanzas context in
+    let+ scopes =
+      match Pkg_sources.package_of_dir_in_context (Dune_project.root project) with
+      | None -> workspace context
+      | Some package ->
+        partition context (Some package)
+        >>| (function
+         | Some (scopes, _) -> scopes
+         | None ->
+           Code_error.raise
+             "Scope.DB.find_by_project: package is not mounted"
+             [ "package", Package.Name.to_dyn package ])
+    in
     find_by_project scopes project
   ;;
 
@@ -783,15 +871,40 @@ module DB = struct
       Memo.return scope
     | Some package ->
       let* context = Context.DB.by_dir (root scope) in
-      let+ scopes, _ = create_from_stanzas (Context.name context) in
+      let+ scopes = workspace (Context.name context) in
       Package.Name.Map.find_exn scopes.by_package (Package.name package)
   ;;
 
   let libs_for_package context name =
-    let+ scopes, _ = create_from_stanzas context in
-    match Package.Name.Map.find scopes.by_package name with
-    | Some scope -> Some scope.db
-    | None -> Package.Name.Map.find scopes.public_libs_by_package name
+    let* packages = Dune_load.packages () in
+    if Package.Name.Map.mem packages name
+    then
+      let+ scopes = workspace context in
+      Package.Name.Map.find scopes.by_package name
+      |> Option.map ~f:(fun scope -> scope.db)
+    else
+      let* candidate = Pkg_sources.find_candidate context name in
+      match candidate with
+      | None -> Memo.return None
+      | Some _ ->
+        let* mounted = Pkg_sources.find_mounted context name in
+        (match Option.map mounted ~f:Pkg_sources.Mounted.kind with
+         | Some (Ok `Dune) ->
+           partition context (Some name)
+           >>| (function
+            | Some (scopes, _) ->
+              Package.Name.Map.find scopes.by_package name
+              |> Option.map ~f:(fun scope -> scope.db)
+            | None -> None)
+         | Some (Ok `Opam | Error _) | None ->
+           let* ctx = Context_libs.get context in
+           let+ candidates = Pkg_sources.candidates context in
+           Some
+             (owner_db
+                ctx
+                ~package_scopes:(package_scopes ctx candidates)
+                ~owner:(Some name)
+                ~include_owner:true))
   ;;
 
   module Lib_entry = struct

@@ -12,12 +12,6 @@ end
 
 let load = Dune_load_workspace.load
 
-type loaded =
-  { dune_files : Dune_file.t list
-  ; projects_by_output_root : Loaded_project.t Path.Build.Map.t
-  ; mounted_errors : User_message.t list Package.Name.Map.t
-  }
-
 module Mounted_dune_files =
   Source_tree.Rules.Dir.Make_map_reduce
     (Memo)
@@ -42,6 +36,9 @@ module Partition = struct
     ; dune_file_by_dir = Dune_file_db.make dune_files
     }
   ;;
+
+  let projects_by_output_root t = t.projects_by_output_root
+  let dune_files t = t.dune_files
 end
 
 let load_mount context mounted =
@@ -126,30 +123,6 @@ let mount =
   fun context name -> Memo.exec memo (context, name)
 ;;
 
-let load_mounted context =
-  let* mounted = Pkg_sources.mounted context in
-  Memo.List.map mounted ~f:(fun mounted ->
-    let owner = Pkg_sources.Mounted.candidate mounted |> Pkg_sources.Candidate.name in
-    let+ result =
-      Memo.collect_user_errors (Memo.of_thunk (fun () -> mount context owner))
-    in
-    owner, result)
-  >>| List.fold_left
-        ~init:([], [], Package.Name.Map.empty)
-        ~f:(fun (projects, files, errors) (name, result) ->
-          match result with
-          | Ok None -> projects, files, errors
-          | Ok
-              (Some
-                 { Partition.projects_by_output_root; dune_files; dune_file_by_dir = _ })
-            ->
-            ( Path.Build.Map.values projects_by_output_root @ projects
-            , dune_files @ files
-            , errors )
-          | Error messages ->
-            projects, files, Package.Name.Map.add_exn errors name messages)
-;;
-
 let workspace =
   Per_context.create_by_name ~name:"workspace-loaded-projects" (fun context_name ->
     Memo.lazy_ ~name:"workspace-loaded-projects-for-context" (fun () ->
@@ -189,69 +162,32 @@ let workspace =
   |> Staged.unstage
 ;;
 
-let loaded =
-  let by_context =
-    Per_context.create_by_name ~name:"loaded-projects" (fun context_name ->
-      Memo.lazy_ ~name:"loaded-projects-for-context" (fun () ->
-        let* { Partition.projects_by_output_root; dune_files; dune_file_by_dir = _ } =
-          workspace context_name
-        in
-        let projects = Path.Build.Map.values projects_by_output_root in
-        let* mounted_projects, mounted_files, mounted_errors =
-          load_mounted context_name
-        in
-        let projects = projects @ mounted_projects in
-        let (_ : Package.t Package.Name.Map.t) =
-          List.fold_left projects ~init:Package.Name.Map.empty ~f:(fun packages project ->
-            Package.Name.Map.union
-              packages
-              (Loaded_project.packages project)
-              ~f:(fun name first second ->
-                User_error.raise
-                  [ Pp.textf
-                      "The package %S is defined more than once:"
-                      (Package.Name.to_string name)
-                  ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc first))
-                  ; Pp.textf "- %s" (Loc.to_file_colon_line (Package.loc second))
-                  ]))
-        in
-        let dune_files = dune_files @ mounted_files in
-        let projects_by_output_root =
-          Path.Build.Map.of_list_map_exn projects ~f:(fun project ->
-            Loaded_project.output_root project, project)
-        in
-        Memo.return { dune_files; projects_by_output_root; mounted_errors })
-      |> Memo.Lazy.force)
-    |> Staged.unstage
-  in
-  fun context -> by_context context
-;;
-
-let package_errors context =
-  let+ { mounted_errors; _ } = loaded context in
-  mounted_errors
-;;
-
-let check_package context name =
-  let* { mounted_errors; _ } = loaded context in
-  match Package.Name.Map.find mounted_errors name with
-  | None -> Memo.return ()
-  | Some messages ->
-    Memo.parallel_iter messages ~f:(fun message -> raise (User_error.E message))
+(* The errors of loading a mounted package, for lookups that report them
+   without failing. *)
+let package_errors context name =
+  Memo.collect_user_errors (mount context name)
+  >>| function
+  | Ok _ -> []
+  | Error messages -> messages
 ;;
 
 let projects_by_output_root context =
-  let+ { projects_by_output_root; _ } = loaded context in
+  let+ { Partition.projects_by_output_root; _ } = workspace context in
   projects_by_output_root
 ;;
 
-let packages_for_context context =
-  let* workspace = load () in
-  let+ projects = projects_by_output_root context in
-  Path.Build.Map.fold projects ~init:workspace.packages ~f:(fun project packages ->
-    if Loaded_project.is_workspace project
-    then packages
-    else Package.Name.Map.union_exn packages (Loaded_project.packages project))
+let find_package context name =
+  let* { packages; _ } = load () in
+  match Package.Name.Map.find packages name with
+  | Some _ as package -> Memo.return package
+  | None ->
+    mount context name
+    >>| (function
+     | None -> None
+     | Some { Partition.projects_by_output_root; _ } ->
+       Path.Build.Map.values projects_by_output_root
+       |> List.find_map ~f:(fun project ->
+         Package.Name.Map.find (Loaded_project.packages project) name))
 ;;
 
 let context_of_dir dir =
@@ -316,7 +252,7 @@ let packages () =
 ;;
 
 let package_closure_for_context context names =
-  let* source_packages = packages_for_context context
+  let* source_packages = packages ()
   and* candidates = Pkg_sources.candidates context in
   let+ managed =
     Memo.List.map candidates ~f:(fun candidate ->
@@ -348,8 +284,37 @@ let package_closure_for_context context names =
 ;;
 
 let dune_files context =
-  let+ t = loaded context in
-  t.dune_files
+  let+ { Partition.dune_files; _ } = workspace context in
+  dune_files
+;;
+
+let stanzas_by_package dune_files =
+  Dune_file.fold_static_stanzas
+    dune_files
+    ~init:Package.Name.Map.empty
+    ~f:(fun dune_file stanza acc ->
+      let package =
+        match Stanza.repr stanza with
+        | Deprecated_library_name.T { old_name = old_public_name, _; _ } ->
+          Some (Package.id (Public_lib.package old_public_name))
+        | _ -> Stanzas.stanza_package stanza
+      in
+      match package with
+      | None -> acc
+      | Some package ->
+        Package.Name.Map.add_multi acc (Package.Id.name package) (dune_file, stanza))
+  |> Package.Name.Map.map ~f:List.rev
+;;
+
+let dune_files_of_package context package =
+  let* { packages; _ } = load () in
+  if Package.Name.Map.mem packages package
+  then dune_files context
+  else
+    mount context package
+    >>| function
+    | None -> []
+    | Some { Partition.dune_files; _ } -> dune_files
 ;;
 
 let stanzas_of_package =
@@ -357,27 +322,17 @@ let stanzas_of_package =
     Memo.create
       "stanzas-by-package"
       ~input:(module Context_name)
-      (fun context ->
-         let+ stanzas = dune_files context in
-         Dune_file.fold_static_stanzas
-           stanzas
-           ~init:Package.Name.Map.empty
-           ~f:(fun dune_file stanza acc ->
-             let package =
-               match Stanza.repr stanza with
-               | Deprecated_library_name.T { old_name = old_public_name, _; _ } ->
-                 Some (Package.id (Public_lib.package old_public_name))
-               | _ -> Stanzas.stanza_package stanza
-             in
-             match package with
-             | None -> acc
-             | Some package ->
-               Package.Name.Map.add_multi acc (Package.Id.name package) (dune_file, stanza))
-         |> Package.Name.Map.map ~f:List.rev)
+      (fun context -> dune_files context >>| stanzas_by_package)
   in
   fun context package ->
-    let+ stanzas = Memo.exec memo context in
-    Package.Name.Map.Multi.find stanzas package
+    let* { packages; _ } = load () in
+    if Package.Name.Map.mem packages package
+    then
+      let+ stanzas = Memo.exec memo context in
+      Package.Name.Map.Multi.find stanzas package
+    else
+      let+ dune_files = dune_files_of_package context package in
+      Package.Name.Map.Multi.find (stanzas_by_package dune_files) package
 ;;
 
 let source_tree_root ~dir =

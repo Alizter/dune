@@ -34,6 +34,9 @@ type t =
        but the artifacts database is depended on by the logic which expands
        globs. The computation of this field is deferred to break the cycle. *)
     local_bins : local_bins Memo.Lazy.t
+  ; (* The binaries natively built locked packages install, by the packages a
+       lookup may see. *)
+    native_bins : packages:Package.Name.Selection.t -> Filename.t -> origin list Memo.t
   ; (* The packages whose binaries are visible from the dir: its owning package
        and the dependency closure of that package. Applies to both
        [local_bins] and the lock directory. *)
@@ -76,45 +79,61 @@ let analyze_binary t ~dir name =
           "Artifacts.analyze_binary: unexpected absolute program name"
           [ "name", Dyn.string name ]
     in
+    let packages =
+      Package.Name.Selection.Only
+        (match t.visible_packages with
+         | All -> t.package_deps
+         | Only visible -> Package.Name.Set.union visible t.package_deps)
+    in
     let which () =
       match lookup_name with
       | None -> Memo.return `None
       | Some lookup_name ->
-        let packages =
-          Package.Name.Selection.Only
-            (match t.visible_packages with
-             | All -> t.package_deps
-             | Only visible -> Package.Name.Set.union visible t.package_deps)
-        in
         Context.which_narrowed_to_packages t.context ~packages lookup_name
         >>| (function
          | None -> `None
          | Some path -> `Resolved path)
     in
+    let enabled origins =
+      Memo.parallel_map origins ~f:(fun origin ->
+        origin.enabled_if
+        >>| function
+        | true -> Some origin
+        | false -> None)
+      >>| List.filter_opt
+    in
+    let duplicate x rest =
+      let loc x = File_binding.Unexpanded.loc x.binding in
+      User_error.raise
+        ~loc:(loc x)
+        [ Pp.textf
+            "binary %S is available from more than one definition. It is also available \
+             in:"
+            name
+        ; Pp.enumerate rest ~f:(fun x -> Pp.verbatim (Loc.to_file_colon_line (loc x)))
+        ]
+    in
+    let natives () =
+      match lookup_name with
+      | None -> Memo.return `None
+      | Some lookup_name ->
+        t.native_bins ~packages lookup_name
+        >>= enabled
+        >>= (function
+         | [] -> which ()
+         | [ x ] -> Memo.return (`Origin x)
+         | x :: rest -> duplicate x rest)
+    in
     (match Option.bind lookup_name ~f:(Filename.Map.find local_bins) with
      | Some (Resolved p) -> Memo.return (`Resolved (Path.build p.path))
-     | None -> which ()
+     | None -> natives ()
      | Some (Origin origins) ->
        List.filter origins ~f:(origin_is_visible t)
-       |> Memo.parallel_map ~f:(fun origin ->
-         origin.enabled_if
-         >>| function
-         | true -> Some origin
-         | false -> None)
-       >>| List.filter_opt
+       |> enabled
        >>= (function
-        | [] -> which ()
+        | [] -> natives ()
         | [ x ] -> Memo.return (`Origin x)
-        | x :: rest ->
-          let loc x = File_binding.Unexpanded.loc x.binding in
-          User_error.raise
-            ~loc:(loc x)
-            [ Pp.textf
-                "binary %S is available from more than one definition. It is also \
-                 available in:"
-                name
-            ; Pp.enumerate rest ~f:(fun x -> Pp.verbatim (Loc.to_file_colon_line (loc x)))
-            ]))
+        | x :: rest -> duplicate x rest))
 ;;
 
 let origin_original_path { dir; binding; _ } =
@@ -193,7 +212,8 @@ let add_package_deps t packages =
 
 let create =
   fun (context : Context.t)
-    ~(local_bins : origin Appendable_list.t Filename.Map.t Memo.Lazy.t) ->
+    ~(local_bins : origin Appendable_list.t Filename.Map.t Memo.Lazy.t)
+    ~native_bins ->
   let local_bins =
     Memo.lazy_ ~name:"artifact-local-binaries" (fun () ->
       let+ local_bins = Memo.Lazy.force local_bins in
@@ -204,6 +224,7 @@ let create =
   in
   { context
   ; local_bins
+  ; native_bins
   ; visible_packages = Package.Name.Selection.All
   ; package_deps = Package.Name.Set.empty
   }

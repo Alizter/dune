@@ -641,8 +641,8 @@ end = struct
   let package_entries (sctx, package_name) =
     let context = Super_context.context sctx in
     let ctx = Context.build_context context in
-    let* packages = Dune_load.packages_for_context ctx.name in
-    match Package.Name.Map.find packages package_name with
+    let* package = Dune_load.find_package ctx.name package_name in
+    match package with
     | None -> Memo.return []
     | Some pkg ->
       let+ init =
@@ -1216,9 +1216,7 @@ let () =
         | Some mounted ->
           let* kind = Pkg_sources.Mounted.kind_exn mounted in
           (match kind with
-           | `Dune ->
-             let+ () = Dune_load.check_package context_name package in
-             None
+           | `Dune -> Memo.return None
            | `Opam -> Pkg_rules.dependency context_name package >>| Option.some)
         | None -> Memo.return None
     in
@@ -1240,8 +1238,7 @@ let () =
 
 let packages =
   let f sctx =
-    let context = Super_context.context sctx |> Context.name in
-    let* packages = Dune_load.packages_for_context context in
+    let* packages = Dune_load.packages () in
     let packages = Package.Name.Map.values packages in
     let+ l =
       Memo.parallel_map packages ~f:(fun (pkg : Package.t) ->
@@ -1273,8 +1270,24 @@ let packages_file_is_part_of path =
   | None -> Memo.return Package.Id.Set.empty
   | Some sctx ->
     let open Memo.O in
-    let+ map = packages sctx in
-    Option.value (Path.Build.Map.find map path) ~default:Package.Id.Set.empty
+    (match Pkg_sources.package_of_artifact_path path with
+     | None ->
+       let+ map = packages sctx in
+       Option.value (Path.Build.Map.find map path) ~default:Package.Id.Set.empty
+     | Some name ->
+       (* A file of a mount belongs to its package when the package installs
+          it. *)
+       let context = Super_context.context sctx |> Context.name in
+       let* package = Dune_load.find_package context name in
+       (match package with
+        | None -> Memo.return Package.Id.Set.empty
+        | Some package ->
+          let+ entries = install_entries sctx name in
+          if
+            List.exists entries ~f:(fun (e : Install.Entry.Sourced.Unexpanded.t) ->
+              Path.Build.equal e.entry.src path)
+          then Package.Id.Set.singleton (Package.id package)
+          else Package.Id.Set.empty))
 ;;
 
 let symlinked_entries sctx package =
@@ -1461,21 +1474,23 @@ let gen_package_install_file_rules sctx (package : Package.t) =
     files >>| Path.Set.of_list_map ~f:Path.build >>= Action_builder.path_set
   in
   let* () =
-    let* all_packages = Dune_load.packages_for_context build_context.name in
     let target_alias = package_install ~context:build_context ~pkg:package in
     let open Action_builder.O in
     Rules.Produce.Alias.add_deps
       target_alias
       (Action_builder.dyn_deps
-         (let+ packages = packages
-          and+ () = install_file_deps in
+         (let* packages = packages
+          and* () = install_file_deps in
+          let+ packages =
+            Action_builder.of_memo
+              (let open Memo.O in
+               Package.Id.Set.to_list packages
+               |> Memo.List.map ~f:(fun (pkg : Package.Id.t) ->
+                 Dune_load.find_package build_context.name (Package.Id.name pkg)
+                 >>| Option.value_exn))
+          in
           ( ()
-          , Package.Id.Set.to_list packages
-            |> Dep.Set.of_list_map ~f:(fun (pkg : Package.Id.t) ->
-              let pkg =
-                let name = Package.Id.name pkg in
-                Package.Name.Map.find_exn all_packages name
-              in
+          , Dep.Set.of_list_map packages ~f:(fun pkg ->
               package_install ~context:build_context ~pkg |> Dep.alias) )))
   in
   let action =
@@ -1578,11 +1593,25 @@ let scheme_per_ctx_memo =
     "install-rule-scheme"
     (fun sctx ->
        let context = Super_context.context sctx |> Context.name in
-       Dune_load.packages_for_context context
-       >>| Package.Name.Map.values
-       >>= Memo.parallel_map ~f:(fun pkg -> scheme sctx (Package.name pkg))
-       >>| Scheme.all
-       >>= Scheme.evaluate ~union:Rules.Dir_rules.union)
+       let* workspace = Dune_load.packages () >>| Package.Name.Map.keys
+       and* locked =
+         Pkg_sources.candidates context >>| List.map ~f:Pkg_sources.Candidate.name
+       in
+       let* workspace = Memo.parallel_map workspace ~f:(scheme sctx) in
+       (* A locked package that fails to load is reported where it is
+          demanded, not by the shared install directory. *)
+       let locked =
+         List.map locked ~f:(fun name ->
+           Scheme.Approximation
+             ( Dir_set.subtree (Install.Context.dir ~context)
+             , Thunk
+                 (fun () ->
+                   Dune_load.package_errors context name
+                   >>= function
+                   | [] -> scheme sctx name
+                   | _ :: _ -> Memo.return Scheme.Empty) ))
+       in
+       Scheme.all (workspace @ locked) |> Scheme.evaluate ~union:Rules.Dir_rules.union)
 ;;
 
 let symlink_rules sctx ~dir =

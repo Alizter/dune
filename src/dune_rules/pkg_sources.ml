@@ -517,22 +517,9 @@ let mounted_by_name =
   |> Staged.unstage
 ;;
 
-let mounted context =
-  let* mounted = mounted_by_name context in
-  Package.Name.Map.values mounted |> Memo.parallel_map ~f:Memo.Lazy.force
-;;
-
 let find_mounted context name =
   let* mounted = mounted_by_name context in
   match Package.Name.Map.find mounted name with
   | None -> Memo.return None
   | Some mounted -> Memo.Lazy.force mounted >>| Option.some
-;;
-
-let opaque_names context =
-  let+ mounted = mounted context in
-  List.fold_left mounted ~init:Package.Name.Set.empty ~f:(fun names mounted ->
-    match Mounted.kind mounted with
-    | Ok `Dune | Error _ -> names
-    | Ok `Opam -> Package.Name.Set.add names (Mounted.candidate mounted |> Candidate.name))
 ;;

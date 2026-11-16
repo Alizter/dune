@@ -1,6 +1,5 @@
-Locked packages that nothing asks for should be neither fetched nor loaded, so
-that they cannot fail an unrelated build. Currently every locked package is
-fetched and loaded, and failures are remembered rather than reported.
+Locked packages that nothing asks for are neither fetched nor loaded, so they
+cannot fail an unrelated build.
 
   $ make_lockdir
   $ cat > dune-project <<'EOF'
@@ -42,15 +41,12 @@ project does not load.
   > (build (run false))
   > EOF
 
-The unrelated target builds, but the two packages that can be fetched were
-fetched, and an empty line is printed.
+The unrelated target builds and no package is fetched.
 
-  $ dune build ./x 2>&1 | dune_cmd subst "$PWD" PWD
-  
+  $ dune build ./x
   $ cat _build/default/x
   built
-  $ find _build/_fetch -name dune-project 2>/dev/null | wc -l
-  2
+  $ test ! -d _build/_fetch
 
 Asking for the unfetchable package fails. The error should say what asked for
 the package; currently there is no "required by" chain.
@@ -82,5 +78,4 @@ So does asking for a library of the broken package, again without a chain.
 
 The unrelated target is still unaffected.
 
-  $ dune build ./x 2>&1 | dune_cmd subst "$PWD" PWD
-  
+  $ dune build ./x

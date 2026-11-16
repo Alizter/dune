@@ -46,9 +46,13 @@ val local_binary : t -> dir:Path.Build.t -> string -> (Path.t * Filename.t) opti
 val binary_available : t -> dir:Path.Build.t -> string -> bool Memo.t
 val add_binaries : t -> dir:Path.Build.t -> File_binding.Expanded.t list -> t
 
+(** [local_bins] are the binaries the workspace installs. [native_bins] are
+    those a lookup name has among the natively built locked packages a
+    requester may see; they are loaded by package name, on demand. *)
 val create
   :  Context.t
   -> local_bins:origin Appendable_list.t Filename.Map.t Memo.Lazy.t
+  -> native_bins:(packages:Package.Name.Selection.t -> Filename.t -> origin list Memo.t)
   -> t
 
 (** Restrict [binary] and [binary_available] to the binaries installed by

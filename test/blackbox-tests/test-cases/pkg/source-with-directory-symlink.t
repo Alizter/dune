@@ -37,10 +37,8 @@ The failed copy leaves the original directory and symlink intact:
   link_to_dir
   real_dir
 
-Remove the failing package. Building any package currently prepares the
-sources of all of them (S7 in PLAN.md), so it would fail the cases below.
-
-  $ rm ${default_lock_dir}/foo.pkg
+The failing package stays in the lock directory: building another package
+does not prepare its source.
 
 --------------------------------------------------------------------------------
 

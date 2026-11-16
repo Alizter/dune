@@ -45,9 +45,9 @@ module Mounted : sig
   val kind_exn : t -> [ `Dune | `Opam ] Memo.t
 end
 
-val mounted : Context_name.t -> Mounted.t list Memo.t
+(** A package's mounted source, prepared on demand: [None] when the package
+    is not locked. *)
 val find_mounted : Context_name.t -> Package.Name.t -> Mounted.t option Memo.t
-val opaque_names : Context_name.t -> Package.Name.Set.t Memo.t
 
 (** How a package's source reaches its mount. *)
 module Preparation : sig

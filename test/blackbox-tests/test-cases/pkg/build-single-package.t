@@ -122,9 +122,9 @@ built.
   > fi
   source-rejected-first
 
-Eager rule collection for directory-target discovery traverses unrelated
-package sources. The looping symlink in the external source masks the usual
-directory-target diagnostic. Neither package should be built.
+Rule collection for directory-target discovery does not traverse unrelated
+package sources: the looping symlink in the external source is never seen, and
+the usual diagnostic is reported. Neither package is built.
 
   $ mkdir query-project query-source
   $ ln -s loop query-source/loop
@@ -145,6 +145,6 @@ directory-target diagnostic. Neither package should be built.
   > EOF
   $ target="$(get_build_pkg_dir requested)/_install"
   $ dune describe targets --context _private "$target" 2>&1 | censor
-  Error:
-  stat($PWD/../query-source/loop): Too many levels of symbolic links
+  Error: Directory _build/default/.pkg/requested/_install is not in context
+  "_private".
   $ test ! -d "$target"

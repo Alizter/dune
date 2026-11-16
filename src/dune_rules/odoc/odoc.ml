@@ -686,7 +686,7 @@ end
 
 let setup_toplevel_index_rule sctx output =
   let ctx = Super_context.context sctx in
-  let* packages = Dune_load.packages_for_context (Context.name ctx) in
+  let* packages = Dune_load.packages () in
   let index = Toplevel_index.of_packages packages output in
   let content = Toplevel_index.content output index in
   let path = Output_format.toplevel_index_path output ctx in
@@ -1201,8 +1201,8 @@ let has_rules ?(directory_targets = Path.Build.Map.empty) m =
 let with_package sctx pkg ~f =
   let pkg = Package.Name.of_string pkg in
   let context = Super_context.context sctx |> Context.name in
-  let* packages = Dune_load.packages_for_context context in
-  match Package.Name.Map.find packages pkg with
+  Dune_load.find_package context pkg
+  >>= function
   | Some pkg -> has_rules (f pkg)
   | None -> Memo.return Gen_rules.no_rules
 ;;
@@ -1221,7 +1221,7 @@ let gen_rules sctx ~dir rest =
        >>> setup_toplevel_index_rule sctx Json)
   | [ "_markdown" ] ->
     let ctx = Super_context.context sctx in
-    let* packages = Dune_load.packages_for_context (Context.name ctx) in
+    let* packages = Dune_load.packages () in
     let all_package_dirs =
       Package.Name.Map.to_list packages
       |> List.map ~f:(fun (_, (pkg : Package.t)) ->
@@ -1302,10 +1302,9 @@ let gen_rules sctx ~dir rest =
              setup_pkg_rules sctx ~pkg:(Package.name pkg) ~for_)
        and+ () =
          let ctx = Super_context.context sctx in
-         let* packages = Dune_load.packages_for_context (Context.name ctx) in
          Package.Name.of_string lib_unique_name_or_pkg
-         |> Package.Name.Map.find packages
-         |> Memo.Option.iter ~f:(fun pkg ->
+         |> Dune_load.find_package (Context.name ctx)
+         >>= Memo.Option.iter ~f:(fun pkg ->
            let pkg = Package.name pkg in
            setup_pkg_rules sctx ~pkg ~for_)
        in

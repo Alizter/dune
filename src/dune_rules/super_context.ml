@@ -240,13 +240,11 @@ let resolve_program_memo t ~dir ?where ?hint ~loc bin =
 let resolve_command_line_program t ~dir bin =
   let context = Context.name t.context in
   let* artifacts = artifacts_host t ~dir
-  and* opaque =
-    Lock_dir.lock_dir_active context
-    >>= function
-    | false -> Memo.return Package.Name.Set.empty
-    | true -> Pkg_sources.opaque_names context
+  and* locked =
+    Pkg_sources.candidates context
+    >>| Package.Name.Set.of_list_map ~f:Pkg_sources.Candidate.name
   in
-  Artifacts.binary (Artifacts.add_package_deps artifacts opaque) ~dir ~loc:None bin
+  Artifacts.binary (Artifacts.add_package_deps artifacts locked) ~dir ~loc:None bin
 ;;
 
 let resolve_program t ~dir ?where ?hint ~loc bin =
