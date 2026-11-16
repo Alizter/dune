@@ -284,8 +284,7 @@ relative to the workspace; the mounted filename is the build path.
 
 The dune-package of a natively built locked package records, under
 --store-orig-source-dir, the directory each library was built from
-(dune-package.t). The mounted library's directory is its build directory; the
-recorded path names a workspace directory that does not exist.
+(dune-package.t). The mounted library's directory is its build directory.
 
   $ cat >> _source/dune <<'EOF'
   > (library (public_name foo))
@@ -294,10 +293,10 @@ recorded path names a workspace directory that does not exist.
   $ dune build --store-orig-source-dir $mount/foo.dune-package 2>&1
   $ grep -A1 orig_src_dir $mount/foo.dune-package
    (orig_src_dir
-    $TESTCASE_ROOT/.pkg/foo)
+    $TESTCASE_ROOT/_build/default/.pkg/foo)
   --
    (orig_src_dir
-    $TESTCASE_ROOT/.pkg/foo/stubs)
+    $TESTCASE_ROOT/_build/default/.pkg/foo/stubs)
 
 A compilation error in the package. The location is relative to the context
 directory, so it does not name a file under the workspace root.
