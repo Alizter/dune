@@ -575,6 +575,12 @@ let display ~root ~display_root dir =
 
 let display_path t dir = display ~root:t.root ~display_root:t.display_root dir
 
+let name_hum t =
+  match Dune_project_name.name t.name with
+  | Some name -> name
+  | None -> sprintf "<anonymous %s>" (Path.to_string_maybe_quoted t.display_root)
+;;
+
 let make_exclusive_dir_packages ~root ~display_root packages =
   match
     Package.Name.Map.values packages

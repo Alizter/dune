@@ -17,6 +17,11 @@ val to_dyn : t -> Dyn.t
 val packages : t -> Package.t Package.Name.Map.t
 val exclusive_package : t -> dir:Path.Local.t -> Package_id.t option
 val name : t -> Dune_project_name.t
+
+(** The project's name for messages. A project without a name is named by its
+    directory, where [display_path] places it. *)
+val name_hum : t -> string
+
 val version : t -> Package_version.t option
 
 (** The project's directory relative to the root of a build context. Whether
