@@ -11,3 +11,7 @@
   (package stdune)
   (package top-closure)
   (package xdg)))
+
+(cram
+ (applies_to mounted-source-preparation.t)
+ (setup_scripts ../../pkg/helpers.sh))
