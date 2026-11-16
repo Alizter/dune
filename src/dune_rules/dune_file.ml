@@ -469,10 +469,11 @@ module Eval = struct
               Pp.textf
                 "dynamic_include %s in directory %s"
                 (Include_stanza.file_path include_context loc include_file
-                 |> Path.build
-                 |> Path.drop_optional_build_context
+                 |> Pkg_sources.source_location
                  |> Path.to_string_maybe_quoted)
-                (Path.Local.to_string_maybe_quoted (eval_source_path eval)))
+                (Loaded_project.output_path eval.loaded_project (eval_source_path eval)
+                 |> Pkg_sources.source_location
+                 |> Path.to_string_maybe_quoted))
             (fun () ->
                let* ast, include_context =
                  Include_stanza.load_sexps ~context:include_context (loc, include_file)

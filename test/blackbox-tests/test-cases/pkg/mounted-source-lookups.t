@@ -184,16 +184,19 @@ mounted messages name the mounted directory's build path.
 
 A cycle between dynamic includes. The workspace frames name workspace
 directories (stanzas/dynamic-include-stanza/cycle.t); the mounted frames name
-a workspace directory that does not exist instead of the build path.
+the build paths.
 
   $ mkdir -p _source/cyc/a _source/cyc/b
   $ echo '(dynamic_include ../b/dune)' > _source/cyc/a/dune
   $ echo '(dynamic_include ../a/dune)' > _source/cyc/b/dune
   $ dune build @$mount/cyc/a/default 2>&1
   Error: Dependency cycle between:
-     dynamic_include .pkg/foo/cyc/b/dune in directory .pkg/foo/cyc/a
-  -> dynamic_include .pkg/foo/cyc/a/dune in directory .pkg/foo/cyc/b
-  -> dynamic_include .pkg/foo/cyc/b/dune in directory .pkg/foo/cyc/a
+     dynamic_include _build/default/.pkg/foo/cyc/b/dune in directory
+     _build/default/.pkg/foo/cyc/a
+  -> dynamic_include _build/default/.pkg/foo/cyc/a/dune in directory
+     _build/default/.pkg/foo/cyc/b
+  -> dynamic_include _build/default/.pkg/foo/cyc/b/dune in directory
+     _build/default/.pkg/foo/cyc/a
   [1]
 
 A compilation error in the package. The location is relative to the context
