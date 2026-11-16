@@ -27,13 +27,11 @@ directory is its build directory, and a mount is never promoted into.
   > EOF
   $ mount=_build/default/.pkg/foo
 
-The mounted file is written in the build directory only. Its second -R entry
-is computed from a workspace directory that does not exist, so it does not
-point at the theory.
+The mounted file is written in the build directory only, which is also the
+theory's source directory, so one entry suffices.
 
   $ dune build $mount/thy/_RocqProject 2>&1 && grep -E '^-[RQ] .* a$' $mount/thy/_RocqProject
   -R . a
-  -R ../../../_build/default/.pkg/foo/thy a
   $ test ! -e _source/thy/_RocqProject
 
 The workspace file is promoted next to the sources and names the build
