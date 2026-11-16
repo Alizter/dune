@@ -110,14 +110,14 @@ paths stay relative to the workspace
   can be defined using the (foreign_library ...) stanza.
   [1]
 
-BUG: the mounted diagnostic currently drops the build context, so these paths
-cannot be opened from the workspace root.
+Mounted diagnostics retain the build context, so the conflicting files can be
+opened from the workspace root.
 
   $ dune build $mount/stubs/stubs.cma
   File "_build/default/.pkg/foo/stubs/dune", line 7, characters 9-13:
   Error: Multiple sources map to the same object name "stub":
-  - .pkg/foo/stubs/stub.c
-  - .pkg/foo/stubs/sub/stub.c
+  - _build/default/.pkg/foo/stubs/stub.c
+  - _build/default/.pkg/foo/stubs/sub/stub.c
   This is not allowed; please rename them or remove "stub" from object names.
   Hint: You can also avoid the name clash by placing the objects into different
   foreign archives and building them in different directories. Foreign archives
