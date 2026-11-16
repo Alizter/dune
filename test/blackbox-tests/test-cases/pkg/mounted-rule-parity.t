@@ -218,8 +218,8 @@ workspace behaviour is covered by stanzas/copy_files/test6.t.
   generated
 
 Copy-with-line-directive actions and globs retain workspace source locations,
-including when sandboxed. Mounted copies currently drop the build context too,
-leaving paths that cannot be opened from the workspace root.
+including when sandboxed. Mounted copies name the original file through its
+mount, without leaking a sandbox path.
 
   $ mkdir -p _source/line-directives/input
   $ echo 'let value = 42' > _source/line-directives/input/value.ml
@@ -258,13 +258,13 @@ leaving paths that cannot be opened from the workspace root.
   $ for file in copied.ml value.ml copied.c value.c; do
   >   cat _build/default/.pkg/foo/line-directives/$file
   > done
-  # 1 ".pkg/foo/line-directives/input/value.ml"
+  # 1 "_build/default/.pkg/foo/line-directives/input/value.ml"
   let value = 42
-  # 1 ".pkg/foo/line-directives/input/value.ml"
+  # 1 "_build/default/.pkg/foo/line-directives/input/value.ml"
   let value = 42
-  #line 1 ".pkg/foo/line-directives/input/value.c"
+  #line 1 "_build/default/.pkg/foo/line-directives/input/value.c"
   int value = 42;
-  #line 1 ".pkg/foo/line-directives/input/value.c"
+  #line 1 "_build/default/.pkg/foo/line-directives/input/value.c"
   int value = 42;
   $ dune trace cat | jq -s '
   >   any(.[]; .cat == "sandbox" and .name == "create"
@@ -276,8 +276,8 @@ leaving paths that cannot be opened from the workspace root.
   $ for file in value.ml value.c; do
   >   grep '^#' _build/default/.pkg/foo/line-directives/$file
   > done
-  # 1 ".pkg/foo/line-directives/input/value.ml"
-  #line 1 ".pkg/foo/line-directives/input/value.c"
+  # 1 "_build/default/.pkg/foo/line-directives/input/value.ml"
+  #line 1 "_build/default/.pkg/foo/line-directives/input/value.c"
 
 Only-sources globs exclude generated inputs and remove stale copied targets.
 Adding a source file updates the glob.
