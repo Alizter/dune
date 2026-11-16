@@ -1,16 +1,24 @@
 open Import
 open Memo.O
 
+module Mount = struct
+  type t =
+    { logical_root : Path.Build.t
+    ; backing_root : Path.Build.t
+    }
+end
+
 module File = struct
   type t =
     | Workspace of Path.Source.t
     | Mounted of
-        { logical : Path.Build.t
+        { mount : Mount.t
+        ; logical : Path.Build.t
         ; backing : Path.Build.t
         }
 
   let workspace path = Workspace path
-  let mounted ~logical ~backing = Mounted { logical; backing }
+  let mounted ~mount ~logical ~backing = Mounted { mount; logical; backing }
 
   let source_path = function
     | Workspace path -> Path.Source.to_local path
@@ -34,9 +42,10 @@ module File = struct
 
   let parent_exn = function
     | Workspace file -> Workspace (Path.Source.parent_exn file)
-    | Mounted { logical; backing } ->
+    | Mounted { mount; logical; backing } ->
       Mounted
-        { logical = Path.Build.parent_exn logical
+        { mount
+        ; logical = Path.Build.parent_exn logical
         ; backing = Path.Build.parent_exn backing
         }
   ;;
@@ -44,9 +53,19 @@ module File = struct
   let relative t loc path =
     match t with
     | Workspace dir -> Workspace (Path.Source.relative ~error_loc:loc dir path)
-    | Mounted { logical; backing } ->
-      let relative dir = Path.Build.relative ~error_loc:loc dir path in
-      Mounted { logical = relative logical; backing = relative backing }
+    | Mounted { mount; logical; backing } ->
+      let { Mount.logical_root; backing_root } = mount in
+      let logical = Path.Build.relative ~error_loc:loc logical path in
+      let backing = Path.Build.relative ~error_loc:loc backing path in
+      if
+        not
+          (Path.Build.is_descendant logical ~of_:logical_root
+           && Path.Build.is_descendant backing ~of_:backing_root)
+      then
+        User_error.raise
+          ~loc
+          [ Pp.textf "Included path %S is outside the mounted source tree." path ];
+      Mounted { mount; logical; backing }
   ;;
 
   let exists = function
@@ -100,8 +119,9 @@ module Dir = struct
   let file t filename =
     match t with
     | Workspace path -> Path.Source.relative_fname path filename |> File.workspace
-    | Mounted { logical; backing } ->
+    | Mounted { mount; logical; backing } ->
       File.mounted
+        ~mount
         ~logical:(Path.Build.relative_fname logical filename)
         ~backing:(Path.Build.relative_fname backing filename)
   ;;

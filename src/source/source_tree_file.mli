@@ -3,13 +3,20 @@ open Import
 (** Source files and directories as seen by source loading. A workspace file is
     read from the workspace. A mounted file has a logical path, used for source
     semantics and diagnostics, and is read from a backing path in the build
-    directory. *)
+    directory. Relative includes must stay within both roots of their mount. *)
+
+module Mount : sig
+  type t =
+    { logical_root : Path.Build.t
+    ; backing_root : Path.Build.t
+    }
+end
 
 module File : sig
   type t
 
   val workspace : Path.Source.t -> t
-  val mounted : logical:Path.Build.t -> backing:Path.Build.t -> t
+  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Path.Build.t -> t
   val source_path : t -> Path.Local.t
 
   (** The logical path used by source semantics and diagnostics. *)
@@ -32,7 +39,7 @@ module Dir : sig
   type t
 
   val workspace : Path.Source.t -> t
-  val mounted : logical:Path.Build.t -> backing:Path.Build.t -> t
+  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Path.Build.t -> t
   val basename : t -> Filename.t
   val file : t -> Filename.t -> File.t
 end

@@ -496,7 +496,8 @@ module Rules = struct
 
   module Dir = struct
     type loaded =
-      { logical_path : Path.Build.t
+      { mount : Source_tree_file.Mount.t
+      ; logical_path : Path.Build.t
       ; backing_path : Path.Build.t
       ; status : Source_dir_status.t
       ; files : Filename.Array.Set.t
@@ -539,8 +540,9 @@ module Rules = struct
       match t with
       | Source dir ->
         Path.Source.append_local (Workspace_dir.path dir) local |> File.workspace
-      | Mounted { logical_path; backing_path; _ } ->
+      | Mounted { mount; logical_path; backing_path; _ } ->
         File.mounted
+          ~mount
           ~logical:(Path.Build.append_local logical_path local)
           ~backing:(Path.Build.append_local backing_path local)
     ;;
@@ -630,6 +632,7 @@ module Rules = struct
     let projects t = t.projects
 
     let load ~logical_root ~backing_root =
+      let mount = { Source_tree_file.Mount.logical_root; backing_root } in
       let rec traverse
                 ~logical_path
                 ~backing_path
@@ -653,6 +656,7 @@ module Rules = struct
                 match Path.Local.descendant path ~of_:source_path with
                 | Some local ->
                   Source_tree_file.File.mounted
+                    ~mount
                     ~logical:(Path.Build.append_local logical_path local)
                     ~backing:(Path.Build.append_local backing_path local)
                   |> Source_tree_file.File.read
@@ -685,7 +689,10 @@ module Rules = struct
         let* dune_file =
           Dune_file.load
             ~dir:
-              (Source_tree_file.Dir.mounted ~logical:logical_path ~backing:backing_path)
+              (Source_tree_file.Dir.mounted
+                 ~mount
+                 ~logical:logical_path
+                 ~backing:backing_path)
             status
             project
             ~files
@@ -744,7 +751,8 @@ module Rules = struct
         in
         let projects = List.concat_map children ~f:(fun (_, _, children) -> children) in
         let dir =
-          { Dir.logical_path
+          { Dir.mount
+          ; logical_path
           ; backing_path
           ; status
           ; files = visible_files

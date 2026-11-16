@@ -513,7 +513,12 @@ module Eval = struct
             Path.Local.relative_fname (eval_source_path eval) Source.Dune_file.fname
           in
           let origin = Loaded_project.output_path eval.loaded_project source_file in
-          let include_context = Include_stanza.in_build_file origin in
+          let root =
+            if Loaded_project.is_workspace eval.loaded_project
+            then None
+            else Some (Loaded_project.partition_root eval.loaded_project)
+          in
+          let include_context = Include_stanza.in_build_file origin ~root in
           collect_dynamic eval ~registry ~context include_context dynamic
         in
         List.iter stanzas ~f:check_dynamic_stanza;
