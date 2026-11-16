@@ -464,13 +464,18 @@ The mounted project receives the same treatment, with no warnings or alerts.
   $ dune build "$mounted/alert/alert.cma"
   $ dune build "$mounted/modules/modules.cma"
 
-Older projects use a different set of default development warning flags, but
-should still receive the vendored override when mounted.
+Older projects use a different set of default development warning flags. The
+workspace still rejects the warning; the mounted project still receives the
+vendored override.
 
   $ cat > _source/dune-project <<'EOF'
   > (lang dune 3.20)
   > (package (name dep))
   > EOF
+  $ (cd _source && dune build --root . warning/warning.cma) 2>workspace-warning-old
+  [1]
+  $ grep '^Error' workspace-warning-old
+  Error (warning 26 [unused-var]): unused variable unused.
   $ dune build "$mounted/warning/warning.cma"
   $ cat > _source/dune-project <<'EOF'
   > (lang dune 3.25)
