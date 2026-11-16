@@ -81,6 +81,51 @@ Foreign stubs with an include directory in the source.
   > EOF
   $ dune build $mount/stubs/stubs.cma 2>&1
 
+Duplicate foreign-object diagnostics list every conflicting source. Workspace
+paths stay relative to the workspace
+(foreign-stubs/duplicate-c-cxx-obj/same-stanza.t).
+
+  $ mkdir _source/stubs/sub
+  $ cp _source/stubs/stub.c _source/stubs/sub/stub.c
+  $ cat > _source/stubs/dune <<'EOF'
+  > (include_subdirs unqualified)
+  > (library
+  >  (public_name foo.stubs)
+  >  (name stubs)
+  >  (foreign_stubs
+  >   (language c)
+  >   (names stub)
+  >   (include_dirs inc)))
+  > EOF
+  $ (cd _source && dune build --root . stubs/stubs.cma)
+  File "stubs/dune", line 7, characters 9-13:
+  7 |   (names stub)
+               ^^^^
+  Error: Multiple sources map to the same object name "stub":
+  - stubs/stub.c
+  - stubs/sub/stub.c
+  This is not allowed; please rename them or remove "stub" from object names.
+  Hint: You can also avoid the name clash by placing the objects into different
+  foreign archives and building them in different directories. Foreign archives
+  can be defined using the (foreign_library ...) stanza.
+  [1]
+
+BUG: the mounted diagnostic currently drops the build context, so these paths
+cannot be opened from the workspace root.
+
+  $ dune build $mount/stubs/stubs.cma
+  File "_build/default/.pkg/foo/stubs/dune", line 7, characters 9-13:
+  Error: Multiple sources map to the same object name "stub":
+  - .pkg/foo/stubs/stub.c
+  - .pkg/foo/stubs/sub/stub.c
+  This is not allowed; please rename them or remove "stub" from object names.
+  Hint: You can also avoid the name clash by placing the objects into different
+  foreign archives and building them in different directories. Foreign archives
+  can be defined using the (foreign_library ...) stanza.
+  [1]
+  $ rm _source/stubs/sub/stub.c
+  $ dune build $mount/stubs/stubs.cma
+
 An install destination that escapes the package. A workspace project gets a
 deprecation warning (stanzas/install/start-install-dst-with-parent-error.t);
 for a mounted package it is an error.
