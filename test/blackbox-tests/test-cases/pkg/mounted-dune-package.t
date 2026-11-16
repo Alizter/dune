@@ -258,6 +258,17 @@ Editing the source invalidates the generated file and its consumer.
   $ _build/default/main.exe
   updated library file
 
+The package's generated metadata lists the sub-library, which lives in a
+subdirectory and is only known by its local name there. A findlib consumer of
+the installed package, such as the nested dune of dune's own bootstrap rule,
+reads it from this file.
+
+  $ dune build _build/default/.pkg/foo/foo.dune-package _build/default/.pkg/foo/META.foo
+  $ grep '^ (name foo' _build/default/.pkg/foo/foo.dune-package
+   (name foo)
+  $ grep 'package "support"' _build/default/.pkg/foo/META.foo
+  [1]
+
 Library-file pforms name installed files, which need not have the same name or
 location in the source tree.
 
