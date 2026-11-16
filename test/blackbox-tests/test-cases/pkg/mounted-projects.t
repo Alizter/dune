@@ -252,3 +252,88 @@ Without the vendored package the library builds.
   $ rm -r _bundle/vendor
   $ echo '(library (public_name bundle))' > _bundle/dune
   $ dune build _build/default/.pkg/bundle/bundle.cma
+
+A disabled package in a vendored project must not leave a missing package scope.
+Start with the package enabled: private libraries can be looked up from both
+its exclusive directory and an unscoped directory in the same project.
+
+  $ mkdir -p _bundle/vendor/d
+  $ cat > _bundle/dune <<'EOF'
+  > (vendored_dirs vendor)
+  > (library (public_name bundle))
+  > EOF
+  $ cat > _bundle/vendor/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (using unreleased 0.1)
+  > (package
+  >  (name disabled)
+  >  (dir d)
+  >  (allow_empty)
+  >  (enabled_if true))
+  > EOF
+  $ cat > _bundle/vendor/d/dune <<'EOF'
+  > (library (name scoped))
+  > (rule
+  >  (target available)
+  >  (action (with-stdout-to %{target} (echo %{lib-available:scoped}))))
+  > EOF
+  $ echo 'let value = 1' > _bundle/vendor/d/scoped.ml
+  $ cat > _bundle/vendor/dune <<'EOF'
+  > (library (name helper) (modules helper))
+  > (executable (name use) (modules use) (libraries helper))
+  > (rule
+  >  (target available)
+  >  (action
+  >   (with-stdout-to %{target}
+  >    (echo "%{lib-available:helper}/%{lib-available:scoped}"))))
+  > EOF
+  $ echo 'let value = 42' > _bundle/vendor/helper.ml
+  $ echo 'let () = Printf.printf "%d\n" Helper.value' > _bundle/vendor/use.ml
+  $ (cd _bundle && make_lockdir && dune build --root . \
+  >   vendor/d/scoped.cma vendor/use.exe vendor/d/available vendor/available)
+  $ _bundle/_build/default/vendor/use.exe
+  42
+  $ cat _bundle/_build/default/vendor/d/available
+  true
+  $ cat _bundle/_build/default/vendor/available
+  true/true
+
+Disabling the package hides its directory without affecting private libraries
+outside it. A lookup of the scoped library must still complete without a missing
+package scope; its availability result is not the property tested here.
+
+  $ cat > _bundle/vendor/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (using unreleased 0.1)
+  > (package
+  >  (name disabled)
+  >  (dir d)
+  >  (allow_empty)
+  >  (enabled_if false))
+  > EOF
+  $ cat >> _bundle/vendor/dune <<'EOF'
+  > (rule
+  >  (target disabled-query)
+  >  (action (with-stdout-to %{target} (echo %{lib-available:scoped}))))
+  > EOF
+  $ echo 'let value = 43' > _bundle/vendor/helper.ml
+  $ (cd _bundle && dune build --root . vendor/use.exe vendor/disabled-query)
+  $ _bundle/_build/default/vendor/use.exe
+  43
+  $ test -f _bundle/_build/default/vendor/disabled-query
+  $ (cd _bundle && dune build --root . vendor/d/available)
+  Error: Don't know how to build vendor/d/available
+  [1]
+
+Mounting the same tree uses the locked package's scope, not the disabled
+vendored package's scope, and retains the private library outside that package.
+
+  $ mount=_build/default/.pkg/bundle
+  $ dune build $mount/bundle.cma $mount/vendor/use.exe \
+  >   $mount/vendor/disabled-query
+  $ $mount/vendor/use.exe
+  43
+  $ test -f $mount/vendor/disabled-query
+  $ dune build $mount/vendor/d/available
+  Error: Don't know how to build _build/default/.pkg/bundle/vendor/d/available
+  [1]
