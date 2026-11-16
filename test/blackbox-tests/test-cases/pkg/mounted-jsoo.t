@@ -68,3 +68,13 @@ One JS executable uses each.
   $ dune build opaque.bc.js
   $ node _build/default/opaque.bc.js
   7
+
+Editing only the mounted library's JavaScript source re-links its consumer.
+
+  $ cat > _foo/foo_runtime.js <<'EOF2'
+  > //Provides: foo_prim
+  > function foo_prim(unit) { return 84; }
+  > EOF2
+  $ dune build mounted.bc.js
+  $ node _build/default/mounted.bc.js
+  84
