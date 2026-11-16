@@ -144,9 +144,8 @@ for a mounted package it is an error.
   [1]
 
 An alias dependency on an alias that is not defined, and on a directory that
-does not exist. The workspace messages name the workspace directory. The
-mounted messages name a workspace directory that does not exist instead of
-the mounted directory's build path.
+does not exist. The workspace messages name the workspace directory; the
+mounted messages name the mounted directory's build path.
 
   $ mkdir _source/aliases
   $ cat > _source/aliases/dune <<'EOF'
@@ -175,11 +174,12 @@ the mounted directory's build path.
   $ dune build $mount/aliases/not-defined 2>&1
   File "_build/default/.pkg/foo/aliases/dune", line 3, characters 18-25:
   Error: This alias is empty.
-  Alias "nothing" is not defined in .pkg/foo/aliases or any of its descendants.
+  Alias "nothing" is not defined in _build/default/.pkg/foo/aliases or any of
+  its descendants.
   [1]
   $ dune build $mount/aliases/no-directory 2>&1
   File "_build/default/.pkg/foo/aliases/dune", line 7, characters 18-33:
-  Error: Don't know about directory .pkg/foo/aliases/nowhere!
+  Error: Don't know about directory _build/default/.pkg/foo/aliases/nowhere!
   [1]
 
 A compilation error in the package. The location is relative to the context

@@ -62,7 +62,7 @@ let include_action_env = function
 ;;
 
 let dep_on_alias_rec alias ~loc =
-  let src_dir = Path.Build.drop_build_context_exn (Alias.dir alias) in
+  let src_dir = Pkg_sources.source_location (Alias.dir alias) in
   Action_builder.of_memo (Dune_load.source_tree_dir ~dir:(Alias.dir alias))
   >>= function
   | None ->
@@ -73,7 +73,7 @@ let dep_on_alias_rec alias ~loc =
               ~loc
               [ Pp.textf
                   "Don't know about directory %s!"
-                  (Path.Source.to_string_maybe_quoted src_dir)
+                  (Path.to_string_maybe_quoted src_dir)
               ])
       }
   | Some _ ->
@@ -90,7 +90,7 @@ let dep_on_alias_rec alias ~loc =
            ; Pp.textf
                "Alias %S is not defined in %s or any of its descendants."
                (Alias.Name.to_string name)
-               (Path.Source.to_string_maybe_quoted src_dir)
+               (Path.to_string_maybe_quoted src_dir)
            ])
 ;;
 
