@@ -1258,9 +1258,12 @@ module Action_expander = struct
     in
     let artifacts =
       List.concat_map dependencies ~f:Dependency.binaries
-      |> Filename.Map.of_list_map_exn ~f:(fun path ->
-        ( Filename.of_string_exn (Bin.strip_exe (Filename.to_string (Path.basename path)))
-        , path ))
+      |> List.fold_left ~init:Filename.Map.empty ~f:(fun acc path ->
+        Filename.Map.set
+          acc
+          (Filename.of_string_exn
+             (Bin.strip_exe (Filename.to_string (Path.basename path))))
+          path)
     in
     { Expander.name = paths.name
     ; paths
