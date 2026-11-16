@@ -156,3 +156,9 @@
 (cram
  (applies_to mounted-menhir-fallback.t)
  (deps %{bin:menhir}))
+
+(cram
+ (applies_to mounted-rocqproject.t)
+ (deps %{bin:rocq})
+ (enabled_if
+  (= %{env:DUNE_ROCQ_TEST=disable} enable)))
