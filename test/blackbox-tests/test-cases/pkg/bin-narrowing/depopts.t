@@ -6,55 +6,57 @@ The narrowing walks the owning package's [(depends ...)] and [(depopts ...)]
 fields. Rule guarded by [%{bin-available:...}] should run correctly when the
 package providing the binary is listed in either of the fields.
 
-  $ make_lockdir
+The provider is a Dune project installing [opt-tool], built natively or by an
+opaque recipe. Each requester checks the binary and runs the guarded rule.
 
-  $ make_lockpkg optional-tool <<'EOF'
-  > (version 0.0.1)
-  > (build
-  >  (progn
-  >   (system "\| cat > opt-tool <<'EOI'
-  >           "\| #!/bin/sh
-  >           "\| echo from optional-tool
-  >           "\| EOI
-  >   )
-  >   (system "chmod +x opt-tool")
-  >   (system "echo 'bin: [ \"opt-tool\" ]' > optional-tool.install")
-  >  ))
+  $ mkdir -p _tool native opaque
+  $ cat > _tool/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name optional-tool))
   > EOF
-
-  $ cat >dune <<'EOF'
+  $ echo '(install (section bin) (files opt-tool))' > _tool/dune
+  $ printf '#!/bin/sh\necho from optional-tool\n' > _tool/opt-tool
+  $ chmod +x _tool/opt-tool
+  $ make_backend_lockdirs optional-tool "$PWD/_tool"
+  $ for backend in native opaque; do
+  >   cat > $backend/dune <<'EOF'
   > (rule
   >  (with-stdout-to avail (echo %{bin-available:opt-tool})))
   > (rule
   >  (enabled_if %{bin-available:opt-tool})
   >  (action (with-stdout-to out (run %{bin:opt-tool}))))
   > EOF
+  > done
+  $ check() (
+  >   cd "$1"
+  >   make_dune_project 3.25
+  >   printf '(package (name mypkg) (allow_empty) (dir .) (%s optional-tool))\n' \
+  >     "$2" >> dune-project
+  >   dune clean
+  >   dune build @all
+  >   echo "$(cat _build/default/avail)"
+  >   cat _build/default/out
+  > )
 
 Declared as a hard dependency, the binary is available and the guarded rule
 runs:
 
-  $ make_dune_project 3.25
-  $ cat >>dune-project <<'EOF'
-  > (package (name mypkg) (allow_empty) (dir .) (depends optional-tool))
-  > EOF
-
-  $ dune build @all
-  $ cat _build/default/avail
+  $ check native depends
   true
-  $ cat _build/default/out
   from optional-tool
+  $ check opaque depends
+  true
+  from optional-tool
+  $ cat opaque/$pkg_root/optional-tool/_install/opaque-recipe
+  opaque
+  $ test ! -e native/$pkg_root/optional-tool/_install/opaque-recipe
 
 Moving the same package to [(depopts ...)], with the lock directory unchanged,
 makes no difference:
 
-  $ make_dune_project 3.25
-  $ cat >>dune-project <<'EOF'
-  > (package (name mypkg) (allow_empty) (dir .) (depopts optional-tool))
-  > EOF
-
-  $ dune clean
-  $ dune build @all
-  $ cat _build/default/avail
+  $ check native depopts
   true
-  $ cat _build/default/out
+  from optional-tool
+  $ check opaque depopts
+  true
   from optional-tool
