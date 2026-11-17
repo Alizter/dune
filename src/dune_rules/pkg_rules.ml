@@ -1321,7 +1321,7 @@ module Action_expander = struct
 
   (* Expanding a package's variables does not read [env]; only [withenv]
      and the recipe's own environment do. *)
-  let expander_with_env context (pkg : Pkg.t) ~env =
+  let expander context (pkg : Pkg.t) ~env =
     let closure =
       Memo.lazy_
         ~name:"package-dependency-closure"
@@ -1357,17 +1357,13 @@ module Action_expander = struct
     }
   ;;
 
-  let expander context pkg =
-    let+ env = Pkg.exported_value_env pkg in
-    expander_with_env context pkg ~env
-  ;;
-
   let expand_action = expand
   let sandbox = Sandbox_mode.Set.singleton Sandbox_mode.copy
 
   let expand context (pkg : Pkg.t) action =
     let+ action =
-      let* expander = expander context pkg in
+      let* env = Pkg.exported_value_env pkg in
+      let expander = expander context pkg ~env in
       expand action ~expander >>| Action.chdir pkg.paths.source_dir
     in
     (* TODO copying is needed for build systems that aren't dune and those
@@ -1891,12 +1887,7 @@ end = struct
         }
       in
       let+ exported_env =
-        let expander =
-          Action_expander.expander_with_env
-            (Package_universe.context_name package_universe)
-            t
-            ~env:Env.Map.empty
-        in
+        let expander = Action_expander.expander context t ~env:Env.Map.empty in
         Memo.parallel_map exported_env ~f:(Action_expander.exported_env expander)
       in
       Some { t with exported_env }
@@ -3425,7 +3416,7 @@ let resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file =
 let all_filtered_depexts context =
   let* all_project_deps = all_project_deps context in
   Memo.List.map all_project_deps ~f:(fun (pkg : Pkg.t) ->
-    let expander = Action_expander.expander_with_env context pkg ~env:Env.Map.empty in
+    let expander = Action_expander.expander context pkg ~env:Env.Map.empty in
     Action_expander.Expander.filtered_depexts expander)
   >>| List.concat
   >>| List.sort_uniq ~compare:String.compare
