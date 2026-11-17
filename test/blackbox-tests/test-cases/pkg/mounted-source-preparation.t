@@ -87,6 +87,48 @@ Patches apply after the overlays, without mutating the source or extra source.
   $ make_lockpkg_file foo foo.ml <<'EOF'
   > let message = "lock file"
   > EOF
+
+A stale hunk fails on the first demand, at the patch action in the lock file.
+
+  $ make_lockpkg_file foo update.patch <<'EOF'
+  > --- a/foo.ml
+  > +++ b/foo.ml
+  > @@ -1 +1 @@
+  > -let message = "something else"
+  > +let message = "patched"
+  > EOF
+  $ dune build main.exe
+  File "dune.lock/foo.pkg", line 4, characters 21-33:
+  4 | (build (progn (patch update.patch) (run false)))
+                           ^^^^^^^^^^^^
+  Error: Patch could not be applied to "foo.ml": hunk does not match file
+  contents
+  [1]
+
+The source and extra source are unchanged after failure.
+
+  $ cat _source/foo.ml _overlay/foo.ml
+  let message = "original"
+  let message = "extra"
+
+A patch for a missing file also fails before the consumer can build.
+
+  $ make_lockpkg_file foo update.patch <<'EOF'
+  > --- a/absent.ml
+  > +++ b/absent.ml
+  > @@ -1 +1 @@
+  > -let message = "extra"
+  > +let message = "patched"
+  > EOF
+  $ dune build main.exe
+  File "dune.lock/foo.pkg", line 4, characters 21-33:
+  4 | (build (progn (patch update.patch) (run false)))
+                           ^^^^^^^^^^^^
+  Error: Cannot edit file "absent.ml": file does not exist
+  [1]
+
+Fixing the patch recovers the build using the overlaid input.
+
   $ make_lockpkg_file foo update.patch <<'EOF'
   > --- a/foo.ml
   > +++ b/foo.ml
