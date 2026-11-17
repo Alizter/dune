@@ -16,9 +16,6 @@ directories are in the mount (workspace libraries: merlin/src-dirs-of-deps.t).
   > (executable (name main) (libraries foo))
   > EOF2
   $ echo 'let () = print_int Foo.B.y' > bin/main.ml
-  $ cat > dune <<'EOF2'
-  > (dirs :standard \ _source)
-  > EOF2
   $ opam_prefix="$(ocamlc -where)"
   $ export BUILD_PATH_PREFIX_MAP="/OPAM_PREFIX=$opam_prefix:$BUILD_PATH_PREFIX_MAP"
 

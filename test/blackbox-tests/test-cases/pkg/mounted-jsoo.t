@@ -46,7 +46,6 @@ the runtime file.
 One JS executable uses each.
 
   $ cat > dune <<'EOF2'
-  > (dirs :standard \ _foo _bar)
   > (executable (name mounted) (modules mounted) (modes js) (libraries foo))
   > (executable (name opaque) (modules opaque) (modes js) (libraries bar))
   > EOF2
