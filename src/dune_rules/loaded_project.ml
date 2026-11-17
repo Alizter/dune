@@ -3,7 +3,7 @@ open Import
 type t =
   { project : Dune_project.t
   ; mounted_package : Package.Name.t option
-  ; source_tree_root : Source_tree.Rules.Dir.t
+  ; source_tree_root : Source_tree.Dir.t
   ; context : Context.t
   ; partition_root : Path.Build.t
   ; output_root : Path.Build.t
@@ -19,7 +19,7 @@ let create
       ~stanza_mask
   =
   let output_root =
-    Source_tree.Rules.Dir.source_path source_tree_root
+    Source_tree.Dir.source_path source_tree_root
     |> Path.Build.append_local (Context.build_dir context)
   in
   { project
@@ -33,7 +33,7 @@ let create
 ;;
 
 let project t = t.project
-let source_root t = Source_tree.Rules.Dir.source_path t.source_tree_root
+let source_root t = Source_tree.Dir.source_path t.source_tree_root
 let build_context t = Context.build_context t.context
 let partition_root t = t.partition_root
 let output_root t = t.output_root
@@ -45,7 +45,7 @@ let vendored_warnings t =
   match t.mounted_package with
   | Some _ -> true
   | None ->
-    (match Source_tree.Rules.Dir.status t.source_tree_root with
+    (match Source_tree.Dir.status t.source_tree_root with
      | Vendored -> true
      | Normal | Data_only -> false)
 ;;
@@ -67,5 +67,5 @@ let output_path t source_path =
 let source_tree_dir t output_path =
   match Path.drop_prefix (Path.build output_path) ~prefix:(Path.build t.output_root) with
   | None -> Memo.return None
-  | Some local -> Source_tree.Rules.Dir.find_dir t.source_tree_root local
+  | Some local -> Source_tree.Dir.find_dir t.source_tree_root local
 ;;

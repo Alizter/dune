@@ -2,7 +2,7 @@ open Import
 open Memo.O
 
 module Source_tree_map_reduce =
-  Source_tree.Rules.Dir.Make_map_reduce
+  Source_tree.Dir.Make_map_reduce
     (Action_builder)
     (Monoid.Appendable_list (struct
          type t = Command.Args.without_targets Command.Args.t
@@ -191,7 +191,7 @@ let include_dir_flags ~expander ~dir ~include_dirs =
                        ~f:(fun t ->
                          let deps =
                            let dir =
-                             Source_tree.Rules.Dir.source_path t
+                             Source_tree.Dir.source_path t
                              |> Path.Build.append_local
                                   (Path.as_in_build_dir_exn build_dir)
                              |> Path.build

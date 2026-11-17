@@ -360,7 +360,7 @@ let gen_common_directory_rules sctx ~dir source_dir =
   let+ () = Format_rules.setup_alias sctx ~dir
   and+ () =
     (* Cram tests of mounted packages are not run. *)
-    match Option.bind source_dir ~f:Source_tree.Rules.Dir.as_source with
+    match Option.bind source_dir ~f:Source_tree.Dir.as_source with
     | None -> Memo.return ()
     | Some source_dir -> Cram_rules.rules source_dir ~sctx ~dir
   and+ () = Revdep_rules.add ~sctx ~dir in
@@ -372,10 +372,7 @@ let gen_rules_source_only sctx ~dir source_dir =
     let* sctx = sctx in
     let+ () = gen_common_directory_rules sctx ~dir (Some source_dir)
     and+ () =
-      define_all_alias
-        ~dir
-        ~js_targets:[]
-        ~project:(Source_tree.Rules.Dir.project source_dir)
+      define_all_alias ~dir ~js_targets:[] ~project:(Source_tree.Dir.project source_dir)
     in
     ())
 ;;
@@ -635,9 +632,7 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
             match mounted_source_dir with
             | None -> Path.Build.Map.empty
             | Some source_dir ->
-              Path.Build.Map.singleton
-                dir
-                (Source_tree.Rules.Dir.sub_dir_names source_dir)
+              Path.Build.Map.singleton dir (Source_tree.Dir.sub_dir_names source_dir)
           in
           let allowed_subdirs =
             let automatic = Automatic_subdir.subdirs components in

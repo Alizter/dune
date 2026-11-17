@@ -5,7 +5,7 @@ type t
 val create
   :  project:Dune_project.t
   -> mounted_package:Package.Name.t option
-  -> source_tree_root:Source_tree.Rules.Dir.t
+  -> source_tree_root:Source_tree.Dir.t
   -> context:Context.t
   -> partition_root:Path.Build.t
   -> stanza_mask:Package.Name.Set.t option
@@ -17,7 +17,7 @@ val project : t -> Dune_project.t
     project independently of the context. *)
 val source_root : t -> Path.Local.t
 
-val source_tree_dir : t -> Path.Build.t -> Source_tree.Rules.Dir.t option Memo.t
+val source_tree_dir : t -> Path.Build.t -> Source_tree.Dir.t option Memo.t
 val build_context : t -> Build_context.t
 val partition_root : t -> Path.Build.t
 val is_workspace : t -> bool

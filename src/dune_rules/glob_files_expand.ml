@@ -18,16 +18,15 @@ let get_descendants_of_relative_dir_relative_to_base_dir_local
       let local =
         Path.Local.descendant
           (Path.Local.relative source_dir relative_dir)
-          ~of_:(Source_tree.Rules.Dir.source_path source_tree_root)
+          ~of_:(Source_tree.Dir.source_path source_tree_root)
       in
       match local with
       | None -> Memo.return []
       | Some local ->
-        Source_tree.Rules.Dir.find_dir source_tree_root local
+        Source_tree.Dir.find_dir source_tree_root local
         >>| (function
          | None -> []
-         | Some dir ->
-           Source_tree.Rules.Dir.sub_dir_names dir |> Filename.Array.Set.to_list)
+         | Some dir -> Source_tree.Dir.sub_dir_names dir |> Filename.Array.Set.to_list)
     in
     let+ rest =
       Memo.List.concat_map children ~f:(fun child ->

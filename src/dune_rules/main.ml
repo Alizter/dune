@@ -13,7 +13,7 @@ let implicit_default_alias dir =
   Option.map source_dir ~f:(fun source_dir ->
     let default_alias =
       let dune_version =
-        Source_tree.Rules.Dir.project source_dir |> Dune_project.dune_version
+        Source_tree.Dir.project source_dir |> Dune_project.dune_version
       in
       if dune_version >= (2, 0) then Alias0.all else Alias0.install
     in

@@ -187,7 +187,7 @@ let source candidate =
 module Mounted = struct
   type loaded =
     { tree : Source_tree.Rules.Mounted.t
-    ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
+    ; projects : (Dune_project.t * Source_tree.Dir.t) list
     }
 
   type t =
@@ -382,7 +382,7 @@ let leading_patches candidates candidate solver_env = function
     loop [] (flatten_progn action)
 ;;
 
-module Scan_dune_files = Source_tree.Rules.Dir.Make_map_reduce (Memo) (Monoid.Exists)
+module Scan_dune_files = Source_tree.Dir.Make_map_reduce (Memo) (Monoid.Exists)
 
 let prepared_source context name =
   Path.Build.L.relative
@@ -504,10 +504,10 @@ let prepare context candidate =
         ~traverse:Source_dir_status.Set.all
         ~trace_event_name:"Package source classification"
         ~f:(fun dir ->
-          match Source_tree.Rules.Dir.dune_file dir with
+          match Source_tree.Dir.dune_file dir with
           | None -> Memo.return false
           | Some _ ->
-            let project = Source_tree.Rules.Dir.project dir in
+            let project = Source_tree.Dir.project dir in
             (match
                Package.Name.Map.find (Dune_project.including_hidden_packages project) name
              with

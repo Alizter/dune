@@ -27,8 +27,7 @@ module In_melange_target_dir = struct
 end
 
 include Alias_builder.Alias_rec (struct
-    module Map_reduce =
-      Source_tree.Rules.Dir.Make_map_reduce (Action_builder) (Alias_status)
+    module Map_reduce = Source_tree.Dir.Make_map_reduce (Action_builder) (Alias_status)
 
     let traverse dir ~f =
       let open Action_builder.O in
@@ -39,7 +38,7 @@ include Alias_builder.Alias_rec (struct
         in
         fun dir ->
           let build_path =
-            Source_tree.Rules.Dir.source_path dir |> Path.Build.append_local build_dir
+            Source_tree.Dir.source_path dir |> Path.Build.append_local build_dir
           in
           let* { Alias_build_info.alias_status = found_in_source
                ; allowed_build_only_subdirs = _

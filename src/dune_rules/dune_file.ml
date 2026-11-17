@@ -113,11 +113,11 @@ let rec parse_file_includes ~stanza_parser ~allow_rule_plugins ~project ~context
 type eval =
   { loaded_project : Loaded_project.t
   ; project : Dune_project.t
-  ; source_dir : Source_tree.Rules.Dir.t
+  ; source_dir : Source_tree.Dir.t
   ; mask : Stanza.t Mask.t
   }
 
-let eval_source_path eval = Source_tree.Rules.Dir.source_path eval.source_dir
+let eval_source_path eval = Source_tree.Dir.source_path eval.source_dir
 
 type dynamic =
   | Dynamic_include of Loc.t * string
@@ -138,7 +138,7 @@ let parse_stanzas ~file ~(eval : eval) sexps =
       | Some f -> f
       | None ->
         (* TODO this is wrong *)
-        Source_tree.Rules.Dir.file
+        Source_tree.Dir.file
           eval.source_dir
           (Path.Local.relative_fname Path.Local.root Source.Dune_file.fname)
     in
@@ -363,14 +363,14 @@ module Script = struct
     let* context = Context.DB.get context in
     let* exec_dir =
       match Loaded_project.owner eval.loaded_project with
-      | None -> Memo.return (Source_tree.Rules.Dir.path eval.source_dir)
+      | None -> Memo.return (Source_tree.Dir.logical_path eval.source_dir)
       | Some package ->
         (* The script may write to its directory, so it runs in the package's
            private copy of the source and not in the fetched one. *)
         let root = Pkg_sources.prepared_source (Context.name context) package in
         let+ () = Build_system.build_dir (Path.build root) in
         Path.drop_prefix_exn
-          (Source_tree.Rules.Dir.path eval.source_dir)
+          (Source_tree.Dir.logical_path eval.source_dir)
           ~prefix:(Path.build (Loaded_project.partition_root eval.loaded_project))
         |> Path.append_local (Path.build root)
     in

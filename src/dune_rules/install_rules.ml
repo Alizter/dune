@@ -691,7 +691,7 @@ end = struct
         >>| function
         | None -> init
         | Some dir ->
-          Source_tree.Rules.Dir.filenames dir
+          Source_tree.Dir.filenames dir
           |> Filename.Array.Set.fold ~init ~f:(fun fn acc ->
             if is_odig_doc_file (Filename.to_string fn)
             then (

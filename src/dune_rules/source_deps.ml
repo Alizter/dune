@@ -2,7 +2,7 @@ open Import
 open Memo.O
 
 module Map_reduce =
-  Source_tree.Rules.Dir.Make_map_reduce
+  Source_tree.Dir.Make_map_reduce
     (Memo)
     (Monoid.Product (Monoid.Union (Path.Set)) (Monoid.Union (Path.Set)))
 
@@ -15,7 +15,7 @@ let files_with_filter path ~filter =
   match source_dir with
   | None -> Memo.return (Dep.Set.empty, Path.Set.empty)
   | Some source_dir ->
-    let root = Source_tree.Rules.Dir.source_path source_dir in
+    let root = Source_tree.Dir.source_path source_dir in
     let+ files, empty_directories =
       Map_reduce.map_reduce
         source_dir
@@ -23,12 +23,12 @@ let files_with_filter path ~filter =
         ~trace_event_name:"Source deps"
         ~f:(fun dir ->
           let relative =
-            Path.Local.descendant (Source_tree.Rules.Dir.source_path dir) ~of_:root
+            Path.Local.descendant (Source_tree.Dir.source_path dir) ~of_:root
             |> Option.value_exn
           in
           let path = Path.append_local path relative in
           let files =
-            Source_tree.Rules.Dir.filenames dir
+            Source_tree.Dir.filenames dir
             |> Filename.Array.Set.to_list
             |> Path.Set.of_list_map ~f:(fun fn -> Path.relative_fname path fn)
             |> Path.Set.filter ~f:filter

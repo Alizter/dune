@@ -1318,7 +1318,7 @@ module Unprocessed = struct
            >>| function
            | None -> dirs
            | Some source_dir ->
-             Path.Build.Map.set dirs dir (Source_tree.Rules.Dir.filenames source_dir)))
+             Path.Build.Map.set dirs dir (Source_tree.Dir.filenames source_dir)))
     in
     let module_configs =
       modules

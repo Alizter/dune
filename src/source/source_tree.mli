@@ -34,6 +34,17 @@ module Dir : sig
   val project : t -> Dune_project.t
 
   val to_dyn : t -> Dyn.t
+
+  (** The directory, unless it belongs to a mounted package. *)
+  val as_source : t -> t option
+
+  val source_path : t -> Path.Local.t
+
+  (** The logical directory used by source semantics. *)
+  val logical_path : t -> Path.t
+
+  val file : t -> Path.Local.t -> Source_tree_file.File.t
+  val find_dir : t -> Path.Local.t -> t option Memo.t
 end
 
 val root : unit -> Dir.t Memo.t
@@ -44,39 +55,6 @@ val root : unit -> Dir.t Memo.t
 module Rules : sig
   module Backing = Source_tree_file.Backing
   module File = Source_tree_file.File
-
-  module Dir : sig
-    type t = Dir.t
-    type sub_dir = Dir.sub_dir
-
-    (** The workspace directory, unless this directory belongs to a mounted
-        package. *)
-    val as_source : t -> Dir.t option
-
-    val source_path : t -> Path.Local.t
-
-    (** The logical directory used by source semantics. *)
-    val path : t -> Path.t
-
-    val file : t -> Path.Local.t -> File.t
-    val filenames : t -> Filename.Array.Set.t
-    val sub_dirs : t -> sub_dir Filename.Array.Map.t
-    val sub_dir_names : t -> Filename.Array.Set.t
-    val sub_dir_as_t : sub_dir -> t Memo.t
-    val find_dir : t -> Path.Local.t -> t option Memo.t
-    val status : t -> Source_dir_status.t
-    val dune_file : t -> Dune_file.t option
-    val project : t -> Dune_project.t
-
-    module Make_map_reduce (M : Memo.S) (Outcome : Monoid) : sig
-      val map_reduce
-        :  t
-        -> traverse:Source_dir_status.Set.t
-        -> trace_event_name:string
-        -> f:(t -> Outcome.t M.t)
-        -> Outcome.t M.t
-    end
-  end
 
   module Mounted : sig
     type t

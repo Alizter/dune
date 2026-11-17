@@ -21,10 +21,10 @@ module Context_and_package = struct
 end
 
 module Mounted_dune_files =
-  Source_tree.Rules.Dir.Make_map_reduce
+  Source_tree.Dir.Make_map_reduce
     (Memo)
     (Monoid.Appendable_list (struct
-         type t = Source_tree.Rules.Dir.t * Source.Dune_file.t
+         type t = Source_tree.Dir.t * Source.Dune_file.t
        end))
 
 (* The projects and dune files of one partition of a context: the workspace,
@@ -89,13 +89,13 @@ let load_mount context mounted =
           ~traverse:Source_dir_status.Set.all
           ~trace_event_name:"Loaded mounted source tree"
           ~f:(fun dir ->
-            match Source_tree.Rules.Dir.dune_file dir with
+            match Source_tree.Dir.dune_file dir with
             | None -> Memo.return Appendable_list.empty
             | Some file -> Memo.return (Appendable_list.singleton (dir, file)))
       in
       let files =
         Appendable_list.map files ~f:(fun (dir, file) ->
-          let root = Source_tree.Rules.Dir.project dir |> Dune_project.root in
+          let root = Source_tree.Dir.project dir |> Dune_project.root in
           Path.Local.Map.find_exn projects_by_root root, dir, file)
       in
       projects, files
@@ -343,14 +343,14 @@ let source_tree_dir ~dir =
   | None -> Memo.return None
   | Some root ->
     let output_root =
-      Source_tree.Rules.Dir.source_path root
+      Source_tree.Dir.source_path root
       |> Path.Build.append_local
            (Context_name.build_dir (Install.Context.of_path dir |> Option.value_exn))
     in
     let local = Path.drop_prefix (Path.build dir) ~prefix:(Path.build output_root) in
     (match local with
      | None -> Memo.return None
-     | Some local -> Source_tree.Rules.Dir.find_dir root local)
+     | Some local -> Source_tree.Dir.find_dir root local)
 ;;
 
 let source_files ~dir =
@@ -358,7 +358,7 @@ let source_files ~dir =
   >>| function
   | None -> Path.Build.Set.empty
   | Some source_dir ->
-    Source_tree.Rules.Dir.filenames source_dir
+    Source_tree.Dir.filenames source_dir
     |> Filename.Array.Set.to_list
     |> Path.Build.Set.of_list_map ~f:(Path.Build.relative_fname dir)
 ;;
@@ -373,7 +373,7 @@ let vendored_warnings ~dir =
       match source_dir with
       | Some dir ->
         Memo.return
-          (match Source_tree.Rules.Dir.status dir with
+          (match Source_tree.Dir.status dir with
            | Vendored -> true
            | Normal | Data_only -> false)
       | None ->

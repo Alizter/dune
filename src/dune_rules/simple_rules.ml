@@ -339,7 +339,7 @@ let copy_files sctx ~dir ~expander (def : Copy_files.t) =
     match only_sources, dir with
     | true, In_build_dir _ ->
       (match source_dir with
-       | Some source_dir -> Source_tree.Rules.Dir.filenames source_dir
+       | Some source_dir -> Source_tree.Dir.filenames source_dir
        | None -> Filename.Array.Set.empty)
       |> Filename_set.create ~dir ~filter:(fun ~basename ->
         Glob.test glob (Filename.to_string basename))

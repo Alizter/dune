@@ -467,6 +467,22 @@ let root () = Memo.Node.read root
 module Dir = struct
   include Dir0
 
+  let as_source t = Source_tree_file.Dir.as_workspace t.dir |> Option.map ~f:(fun _ -> t)
+  let source_path t = Source_tree_file.Dir.source_path t.dir
+  let logical_path t = Source_tree_file.Dir.path t.dir
+  let file t local = Source_tree_file.Dir.append_local t.dir local
+
+  let find_dir t path =
+    let rec loop t = function
+      | [] -> Memo.return (Some t)
+      | name :: rest ->
+        (match Filename.Array.Map.find t.sub_dirs name with
+         | None -> Memo.return None
+         | Some sub_dir -> sub_dir.sub_dir_as_t >>= fun t -> loop t rest)
+    in
+    loop t (Path.Local.explode path)
+  ;;
+
   module Make_map_reduce (M : Memo.S) (Outcome : Monoid) = struct
     open M.O
 
@@ -514,29 +530,6 @@ end
 module Rules = struct
   module Backing = Source_tree_file.Backing
   module File = Source_tree_file.File
-
-  module Dir = struct
-    include Dir
-
-    let as_source t =
-      Source_tree_file.Dir.as_workspace t.dir |> Option.map ~f:(fun _ -> t)
-    ;;
-
-    let source_path t = Source_tree_file.Dir.source_path t.dir
-    let path t = Source_tree_file.Dir.path t.dir
-    let file t local = Source_tree_file.Dir.append_local t.dir local
-
-    let find_dir t path =
-      let rec loop t = function
-        | [] -> Memo.return (Some t)
-        | name :: rest ->
-          (match Filename.Array.Map.find t.sub_dirs name with
-           | None -> Memo.return None
-           | Some sub_dir -> sub_dir.sub_dir_as_t >>= fun t -> loop t rest)
-      in
-      loop t (Path.Local.explode path)
-    ;;
-  end
 
   module Mounted = struct
     type t =
