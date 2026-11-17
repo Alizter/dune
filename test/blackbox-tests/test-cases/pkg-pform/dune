@@ -1,0 +1,3 @@
+(cram
+ (applies_to install-dirs.t)
+ (setup_scripts ../pkg/helpers.sh))

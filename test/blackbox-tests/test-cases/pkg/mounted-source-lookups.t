@@ -32,36 +32,6 @@ A source tree installed by the package (install/install-source-tree.t).
     "_build/install/default/share/foo/docs/index.txt" {"docs/index.txt"}
     "_build/install/default/share/foo/docs/nested/more.txt" {"docs/nested/more.txt"}
 
-A generated directory installed under another name, including nested files
-(package-materialization/install-dirs.t and pkg-pform/install-dirs.t).
-
-  $ cat >> _source/dune <<'EOF'
-  > (rule
-  >  (target (dir generated))
-  >  (action
-  >   (progn
-  >    (run mkdir -p %{target}/sub)
-  >    (system "echo top > %{target}/top.txt")
-  >    (system "echo nested > %{target}/sub/nested.txt"))))
-  > (install
-  >  (section share)
-  >  (dirs (generated as payload)))
-  > EOF
-  $ cat > dune <<'EOF'
-  > (rule
-  >  (target directory-files)
-  >  (deps (package foo))
-  >  (action
-  >   (with-stdout-to %{target}
-  >    (progn
-  >     (cat %{pkg:foo:share:payload}/top.txt)
-  >     (cat %{pkg:foo:share:payload}/sub/nested.txt)))))
-  > EOF
-  $ dune build directory-files
-  $ cat _build/default/directory-files
-  top
-  nested
-
 Foreign stubs with an include directory in the source.
 
   $ cat > _source/stubs/dune <<'EOF'
