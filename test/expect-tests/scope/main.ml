@@ -61,15 +61,12 @@ let%expect_test "package library entries and lazy native visibility" =
               ~file_watcher:No_watcher
               (fun () -> Memo.run computation)
           in
+          let package = Dune_lang.Package.Name.of_string in
           let entries () =
-            Scope.DB.lib_entries_of_package
-              Context_name.default
-              (Dune_lang.Package.Name.of_string "a")
+            Scope.DB.lib_entries_of_package Context_name.default (package "a")
           in
           let package_stanzas name =
-            Partitions.stanzas_of_package
-              Context_name.default
-              (Dune_lang.Package.Name.of_string name)
+            Partitions.stanzas_of_package Context_name.default (package name)
           in
           let previous = Weak.create 1 in
           write_stanzas [ "old" ];
@@ -144,12 +141,10 @@ let%expect_test "package library entries and lazy native visibility" =
                "(version 1.0)\n(source (copy %S))\n(build (run false))\n"
                (Path.to_absolute_filename (Path.relative Path.root "_native")));
           run
-            (let+ _ =
-               Fs_memo.dir_contents
-                 ~force_update:true
-                 (Path.Outside_build_dir.In_source_dir Path.Source.root)
-             in
-             ());
+            (Fs_memo.dir_contents
+               ~force_update:true
+               (Path.Outside_build_dir.In_source_dir Path.Source.root)
+             |> Memo.map ~f:ignore);
           invalidate ();
           run
             (let* scope =
@@ -157,9 +152,7 @@ let%expect_test "package library entries and lazy native visibility" =
              in
              let db = Scope.public_libs scope in
              let* dune_files =
-               Partitions.dune_files_of_package
-                 Context_name.default
-                 (Dune_lang.Package.Name.of_string "native")
+               Partitions.dune_files_of_package Context_name.default (package "native")
              in
              let ids =
                Dune_file.fold_static_stanzas
@@ -177,32 +170,28 @@ let%expect_test "package library entries and lazy native visibility" =
                        (Lib_id.Local id)
                    | _ -> ids)
              in
-             let* public =
-               Lib.DB.find_lib_id db (String.Map.find_exn ids "implementation")
+             let visible name =
+               Lib.DB.find_lib_id db (String.Map.find_exn ids name) >>| Option.is_some
              in
-             printfn "undeclared native local id: %b" (Option.is_some public);
-             let* private_ =
-               Lib.DB.find_lib_id db (String.Map.find_exn ids "private_impl")
-             in
-             printfn "private local id visible: %b" (Option.is_some private_);
+             let* public = visible "implementation" in
+             printfn "undeclared native local id: %b" public;
+             let* private_ = visible "private_impl" in
+             printfn "private local id visible: %b" private_;
+             let owned = String.Set.of_list [ "app"; "declared"; "native"; "hidden" ] in
              let+ libraries = Lib.DB.all db in
              let names =
                Lib.Set.to_list libraries
                |> List.map ~f:(fun lib -> Dune_lang.Lib_name.to_string (Lib.name lib))
-               |> List.filter ~f:(fun name ->
-                 List.mem
-                   [ "app"; "declared"; "native"; "hidden" ]
-                   name
-                   ~equal:String.equal)
+               |> List.filter ~f:(String.Set.mem owned)
                |> List.sort ~compare:String.compare
              in
              printfn "owned public enumeration: %s" (String.concat ~sep:", " names);
-             printfn
-               "declared opaque recipe ran: %b"
-               (Stdlib.Sys.file_exists "_build/default/.pkg/declared/_install/cookie");
-             printfn
-               "undeclared opaque recipe ran: %b"
-               (Stdlib.Sys.file_exists "_build/default/.pkg/hidden/_install/cookie"))));
+             let ran name =
+               Stdlib.Sys.file_exists
+                 (sprintf "_build/default/.pkg/%s/_install/cookie" name)
+             in
+             printfn "declared opaque recipe ran: %b" (ran "declared");
+             printfn "undeclared opaque recipe ran: %b" (ran "hidden"))));
   [%expect
     {|
     indexed a stanzas: 2
