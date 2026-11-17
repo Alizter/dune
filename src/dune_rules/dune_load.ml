@@ -187,24 +187,21 @@ let find_package context name =
          Package.Name.Map.find (Loaded_project.packages project) name))
 ;;
 
-let mount_of_dir context ~dir =
-  match Pkg_sources.package_of_artifact_path dir with
-  | None -> Memo.return None
-  | Some package -> mount context package
+let partition_of_dir context ~dir =
+  let* mount =
+    match Pkg_sources.package_of_artifact_path dir with
+    | None -> Memo.return None
+    | Some package -> mount context package
+  in
+  match mount with
+  | Some ({ Partition.projects_by_output_root; _ } as partition)
+    when not (Path.Build.Map.is_empty projects_by_output_root) -> Memo.return partition
+  | Some _ | None -> workspace context
 ;;
 
 let find_loaded_project ~dir =
   let context = Install.Context.of_path dir |> Option.value_exn in
-  let* mount = mount_of_dir context ~dir in
-  let+ projects_by_output_root =
-    match mount with
-    | Some { Partition.projects_by_output_root; _ }
-      when not (Path.Build.Map.is_empty projects_by_output_root) ->
-      Memo.return projects_by_output_root
-    | Some _ | None ->
-      let+ { Partition.projects_by_output_root; _ } = workspace context in
-      projects_by_output_root
-  in
+  let+ { Partition.projects_by_output_root; _ } = partition_of_dir context ~dir in
   Find_closest_source_dir.find_by_dir_exn projects_by_output_root ~dir
 ;;
 
@@ -220,13 +217,8 @@ let stanzas_in_dir dir =
     match Install.Context.of_path dir with
     | None -> Memo.return None
     | Some ctx ->
-      let* mount = mount_of_dir ctx ~dir in
-      (match mount with
-       | Some { Partition.dune_file_by_dir; _ } ->
-         Memo.return (Path.Build.Map.find dune_file_by_dir dir)
-       | None ->
-         let+ { Partition.dune_file_by_dir; _ } = workspace ctx in
-         Path.Build.Map.find dune_file_by_dir dir))
+      let+ { Partition.dune_file_by_dir; _ } = partition_of_dir ctx ~dir in
+      Path.Build.Map.find dune_file_by_dir dir)
 ;;
 
 let mask () =
