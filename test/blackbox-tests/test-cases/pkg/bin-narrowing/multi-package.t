@@ -45,12 +45,7 @@ requester rules. Lookup must use the installed name, not the source basename.
   > EOF
   $ mkdir _mounted
   $ cp -R _requesters/. _mounted/
-  $ cat > _mounted/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name mounted-a) (dir a) (depends tool-a))
-  > (package (name mounted-b) (dir b) (depends tool-b))
-  > (package (name mounted-denied) (dir denied))
-  > EOF
+  $ sed -i 's/(name \(pkg-\)*/(name mounted-/' _mounted/dune-project
   $ make_case() (
   >   set -eu
   >   local backend="$1"
