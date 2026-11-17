@@ -63,9 +63,9 @@ module Spec = struct
         , List
             (Package_name.Map.values packages
              |> List.map ~f:(fun package ->
-               Local_package.for_solver package
-               |> Local_package.For_solver.solver_metadata
-               |> fun metadata -> Sexp.Atom metadata)) )
+               Sexp.Atom
+                 (Local_package.for_solver package
+                  |> Local_package.For_solver.solver_metadata))) )
       ; ( "repos"
         , List
             (List.map repos ~f:(fun repo ->

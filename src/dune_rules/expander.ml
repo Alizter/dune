@@ -62,7 +62,6 @@ type t =
 
 let artifacts t = t.artifacts_host
 let dir t = t.dir
-let source_dir t = Dune_project.dir_in_context t.dir
 
 let source_tree_root t =
   let open Memo.O in
@@ -863,7 +862,8 @@ let visible_packages t =
       in
       Package.Name.Selection.Only closure
     | None ->
-      (match Dune_project.exclusive_package t.project ~dir:(source_dir t) with
+      let dir = Dune_project.dir_in_context t.dir in
+      (match Dune_project.exclusive_package t.project ~dir with
        | None -> Memo.return Package.Name.Selection.All
        | Some pkg_id ->
          let name = Package.Id.name pkg_id in

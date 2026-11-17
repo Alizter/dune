@@ -194,7 +194,7 @@ let gen_rules_for_source (source : Source.t) =
       let* () = Action_builder.return () in
       Action_builder.of_memo (resolve_url url)
     in
-    fun ~target ~(kind : Kind.t) ->
+    fun ~target ~kind ->
       Action_builder.with_no_targets
         (let open Action_builder.O in
          (* Asked when the target is built: a local source that is missing

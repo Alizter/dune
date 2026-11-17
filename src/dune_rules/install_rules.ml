@@ -497,7 +497,7 @@ end = struct
         then
           if lib.optional
           then (
-            let src_dir = Expander.source_dir expander in
+            let src_dir = Dune_project.dir_in_context (Expander.dir expander) in
             Lib.DB.available_by_lib_id
               (Scope.libs scope)
               (Local (Library.to_lib_id ~src_dir lib)))

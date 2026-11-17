@@ -5,7 +5,6 @@ open Import
 type t
 
 val dir : t -> Path.Build.t
-val source_dir : t -> Path.Local.t
 val source_tree_root : t -> Source_tree.Dir.t Memo.t
 val context : t -> Context_name.t
 val project : t -> Dune_project.t

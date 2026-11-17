@@ -431,10 +431,10 @@ let has_rules fn =
 ;;
 
 let find_scope ~sctx encoded_scope =
-  let scope_dir = Parameterised_name.Scope.decode encoded_scope in
-  match scope_dir with
-  | None -> Super_context.context sctx |> Context.build_dir |> Scope.DB.find_by_dir
-  | Some dir -> Scope.DB.find_by_dir dir
+  let context = Super_context.context sctx in
+  Parameterised_name.Scope.decode encoded_scope
+  |> Option.value ~default:(Context.build_dir context)
+  |> Scope.DB.find_by_dir
 ;;
 
 let gen_rules ~sctx ~dir rest =

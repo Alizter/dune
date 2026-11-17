@@ -124,28 +124,24 @@ module For_solver = struct
   ;;
 
   let dependency_hash local_packages ~referenced_packages =
-    let baseline =
-      non_local_dependencies local_packages |> Dependency_hash.of_dependency_formula
-    in
-    match baseline with
-    | None -> None
-    | Some baseline ->
+    non_local_dependencies local_packages
+    |> Dependency_hash.of_dependency_formula
+    |> Option.map ~f:(fun baseline ->
       let referenced =
         List.filter local_packages ~f:(fun pkg ->
           Package_name.Set.mem referenced_packages pkg.name)
         |> List.sort ~compare:(fun a b -> Package_name.compare a.name b.name)
       in
-      (match referenced with
-       | [] -> Some baseline
-       | _ ->
-         Sexp.List
-           [ Atom "mixed-package-inputs"
-           ; Atom (Dependency_hash.to_string baseline)
-           ; List (List.map referenced ~f:(fun pkg -> Sexp.Atom (solver_metadata pkg)))
-           ]
-         |> Sexp.to_string
-         |> Md5.string
-         |> Option.some)
+      match referenced with
+      | [] -> baseline
+      | _ ->
+        Sexp.List
+          [ Atom "mixed-package-inputs"
+          ; Atom (Dependency_hash.to_string baseline)
+          ; List (List.map referenced ~f:(fun pkg -> Sexp.Atom (solver_metadata pkg)))
+          ]
+        |> Sexp.to_string
+        |> Md5.string)
   ;;
 end
 
