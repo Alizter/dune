@@ -100,24 +100,30 @@ native and opaque installations.
   installed-name
   installed-name
 
-Copy just this sublibrary fixture for the locked providers. The unrelated
-all-section fixtures above are not part of their installation.
+Use the complete producer and the same pforms with both locked backends.
+The contents agree, but the native rule depends on the mounted source
+while the opaque rule depends on the installed file.
 
   $ cp dune-project _provider/dune-project
-  $ cp -R foo/support _provider/
+  $ cp -R foo _provider/
   $ (cd native && make_named_package_project consumer 3.24 foo)
   $ (cd opaque && make_named_package_project consumer 3.24 foo)
-  $ cp library-rules native/dune
-  $ cp library-rules opaque/dune
+  $ cp dune native/dune
+  $ cp dune opaque/dune
   $ make_backend_lockdirs foo "$PWD/_provider"
-  $ (cd native && dune build renamed libexec-data lib-data)
+  $ (cd native && dune build out renamed libexec-data lib-data)
+  $ cmp _build/default/out native/_build/default/out
   $ cat native/_build/default/renamed native/_build/default/libexec-data \
   >   native/_build/default/lib-data
   installed-name
   installed-name
   installed-name
   $ test ! -e native/_build/default/.pkg/foo/_install/cookie
-  $ (cd opaque && dune build renamed libexec-data lib-data)
+  $ (cd native && dune rules --format=json _build/default/out) \
+  >   | jq_dune '.[] | ruleDepFilePaths | select(test("/share_(src|dst)$"))'
+  "_build/default/.pkg/foo/foo/share_src"
+  $ (cd opaque && dune build out renamed libexec-data lib-data)
+  $ cmp _build/default/out opaque/_build/default/out
   $ cat opaque/_build/default/renamed opaque/_build/default/libexec-data \
   >   opaque/_build/default/lib-data
   installed-name
@@ -126,3 +132,6 @@ all-section fixtures above are not part of their installation.
   $ cat opaque/_build/default/.pkg/foo/_install/opaque-recipe
   opaque
   $ test -f opaque/_build/default/.pkg/foo/_install/cookie
+  $ (cd opaque && dune rules --format=json _build/default/out) \
+  >   | jq_dune '.[] | ruleDepFilePaths | select(test("/share_(src|dst)$"))'
+  "_build/default/.pkg/foo/_install/share/foo/share_dst"
