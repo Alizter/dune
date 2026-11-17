@@ -1018,7 +1018,10 @@ module Unprocessed = struct
     | _ -> Action_builder.return None
   ;;
 
-  let pp_flags ctx ~for_ ~expander ~scope lib_name preprocess
+  let pp_flags
+        { config = { for_; libname = lib_name; _ }; expander; scope; _ }
+        ctx
+        preprocess
     : Processed.pp_flag option Action_builder.t
     =
     match preprocess with
@@ -1100,15 +1103,7 @@ module Unprocessed = struct
   ;;
 
   let pp_config t ctx =
-    Per_item_action_builder.map
-      t.config.preprocess
-      ~f:
-        (pp_flags
-           ctx
-           ~for_:t.config.for_
-           ~expander:t.expander
-           ~scope:t.scope
-           t.config.libname)
+    Per_item_action_builder.map t.config.preprocess ~f:(pp_flags t ctx)
   ;;
 
   (* Like [pp_config], but also returns the dependencies of the PPX rewriters
@@ -1117,15 +1112,7 @@ module Unprocessed = struct
     let open Action_builder.O in
     let+ pp_config_and_deps =
       Per_item_action_builder.map t.config.preprocess ~f:(fun preprocess ->
-        let pp_flag =
-          pp_flags
-            ctx
-            ~for_:t.config.for_
-            ~expander:t.expander
-            ~scope:t.scope
-            t.config.libname
-            preprocess
-        in
+        let pp_flag = pp_flags t ctx preprocess in
         match preprocess with
         | Pps _ -> ppx_deps_of_builder pp_flag
         | No_preprocessing | Action _ | Future_syntax _ ->
