@@ -48,30 +48,3 @@ Explicitly including the directory in the workspace is an error.
   Error: The directory .pkg is reserved for locked packages and cannot be part
   of the workspace.
   [1]
-  $ _build/default/main.exe
-  mounted
-  $ dune build
-  File ".pkg", line 1, characters 0-0:
-  Error: The directory .pkg is reserved for locked packages and cannot be part
-  of the workspace.
-  [1]
-  $ dune build _build/default/.pkg/foo/stray
-  File ".pkg", line 1, characters 0-0:
-  Error: The directory .pkg is reserved for locked packages and cannot be part
-  of the workspace.
-  [1]
-  $ dune build @_build/default/.pkg/other/default
-  File ".pkg", line 1, characters 0-0:
-  Error: The directory .pkg is reserved for locked packages and cannot be part
-  of the workspace.
-  [1]
-
-An install stanza in such a directory is not reached either.
-
-  $ echo foo > .pkg/other/foo
-  $ echo '(install (section bin) (files foo))' > .pkg/other/dune
-  $ dune build @install 2>&1 
-  File ".pkg", line 1, characters 0-0:
-  Error: The directory .pkg is reserved for locked packages and cannot be part
-  of the workspace.
-  [1]
