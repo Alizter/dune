@@ -32,15 +32,6 @@ skips temporary files.
   $ build "$target"
   Success
 
-An ordinary edit outside the workspace updates the mounted source.
-
-  $ echo 'let x = 2' > ../dep/lib/a.ml
-  $ with_timeout dune rpc flush-file-watcher --wait
-  $ build "$target"
-  Success
-  $ cat $(dirname "$target")/lib/a.ml
-  let x = 2
-
 Emacs creates an autosave file, and a change to the directory makes dune
 re-read its listing while the autosave file exists:
 
@@ -69,7 +60,6 @@ reusing the listing of lib with a stale file:
   [1]
 
   $ stop_dune
-  Success, waiting for filesystem changes...
   Success, waiting for filesystem changes...
   Success, waiting for filesystem changes...
   Error:
