@@ -459,7 +459,9 @@ module Dir = struct
          | None -> Memo.return None
          | Some sub_dir -> sub_dir.sub_dir_as_t >>= fun t -> loop t rest)
     in
-    loop t (Path.Local.explode path)
+    match Path.Local.descendant path ~of_:(source_path t) with
+    | None -> Memo.return None
+    | Some path -> loop t (Path.Local.explode path)
   ;;
 
   module Make_map_reduce (M : Memo.S) (Outcome : Monoid) = struct

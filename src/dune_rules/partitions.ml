@@ -314,16 +314,7 @@ let source_tree_dir ~dir =
   let* root = source_tree_root ~dir in
   match root with
   | None -> Memo.return None
-  | Some root ->
-    let output_root =
-      Source_tree.Dir.source_path root
-      |> Path.Build.append_local
-           (Context_name.build_dir (Install.Context.of_path dir |> Option.value_exn))
-    in
-    let local = Path.drop_prefix (Path.build dir) ~prefix:(Path.build output_root) in
-    (match local with
-     | None -> Memo.return None
-     | Some local -> Source_tree.Dir.find_dir root local)
+  | Some root -> Source_tree.Dir.find_dir root (Dune_project.dir_in_context dir)
 ;;
 
 let source_files ~dir =

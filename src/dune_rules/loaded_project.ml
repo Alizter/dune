@@ -72,7 +72,5 @@ let output_path t source_path =
 ;;
 
 let source_tree_dir t output_path =
-  match Path.drop_prefix (Path.build output_path) ~prefix:(Path.build t.output_root) with
-  | None -> Memo.return None
-  | Some local -> Source_tree.Dir.find_dir t.source_tree_root local
+  Source_tree.Dir.find_dir t.source_tree_root (Dune_project.dir_in_context output_path)
 ;;
