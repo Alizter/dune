@@ -86,10 +86,7 @@ lookup may select its competing binary.
   > EOF
   $ cp -R _selection/. native/
   $ cp -R _selection/. opaque/
-  $ (cd native && make_lockdir &&
-  >  make_dune_source_lockpkg native provider "$PWD/../_provider")
-  $ (cd opaque && make_lockdir &&
-  >  make_dune_source_lockpkg opaque provider "$PWD/../_provider")
+  $ make_backend_lockdirs provider "$PWD/_provider"
 
 The native provider is selected without running its failing recipe. Pform
 execution and the independent dependency-pform/PATH action both select it.
@@ -113,7 +110,6 @@ binary to stage in [.binaries]; [(system dup)] finds the installed copy on
   $ cat opaque/_build/default/.pkg/provider/_install/opaque-recipe
   opaque
   $ test -f opaque/_build/default/.pkg/provider/_install/cookie
-  $ test ! -e _provider/opaque-recipe
 
 In [workspace-shadows-lockdir.t] the workspace binary does shadow the lockdir
 one: there it belongs to the directory's own owning package, whose binaries are

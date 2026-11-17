@@ -534,6 +534,17 @@ make_dune_source_lockpkg() {
   esac
 }
 
+make_backend_lockdirs() {
+  local pkg="$1"
+  local source="$2"
+  local backend
+
+  for backend in native opaque; do
+    (cd "$backend" && make_lockdir &&
+      make_dune_source_lockpkg "$backend" "$pkg" "$source") || return 1
+  done
+}
+
 append_to_lockpkg() {
   local pkg="${1}"
   cat >> "${source_lock_dir}/${pkg}.pkg"

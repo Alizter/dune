@@ -90,16 +90,9 @@ with an explicit package dependency.
   > EOF
   $ cp consumer-dune native/dune
   $ cp consumer-dune opaque/dune
-  $ cat > consumer-project <<'EOF'
-  > (lang dune 3.24)
-  > (package (name consumer) (depends foo))
-  > EOF
-  $ cp consumer-project native/dune-project
-  $ cp consumer-project opaque/dune-project
-  $ (cd native && make_lockdir &&
-  >  make_dune_source_lockpkg native foo "$PWD/../_provider")
-  $ (cd opaque && make_lockdir &&
-  >  make_dune_source_lockpkg opaque foo "$PWD/../_provider")
+  $ (cd native && make_named_package_project consumer 3.24 foo)
+  $ (cd opaque && make_named_package_project consumer 3.24 foo)
+  $ make_backend_lockdirs foo "$PWD/_provider"
   $ (cd native && dune build directory-files)
   $ cat native/_build/default/directory-files
   top

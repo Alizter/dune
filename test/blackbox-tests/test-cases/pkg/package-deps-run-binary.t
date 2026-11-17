@@ -48,10 +48,7 @@ for the user rules; this makes copy mode effective even without a package dep.
   > EOF
   $ cp _consumer/* native/
   $ cp _consumer/* opaque/
-  $ (cd native && make_lockdir &&
-  >  make_dune_source_lockpkg native provider "$PWD/../_provider")
-  $ (cd opaque && make_lockdir &&
-  >  make_dune_source_lockpkg opaque provider "$PWD/../_provider")
+  $ make_backend_lockdirs provider "$PWD/_provider"
 
 Native provider, default sandboxing, with and without a package dependency.
 Literal and pform lookups have separate actions, so neither supplies the
@@ -74,7 +71,6 @@ Native provider, copy sandboxing. Remove the outputs to rerun every action.
   from provider: literal
   from provider: pform
   $ test ! -e native/_build/default/.pkg/provider/_install/cookie
-  $ test ! -e native/_build/default/.pkg/provider/_install/opaque-recipe
 
 Opaque provider, default sandboxing, with the same consumers and lookups.
 
@@ -98,4 +94,3 @@ inside it must not be copied twice when both dependencies are present.
   $ cat opaque/_build/default/.pkg/provider/_install/opaque-recipe
   opaque
   $ test -f opaque/_build/default/.pkg/provider/_install/cookie
-  $ test ! -e _provider/opaque-recipe

@@ -105,18 +105,11 @@ all-section fixtures above are not part of their installation.
 
   $ cp dune-project _provider/dune-project
   $ cp -R foo/support _provider/
-  $ cat > consumer-project <<'EOF'
-  > (lang dune 3.24)
-  > (package (name consumer) (depends foo))
-  > EOF
-  $ cp consumer-project native/dune-project
-  $ cp consumer-project opaque/dune-project
+  $ (cd native && make_named_package_project consumer 3.24 foo)
+  $ (cd opaque && make_named_package_project consumer 3.24 foo)
   $ cp library-rules native/dune
   $ cp library-rules opaque/dune
-  $ (cd native && make_lockdir &&
-  >  make_dune_source_lockpkg native foo "$PWD/../_provider")
-  $ (cd opaque && make_lockdir &&
-  >  make_dune_source_lockpkg opaque foo "$PWD/../_provider")
+  $ make_backend_lockdirs foo "$PWD/_provider"
   $ (cd native && dune build renamed libexec-data lib-data)
   $ cat native/_build/default/renamed native/_build/default/libexec-data \
   >   native/_build/default/lib-data
