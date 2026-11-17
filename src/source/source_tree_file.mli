@@ -6,7 +6,7 @@ open Import
 
 module Backing : sig
   type t =
-    | External of Path.External.t
+    | Fs of Path.Outside_build_dir.t
     | Build of Path.Build.t
 
   val path : t -> Path.t

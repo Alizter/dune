@@ -57,13 +57,7 @@ module Candidate = struct
       let+ kind = Lock_dir.source_kind source >>| User_error.ok_exn in
       let root =
         match kind with
-        | `Local (`Directory, path) ->
-          let path =
-            Path.outside_build_dir path
-            |> Path.to_absolute_filename
-            |> Path.External.of_string
-          in
-          Backing.External path
+        | `Local (`Directory, path) -> Backing.Fs path
         | `Local (`File, _) | `Fetch ->
           Backing.Build (Fetch_rules.make_target ~kind:Dir source)
       in
@@ -139,8 +133,9 @@ let listing root =
          Code_error.raise
            "Package source directory was not produced"
            [ "dir", Path.Build.to_dyn dir ]
-       | External dir ->
-         Memo.return (Error (Unix.ENOENT, "readdir", Path.External.to_string dir)))
+       | Fs dir ->
+         Memo.return
+           (Error (Unix.ENOENT, "readdir", Path.Outside_build_dir.to_string dir)))
     | Ok (Some (files, dirs)) ->
       let files =
         Filename.Array.Set.to_list files

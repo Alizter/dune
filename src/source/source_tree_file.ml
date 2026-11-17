@@ -3,61 +3,59 @@ open Memo.O
 
 module Backing = struct
   type t =
-    | External of Path.External.t
+    | Fs of Path.Outside_build_dir.t
     | Build of Path.Build.t
 
   let repr =
     Repr.variant
       "source-backing"
-      [ Repr.case "External" Path.External.repr ~proj:(function
-          | External path -> Some path
+      [ Repr.case "Fs" (Repr.view Path.repr ~to_:Path.outside_build_dir) ~proj:(function
+          | Fs path -> Some path
           | Build _ -> None)
       ; Repr.case "Build" Path.Build.repr ~proj:(function
           | Build path -> Some path
-          | External _ -> None)
+          | Fs _ -> None)
       ]
   ;;
 
   let equal a b =
     match a, b with
-    | External a, External b -> Path.External.equal a b
+    | Fs a, Fs b -> Path.Outside_build_dir.equal a b
     | Build a, Build b -> Path.Build.equal a b
-    | External _, Build _ | Build _, External _ -> false
+    | Fs _, Build _ | Build _, Fs _ -> false
   ;;
 
   let hash = function
-    | External path -> Poly.hash (0, Path.External.hash path)
+    | Fs path -> Poly.hash (0, Path.Outside_build_dir.hash path)
     | Build path -> Poly.hash (1, Path.Build.hash path)
   ;;
 
   let to_dyn = Repr.to_dyn repr
 
   let path = function
-    | External path -> Path.external_ path
+    | Fs path -> Path.outside_build_dir path
     | Build path -> Path.build path
   ;;
 
   let append_local t local =
     match t with
-    | External path -> External (Path.External.append_local path local)
+    | Fs path -> Fs (Path.Outside_build_dir.append_local path local)
     | Build path -> Build (Path.Build.append_local path local)
   ;;
 
   let relative_fname t name =
     match t with
-    | External path -> External (Path.External.relative_fname path name)
+    | Fs path -> Fs (Path.Outside_build_dir.relative_fname path name)
     | Build path -> Build (Path.Build.relative_fname path name)
   ;;
 
-  let fs_path path = Path.Outside_build_dir.External path
-
   let file_exists = function
-    | External path -> Fs_memo.file_exists (fs_path path)
+    | Fs path -> Fs_memo.file_exists path
     | Build path -> Build_system.file_exists (Path.build path)
   ;;
 
   let read_file = function
-    | External path -> Fs_memo.file_contents (fs_path path)
+    | Fs path -> Fs_memo.file_contents path
     | Build path -> Build_system.read_file (Path.build path)
   ;;
 
@@ -65,8 +63,8 @@ module Backing = struct
     | Build dir ->
       let+ contents = Build_system.directory_target_contents_opt ~dir in
       Ok contents
-    | External dir ->
-      let+ contents = Fs_memo.dir_contents (fs_path dir) in
+    | Fs dir ->
+      let+ contents = Fs_memo.dir_contents dir in
       (match contents with
        | Error (Unix.ENOENT, _, _) -> Ok None
        | Error error -> Error error
@@ -81,7 +79,9 @@ module Backing = struct
                 | ".hg" | ".git" | "_darcs" | "_opam" | "_build" | "_esy" -> Skip
                 | _ -> Right name)
              | _ ->
-               let path = Path.External.relative_fname dir name |> Path.external_ in
+               let path =
+                 Path.Outside_build_dir.relative_fname dir name |> Path.outside_build_dir
+               in
                if String.starts_with ~prefix:".#" name_s || Path.is_broken_symlink path
                then Skip
                else Left name)

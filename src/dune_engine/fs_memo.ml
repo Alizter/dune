@@ -806,53 +806,12 @@ end = struct
   ;;
 end
 
-(* Watcher events use workspace-relative keys. Only localize exact absolute
-   aliases, leaving non-canonical spellings and build paths unchanged. *)
-let canonical_path (path : Path.Outside_build_dir.t) =
-  match path with
-  | In_source_dir _ -> path
-  | External file ->
-    let absolute = Path.External.to_string file in
-    let root = Path.to_absolute_filename Path.root in
-    let directory_prefix dir =
-      if String.ends_with dir ~suffix:"/"
-      then dir
-      else if Sys.win32 && String.ends_with dir ~suffix:"\\"
-      then String.take dir (String.length dir - 1) ^ "/"
-      else dir ^ "/"
-    in
-    let build_dir = Path.to_absolute_filename Path.build_dir in
-    let suffix =
-      if
-        String.equal absolute build_dir
-        || String.starts_with absolute ~prefix:(directory_prefix build_dir)
-      then None
-      else if String.equal absolute root
-      then Some ""
-      else String.drop_prefix absolute ~prefix:(directory_prefix root)
-    in
-    (match suffix with
-     | None -> path
-     | Some suffix when not (Filename.is_relative suffix) -> path
-     | Some suffix ->
-       (match Path.Local.relative_result Path.Local.root suffix with
-        | Error _ -> path
-        | Ok local ->
-          let source = Path.Source.of_local local in
-          if
-            (not (Path.Source.is_in_build_dir source))
-            && String.equal absolute (Path.to_absolute_filename (Path.source source))
-          then In_source_dir source
-          else path))
-;;
-
 (* CR-someday amokhov: The current implementation doesn't handle symbolic links
    correctly. Instead of running [path_stat] on [path] directly and watching the
    [path] via its parent, we should watch all intermediate symbolic links, if
    there are any. If any of them changes, the whole chain should be invalidated
    and re-traversed/re-watched again. *)
 let path_stat path =
-  let path = canonical_path path in
   let* () = Watcher.watch ~try_to_watch_via_parent:true path in
   match Fs_cache.read Fs_cache.Untracked.path_stat path with
   | Ok { st_dev = _; st_ino = _; st_kind = S_DIR } as result ->
@@ -925,7 +884,6 @@ let dir_exists path =
    file system access functions in one place, and exposing an uncached version
    of [file_digest] seems error-prone. We may need to rethink this decision. *)
 let file_digest ?(force_update = false) path =
-  let path = canonical_path path in
   if force_update
   then (
     Cached_digest.Untracked.invalidate_cached_timestamp_file path;
@@ -955,7 +913,6 @@ let file_digest_exn ~loc path =
 ;;
 
 let dir_contents ?(force_update = false) path =
-  let path = canonical_path path in
   if force_update
   then (
     Cached_digest.Untracked.invalidate_cached_timestamp_dirs path;
@@ -969,7 +926,6 @@ let dir_contents ?(force_update = false) path =
    [with_lexbuf_from_file], so perhaps we could just replace this more general
    function with two simpler ones that can be cached independently. *)
 let tracking_file_digest path =
-  let path = canonical_path path in
   let+ () = Watcher.watch ~try_to_watch_via_parent:true path in
   (* This is a bit of a hack. By reading [file_digest], we cause the [path] to
      be recorded in the [Fs_cache.Untracked.file_digest], so the build will be
