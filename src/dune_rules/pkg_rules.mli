@@ -8,15 +8,7 @@ open Import
     dependencies retain their private package directories. *)
 
 module Paths : sig
-  type 'a t =
-    { source_dir : 'a
-    ; target_dir : 'a
-    ; extra_sources : 'a
-    ; name : Package.Name.t
-    ; install_roots : 'a Install.Roots.t Lazy.t
-    ; install_paths : 'a Install.Paths.t Lazy.t
-    ; prefix : 'a
-    }
+  type 'a t
 
   val of_root
     :  Package.Name.t
@@ -27,7 +19,7 @@ module Paths : sig
     -> 'a t
 
   val map_path : 'a t -> f:('a -> 'b) -> 'b t
-  val install_roots : 'a t -> 'a Install.Roots.t
+  val target_dir : 'a t -> 'a
 end
 
 val candidate_paths : Pkg_sources.Candidate.t -> Path.Build.t Paths.t
@@ -35,7 +27,7 @@ val candidate_paths : Pkg_sources.Candidate.t -> Path.Build.t Paths.t
 module Dependency : sig
   type t
 
-  val paths : t -> Path.t Paths.t
+  val lib_root : t -> Path.t
 
   (** The package's dependency in a shared install layout at [prefix]. *)
   val native

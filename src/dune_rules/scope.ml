@@ -521,12 +521,8 @@ module DB = struct
             | None -> Memo.return None
             | Some (_, dependency) ->
               let* dependency, _ = Action_builder.evaluate_and_collect_facts dependency in
-              let roots =
-                Pkg_rules.Dependency.paths dependency |> Pkg_rules.Paths.install_roots
-              in
-              let* findlib =
-                Findlib.create_for_package context ~package:name ~lib_root:roots.lib_root
-              in
+              let lib_root = Pkg_rules.Dependency.lib_root dependency in
+              let* findlib = Findlib.create_for_package context ~package:name ~lib_root in
               let* ctx = Context_libs.get context in
               let+ parent = package_db context name ~include_owner:false in
               let resolve library =
@@ -561,7 +557,11 @@ module DB = struct
       lazy
         (Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
            let name = Pkg_sources.Candidate.name candidate in
-           let root = (Pkg_rules.candidate_paths candidate).target_dir |> Path.build in
+           let root =
+             Pkg_rules.candidate_paths candidate
+             |> Pkg_rules.Paths.target_dir
+             |> Path.build
+           in
            ( name
            , (root, owner_db ctx ~package_scopes ~owner:(Some name) ~include_owner:true) )))
     in

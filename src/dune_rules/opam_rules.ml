@@ -69,20 +69,22 @@ let gen_mounted_rules context ~dir components =
        in
        (match rest, inventory with
         | [], _ ->
-          let paths = Pkg_rules.candidate_paths candidate in
+          let target_dir =
+            Pkg_rules.candidate_paths candidate |> Pkg_rules.Paths.target_dir
+          in
           let rules =
             Dune_engine.Rules.collect_unit (fun () ->
               let* () =
                 Dune_engine.Rules.Produce.Alias.add_deps
                   (Alias.make Alias0.all ~dir)
-                  (Action_builder.path (Path.build paths.target_dir))
+                  (Action_builder.path (Path.build target_dir))
               in
               let dependencies = Package_layout.materialize_dependencies context name in
               Pkg_rules.gen_mounted_rule context candidate ~dependencies)
           in
           Rules
             (Rules.create
-               ~directory_targets:(Path.Build.Map.singleton paths.target_dir Loc.none)
+               ~directory_targets:(Path.Build.Map.singleton target_dir Loc.none)
                ~source_sub_dirs
                ~source_files
                rules)
