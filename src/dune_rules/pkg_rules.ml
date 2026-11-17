@@ -3420,8 +3420,9 @@ let package_prefixes ctx =
   >>= function
   | false -> Memo.return []
   | true ->
-    all_project_deps ctx
-    >>| List.map ~f:(fun { Pkg.info = { name; _ }; paths = { Paths.prefix; _ }; _ } ->
+    Pkg_sources.candidates ctx
+    >>= Memo.parallel_map ~f:(fun candidate ->
+      let+ { Paths.prefix; name; _ } = mounted_paths ctx candidate in
       prefix, name)
 ;;
 
