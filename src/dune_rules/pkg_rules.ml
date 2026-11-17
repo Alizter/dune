@@ -2381,22 +2381,6 @@ module Copy_source = struct
   include Action_ext.Make (Spec)
 end
 
-let copy_source_input source ~dst =
-  let open Action_builder.O in
-  let* { Source_input.files; directories } = source in
-  let+ () = Action_builder.paths (List.map files ~f:fst) in
-  Action.progn
-    (List.map (Path.Local.root :: directories) ~f:(fun local ->
-       Action.mkdir (Path.Build.append_local dst local))
-     @ List.map files ~f:(fun (src, local) ->
-       let dst = Path.Build.append_local dst local in
-       Action.progn
-         [ Action.mkdir (Path.Build.parent_exn dst)
-         ; Action.remove_tree dst
-         ; Copy_source.action (src, dst)
-         ]))
-;;
-
 let execute ~expander ~write_paths ~source ~build ~install =
   let copies = Action_builder.map source ~f:Action.Full.make in
   let install_dirs =
@@ -2645,8 +2629,10 @@ let dune_dep =
 
 (* The fetched source of a package with its lock directory files and extra
    sources laid over it. *)
-let source_input ~source ~files_dir ~extra_sources =
+let candidate_source_input candidate =
   let open Action_builder.O in
+  let* source = Action_builder.of_memo (Pkg_sources.source candidate) in
+  let files_dir = Pkg_sources.Candidate.files_dir candidate in
   let+ files =
     Action_builder.of_memo
       (Memo.of_thunk (fun () ->
@@ -2658,33 +2644,36 @@ let source_input ~source ~files_dir ~extra_sources =
     source.Source_input.files
     @ Path.Set.to_list_map files ~f:(fun src ->
       src, Path.drop_prefix_exn src ~prefix:(Path.build files_dir))
-    @ extra_sources
+    @ List.map
+        (Pkg_sources.Candidate.lock_pkg candidate).info.extra_sources
+        ~f:(fun (local, source) ->
+          let path =
+            match Dune_pkg.Source.kind source with
+            | `Directory_or_archive path -> Path.external_ path
+            | `Fetch -> Fetch_rules.make_target ~kind:File source |> Path.build
+          in
+          path, local)
   in
   { source with files }
-;;
-
-let candidate_source_input candidate =
-  let open Action_builder.O in
-  let* source = Action_builder.of_memo (Pkg_sources.source candidate) in
-  source_input
-    ~source
-    ~files_dir:(Pkg_sources.Candidate.files_dir candidate)
-    ~extra_sources:
-      (List.map
-         (Pkg_sources.Candidate.lock_pkg candidate).info.extra_sources
-         ~f:(fun (local, source) ->
-           let path =
-             match Dune_pkg.Source.kind source with
-             | `Directory_or_archive path -> Path.external_ path
-             | `Fetch -> Fetch_rules.make_target ~kind:File source |> Path.build
-           in
-           path, local))
 ;;
 
 let prepared_source_rule candidate ~target ~patches =
   let build =
     let open Action_builder.O in
-    let+ copies = copy_source_input (candidate_source_input candidate) ~dst:target in
+    let* { Source_input.files; directories } = candidate_source_input candidate in
+    let+ () = Action_builder.paths (List.map files ~f:fst) in
+    let copies =
+      Action.progn
+        (List.map (Path.Local.root :: directories) ~f:(fun local ->
+           Action.mkdir (Path.Build.append_local target local))
+         @ List.map files ~f:(fun (src, local) ->
+           let dst = Path.Build.append_local target local in
+           Action.progn
+             [ Action.mkdir (Path.Build.parent_exn dst)
+             ; Action.remove_tree dst
+             ; Copy_source.action (src, dst)
+             ]))
+    in
     let patches =
       List.map patches ~f:(fun (_loc, patch) ->
         Dune_patch.action ~patch:(Path.build (Path.Build.append_local target patch))
