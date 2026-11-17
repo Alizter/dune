@@ -35,15 +35,9 @@ Its toplevel wrapper leaves a marker to prove it evaluated the script.
 
   $ mkdir compiler-for-script
   $ cd compiler-for-script
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name workspace) (allow_empty) (depends scripted))
-  > EOF
+  $ make_named_package_project workspace 3.25 scripted
   $ mkdir _scripted
-  $ cat > _scripted/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name scripted))
-  > EOF
+  $ (cd _scripted && make_dune_project_with_package 3.25 scripted)
   $ cat > _scripted/dune <<'EOF'
   > (* -*- tuareg -*- *)
   > let () = Jbuild_plugin.V1.send {|

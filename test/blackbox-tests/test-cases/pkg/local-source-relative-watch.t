@@ -9,10 +9,7 @@ their backing has been represented as an absolute external package location.
   $ echo '(executable (name main) (libraries foo))' > dune
   $ echo 'let () = print_endline Foo.message' > main.ml
   $ mkdir _source
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune
   $ echo 'let message = "original"' > _source/foo.ml
   $ make_lockpkg foo <<'EOF'

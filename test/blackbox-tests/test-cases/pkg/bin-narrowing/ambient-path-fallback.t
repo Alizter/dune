@@ -73,10 +73,7 @@ package. A missing optional tool should simply disable its rule.
   > (build (system "echo unexpected-unscoped-lookup; exit 1"))
   > EOF
   $ mkdir native
-  $ cat >native/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name native-tool))
-  > EOF
+  $ (cd native && make_dune_project_with_package 3.25 native-tool)
   $ cat >native/dune <<'EOF'
   > (install (section bin) (files (tool.sh as native-tool)))
   > EOF

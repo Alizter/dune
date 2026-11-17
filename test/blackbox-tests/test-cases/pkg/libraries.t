@@ -11,9 +11,7 @@ Both cases use the same source and consumer, in independent build roots.
   > EOF
   $ echo 'let () = ()' > external_sources/tool.ml
   $ mkdir _consumer native opaque
-  $ cat > _consumer/dune-project <<'EOF'
-  > (lang dune 3.11)
-  > EOF
+  $ (cd _consumer && make_dune_project 3.11)
   $ cat > _consumer/dune <<'EOF'
   > (library
   >  (name foo)

@@ -220,10 +220,7 @@ the metadata package rather than the package installing its tools.
 
   $ mkdir _native
   $ cp dune lexer.mll parser.mly _native/
-  $ cat >_native/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name native))
-  > EOF
+  $ (cd _native && make_dune_project_with_package 3.25 native)
   $ echo '(library (public_name native))' >>_native/dune
   $ make_lockpkg native <<EOF
   > (version 1)

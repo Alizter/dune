@@ -1,9 +1,6 @@
 A lock-dir package depends on a workspace package.
 
-  $ make_dune_project 3.24
-  $ cat >> dune-project <<EOF
-  > (package (name myws))
-  > EOF
+  $ make_dune_project_with_package 3.24 myws
 
   $ mkdir src
   $ cat > src/dune <<EOF
@@ -72,22 +69,15 @@ The same tool dependency must not expose workspace development dependencies
 when resolving the libraries of a mounted package.
 
   $ mkdir _native
-  $ cat > _native/dune-project <<'EOF'
-  > (lang dune 3.26)
-  > (package (name native))
-  > EOF
+  $ (cd _native && make_dune_project_with_package 3.26 native)
   $ cat > _native/dune <<'EOF'
   > (library
   >  (public_name native)
   >  (libraries compiler-libs.common))
   > EOF
   $ echo 'let value = 1' > _native/native.ml
-  $ make_lockpkg native <<EOF
-  > (version 1.0)
-  > (depends dune)
-  > (source (copy $PWD/_native))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native native "$PWD/_native"
+  $ echo '(depends dune)' | append_to_lockpkg native
   $ make_lockpkg mylock <<'EOF'
   > (version 0.0.1)
   > (depends myws native dune)

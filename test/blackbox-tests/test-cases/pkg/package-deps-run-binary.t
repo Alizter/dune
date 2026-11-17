@@ -5,10 +5,7 @@ always depends on the provider; all cells share their source definitions.
 
   $ export DUNE_CACHE=disabled
   $ mkdir _provider _consumer native opaque
-  $ cat > _provider/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name provider))
-  > EOF
+  $ (cd _provider && make_dune_project_with_package 3.25 provider)
   $ echo '(install (section bin) (files mybin))' > _provider/dune
   $ cat > _provider/mybin <<'EOF'
   > #!/bin/sh

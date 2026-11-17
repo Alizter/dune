@@ -64,10 +64,7 @@ roots. The workspace sibling is not declared by the consumer, so neither
 lookup may select its competing binary.
 
   $ mkdir -p _provider _selection/sibling _selection/consumer native opaque
-  $ cat > _provider/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name provider))
-  > EOF
+  $ (cd _provider && make_dune_project_with_package 3.25 provider)
   $ echo '(install (section bin) (files (dup.sh as dup)))' > _provider/dune
   $ printf '#!/bin/sh\necho from lockdir\n' > _provider/dup.sh
   $ printf '#!/bin/sh\necho from workspace\n' > _selection/sibling/dup.sh

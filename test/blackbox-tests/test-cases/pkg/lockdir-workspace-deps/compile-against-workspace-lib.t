@@ -37,17 +37,11 @@ The workspace provider can itself depend on another locked package. The shared
 layout must contain the transitive library needed to link the opaque consumer,
 without making that library's variables a direct recipe dependency.
 
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name workspace-lib) (depends leaf))
-  > EOF
+  $ make_named_package_project workspace-lib 3.25 leaf
   $ echo '(library (name workspace_lib) (public_name workspace-lib) (modes byte) (libraries leaf))' > src/dune
   $ echo 'let greeting = Leaf.greeting' > src/workspace_lib.ml
   $ mkdir _leaf
-  $ cat > _leaf/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name leaf))
-  > EOF
+  $ (cd _leaf && make_dune_project_with_package 3.25 leaf)
   $ echo '(library (public_name leaf) (modes byte))' > _leaf/dune
   $ echo 'let greeting = "native leaf"' > _leaf/leaf.ml
   $ make_dune_source_lockpkg native leaf "$PWD/_leaf"
