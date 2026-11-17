@@ -525,7 +525,9 @@ module DB = struct
             | None -> Memo.return None
             | Some (_, dependency) ->
               let* dependency, _ = Action_builder.evaluate_and_collect_facts dependency in
-              let roots = Pkg_rules.Paths.install_roots dependency.paths in
+              let roots =
+                Pkg_rules.Dependency.paths dependency |> Pkg_rules.Paths.install_roots
+              in
               let* findlib =
                 Findlib.create_for_package context ~package:name ~lib_root:roots.lib_root
               in

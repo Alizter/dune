@@ -373,6 +373,7 @@ module Dependency = struct
     { paths; files = Section.Map.empty; variables; exported_env; export_paths = paths }
   ;;
 
+  let paths { paths; _ } = paths
   let info { paths; variables; _ } = paths.name, (variables, paths)
 
   let install_entries { paths; files; _ } =

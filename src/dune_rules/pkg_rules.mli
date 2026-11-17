@@ -33,13 +33,9 @@ end
 val candidate_paths : Pkg_sources.Candidate.t -> Path.Build.t Paths.t
 
 module Dependency : sig
-  type t =
-    { paths : Path.t Paths.t
-    ; files : Path.t list Section.Map.t
-    ; variables : OpamVariable.variable_contents Package_variable_name.Map.t
-    ; exported_env : String_with_vars.t Dune_lang.Action.Env_update.t list
-    ; export_paths : Path.t Paths.t
-    }
+  type t
+
+  val paths : t -> Path.t Paths.t
 
   (** The package's dependency in a shared install layout at [prefix]. *)
   val native
