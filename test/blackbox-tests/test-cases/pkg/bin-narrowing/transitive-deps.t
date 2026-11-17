@@ -6,10 +6,7 @@ The leaf [transitive] is a Dune project installing [transitive-bin], built
 natively or by an opaque recipe:
 
   $ mkdir -p _transitive native opaque
-  $ cat > _transitive/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name transitive))
-  > EOF
+  $ (cd _transitive && make_dune_project_with_package 3.25 transitive)
   $ echo '(install (section bin) (files transitive-bin))' > _transitive/dune
   $ printf '#!/bin/sh\necho from transitive\n' > _transitive/transitive-bin
   $ chmod +x _transitive/transitive-bin
@@ -106,13 +103,9 @@ Each check prints [direct-bin] (direct dep), [transitive-bin] (through
 
 The package [other] was *not* built. A native [transitive] runs no recipe:
 
-  $ built() (
-  >   cd "$1"
-  >   dune trace cat | jq 'select(.cat == "process" and .name == "finish" and .args.target_dirs[]?) | .args.target_dirs[]' | sort -u | censor
-  > )
-  $ built native
+  $ (cd native && dune trace cat | jq 'select(.cat == "process" and .name == "finish" and .args.target_dirs[]?) | .args.target_dirs[]' | sort -u | censor)
   "_build/default/.pkg/direct/_install"
-  $ built opaque
+  $ (cd opaque && dune trace cat | jq 'select(.cat == "process" and .name == "finish" and .args.target_dirs[]?) | .args.target_dirs[]' | sort -u | censor)
   "_build/default/.pkg/direct/_install"
   "_build/default/.pkg/transitive/_install"
 
@@ -145,8 +138,7 @@ target no longer pulls in [other], a package outside that closure:
 
 [transitive] (in [direct]'s closure) is built too, as it must be:
 
-  $ cookie="opaque/$(get_build_pkg_dir transitive)/_install/cookie"
-  $ if test -f "$cookie"
+  $ if test -f "opaque/$(get_build_pkg_dir transitive)/_install/cookie"
   >  then echo "transitive *was* built"; else echo "transitive was not built"; fi
   transitive *was* built
   $ ls native/_build/_private/default/.packages/*/bin
