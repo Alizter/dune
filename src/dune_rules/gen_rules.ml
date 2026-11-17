@@ -584,16 +584,12 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
   let* source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
   (* The engine finds the sources of a workspace directory itself. Those of a
      mounted package are not in the workspace, so it is told. *)
-  let mounted_source_dir =
-    match Pkg_sources.package_of_artifact_path dir with
-    | None -> None
-    | Some (_ : Package.Name.t) -> source_tree_dir
-  in
-  let source_files =
-    match mounted_source_dir with
-    | None -> Path.Build.Map.empty
-    | Some source_dir ->
-      Path.Build.Map.singleton dir (Source_file_dir.rules ~dir source_dir)
+  let source_files, source_sub_dirs =
+    match Pkg_sources.package_of_artifact_path dir, source_tree_dir with
+    | None, _ | Some _, None -> Path.Build.Map.empty, Path.Build.Map.empty
+    | Some (_ : Package.Name.t), Some source_dir ->
+      ( Path.Build.Map.singleton dir (Source_file_dir.rules ~dir source_dir)
+      , Path.Build.Map.singleton dir (Source_tree.Dir.sub_dir_names source_dir) )
   in
   match dir_status with
   | Lock_dir _ -> Memo.return Gen_rules.no_rules
@@ -614,12 +610,6 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
               dir_status
               ~jsoo_enabled:Jsoo_rules.jsoo_enabled
               ~dir
-          in
-          let source_sub_dirs =
-            match mounted_source_dir with
-            | None -> Path.Build.Map.empty
-            | Some source_dir ->
-              Path.Build.Map.singleton dir (Source_tree.Dir.sub_dir_names source_dir)
           in
           let allowed_subdirs =
             let automatic = Automatic_subdir.subdirs components in
