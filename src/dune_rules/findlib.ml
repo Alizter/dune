@@ -505,10 +505,7 @@ module Loader = struct
   ;;
 
   let lookup_and_load (db : DB.t) name =
-    let resolve_package = function
-      | Some _ as package -> package
-      | None -> if db.lock_dir_active then None else Some name
-    in
+    let resolve_package package = if db.lock_dir_active then package else Some name in
     Memo.List.find_map db.paths ~f:(fun (path, package) ->
       lookup db ~package:(resolve_package package) name path)
     >>= function
@@ -664,7 +661,7 @@ let create_for_package context_name ~package ~lib_root =
   DB.create
     ~paths:[ lib_root, Some package ]
     ~stdlib_package:None
-    ~lock_dir_active:false
+    ~lock_dir_active:true
     ~lib_config
 ;;
 
