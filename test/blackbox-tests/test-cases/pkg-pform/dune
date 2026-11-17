@@ -1,3 +1,3 @@
 (cram
- (applies_to install-dirs.t)
+ (applies_to install-dirs.t artifacts.t)
  (setup_scripts ../pkg/helpers.sh))

@@ -270,40 +270,14 @@ reads it from this file.
   $ grep 'package "support"' _build/default/.pkg/foo/META.foo
   package "support" (
 
-Library-file pforms name installed files, which need not have the same name or
-location in the source tree.
+Keep renamed library/libexec data for the ordinary installation checks below.
+Their file-pform consumption is covered by pkg-pform/artifacts.t.
 
   $ echo installed-name > _foo/support/data
   $ cat >> _foo/support/dune <<'EOF'
   > (install (section lib) (files (data as support/renamed.txt)))
-  > EOF
-  $ cat >> dune <<'EOF'
-  > (rule
-  >  (target renamed)
-  >  (action (copy %{lib:foo.support:renamed.txt} %{target})))
-  > EOF
-  $ dune build renamed
-  $ cat _build/default/renamed
-  installed-name
-
-The libexec section shares the library directory and is accessible through
-both lib and libexec pforms.
-
-  $ cat >> _foo/support/dune <<'EOF'
   > (install (section libexec) (files (data as support/executable-data)))
   > EOF
-  $ cat >> dune <<'EOF'
-  > (rule
-  >  (target libexec-data)
-  >  (action (copy %{libexec:foo.support:executable-data} %{target})))
-  > (rule
-  >  (target lib-data)
-  >  (action (copy %{lib:foo.support:executable-data} %{target})))
-  > EOF
-  $ dune build libexec-data lib-data
-  $ cat _build/default/libexec-data _build/default/lib-data
-  installed-name
-  installed-name
 
 Public files and binaries must also have ordinary installation rules. A special
 pform-only route is not a substitute for these targets.
