@@ -622,9 +622,7 @@ module DB = struct
              let+ public = partition (Some package) in
              `Native public)
     in
-    let candidate_names () =
-      Pkg_sources.candidates context >>| List.map ~f:Pkg_sources.Candidate.name
-    in
+    let candidate_names () = Pkg_sources.dependencies context >>| Package.Name.Map.keys in
     let kinds names =
       Memo.parallel_map names ~f:(fun name ->
         let+ mounted = Pkg_sources.find_mounted context name in

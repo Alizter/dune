@@ -235,10 +235,7 @@ let resolve_program_memo t ~dir ?where ?hint ~loc bin =
 let resolve_command_line_program t ~dir bin =
   let context = Context.name t.context in
   let* artifacts = artifacts_host t ~dir
-  and* locked =
-    Pkg_sources.candidates context
-    >>| Package.Name.Set.of_list_map ~f:Pkg_sources.Candidate.name
-  in
+  and* locked = Pkg_sources.dependencies context >>| Package.Name.Set.of_keys in
   Artifacts.binary (Artifacts.add_package_deps artifacts locked) ~dir ~loc:None bin
 ;;
 

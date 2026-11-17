@@ -1587,9 +1587,7 @@ let scheme_per_ctx_memo =
     (fun sctx ->
        let context = Super_context.context sctx |> Context.name in
        let* workspace = Dune_load.packages () >>| Package.Name.Map.keys
-       and* locked =
-         Pkg_sources.candidates context >>| List.map ~f:Pkg_sources.Candidate.name
-       in
+       and* locked = Pkg_sources.dependencies context >>| Package.Name.Map.keys in
        let* workspace = Memo.parallel_map workspace ~f:(scheme sctx) in
        (* A locked package that fails to load is reported where it is
           demanded, not by the shared install directory. *)

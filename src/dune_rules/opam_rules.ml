@@ -31,11 +31,9 @@ let gen_mounted_rules context ~dir components =
   let open Build_config.Gen_rules in
   match components with
   | [] ->
-    let+ candidates = Pkg_sources.candidates context in
-    List.map candidates ~f:(fun candidate ->
-      Pkg_sources.Candidate.name candidate
-      |> Package.Name.to_string
-      |> Filename.of_string_exn)
+    let+ locked = Pkg_sources.dependencies context in
+    Package.Name.Map.keys locked
+    |> List.map ~f:(fun name -> Package.Name.to_string name |> Filename.of_string_exn)
     |> Subdir_set.of_list
     |> make_empty ~dir
   | name :: rest ->

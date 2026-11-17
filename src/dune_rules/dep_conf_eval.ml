@@ -293,8 +293,7 @@ let expand_package_set context package_names =
 let expand_package_set context package_names =
   let open Memo.O in
   let* expanded = expand_package_set context package_names in
-  let* candidates = Pkg_sources.candidates context in
-  let managed = Package.Name.Set.of_list_map candidates ~f:Pkg_sources.Candidate.name in
+  let* managed = Pkg_sources.dependencies context >>| Package.Name.Set.of_keys in
   Memo.map_reduce_seq
     (Package.Name.Set.to_seq (Package.Name.Set.inter expanded managed))
     ~empty:expanded
