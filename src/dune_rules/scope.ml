@@ -424,11 +424,14 @@ module DB = struct
         rocq_stanzas
         ~db_by_project_dir:
           (Path.Build.Map.map db_by_project_dir ~f:(fun (project, _, db) -> project, db))
+        ~projects_by_root
     in
     let by_dir =
-      Path.Build.Map.map db_by_project_dir ~f:(fun (loaded_project, public_libs, db) ->
-        let rocq_db = Rocq_scope.find rocq_scopes ~project:loaded_project in
-        { loaded_project; db; public_libs; rocq_db })
+      Path.Build.Map.mapi
+        db_by_project_dir
+        ~f:(fun dir (loaded_project, public_libs, db) ->
+          let rocq_db = Rocq_scope.find rocq_scopes ~dir in
+          { loaded_project; db; public_libs; rocq_db })
     in
     let by_package =
       Path.Build.Map.to_list make_db_by_project_dir
@@ -463,9 +466,7 @@ module DB = struct
           (dune_file, Deprecated_library_name d) :: acc, rocq_acc
         | Library_redirect.Local.T d -> (dune_file, Library_redirect d) :: acc, rocq_acc
         | Rocq_stanza.Theory.T rocq_lib ->
-          ( acc
-          , (Dune_file.loaded_project dune_file, Dune_file.output_dir dune_file, rocq_lib)
-            :: rocq_acc )
+          acc, (Dune_file.output_dir dune_file, rocq_lib) :: rocq_acc
         | _ -> acc, rocq_acc)
   ;;
 
