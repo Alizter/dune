@@ -620,16 +620,6 @@ module DB = struct
              let+ public = partition (Some package) in
              `Native public)
     in
-    (* The locked package named like a library. A dune package defines only
-       libraries named after it. *)
-    let named name =
-      let package = Lib_name.package_name name in
-      mounted_libs package
-      >>| function
-      | `Opaque -> `Opaque package
-      | `None -> `None
-      | `Native public -> `Native public
-    in
     let candidate_names () =
       Pkg_sources.candidates context >>| List.map ~f:Pkg_sources.Candidate.name
     in
@@ -699,13 +689,16 @@ module DB = struct
       let* results = partition None >>= fun public -> resolve_in public name in
       if List.is_non_empty results
       then Memo.return results
-      else
+      else (
+        (* The locked package named like a library. A dune package defines
+           only libraries named after it. *)
+        let package = Lib_name.package_name name in
         let* results =
-          named name
+          mounted_libs package
           >>= function
           | `None -> Memo.return []
           | `Native public -> resolve_in public name
-          | `Opaque package -> search name [ package ]
+          | `Opaque -> search name [ package ]
         in
         if List.is_non_empty results
         then Memo.return results
@@ -718,7 +711,7 @@ module DB = struct
             let* results = opaque candidates >>= search name in
             if List.is_non_empty results
             then Memo.return results
-            else errors_for name candidates
+            else errors_for name candidates)
     in
     let resolve_lib_id (lib_id : Lib_id.t) =
       match lib_id with
