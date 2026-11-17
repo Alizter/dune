@@ -74,13 +74,8 @@ package. A missing optional tool should simply disable its rule.
   > EOF
   $ mkdir native
   $ (cd native && make_dune_project_with_package 3.25 native-tool)
-  $ cat >native/dune <<'EOF'
-  > (install (section bin) (files (tool.sh as native-tool)))
-  > EOF
-  $ cat >native/tool.sh <<'EOF'
-  > #!/bin/sh
-  > echo from native
-  > EOF
+  $ echo '(install (section bin) (files (tool.sh as native-tool)))' > native/dune
+  $ printf '#!/bin/sh\necho from native\n' > native/tool.sh
   $ chmod +x native/tool.sh
   $ cat >>dune <<'EOF'
   > (rule
