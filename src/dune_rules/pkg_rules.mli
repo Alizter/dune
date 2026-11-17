@@ -104,15 +104,14 @@ val which
   -> Path.t option Memo.t
 
 (** [env_for_packages ~packages context] is an env holding environment
-    variables constructed from the opaque [packages] in the lock directory.
-    Native packages use the consumer's shared install layout. Only the named
-    packages are included, not their dependencies. [All] means all opaque
-    packages. Empty when the context has no lock directory. *)
+    variables constructed from the [packages] in the lock directory. Only those
+    packages are included, not their dependencies. [All] means the whole lock
+    directory. Empty when the context has no lock directory. *)
 val env_for_packages : packages:Package.Name.Selection.t -> Context_name.t -> Env.t Memo.t
 
 (** [bin_paths_for_packages ~packages context] returns a list of bin
-    directories of opaque [packages] in the lock directory. [All] means all
-    opaque packages. Empty when the context has no lock directory. *)
+    directories of [packages] in the lock directory. [All] means the whole lock
+    directory. Empty when the context has no lock directory. *)
 val bin_paths_for_packages
   :  packages:Package.Name.Selection.t
   -> Context_name.t
@@ -142,8 +141,7 @@ val find_opaque
 (* CR-someday Alizter: These prefixes would be [Path.Build.t] if not for
    the "toolchain" mechanism, which installs outside the build directory. *)
 
-(** Opaque installation prefixes and owning packages from the context's lock
-    directory. Native libraries use ordinary workspace library resolution. *)
+(** Installation prefixes and owning packages from the context's lock directory. *)
 val package_prefixes : Context_name.t -> (Path.t * Package.Name.t) list Memo.t
 
 val resolve_installed_file
