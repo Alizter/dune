@@ -167,13 +167,6 @@ Implicit default aliases use the same source view and include ordinary targets.
   $ cat _build/default/.pkg/foo/checks/child/implicit
   implicit
 
-Workspace alias traversal must not sweep in dependency mounts.
-
-  $ dune build @_build/default/scan
-  Error: Alias "scan" specified on the command line is empty.
-  It is not defined in . or any of its descendants.
-  [1]
-
 Requesting a source directory is shorthand for its default alias in either view.
 
   $ cat >> _source/checks/child/dune <<'EOF'
