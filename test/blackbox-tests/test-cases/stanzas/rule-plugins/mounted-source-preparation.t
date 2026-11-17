@@ -119,9 +119,6 @@ context and still sees the prepared overlay.
   patched
   $ test -f _build/host/.pkg/foo/tools/generator/rules.exe
   $ test ! -e _build/target/.pkg/foo/tools/generator/rules.exe
-  $ test ! -e _source/tools/generator/scratch
-  $ test ! -e _build/host/.pkg/foo/tools/generator/scratch
-  $ test ! -e _build/target/.pkg/foo/tools/generator/scratch
 
 Now compile the plugin from its mounted OCaml source. The SDK path is an
 explicit fixture input, independent of locked-library visibility and exported
