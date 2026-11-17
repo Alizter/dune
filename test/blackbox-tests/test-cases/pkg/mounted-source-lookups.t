@@ -71,16 +71,7 @@ paths stay relative to the workspace
 
   $ mkdir _source/stubs/sub
   $ cp _source/stubs/stub.c _source/stubs/sub/stub.c
-  $ cat > _source/stubs/dune <<'EOF'
-  > (include_subdirs unqualified)
-  > (library
-  >  (public_name foo.stubs)
-  >  (name stubs)
-  >  (foreign_stubs
-  >   (language c)
-  >   (names stub)
-  >   (include_dirs inc)))
-  > EOF
+  $ sed -i '1i (include_subdirs unqualified)' _source/stubs/dune
 Mounted diagnostics retain the build context, so the conflicting files can be
 opened from the workspace root.
 
@@ -238,9 +229,7 @@ relative to the workspace; the mounted filename is the build path.
   >  (libraries showloc_driver)
   >  (kind ppx_rewriter))
   > EOF
-  $ cat > _source/mlx/dune <<'EOF'
-  > (library (name uses) (preprocess (pps showloc)))
-  > EOF
+  $ echo '(library (name uses) (preprocess (pps showloc)))' > _source/mlx/dune
   $ echo 'let x = 1' > _source/mlx/uses.mlx
   $ (cd _source && dune build --root . mlx/uses.cma 2>&1)
   File "mlx/dune", line 1, characters 33-46:
@@ -257,9 +246,7 @@ The dune-package of a natively built locked package records, under
 --store-orig-source-dir, the directory each library was built from
 (dune-package.t). The mounted library's directory is its build directory.
 
-  $ cat >> _source/dune <<'EOF'
-  > (library (public_name foo))
-  > EOF
+  $ echo '(library (public_name foo))' >> _source/dune
   $ echo 'let x = 1' > _source/foo.ml
   $ dune build --store-orig-source-dir $mount/foo.dune-package 2>&1
   $ grep -A1 orig_src_dir $mount/foo.dune-package
