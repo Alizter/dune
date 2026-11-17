@@ -170,6 +170,14 @@
   (package cinaps)))
 
 (cram
+ (applies_to mounted-mdx.t)
+ (deps
+  (package mdx))
+ (enabled_if
+  ; temporary workaround for #10874
+  (<> %{system} macosx)))
+
+(cram
  (applies_to mounted-rocqproject.t)
  (deps %{bin:rocq})
  (enabled_if
