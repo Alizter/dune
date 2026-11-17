@@ -26,13 +26,7 @@ packages, building them:
 
 Declaring the dependency in a directory scope keeps it available:
 
-  $ cat >>dune-project <<'EOF'
-  > (package
-  >  (name consumer)
-  >  (allow_empty)
-  >  (dir .)
-  >  (depends foo))
-  > EOF
+  $ echo '(package (name consumer) (allow_empty) (dir .) (depends foo))' >> dune-project
   $ dune exec mybin
   from foo
 

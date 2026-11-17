@@ -54,13 +54,7 @@ Test that installed binaries are visible in dependent packages
 It should also be visible in a workspace package that declares the dependency:
 
   $ make_dune_project 3.24
-  $ cat >>dune-project <<'EOF'
-  > (package
-  >  (name consumer)
-  >  (allow_empty)
-  >  (dir .)
-  >  (depends test))
-  > EOF
+  $ echo '(package (name consumer) (allow_empty) (dir .) (depends test))' >> dune-project
 
   $ cat >dune <<EOF
   > (rule
