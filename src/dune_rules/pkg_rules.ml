@@ -355,10 +355,8 @@ module Dependency = struct
 
   let load paths ~variables ~exported_env =
     let open Action_builder.O in
-    let cookie = Paths.install_cookie paths in
-    let* () = Action_builder.path cookie in
-    let { Install_cookie.Gen.files; variables = installed_variables } =
-      Install_cookie.load_exn cookie
+    let* { Install_cookie.Gen.files; variables = installed_variables } =
+      Install_cookie.read paths
     in
     let+ () = Section.Map.values files |> List.concat |> Action_builder.paths in
     let variables =
@@ -2422,10 +2420,8 @@ let execute ~expander ~write_paths ~source ~build ~install =
      @ [ finish ])
   |> Action_builder.With_targets.map ~f:(fun action ->
     Action.Full.add_env (Value_list_env.to_env expander.env) action
-    |> Action.Full.add_sandbox (Sandbox_mode.Set.singleton Sandbox_mode.copy)
+    |> Action.Full.add_sandbox Action_expander.sandbox
     |> Action.Full.disable_sandbox_policy)
-  |> Action_builder.With_targets.add_directories
-       ~directory_targets:[ write_paths.target_dir ]
 ;;
 
 let execute_recipe ~build ~install ~expander ~write_paths ~source =
