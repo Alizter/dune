@@ -425,9 +425,10 @@ let add_alias_rule (ctx : Build_context.t) ~profile ~project ~pkg =
   let source_opam_path = Pkg_sources.source_location opam_path in
   let generated_opam_path = build_path ~build_dir pkg in
   let opam_alias = Alias.make Alias0.opam ~dir in
-  let has_source_opam = source_file_exists ~build_dir pkg in
   let* use_source_opam =
-    if Profile.is_release profile then has_source_opam else Memo.return false
+    if Profile.is_release profile
+    then source_file_exists ~build_dir pkg
+    else Memo.return false
   in
   let aliases = [ Alias.make Alias0.install ~dir; Alias.make Alias0.runtest ~dir ] in
   let* () =
@@ -447,10 +448,10 @@ let add_alias_rule (ctx : Build_context.t) ~profile ~project ~pkg =
         (let open Action_builder.O in
          let+ () = Action_builder.path (Path.build generated_opam_path)
          and+ () =
-           let* exists = Action_builder.of_memo has_source_opam in
-           if exists
-           then Action_builder.path (Path.build opam_path)
-           else Action_builder.return ()
+           Action_builder.if_file_exists
+             source_opam_path
+             ~then_:(Action_builder.path (Path.build opam_path))
+             ~else_:(Action_builder.return ())
          in
          Action.diff (Path.build opam_path) generated_opam_path
          |> Action.Full.make
