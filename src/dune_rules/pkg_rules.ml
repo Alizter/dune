@@ -1230,8 +1230,15 @@ module Action_expander = struct
       Action.Setenv (Env.Var.to_string k, v, action))
   ;;
 
-  let for_recipe (pkg : Pkg.t) ~context ~path ~env ~direct ~dependencies =
-    let { Pkg.paths; info; depexts; _ } = pkg in
+  let for_recipe
+        (paths : Path.t Paths.t)
+        { Lock_dir.Pkg.info; depexts; _ }
+        ~context
+        ~path
+        ~env
+        ~direct
+        ~dependencies
+    =
     let { Pkg_info.version; _ } = info in
     let variables = Pkg_info.variables info in
     let env =
@@ -1702,6 +1709,35 @@ module DB = struct
   ;;
 end
 
+let relocate action =
+  let string_with_vars =
+    String_with_vars.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree
+  in
+  let slang = Slang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
+  let blang = Slang.Blang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
+  Dune_lang.Action.map action ~string_with_vars ~slang ~blang
+;;
+
+let relocate_build b =
+  match (b : Build_command.t) with
+  | Dune -> Build_command.Dune
+  | Action a -> Build_command.Action (relocate a)
+;;
+
+let is_relocatable_compiler_marker name =
+  let relocatable_compiler = Package.Name.of_string "relocatable-compiler" in
+  let relocatable = Package.Name.of_string "relocatable" in
+  Package.Name.equal name relocatable_compiler || Package.Name.equal name relocatable
+;;
+
+let is_compiler_version_relocatable (info : Pkg_info.t) =
+  Pkg_toolchain.is_compiler_package_with_toolchains_enabled info.name
+  &&
+  match Package_version.compare info.version (Package_version.of_string "5.5.0") with
+  | Lt -> false
+  | Eq | Gt -> true
+;;
+
 module rec Resolve : sig
   val resolve : DB.t -> Loc.t -> Pkg_digest.t -> Package_universe.t -> Pkg.t Memo.t
 end = struct
@@ -1727,40 +1763,11 @@ end = struct
     let to_dyn = Dyn.opaque
   end
 
-  let relocate action =
-    let string_with_vars =
-      String_with_vars.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree
-    in
-    let slang = Slang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
-    let blang = Slang.Blang.map_loc ~f:Dune_pkg.Lock_dir.loc_in_source_tree in
-    Dune_lang.Action.map action ~string_with_vars ~slang ~blang
-  ;;
-
-  let relocate_build b =
-    match (b : Build_command.t) with
-    | Dune -> Build_command.Dune
-    | Action a -> Build_command.Action (relocate a)
-  ;;
-
-  let is_relocatable_compiler_marker name =
-    let relocatable_compiler = Package.Name.of_string "relocatable-compiler" in
-    let relocatable = Package.Name.of_string "relocatable" in
-    Package.Name.equal name relocatable_compiler || Package.Name.equal name relocatable
-  ;;
-
   let has_relocatable_compiler_marker (info : Pkg_info.t) depends =
     is_relocatable_compiler_marker info.name
     || Pkg.top_closure depends
        |> List.exists ~f:(fun (pkg : Pkg.t) ->
          is_relocatable_compiler_marker pkg.info.name)
-  ;;
-
-  let is_compiler_version_relocatable (info : Pkg_info.t) =
-    Pkg_toolchain.is_compiler_package_with_toolchains_enabled info.name
-    &&
-    match Package_version.compare info.version (Package_version.of_string "5.5.0") with
-    | Lt -> false
-    | Eq | Gt -> true
   ;;
 
   let resolve_impl { Input.db; pkg_digest; universe = package_universe } =
@@ -2988,9 +2995,57 @@ let resolve_pkg_dep context (loc, package_name) =
   Resolve.resolve db loc pkg_digest (Dependencies context)
 ;;
 
-let dependency context name =
-  let+ pkg = resolve_pkg_dep context (Loc.none, name) in
-  Pkg.dependency pkg
+let mounted_paths context candidate =
+  let ({ Lock_dir.Pkg.info; _ } as lock_pkg) = Pkg_sources.Candidate.lock_pkg candidate in
+  let paths = Paths.map_path (candidate_paths candidate) ~f:Path.build in
+  let rec depends_on_marker seen = function
+    | [] -> Memo.return false
+    | name :: names ->
+      if is_relocatable_compiler_marker name
+      then Memo.return true
+      else if Package.Name.Set.mem seen name
+      then depends_on_marker seen names
+      else (
+        let seen = Package.Name.Set.add seen name in
+        Pkg_sources.find_candidate context name
+        >>= function
+        | None -> depends_on_marker seen names
+        | Some candidate ->
+          let* depends = Pkg_sources.Candidate.dependencies candidate in
+          depends_on_marker seen (Package.Name.Set.to_list depends @ names))
+  in
+  let+ relocatable =
+    if
+      (not (Pkg_toolchain.is_compiler_package_with_toolchains_enabled info.name))
+      || is_compiler_version_relocatable info
+    then Memo.return true
+    else depends_on_marker Package.Name.Set.empty [ info.name ]
+  in
+  if relocatable
+  then paths
+  else (
+    (* A compiler that cannot be moved is installed in the user's toolchain
+       directory, so that is its prefix. *)
+    let prefix = Pkg_toolchain.installation_prefix lock_pkg in
+    let install_roots =
+      Pkg_toolchain.install_roots ~prefix |> Install.Roots.map ~f:Path.outside_build_dir
+    in
+    { paths with
+      prefix = Path.outside_build_dir prefix
+    ; install_roots = Lazy.from_val install_roots
+    ; install_paths =
+        lazy
+          (Install.Paths.make
+             ~relative:Path.relative
+             ~package:info.name
+             ~roots:install_roots)
+    })
+;;
+
+let dependency context candidate =
+  let+ paths = mounted_paths context candidate in
+  let { Lock_dir.Pkg.info; exported_env; _ } = Pkg_sources.Candidate.lock_pkg candidate in
+  Dependency.load paths ~variables:(Pkg_info.variables info) ~exported_env
 ;;
 
 let find_opaque context name =
@@ -3000,18 +3055,28 @@ let find_opaque context name =
   | Some (mounted, `Opam) ->
     let candidate = Pkg_sources.Mounted.candidate mounted in
     let root = (candidate_paths candidate).target_dir in
-    let+ dependency = dependency context name in
+    let+ dependency = dependency context candidate in
     Some (root, dependency)
 ;;
 
 let gen_mounted_rule context candidate ~dependencies =
   let name = Pkg_sources.Candidate.name candidate in
-  let* pkg = resolve_pkg_dep context (Loc.none, name)
+  let ({ Lock_dir.Pkg.info; build_command; install_command; _ } as lock_pkg) =
+    Pkg_sources.Candidate.lock_pkg candidate
+  in
+  let write_paths = candidate_paths candidate in
+  let* paths = mounted_paths context candidate
+  and* depends = Pkg_sources.Candidate.dependencies candidate
+  and* platform = Lock_dir.Sys_vars.solver_env
   and* preparation = Pkg_sources.preparation context name
   and* backing = Pkg_sources.mount_backing context name in
+  let choose field =
+    Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform field ~platform
+  in
+  let install = choose install_command |> Option.map ~f:relocate in
   (* A mounted source already has the recipe's leading patches applied. *)
   let build =
-    match preparation, pkg.build_command with
+    match preparation, choose build_command |> Option.map ~f:relocate_build with
     | Some (Prepared { rest; patches = _; native = _ }), Some (Action _) ->
       Some (Build_command.Action (Progn rest))
     | _, build -> build
@@ -3019,7 +3084,7 @@ let gen_mounted_rule context candidate ~dependencies =
   let source =
     let open Action_builder.O in
     match backing with
-    | None -> Action_builder.return (Action.mkdir pkg.write_paths.source_dir)
+    | None -> Action_builder.return (Action.mkdir write_paths.source_dir)
     | Some backing ->
       let* { Source_input.files; directories = _ } =
         Action_builder.of_memo
@@ -3027,7 +3092,7 @@ let gen_mounted_rule context candidate ~dependencies =
       in
       let+ () =
         List.map files ~f:(fun (_, local) ->
-          Path.build (Path.Build.append_local pkg.write_paths.source_dir local))
+          Path.build (Path.Build.append_local write_paths.source_dir local))
         |> Action_builder.paths
       in
       Action.progn []
@@ -3042,7 +3107,8 @@ let gen_mounted_rule context candidate ~dependencies =
       | _ -> layout_env layout ~path ~base:(Global.env ())
     in
     Action_expander.for_recipe
-      pkg
+      paths
+      lock_pkg
       ~context
       ~path
       ~env
@@ -3050,7 +3116,7 @@ let gen_mounted_rule context candidate ~dependencies =
       ~dependencies:(Layout.dependencies layout)
   in
   let progress =
-    Pkg_build_progress.progress_action pkg.info.name pkg.info.version `Building
+    Pkg_build_progress.progress_action info.name info.version `Building
     |> Action.Full.make
     |> Action_builder.With_targets.return
   in
@@ -3059,15 +3125,10 @@ let gen_mounted_rule context candidate ~dependencies =
     let* expander = expander in
     let* action =
       Action_builder.of_memo
-        (execute_recipe
-           ~build
-           ~install:pkg.install_command
-           ~expander
-           ~write_paths:pkg.write_paths
-           ~source)
+        (execute_recipe ~build ~install ~expander ~write_paths ~source)
     in
     let* () =
-      if pkg.depends_on_dune
+      if Package.Name.Set.mem depends Dune_pkg.Dune_dep.name
       then Action_builder.deps (Dep.Set.singleton (Lazy.force dune_dep))
       else Action_builder.return ()
     in
@@ -3078,7 +3139,7 @@ let gen_mounted_rule context candidate ~dependencies =
   in
   Action_builder.with_no_targets build
   |> Action_builder.With_targets.add_directories
-       ~directory_targets:[ pkg.write_paths.target_dir ]
+       ~directory_targets:[ write_paths.target_dir ]
   |> rule ~loc:Loc.none
 ;;
 

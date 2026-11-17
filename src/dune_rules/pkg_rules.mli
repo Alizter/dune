@@ -137,7 +137,10 @@ val find_package
   -> Package.Name.t
   -> (Package.Name.Set.t * unit Action_builder.t) option Memo.t
 
-val dependency : Context_name.t -> Package.Name.t -> Dependency.t Action_builder.t Memo.t
+val dependency
+  :  Context_name.t
+  -> Pkg_sources.Candidate.t
+  -> Dependency.t Action_builder.t Memo.t
 
 val find_opaque
   :  Context_name.t

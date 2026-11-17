@@ -10,8 +10,11 @@ let materialize_ordered context names =
         Action_builder.of_memo (Pkg_sources.find_mounted_kind context name)
       in
       match mounted with
-      | Some (_, `Opam) ->
-        let* dependency = Action_builder.of_memo (Pkg_rules.dependency context name) in
+      | Some (mounted, `Opam) ->
+        let* dependency =
+          Action_builder.of_memo
+            (Pkg_rules.dependency context (Pkg_sources.Mounted.candidate mounted))
+        in
         dependency
       | Some (mounted, `Dune) ->
         let candidate = Pkg_sources.Mounted.candidate mounted in
