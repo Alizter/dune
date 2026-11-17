@@ -23,9 +23,13 @@ end
 module Mounted_dune_files =
   Source_tree.Dir.Make_map_reduce
     (Memo)
-    (Monoid.Appendable_list (struct
-         type t = Source_tree.Dir.t * Source.Dune_file.t
+    (Monoid.Product
+       (Monoid.Appendable_list (struct
+         type t = Dune_project.t * Source_tree.Dir.t
        end))
+       (Monoid.Appendable_list (struct
+            type t = Source_tree.Dir.t * Source.Dune_file.t
+          end)))
 
 (* The projects and dune files of one partition of a context: the workspace,
    or one mounted package. *)
@@ -69,9 +73,31 @@ let load_mount context mounted =
       let candidate = Pkg_sources.Mounted.candidate mounted in
       let owner = Pkg_sources.Candidate.name candidate in
       let artifact_root = Pkg_sources.Candidate.artifact_root candidate in
-      let* projects =
-        Pkg_sources.Mounted.projects mounted
+      let version = (Pkg_sources.Candidate.lock_pkg candidate).info.version in
+      let* projects, files =
+        Mounted_dune_files.map_reduce
+          tree
+          ~traverse:Source_dir_status.Set.all
+          ~trace_event_name:"Loaded mounted source tree"
+          ~f:(fun dir ->
+            let project = Source_tree.Dir.project dir in
+            Memo.return
+              ( (if
+                   Path.Local.equal
+                     (Dune_project.root project)
+                     (Source_tree.Dir.source_path dir)
+                 then Appendable_list.singleton (project, dir)
+                 else Appendable_list.empty)
+              , match Source_tree.Dir.dune_file dir with
+                | None -> Appendable_list.empty
+                | Some file -> Appendable_list.singleton (dir, file) ))
+      in
+      let+ projects =
+        Appendable_list.to_list projects
         |> Memo.List.map ~f:(fun (project, source_tree_root) ->
+          let project =
+            Dune_project.set_package_version project ~package:owner ~version
+          in
           let* visible_packages =
             Dune_project.including_hidden_packages project
             |> Package.Name.Map.values
@@ -89,16 +115,6 @@ let load_mount context mounted =
             ~partition_root:artifact_root
             ~stanza_mask:(Some visible_packages)
           |> Memo.return)
-      in
-      let+ files =
-        Mounted_dune_files.map_reduce
-          (Source_tree.Rules.Mounted.root tree)
-          ~traverse:Source_dir_status.Set.all
-          ~trace_event_name:"Loaded mounted source tree"
-          ~f:(fun dir ->
-            match Source_tree.Dir.dune_file dir with
-            | None -> Memo.return Appendable_list.empty
-            | Some file -> Memo.return (Appendable_list.singleton (dir, file)))
       in
       projects, files
   in
@@ -319,8 +335,7 @@ let source_tree_root ~dir =
       | None -> Source_tree.root () >>| Option.some
       | Some package ->
         let+ mounted = Pkg_sources.find_mounted context package in
-        Option.bind mounted ~f:Pkg_sources.Mounted.tree
-        |> Option.map ~f:Source_tree.Rules.Mounted.root)
+        Option.bind mounted ~f:Pkg_sources.Mounted.tree)
 ;;
 
 let source_tree_dir ~dir =

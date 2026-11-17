@@ -532,21 +532,6 @@ module Rules = struct
   module File = Source_tree_file.File
 
   module Mounted = struct
-    type t =
-      { root : Dir.t
-      ; projects : (Dune_project.t * Dir.t) list
-      }
-
-    let root t = t.root
-    let projects t = t.projects
-
-    module Projects =
-      Dir.Make_map_reduce
-        (Memo)
-        (Monoid.Appendable_list (struct
-             type t = Dune_project.t * Dir.t
-           end))
-
     let load ~loc ~logical_root ~backing_root =
       let dir =
         Source_tree_file.Dir.mounted
@@ -554,34 +539,20 @@ module Rules = struct
           ~logical:logical_root
           ~backing:backing_root
       in
-      let* root =
-        find_dir_raw
-          ~default_vcs:Ancestor_vcs
-          ~dir
-          ~basename:(Source_tree_file.Dir.basename dir)
-          ~virtual_:false
-          ~dirs_visited:Dirs_visited.empty
-          ~dune_file:None
-          ~status:Normal
-          ~project:
-            (Dune_project.anonymous
-               ~dir:(Source_tree_file.Dir.source_path dir)
-               ~display_dir:(Path.build logical_root)
-               Package_info.empty
-               Package.Name.Map.empty)
-      in
-      let+ projects =
-        Projects.map_reduce
-          root
-          ~traverse:Source_dir_status.Set.all
-          ~trace_event_name:"Mounted projects"
-          ~f:(fun dir ->
-            Memo.return
-              (if Path.Local.equal (Dune_project.root dir.project) (Dir.source_path dir)
-               then Appendable_list.singleton (dir.project, dir)
-               else Appendable_list.empty))
-      in
-      { root; projects = Appendable_list.to_list projects }
+      find_dir_raw
+        ~default_vcs:Ancestor_vcs
+        ~dir
+        ~basename:(Source_tree_file.Dir.basename dir)
+        ~virtual_:false
+        ~dirs_visited:Dirs_visited.empty
+        ~dune_file:None
+        ~status:Normal
+        ~project:
+          (Dune_project.anonymous
+             ~dir:(Source_tree_file.Dir.source_path dir)
+             ~display_dir:(Path.build logical_root)
+             Package_info.empty
+             Package.Name.Map.empty)
     ;;
   end
 end

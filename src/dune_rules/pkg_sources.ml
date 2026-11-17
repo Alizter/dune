@@ -185,14 +185,9 @@ let source candidate =
 ;;
 
 module Mounted = struct
-  type loaded =
-    { tree : Source_tree.Rules.Mounted.t
-    ; projects : (Dune_project.t * Source_tree.Dir.t) list
-    }
-
   type t =
     { candidate : Candidate.t
-    ; loaded : (loaded option, User_message.t list) result
+    ; loaded : (Source_tree.Dir.t option, User_message.t list) result
     }
 
   let candidate t = t.candidate
@@ -215,14 +210,8 @@ module Mounted = struct
 
   let tree t =
     match t.loaded with
-    | Ok (Some loaded) -> Some loaded.tree
-    | Ok None | Error _ -> None
-  ;;
-
-  let projects t =
-    match t.loaded with
-    | Ok (Some loaded) -> loaded.projects
-    | Ok None | Error _ -> []
+    | Ok tree -> tree
+    | Error _ -> None
   ;;
 end
 
@@ -497,10 +486,9 @@ let prepare context candidate =
         ~logical_root
         ~backing_root
     in
-    let projects = Source_tree.Rules.Mounted.projects tree in
     let* has_dune_file =
       Scan_dune_files.map_reduce
-        (Source_tree.Rules.Mounted.root tree)
+        tree
         ~traverse:Source_dir_status.Set.all
         ~trace_event_name:"Package source classification"
         ~f:(fun dir ->
@@ -514,15 +502,7 @@ let prepare context candidate =
              | None -> Memo.return false
              | Some package -> Dune_load_workspace.package_enabled package))
     in
-    if not has_dune_file
-    then Memo.return None
-    else (
-      let version = (Candidate.lock_pkg candidate).info.version in
-      let projects =
-        List.map projects ~f:(fun (project, dir) ->
-          Dune_project.set_package_version project ~package:name ~version, dir)
-      in
-      Memo.return (Some { Mounted.tree; projects }))
+    Memo.return (Option.some_if has_dune_file tree)
 ;;
 
 let mounted_by_name =

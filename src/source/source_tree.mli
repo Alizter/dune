@@ -57,17 +57,12 @@ module Rules : sig
   module File = Source_tree_file.File
 
   module Mounted : sig
-    type t
-
     (** Load the tree at [logical_root] from its external or built backing. *)
     val load
       :  loc:Loc.t
       -> logical_root:Path.Build.t
       -> backing_root:Backing.t
-      -> t Memo.t
-
-    val root : t -> Dir.t
-    val projects : t -> (Dune_project.t * Dir.t) list
+      -> Dir.t Memo.t
   end
 end
 

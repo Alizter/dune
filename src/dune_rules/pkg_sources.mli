@@ -39,8 +39,7 @@ module Mounted : sig
   type t
 
   val candidate : t -> Candidate.t
-  val tree : t -> Source_tree.Rules.Mounted.t option
-  val projects : t -> (Dune_project.t * Source_tree.Dir.t) list
+  val tree : t -> Source_tree.Dir.t option
   val kind : t -> ([ `Dune | `Opam ], User_message.t list) result
   val kind_exn : t -> [ `Dune | `Opam ] Memo.t
 end
