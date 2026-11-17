@@ -16,31 +16,27 @@ let materialize_ordered context names =
           ; export_paths = paths
           }
       in
-      let* mounted = Action_builder.of_memo (Pkg_sources.find_mounted context name) in
+      let* mounted =
+        Action_builder.of_memo (Pkg_sources.find_mounted_kind context name)
+      in
       match mounted with
-      | Some mounted ->
-        let* kind = Action_builder.of_memo (Pkg_sources.Mounted.kind_exn mounted) in
-        (match kind with
-         | `Opam ->
-           let* dependency = Action_builder.of_memo (Pkg_rules.dependency context name) in
-           dependency
-         | `Dune ->
-           let candidate = Pkg_sources.Mounted.candidate mounted in
-           let { Dune_pkg.Lock_dir.Pkg.info; exported_env; _ } =
-             Pkg_sources.Candidate.lock_pkg candidate
-           in
-           let paths =
-             Pkg_rules.candidate_paths candidate |> Pkg_rules.Paths.map_path ~f:Path.build
-           in
-           let paths =
-             { paths with
-               source_dir = Path.build (Pkg_sources.Candidate.artifact_root candidate)
-             }
-           in
-           native
-             paths
-             ~variables:(Dune_pkg.Lock_dir.Pkg_info.variables info)
-             ~exported_env)
+      | Some (_, `Opam) ->
+        let* dependency = Action_builder.of_memo (Pkg_rules.dependency context name) in
+        dependency
+      | Some (mounted, `Dune) ->
+        let candidate = Pkg_sources.Mounted.candidate mounted in
+        let { Dune_pkg.Lock_dir.Pkg.info; exported_env; _ } =
+          Pkg_sources.Candidate.lock_pkg candidate
+        in
+        let paths =
+          Pkg_rules.candidate_paths candidate |> Pkg_rules.Paths.map_path ~f:Path.build
+        in
+        let paths =
+          { paths with
+            source_dir = Path.build (Pkg_sources.Candidate.artifact_root candidate)
+          }
+        in
+        native paths ~variables:(Dune_pkg.Lock_dir.Pkg_info.variables info) ~exported_env
       | None ->
         let* package = Action_builder.of_memo (Dune_load.find_package context name) in
         (match package with

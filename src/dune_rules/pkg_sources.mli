@@ -51,6 +51,11 @@ end
     is not locked. *)
 val find_mounted : Context_name.t -> Package.Name.t -> Mounted.t option Memo.t
 
+val find_mounted_kind
+  :  Context_name.t
+  -> Package.Name.t
+  -> (Mounted.t * [ `Dune | `Opam ]) option Memo.t
+
 (** How a package's source reaches its mount. *)
 module Preparation : sig
   type t =

@@ -919,14 +919,10 @@ let gen_rules ctx ~dir components =
     match components with
     | root :: name :: rest
       when String.equal root (Filename.to_string Filename.pkg_dir_basename) ->
-      let* mounted = Pkg_sources.find_mounted ctx (Package.Name.of_string name) in
+      let* mounted = Pkg_sources.find_mounted_kind ctx (Package.Name.of_string name) in
       (match mounted with
-       | None -> Opam_rules.gen_mounted_rules ctx ~dir (name :: rest)
-       | Some mounted ->
-         let* kind = Pkg_sources.Mounted.kind_exn mounted in
-         (match kind with
-          | `Dune -> gen_rules ctx (Super_context.find_exn ctx) ~dir rest
-          | `Opam -> Opam_rules.gen_mounted_rules ctx ~dir (name :: rest)))
+       | Some (_, `Dune) -> gen_rules ctx (Super_context.find_exn ctx) ~dir rest
+       | None | Some (_, `Opam) -> Opam_rules.gen_mounted_rules ctx ~dir (name :: rest))
     | root :: rest when String.equal root (Filename.to_string Filename.pkg_dir_basename)
       -> Opam_rules.gen_mounted_rules ctx ~dir rest
     | _ ->

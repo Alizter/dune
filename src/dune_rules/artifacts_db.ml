@@ -142,18 +142,14 @@ let native_bins context ~packages name =
     in
     Package.Name.Set.to_list declared
     |> Memo.List.concat_map ~f:(fun package ->
-      let* mounted = Pkg_sources.find_mounted context package in
+      let* mounted = Pkg_sources.find_mounted_kind context package in
       match mounted with
-      | None -> Memo.return []
-      | Some mounted ->
-        Pkg_sources.Mounted.kind_exn mounted
-        >>= (function
-         | `Opam -> Memo.return []
-         | `Dune ->
-           let+ binaries = package_binaries context package in
-           Filename.Map.find binaries name
-           |> Option.map ~f:Appendable_list.to_list
-           |> Option.value ~default:[]))
+      | None | Some (_, `Opam) -> Memo.return []
+      | Some (_, `Dune) ->
+        let+ binaries = package_binaries context package in
+        Filename.Map.find binaries name
+        |> Option.map ~f:Appendable_list.to_list
+        |> Option.value ~default:[])
 ;;
 
 let all =

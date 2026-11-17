@@ -1839,10 +1839,9 @@ end = struct
           match mounted with
           | None -> Memo.return `Opam
           | Some candidate ->
-            Pkg_sources.find_mounted context (Pkg_sources.Candidate.name candidate)
-            >>= (function
-             | None -> Memo.return `Opam
-             | Some mounted -> Pkg_sources.Mounted.kind_exn mounted))
+            Pkg_sources.find_mounted_kind context (Pkg_sources.Candidate.name candidate)
+            >>| Option.map ~f:snd
+            >>| Option.value ~default:`Opam)
       in
       let id = Pkg.Id.gen () in
       let write_paths =
@@ -3032,18 +3031,14 @@ let dependency context name =
 ;;
 
 let find_opaque context name =
-  let* mounted = Pkg_sources.find_mounted context name in
+  let* mounted = Pkg_sources.find_mounted_kind context name in
   match mounted with
-  | None -> Memo.return None
-  | Some mounted ->
-    let* kind = Pkg_sources.Mounted.kind_exn mounted in
-    (match kind with
-     | `Dune -> Memo.return None
-     | `Opam ->
-       let candidate = Pkg_sources.Mounted.candidate mounted in
-       let root = (candidate_paths candidate).target_dir in
-       let+ dependency = dependency context name in
-       Some (root, dependency))
+  | None | Some (_, `Dune) -> Memo.return None
+  | Some (mounted, `Opam) ->
+    let candidate = Pkg_sources.Mounted.candidate mounted in
+    let root = (candidate_paths candidate).target_dir in
+    let+ dependency = dependency context name in
+    Some (root, dependency)
 ;;
 
 let gen_mounted_rule context candidate ~dependencies =

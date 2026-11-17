@@ -546,3 +546,9 @@ let find_mounted context name =
   | None -> Memo.return None
   | Some mounted -> Memo.Lazy.force mounted >>| Option.some
 ;;
+
+let find_mounted_kind context name =
+  find_mounted context name
+  >>= Memo.Option.map ~f:(fun mounted ->
+    Mounted.kind_exn mounted >>| fun kind -> mounted, kind)
+;;
