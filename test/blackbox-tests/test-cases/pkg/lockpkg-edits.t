@@ -13,11 +13,10 @@ results behind.
   $ echo '(library (public_name foo))' > _source/dune
   $ echo 'let message = "native"' > _source/foo.ml
   $ echo 'unused' > _source/template.in
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ lock() {
+  >   echo "(version $1) (source (copy $PWD/_source)) (build (run false))" |
+  >     make_lockpkg foo; }
+  $ lock 1.0
 
 The package is a Dune project, so it is built natively and its recipe does not
 run.
@@ -30,11 +29,7 @@ run.
 
 A new version in the lock file reaches the generated metadata.
 
-  $ make_lockpkg foo <<EOF
-  > (version 2.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ lock 2.0
   $ dune build main.exe @pkg-install
   $ find _build/default -name META.foo -exec grep '^version' {} \;
   version = "2.0"
@@ -62,11 +57,7 @@ The natively generated metadata is gone.
 
 Removing it again returns to the native build.
 
-  $ make_lockpkg foo <<EOF
-  > (version 2.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ lock 2.0
   $ dune build main.exe @pkg-install
   $ _build/default/main.exe
   native
