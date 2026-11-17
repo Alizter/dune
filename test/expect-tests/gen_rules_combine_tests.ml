@@ -48,8 +48,9 @@ let%expect_test "empty generated rule combinations remain deferred" =
     |}]
 ;;
 
-let generated_rules = function
-  | Gen_rules.Rules rules -> rules
+let combine left right =
+  match Gen_rules.combine left right with
+  | Rules rules -> rules
   | Unknown_context | Redirect_to_parent _ ->
     Code_error.raise "Expected a normal generated-rules result" []
 ;;
@@ -66,7 +67,7 @@ let%expect_test "empty generated rules retain subdirectory declarations" =
     ]
     ~f:(fun (name, left, right) ->
       let { Gen_rules.Rules.build_dir_only_sub_dirs; directory_targets; _ } =
-        Gen_rules.combine left right |> generated_rules
+        combine left right
       in
       printfn
         "%s: declaration=%b directory_targets_empty=%b"
@@ -80,34 +81,31 @@ let%expect_test "empty generated rules retain subdirectory declarations" =
     |}]
 ;;
 
+let source_dir = Path.Build.relative Path.Build.root "default/source"
+
+let with_sources sources rules =
+  Gen_rules.Rules
+    (Gen_rules.Rules.create ~sources:(Path.Build.Map.singleton source_dir sources) rules)
+;;
+
 let%expect_test "source subdirectory metadata is combined without evaluating rules" =
-  let dir = Path.Build.relative Path.Build.root "default/source" in
   let calls = ref 0 in
   let declared name =
-    Gen_rules.Rules
-      (Gen_rules.Rules.create
-         ~sources:
-           (Path.Build.Map.singleton
-              dir
-              ( Filename.Map.empty
-              , Filename.Array.Set.singleton (Filename.of_string_exn name) ))
-         (Memo.of_thunk (fun () ->
-            incr calls;
-            Memo.return Rules.empty)))
+    with_sources
+      (Filename.Map.empty, Filename.Array.Set.singleton (Filename.of_string_exn name))
+      (Memo.of_thunk (fun () ->
+         incr calls;
+         Memo.return Rules.empty))
   in
-  let left = declared "left" in
-  let right = declared "right" in
   List.iter
-    [ "empty left", Gen_rules.no_rules, left
-    ; "empty right", left, Gen_rules.no_rules
-    ; "both declared", left, right
+    [ "empty left", Gen_rules.no_rules, declared "left"
+    ; "empty right", declared "left", Gen_rules.no_rules
+    ; "both declared", declared "left", declared "right"
     ]
     ~f:(fun (name, left, right) ->
-      let { Gen_rules.Rules.sources; _ } =
-        Gen_rules.combine left right |> generated_rules
-      in
+      let { Gen_rules.Rules.sources; _ } = combine left right in
       let subdirs =
-        Path.Build.Map.find_exn sources dir
+        Path.Build.Map.find_exn sources source_dir
         |> snd
         |> Filename.Array.Set.to_list
         |> List.map ~f:Filename.to_string
@@ -123,27 +121,20 @@ let%expect_test "source subdirectory metadata is combined without evaluating rul
 ;;
 
 let%expect_test "source file inventories are combined" =
-  let dir = Path.Build.relative Path.Build.root "default/source" in
   let declared name =
     let file = Filename.of_string_exn name in
     let rule =
-      let dst = Path.Build.relative_fname dir file in
+      let dst = Path.Build.relative_fname source_dir file in
       Rule.make
         ~targets:(Targets.File.create dst)
         (Action_builder.return (Action.Full.make (Action.write_file dst "")))
     in
-    Gen_rules.Rules
-      (Gen_rules.Rules.create
-         ~sources:
-           (Path.Build.Map.singleton
-              dir
-              (Filename.Map.singleton file rule, Filename.Array.Set.empty))
-         (Memo.return Rules.empty))
+    with_sources
+      (Filename.Map.singleton file rule, Filename.Array.Set.empty)
+      (Memo.return Rules.empty)
   in
-  let { Gen_rules.Rules.sources; _ } =
-    Gen_rules.combine (declared "left") (declared "right") |> generated_rules
-  in
-  let files, _ = Path.Build.Map.find_exn sources dir in
+  let { Gen_rules.Rules.sources; _ } = combine (declared "left") (declared "right") in
+  let files, _ = Path.Build.Map.find_exn sources source_dir in
   printfn
     "files=%s"
     (Filename.Map.keys files |> Filename.L.to_string |> String.concat ~sep:",");
