@@ -6,33 +6,17 @@ module Backing = Source_tree.Rules.Backing
 let source_inventory context candidate ~dir components =
   let name = Pkg_sources.Candidate.name candidate in
   let loc = Pkg_sources.Candidate.source_loc candidate in
-  let rec descend backing = function
-    | [] ->
-      Backing.dir_contents backing
-      >>| Result.map ~f:(Option.map ~f:(fun contents -> backing, contents))
-    | component :: rest ->
-      let name = Filename.of_string_exn component in
-      Backing.dir_contents backing
-      >>= (function
-       | Error error -> Memo.return (Error error)
-       | Ok (Some (_, dirs)) when Filename.Array.Set.mem dirs name ->
-         descend (Backing.relative_fname backing name) rest
-       | Ok _ -> Memo.return (Ok None))
-  in
   Pkg_sources.mount_backing context name
   >>= function
   | None -> Memo.return None
   | Some root ->
-    descend root components
+    let components = List.map components ~f:Filename.of_string_exn in
+    Backing.find_dir root components
     >>| (function
-     | Error error ->
-       User_error.raise
-         ~loc
-         [ Pp.textf "Unable to read %s" (Path.to_string_maybe_quoted (Backing.path root))
-         ; Unix_error.Detailed.pp error
-         ]
+     | Error error -> Backing.unreadable ~loc root error
      | Ok inventory ->
-       Option.map inventory ~f:(fun (backing, (files, dirs)) ->
+       Option.map inventory ~f:(fun (files, dirs) ->
+         let backing = List.fold_left components ~init:root ~f:Backing.relative_fname in
          let files =
            Filename.Array.Set.to_list files
            |> Filename.Map.of_list_map_exn ~f:(fun file ->

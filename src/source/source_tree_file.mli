@@ -25,6 +25,17 @@ module Backing : sig
          , Unix_error.Detailed.t )
          result
          Memo.t
+
+  (** The listing of a sub-directory, or [Ok None] if one is missing. *)
+  val find_dir
+    :  t
+    -> Filename.t list
+    -> ( (Filename.Array.Set.t * Filename.Array.Set.t) option
+         , Unix_error.Detailed.t )
+         result
+         Memo.t
+
+  val unreadable : loc:Loc.t -> t -> Unix_error.Detailed.t -> 'a
 end
 
 module File : sig

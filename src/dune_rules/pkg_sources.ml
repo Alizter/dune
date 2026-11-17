@@ -169,12 +169,7 @@ let listing =
     let+ contents = Memo.exec memo root in
     match contents with
     | Ok contents -> contents
-    | Error error ->
-      User_error.raise
-        ~loc
-        [ Pp.textf "Unable to read %s" (Path.to_string_maybe_quoted (Backing.path root))
-        ; Unix_error.Detailed.pp error
-        ]
+    | Error error -> Backing.unreadable ~loc root error
 ;;
 
 let source candidate =

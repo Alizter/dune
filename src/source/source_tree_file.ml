@@ -88,6 +88,25 @@ module Backing = struct
          in
          Ok (Some (Filename.Array.Set.of_list files, Filename.Array.Set.of_list dirs)))
   ;;
+
+  let rec find_dir t = function
+    | [] -> dir_contents t
+    | name :: rest ->
+      dir_contents t
+      >>= (function
+       | Ok (Some (_, dirs)) when Filename.Array.Set.mem dirs name ->
+         find_dir (relative_fname t name) rest
+       | Ok _ -> Memo.return (Ok None)
+       | Error _ as error -> Memo.return error)
+  ;;
+
+  let unreadable ~loc t error =
+    User_error.raise
+      ~loc
+      [ Pp.textf "Unable to read %s" (Path.to_string_maybe_quoted (path t))
+      ; Unix_error.Detailed.pp error
+      ]
+  ;;
 end
 
 module Mount = struct
@@ -156,24 +175,14 @@ module File = struct
     | Mounted { mount; local } ->
       let file = Mount.backing mount local in
       (* Resolve parent directories through the inventory, not through links. *)
-      let rec lookup directory = function
-        | [] -> Memo.return false
-        | name :: rest ->
-          let* contents = Backing.dir_contents directory in
-          (match contents with
-           | Error _ | Ok None -> Memo.return false
-           | Ok (Some (files, dirs)) ->
-             (match rest with
-              | [] ->
-                if Filename.Array.Set.mem files name
-                then Backing.file_exists file
-                else Memo.return false
-              | _ ->
-                if Filename.Array.Set.mem dirs name
-                then lookup (Backing.relative_fname directory name) rest
-                else Memo.return false))
-      in
-      lookup mount.backing_root (Path.Local.explode local)
+      (match List.rev (Path.Local.explode local) with
+       | [] -> Memo.return false
+       | name :: dirs ->
+         Backing.find_dir mount.backing_root (List.rev dirs)
+         >>= (function
+          | Ok (Some (files, _)) when Filename.Array.Set.mem files name ->
+            Backing.file_exists file
+          | Error _ | Ok _ -> Memo.return false))
   ;;
 
   let read t =
@@ -252,13 +261,6 @@ module Dir = struct
       >>| (function
        | Ok None -> Dir_contents.empty
        | Ok (Some (files, dirs)) -> Dir_contents.of_names ~files ~dirs
-       | Error error ->
-         User_error.raise
-           ~loc:mount.loc
-           [ Pp.textf
-               "Unable to read %s"
-               (Path.to_string_maybe_quoted (Backing.path backing))
-           ; Unix_error.Detailed.pp error
-           ])
+       | Error error -> Backing.unreadable ~loc:mount.loc backing error)
   ;;
 end
