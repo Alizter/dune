@@ -1,5 +1,6 @@
 open Import
 open Memo.O
+module Backing = Source_tree.Rules.Backing
 
 let package_of_dir_in_context dir =
   match Path.Local.explode dir |> Filename.L.to_string with
@@ -31,13 +32,38 @@ end
 module Candidate = struct
   type t =
     { lock_pkg : Dune_pkg.Lock_dir.Pkg.t
-    ; source_root : Path.Build.t option
     ; files_dir : Path.Build.t
     ; artifact_root : Path.Build.t
     }
 
   let name t = t.lock_pkg.info.name
-  let source_root t = t.source_root
+
+  let source_loc t =
+    match t.lock_pkg.info.source with
+    | None -> Loc.none
+    | Some source -> fst source.url
+  ;;
+
+  let source_root t =
+    match t.lock_pkg.info.source with
+    | None -> Memo.return None
+    | Some source ->
+      let+ kind = Lock_dir.source_kind source >>| User_error.ok_exn in
+      let root =
+        match kind with
+        | `Local (`Directory, path) ->
+          let path =
+            Path.outside_build_dir path
+            |> Path.to_absolute_filename
+            |> Path.External.of_string
+          in
+          Backing.External path
+        | `Local (`File, _) | `Fetch ->
+          Backing.Build (Fetch_rules.make_target ~kind:Dir source)
+      in
+      Some root
+  ;;
+
   let lock_pkg t = t.lock_pkg
   let files_dir t = t.files_dir
   let artifact_root t = t.artifact_root
@@ -51,10 +77,6 @@ module Candidate = struct
   ;;
 
   let make context (lock_pkg : Dune_pkg.Lock_dir.Pkg.t) ~files_dir =
-    let source_root =
-      Option.map lock_pkg.info.source ~f:(fun source ->
-        Fetch_rules.make_target ~kind:Dir source)
-    in
     let artifact_root =
       Path.Build.L.relative
         (Context_name.build_dir context)
@@ -62,7 +84,7 @@ module Candidate = struct
         ; Package.Name.to_string lock_pkg.info.name
         ]
     in
-    { lock_pkg; source_root; files_dir; artifact_root }
+    { lock_pkg; files_dir; artifact_root }
   ;;
 end
 
@@ -105,60 +127,61 @@ let find_candidate context name =
 
 let listing root =
   let rec loop local =
-    let dir = Path.Build.append_local root local in
-    let* contents = Build_system.directory_target_contents_opt ~dir in
-    let files, dirs =
-      match contents with
-      | Some contents -> contents
-      | None ->
-        Code_error.raise
-          "Package source directory was not produced"
-          [ "dir", Path.Build.to_dyn dir ]
-    in
-    let files =
-      Filename.Array.Set.to_list files
-      |> List.map ~f:(fun file ->
-        ( Path.build (Path.Build.relative_fname dir file)
-        , Path.Local.relative_fname local file ))
-    in
-    let+ subdirs =
-      Filename.Array.Set.to_list dirs
-      |> Memo.List.map ~f:(fun dir -> loop (Path.Local.relative_fname local dir))
-    in
-    { Source_input.files =
-        files @ List.concat_map subdirs ~f:(fun { Source_input.files; _ } -> files)
-    ; directories =
-        local
-        :: List.concat_map subdirs ~f:(fun { Source_input.directories; _ } -> directories)
-    }
+    let dir = Backing.append_local root local in
+    let* contents = Backing.dir_contents dir in
+    match contents with
+    | Error error -> Memo.return (Error error)
+    | Ok None ->
+      (match dir with
+       | Backing.Build dir ->
+         Code_error.raise
+           "Package source directory was not produced"
+           [ "dir", Path.Build.to_dyn dir ]
+       | External dir ->
+         Memo.return (Error (Unix.ENOENT, "readdir", Path.External.to_string dir)))
+    | Ok (Some (files, dirs)) ->
+      let files =
+        Filename.Array.Set.to_list files
+        |> List.map ~f:(fun file ->
+          ( Backing.relative_fname dir file |> Backing.path
+          , Path.Local.relative_fname local file ))
+      in
+      let+ subdirs =
+        Filename.Array.Set.to_list dirs
+        |> Memo.List.map ~f:(fun dir -> loop (Path.Local.relative_fname local dir))
+      in
+      let open Result.O in
+      let+ subdirs = Result.List.all subdirs in
+      { Source_input.files =
+          files @ List.concat_map subdirs ~f:(fun { Source_input.files; _ } -> files)
+      ; directories =
+          local
+          :: List.concat_map subdirs ~f:(fun { Source_input.directories; _ } ->
+            directories)
+      }
   in
   loop Path.Local.root
 ;;
 
 let listing =
-  let memo = Memo.create "package-source-listing" ~input:(module Path.Build) listing in
-  Memo.exec memo
+  let memo = Memo.create "package-source-listing" ~input:(module Backing) listing in
+  fun ~loc root ->
+    let+ contents = Memo.exec memo root in
+    match contents with
+    | Ok contents -> contents
+    | Error error ->
+      User_error.raise
+        ~loc
+        [ Pp.textf "Unable to read %s" (Path.to_string_maybe_quoted (Backing.path root))
+        ; Unix_error.Detailed.pp error
+        ]
 ;;
 
 let source candidate =
-  let* empty_directories =
-    match (Candidate.lock_pkg candidate).info.source with
-    | None -> Memo.return None
-    | Some source ->
-      Lock_dir.source_kind source
-      >>| User_error.ok_exn
-      >>= (function
-       | `Local (`File, _) | `Fetch -> Memo.return None
-       | `Local (`Directory, dir) ->
-         let+ files, dirs = Fetch_rules.local_source_contents ~loc:(fst source.url) dir in
-         Option.some_if (List.is_empty files) dirs)
-  in
-  match empty_directories, Candidate.source_root candidate with
-  | Some directories, _ ->
-    (* Empty inputs cannot be represented by an engine directory target. *)
-    Memo.return { Source_input.files = []; directories }
-  | None, None -> Memo.return { Source_input.files = []; directories = [] }
-  | None, Some root -> listing root
+  let* root = Candidate.source_root candidate in
+  match root with
+  | None -> Memo.return { Source_input.files = []; directories = [] }
+  | Some root -> listing ~loc:(Candidate.source_loc candidate) root
 ;;
 
 module Mounted = struct
@@ -375,7 +398,7 @@ module Preparation = struct
   type t =
     | Opaque
     | Plain of
-        { dir : Path.Build.t
+        { dir : Backing.t
         ; native : bool
         }
     | Prepared of
@@ -421,12 +444,13 @@ let preparation_of_candidate context candidates candidate =
          ; rest
          ; native
          })
-  else (
-    match Candidate.source_root candidate with
+  else
+    let* root = Candidate.source_root candidate in
+    match root with
     | None -> Memo.return Preparation.Opaque
     | Some dir ->
       let+ input = source candidate in
-      if List.is_empty input.files then Preparation.Opaque else Plain { dir; native })
+      if List.is_empty input.files then Preparation.Opaque else Plain { dir; native }
 ;;
 
 let preparations =
@@ -452,8 +476,8 @@ let mount_backing context name =
   preparation context name
   >>| function
   | None | Some Opaque -> None
-  | Some (Plain { dir; native = _ } | Prepared { dir; patches = _; rest = _; native = _ })
-    -> Some dir
+  | Some (Plain { dir; native = _ }) -> Some dir
+  | Some (Prepared { dir; patches = _; rest = _; native = _ }) -> Some (Backing.Build dir)
 ;;
 
 let prepare context candidate =
@@ -467,13 +491,18 @@ let prepare context candidate =
     | Opaque
     | Plain { dir = _; native = false }
     | Prepared { dir = _; patches = _; rest = _; native = false } -> None
-    | Plain { dir; native = true }
-    | Prepared { dir; patches = _; rest = _; native = true } -> Some dir
+    | Plain { dir; native = true } -> Some dir
+    | Prepared { dir; patches = _; rest = _; native = true } -> Some (Backing.Build dir)
   with
   | None -> Memo.return None
   | Some backing_root ->
     let logical_root = Candidate.artifact_root candidate in
-    let* tree = Source_tree.Rules.Mounted.load ~logical_root ~backing_root in
+    let* tree =
+      Source_tree.Rules.Mounted.load
+        ~loc:(Candidate.source_loc candidate)
+        ~logical_root
+        ~backing_root
+    in
     let projects = Source_tree.Rules.Mounted.projects tree in
     let* has_dune_file =
       Scan_dune_files.map_reduce

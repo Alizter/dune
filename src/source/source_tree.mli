@@ -42,6 +42,8 @@ val root : unit -> Dir.t Memo.t
     either workspace or build-target ownership; callers use this API rather than
     dispatching on generic paths. *)
 module Rules : sig
+  module Backing = Source_tree_file.Backing
+
   module File : sig
     type t
 
@@ -98,9 +100,12 @@ module Rules : sig
   module Mounted : sig
     type t
 
-    (** Load the tree whose logical root is [logical_root] from the directory
-        target [backing_root]. *)
-    val load : logical_root:Path.Build.t -> backing_root:Path.Build.t -> t Memo.t
+    (** Load the tree at [logical_root] from its external or built backing. *)
+    val load
+      :  loc:Loc.t
+      -> logical_root:Path.Build.t
+      -> backing_root:Backing.t
+      -> t Memo.t
 
     val root : t -> Dir.t
     val projects : t -> (Dune_project.t * Dir.t) list

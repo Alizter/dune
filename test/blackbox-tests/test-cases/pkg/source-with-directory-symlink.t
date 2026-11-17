@@ -28,7 +28,8 @@ We could potentially resolve them during the copy.
 
   $ build_pkg foo 2>&1 | censor
   Error: Is a directory
-  -> required by _build/_fetch/url-$DIGEST-dir
+  -> required by _build/default/.pkg/foo/link_to_dir
+  -> required by _build/default/.pkg/foo/_install
   [1]
 
 The failed copy leaves the original directory and symlink intact:

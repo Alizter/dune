@@ -29,15 +29,16 @@ configuration is recipe input, not configuration for the outer build.
   $ cat _build/default/.pkg/first/_install/share/first/result
   original
 
-Recipes receive writable copies. The source snapshot and the other package
-using that snapshot are not modified.
+Recipes receive writable copies. The original source and the source files
+of both mounts are not modified.
 
   $ dune build _build/default/.pkg/second/_install
   $ cat _build/default/.pkg/second/_install/share/second/result
   original
   $ cat _sources/input
   original
-  $ find _build/_fetch -path '*-dir/input' -exec cat {} \;
+  $ cat _build/default/.pkg/first/input _build/default/.pkg/second/input
+  original
   original
 
 Opaque recipes see transitive tools and read the installed files of their

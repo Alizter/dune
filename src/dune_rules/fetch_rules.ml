@@ -176,55 +176,6 @@ let all_sources () =
   >>| List.fold_left ~init ~f:add_sources
 ;;
 
-let local_source_contents ~loc src =
-  let rec scan local =
-    let dir = Path.Outside_build_dir.append_local src local in
-    let* contents = Fs_memo.dir_contents dir in
-    match contents with
-    | Error error ->
-      User_error.raise
-        ~loc
-        [ Pp.textf "Unable to read %s" (Path.Outside_build_dir.to_string_maybe_quoted dir)
-        ; Unix_error.Detailed.pp error
-        ]
-    | Ok contents ->
-      let* children =
-        Fs_memo.Dir_contents.to_list contents
-        |> Memo.List.map ~f:(fun (name, kind) ->
-          let relative = Path.Local.relative_fname local name in
-          match (kind : Unix.file_kind), Filename.to_string name with
-          | S_DIR, (".hg" | ".git" | "_darcs" | "_opam" | "_build" | "_esy") ->
-            Memo.return ([], [])
-          | S_DIR, _ -> scan relative
-          | _, name ->
-            let path =
-              Path.Outside_build_dir.append_local src relative |> Path.outside_build_dir
-            in
-            if String.starts_with ~prefix:".#" name || Path.is_broken_symlink path
-            then Memo.return ([], [])
-            else Memo.return ([ relative ], []))
-      in
-      let files, dirs = List.unzip children in
-      Memo.return (List.concat files, local :: List.concat dirs)
-  in
-  scan Path.Local.root
-;;
-
-let copy_local_directory ~loc ~src ~dst =
-  let open Action_builder.O in
-  let* files, dirs = Action_builder.of_memo (local_source_contents ~loc src) in
-  let copies =
-    List.map files ~f:(fun local ->
-      let src = Path.Outside_build_dir.append_local src local |> Path.outside_build_dir in
-      src, Path.Build.append_local dst local)
-  in
-  let+ () = Action_builder.paths (List.map copies ~f:fst) in
-  Action.progn
-    (List.map dirs ~f:(fun local -> Action.mkdir (Path.Build.append_local dst local))
-     @ List.map copies ~f:(fun (src, dst) -> Action.copy src dst))
-  |> Action.Full.make ~can_go_in_shared_cache:true
-;;
-
 let gen_rules_for_source (source : Source.t) =
   let { Source.url = loc_url, url; checksum } = source in
   let loc_url = Dune_pkg.Lock_dir.loc_in_source_tree loc_url in
@@ -251,22 +202,12 @@ let gen_rules_for_source (source : Source.t) =
          let* source_kind =
            Action_builder.of_memo (Lock_dir.source_kind source) >>| User_error.ok_exn
          in
-         match source_kind, kind with
-         | `Local (`Directory, source_root), Dir ->
-           copy_local_directory ~loc:loc_url ~src:source_root ~dst:target
-         | `Local (`File, path), File ->
-           let path = Path.outside_build_dir path in
-           let+ () = Action_builder.path path in
-           Action.Full.make ~can_go_in_shared_cache:true (Action.Copy (path, target))
-         | `Local (`Directory, _), File | `Local (`File, _), Dir | `Fetch, _ ->
-           let* () =
-             match source_kind with
-             | `Local (_, path) -> Action_builder.path (Path.outside_build_dir path)
-             | `Fetch -> Action_builder.return ()
-           in
-           let+ url = url in
-           action ~url:(loc_url, url) ~checksum ~target ~kind
-           |> Action.Full.make ~can_go_in_shared_cache:true)
+         (match source_kind with
+          | `Local (_, path) -> Action_builder.path (Path.outside_build_dir path)
+          | `Fetch -> Action_builder.return ())
+         >>> let+ url = url in
+             action ~url:(loc_url, url) ~checksum ~target ~kind
+             |> Action.Full.make ~can_go_in_shared_cache:true)
   in
   let dir_rule =
     let target = make_target ~kind:Dir in

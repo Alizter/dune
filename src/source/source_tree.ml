@@ -488,6 +488,8 @@ end
 module Workspace_dir = Dir
 
 module Rules = struct
+  module Backing = Source_tree_file.Backing
+
   module File = struct
     include Source_tree_file.File
 
@@ -498,7 +500,7 @@ module Rules = struct
     type loaded =
       { mount : Source_tree_file.Mount.t
       ; logical_path : Path.Build.t
-      ; backing_path : Path.Build.t
+      ; backing : Backing.t
       ; status : Source_dir_status.t
       ; files : Filename.Array.Set.t
       ; sub_dirs : loaded Filename.Array.Map.t
@@ -533,18 +535,18 @@ module Rules = struct
 
     let backing_path = function
       | Source dir -> Path.source (Workspace_dir.path dir)
-      | Mounted { backing_path; _ } -> Path.build backing_path
+      | Mounted { backing; _ } -> Backing.path backing
     ;;
 
     let file t local =
       match t with
       | Source dir ->
         Path.Source.append_local (Workspace_dir.path dir) local |> File.workspace
-      | Mounted { mount; logical_path; backing_path; _ } ->
+      | Mounted { mount; logical_path; backing; _ } ->
         File.mounted
           ~mount
           ~logical:(Path.Build.append_local logical_path local)
-          ~backing:(Path.Build.append_local backing_path local)
+          ~backing:(Backing.append_local backing local)
     ;;
 
     let filenames = function
@@ -631,20 +633,29 @@ module Rules = struct
     let root t = t.root
     let projects t = t.projects
 
-    let load ~logical_root ~backing_root =
+    let load ~loc ~logical_root ~backing_root =
       let mount = { Source_tree_file.Mount.logical_root; backing_root } in
       let rec traverse
                 ~logical_path
-                ~backing_path
+                ~backing
+                ~physical
                 ~status
                 ~parent_dune_file
                 ~parent_project
         =
         let* files, physical_subdirs =
-          Build_system.directory_target_contents_opt ~dir:backing_path
+          (if physical then Backing.dir_contents backing else Memo.return (Ok None))
           >>| function
-          | Some contents -> contents
-          | None -> Filename.Array.Set.empty, Filename.Array.Set.empty
+          | Ok (Some contents) -> contents
+          | Ok None -> Filename.Array.Set.empty, Filename.Array.Set.empty
+          | Error error ->
+            User_error.raise
+              ~loc
+              [ Pp.textf
+                  "Unable to read %s"
+                  (Path.to_string_maybe_quoted (Backing.path backing))
+              ; Unix_error.Detailed.pp error
+              ]
         in
         let source_path = Dune_project.dir_in_context logical_path in
         let* loaded_project =
@@ -658,7 +669,7 @@ module Rules = struct
                   Source_tree_file.File.mounted
                     ~mount
                     ~logical:(Path.Build.append_local logical_path local)
-                    ~backing:(Path.Build.append_local backing_path local)
+                    ~backing:(Backing.append_local backing local)
                   |> Source_tree_file.File.read
                   >>| Option.value_exn
                 | None ->
@@ -688,11 +699,7 @@ module Rules = struct
         in
         let* dune_file =
           Dune_file.load
-            ~dir:
-              (Source_tree_file.Dir.mounted
-                 ~mount
-                 ~logical:logical_path
-                 ~backing:backing_path)
+            ~dir:(Source_tree_file.Dir.mounted ~mount ~logical:logical_path ~backing)
             status
             project
             ~files
@@ -738,7 +745,8 @@ module Rules = struct
               let+ child, child_projects =
                 traverse
                   ~logical_path:(Path.Build.relative_fname logical_path basename)
-                  ~backing_path:(Path.Build.relative_fname backing_path basename)
+                  ~backing:(Backing.relative_fname backing basename)
+                  ~physical:(Filename.Array.Set.mem physical_subdirs basename)
                   ~status:child_status
                   ~parent_dune_file:dune_file
                   ~parent_project:(Some project)
@@ -753,7 +761,7 @@ module Rules = struct
         let dir =
           { Dir.mount
           ; logical_path
-          ; backing_path
+          ; backing
           ; status
           ; files = visible_files
           ; sub_dirs
@@ -769,7 +777,8 @@ module Rules = struct
       let+ root, projects =
         traverse
           ~logical_path:logical_root
-          ~backing_path:backing_root
+          ~backing:backing_root
+          ~physical:true
           ~status:Source_dir_status.Normal
           ~parent_dune_file:None
           ~parent_project:None

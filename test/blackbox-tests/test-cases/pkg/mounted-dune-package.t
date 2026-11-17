@@ -31,7 +31,7 @@ root.
   native
   $ test -f _build/default/.pkg/foo/.foo.objs/native/foo.cmx
   $ test ! -e _build/default/.pkg/foo/unused.txt
-  $ cat _build/_fetch/url-*-dir/unused.txt
+  $ cat _foo/unused.txt
   unselected
 
 Native installation uses the shared materializer, with metadata describing the

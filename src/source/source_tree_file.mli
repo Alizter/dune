@@ -2,13 +2,38 @@ open Import
 
 (** Source files and directories as seen by source loading. A workspace file is
     read from the workspace. A mounted file has a logical path, used for source
-    semantics and diagnostics, and is read from a backing path in the build
-    directory. Relative includes must stay within both roots of their mount. *)
+    semantics and diagnostics, and is read from an external or built backing. Relative includes must stay within both roots of their mount. *)
+
+module Backing : sig
+  type t =
+    | External of Path.External.t
+    | Build of Path.Build.t
+
+  val path : t -> Path.t
+  val append_local : t -> Path.Local.t -> t
+  val relative_fname : t -> Filename.t -> t
+  val parent_exn : t -> t
+  val equal : t -> t -> bool
+  val hash : t -> int
+  val to_dyn : t -> Dyn.t
+  val file_exists : t -> bool Memo.t
+  val read_file : t -> string Memo.t
+
+  (** Built listings are unfiltered; external listings use package source
+      filtering. Missing directories, including virtual subdirectories,
+      return [Ok None]. *)
+  val dir_contents
+    :  t
+    -> ( (Filename.Array.Set.t * Filename.Array.Set.t) option
+         , Unix_error.Detailed.t )
+         result
+         Memo.t
+end
 
 module Mount : sig
   type t =
     { logical_root : Path.Build.t
-    ; backing_root : Path.Build.t
+    ; backing_root : Backing.t
     }
 end
 
@@ -16,7 +41,7 @@ module File : sig
   type t
 
   val workspace : Path.Source.t -> t
-  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Path.Build.t -> t
+  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Backing.t -> t
   val source_path : t -> Path.Local.t
 
   (** The logical path used by source semantics and diagnostics. *)
@@ -39,7 +64,7 @@ module Dir : sig
   type t
 
   val workspace : Path.Source.t -> t
-  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Path.Build.t -> t
+  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Backing.t -> t
   val basename : t -> Filename.t
   val file : t -> Filename.t -> File.t
 end

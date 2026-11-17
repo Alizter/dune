@@ -106,8 +106,7 @@ Patches apply after the overlays, without mutating the source or extra source.
   $ cat _source/foo.ml _overlay/foo.ml
   let message = "original"
   let message = "extra"
-  $ find _build/_fetch -path '*-dir/foo.ml' -exec cat {} \;
-  let message = "original"
+  $ test ! -d _build/_fetch
   $ cd ..
 
 Patch conditions use the package and dependency versions as metadata. The

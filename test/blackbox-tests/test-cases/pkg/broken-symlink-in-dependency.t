@@ -69,7 +69,9 @@ The recipe working directories contain all files except the broken symlinks:
   $ build_pkg baz
   a.txt
 
-The immutable source snapshots exclude the broken symlinks too:
-  $ find _build/_fetch -name b.txt
-  $ find _build/_fetch -name a.txt | wc -l
-  3
+The built source trees contain the real file but no broken link:
+  $ for package in foo bar baz; do
+  >   test -f _build/default/.pkg/$package/a.txt
+  >   test ! -e _build/default/.pkg/$package/b.txt
+  >   test ! -L _build/default/.pkg/$package/b.txt
+  > done

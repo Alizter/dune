@@ -2499,15 +2499,23 @@ let rule ?loc { Action_builder.With_targets.build; targets } =
 ;;
 
 let source_files root ~loc =
-  let skip_dir = function
-    | ".hg" | ".git" | "_darcs" | "_opam" | "_build" | "_esy" -> true
-    | _ -> false
+  let module Backing = Source_tree.Rules.Backing in
+  let root =
+    let path =
+      Path.outside_build_dir root |> Path.to_absolute_filename |> Path.External.of_string
+    in
+    Backing.External path
   in
-  let skip_file = String.starts_with ~prefix:".#" in
   let rec loop path =
-    let full_path = Path.Outside_build_dir.append_local root path in
-    Fs_memo.dir_contents full_path
-    >>= function
+    let full_path = Backing.append_local root path in
+    let* contents = Backing.dir_contents full_path in
+    let contents =
+      match contents with
+      | Error error -> Error error
+      | Ok None -> Error (Unix.ENOENT, "readdir", Path.to_string (Backing.path full_path))
+      | Ok (Some contents) -> Ok contents
+    in
+    match contents with
     | Error e ->
       Memo.return
         (Error
@@ -2515,24 +2523,17 @@ let source_files root ~loc =
               ~loc
               [ Pp.textf
                   "Unable to read %s"
-                  (Path.Outside_build_dir.to_string_maybe_quoted full_path)
+                  (Path.to_string_maybe_quoted (Backing.path full_path))
               ; Unix_error.Detailed.pp e
               ]))
-    | Ok contents ->
-      let files, dirs =
-        let contents = Fs_memo.Dir_contents.to_list contents in
-        List.rev_filter_partition_map contents ~f:(fun (name, kind) ->
-          (* TODO handle links and cycles correctly *)
-          let name_s = Filename.to_string name in
-          let relative = Path.Local.relative_fname path name in
-          match kind with
-          | S_DIR -> if skip_dir name_s then Skip else Right relative
-          | _ -> if skip_file name_s then Skip else Left relative)
-      in
+    | Ok (files, dirs) ->
       Memo.map_reduce
-        dirs
-        ~f:loop
-        ~empty:(Ok (Path.Local.Set.of_list files))
+        (Filename.Array.Set.to_list dirs)
+        ~f:(fun name -> loop (Path.Local.relative_fname path name))
+        ~empty:
+          (Ok
+             (Filename.Array.Set.to_list files
+              |> Path.Local.Set.of_list_map ~f:(Path.Local.relative_fname path)))
         ~combine:(fun left right ->
           let open Result.O in
           let* left = left in
@@ -2700,7 +2701,12 @@ let candidate_source_input candidate =
       (List.map
          (Pkg_sources.Candidate.lock_pkg candidate).info.extra_sources
          ~f:(fun (local, source) ->
-           Fetch_rules.make_target ~kind:File source |> Path.build, local))
+           let path =
+             match Dune_pkg.Source.kind source with
+             | `Directory_or_archive path -> Path.external_ path
+             | `Fetch -> Fetch_rules.make_target ~kind:File source |> Path.build
+           in
+           path, local))
 ;;
 
 let prepared_source_rule candidate ~target ~patches =
@@ -3057,7 +3063,8 @@ let gen_mounted_rule context candidate ~dependencies =
     | None -> Action_builder.return (Action.mkdir pkg.write_paths.source_dir)
     | Some backing ->
       let* { Source_input.files; directories = _ } =
-        Action_builder.of_memo (Pkg_sources.listing backing)
+        Action_builder.of_memo
+          (Pkg_sources.listing ~loc:(Pkg_sources.Candidate.source_loc candidate) backing)
       in
       let+ () =
         List.map files ~f:(fun (_, local) ->

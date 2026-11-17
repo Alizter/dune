@@ -1,6 +1,5 @@
-A mounted package whose source is a local directory. R2 in PLAN.md: the mount
-is to be backed by the directory on disk; today a snapshot of it is first
-copied into _build/_fetch, from which the mount is copied again.
+A mounted package whose source is a local directory uses that directory as
+its backing, without first copying a snapshot into _build/_fetch.
 
   $ make_lockdir
   $ cat > dune-project <<'EOF2'
@@ -43,7 +42,6 @@ Building a consumer does not need a snapshot of the source under _build/_fetch.
   $ _build/default/main.exe
   original
   $ test ! -d _build/_fetch
-  [1]
 
 Editing a file on disk rebuilds the consumer.
 
@@ -169,7 +167,6 @@ inside the writable sandbox and do not change either origin.
   shared
   $ test ! -L _build/default/.pkg/recipe/alias.txt
   $ test ! -d _build/_fetch
-  [1]
 
 Editing either local input rebuilds the recipe without changing its sources.
 
@@ -181,3 +178,59 @@ Editing either local input rebuilds the recipe without changing its sources.
   $ cat _source/input.txt _shared/input.txt
   edited
   shared-edited
+
+A directory link must not become a route for reading source includes outside
+an external backing. Only file links retain the main copy semantics.
+
+  $ mkdir _include_links
+  $ cd _include_links
+  $ make_dune_project 3.25
+  $ make_lockdir
+  $ mkdir _source _outside
+  $ cat > _source/dune-project <<'EOF2'
+  > (lang dune 3.25)
+  > (package (name foo))
+  > EOF2
+  $ echo '(include link/secret.inc)' > _source/dune
+  $ cat > _outside/secret.inc <<'EOF2'
+  > (rule (target escaped) (action (write-file %{target} outside)))
+  > EOF2
+  $ ln -s ../_outside _source/link
+  $ make_lockpkg foo <<EOF2
+  > (version 1.0)
+  > (source (copy $PWD/_source))
+  > (build (run false))
+  > EOF2
+  $ dune build _build/default/.pkg/foo/escaped 2>&1
+  File "_build/default/.pkg/foo/dune", line 1, characters 0-25:
+  Error: File _build/default/.pkg/foo/link/secret.inc doesn't exist.
+  [1]
+  $ test ! -e _build/default/.pkg/foo/escaped
+
+A synthetic subdirectory must not make that directory link traversable either.
+
+  $ echo '(subdir link (include secret.inc))' > _source/dune
+  $ dune build _build/default/.pkg/foo/link/escaped 2>&1
+  File "_build/default/.pkg/foo/dune", line 1, characters 13-33:
+  Error: File _build/default/.pkg/foo/link/secret.inc doesn't exist.
+  [1]
+  $ test ! -e _build/default/.pkg/foo/link/escaped
+
+Repeated separators and parent components must select the same file in the
+logical mount and the external backing, without reading through the link.
+
+  $ cat > _source/secret.inc <<'EOF2'
+  > (rule (target normalized) (action (write-file %{target} inside)))
+  > EOF2
+  $ echo '(include link//../secret.inc)' > _source/dune
+  $ dune build _build/default/.pkg/foo/normalized
+  $ cat _build/default/.pkg/foo/normalized
+  inside
+  $ test ! -e _build/default/.pkg/foo/escaped
+
+The opaque inventory must not follow a directory link on a direct lookup.
+
+  $ rm _source/dune
+  $ dune build _build/default/.pkg/foo/link/secret.inc 2>&1
+  Error: Don't know how to build _build/default/.pkg/foo/link/secret.inc
+  [1]

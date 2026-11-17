@@ -27,16 +27,15 @@ file in the package's source.
 
   $ build_pkg foo
 
-Even without build or install actions, overlays must not modify prepared inputs.
+Even without build or install actions, overlays must not modify either input.
 
-  $ cat _build/_fetch/url-*-dir/foo.txt
+  $ cat foo-source/foo.txt foo.txt
   from source
-  $ cat foo-source/foo.txt
-  from source
+  from extra source
 
 If foo.txt exists in both the main source and extra_sources, a build action
-must read the extra_sources version. The workspace file and the file in the
-prepared source directory must retain their original contents.
+must read the extra_sources version. Both original inputs must retain their
+contents.
 
   $ make_lockpkg foo <<EOF
   > (version 1)
@@ -52,8 +51,7 @@ prepared source directory must retain their original contents.
   $ cat foo-source/foo.txt
   from source
 
-The prepared source directory also stays unchanged. The overlay is confined to
-the writable build copy:
+The mount contains the overlay, while the original source remains unchanged:
 
-  $ cat _build/_fetch/url-*-dir/foo.txt
-  from source
+  $ cat _build/default/.pkg/foo/foo.txt
+  from extra source

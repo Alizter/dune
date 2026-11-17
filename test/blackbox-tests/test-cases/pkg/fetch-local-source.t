@@ -36,6 +36,6 @@ Build a package that uses the src directory as its source:
   Solution for dune.lock:
   - foo.0.0.1
   $ build_pkg foo
-  $ cat _build/_fetch/url-*-dir/*
+  $ cat _build/default/.pkg/foo/a.txt _build/default/.pkg/foo/b.txt
   hello
   world

@@ -37,8 +37,7 @@ package. Cram test fixtures are data-only before project parsing.
   $ dune build main.exe
   $ _build/default/main.exe
   left/right
-  $ find _build/_fetch -maxdepth 1 -type d -name '*-dir' | wc -l
-  1
+  $ test ! -d _build/_fetch
   $ test -f _build/default/.pkg/left/left.cmxa
   $ test -f _build/default/.pkg/right/sub/right.cmxa
   $ test ! -e _build/default/.pkg/left/sub/right.cmxa

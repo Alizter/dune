@@ -1,4 +1,5 @@
 open Import
+module Backing = Source_tree.Rules.Backing
 
 val package_of_artifact_path : Path.Build.t -> Package.Name.t option
 
@@ -21,6 +22,7 @@ module Candidate : sig
 
   val name : t -> Package.Name.t
   val lock_pkg : t -> Dune_pkg.Lock_dir.Pkg.t
+  val source_loc : t -> Loc.t
   val files_dir : t -> Path.Build.t
   val artifact_root : t -> Path.Build.t
   val dependencies : t -> Package.Name.Set.t Memo.t
@@ -32,8 +34,8 @@ val candidates : Context_name.t -> Candidate.t list Memo.t
 val find_candidate : Context_name.t -> Package.Name.t -> Candidate.t option Memo.t
 val source : Candidate.t -> Source_input.t Memo.t
 
-(** Every file and directory under a directory target. *)
-val listing : Path.Build.t -> Source_input.t Memo.t
+(** Every source file and directory under a package backing. *)
+val listing : loc:Loc.t -> Backing.t -> Source_input.t Memo.t
 
 module Mounted : sig
   type t
@@ -54,9 +56,9 @@ module Preparation : sig
   type t =
     | Opaque (** The package has no source to mount. *)
     | Plain of
-        { dir : Path.Build.t
+        { dir : Backing.t
         ; native : bool
-        } (** The fetched directory is used as it is. *)
+        } (** The external or fetched directory is used as it is. *)
     | Prepared of
         { dir : Path.Build.t
         ; patches : (Loc.t * Path.Local.t) list
@@ -74,7 +76,7 @@ val preparation : Context_name.t -> Package.Name.t -> Preparation.t option Memo.
 
 (** The directory a package's mount copies its source from, when its source is
     mounted. *)
-val mount_backing : Context_name.t -> Package.Name.t -> Path.Build.t option Memo.t
+val mount_backing : Context_name.t -> Package.Name.t -> Backing.t option Memo.t
 
 (** A private copy of a mounted package's source, with its leading patches
     applied. Programs that run in the source, such as dune files in OCaml syntax,

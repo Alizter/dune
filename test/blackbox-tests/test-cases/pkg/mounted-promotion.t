@@ -43,13 +43,13 @@ promotions. Promotion controls on the command line must not override this.
   > (build (run false))
   > EOF
 
-Rule promotion produces only build artifacts, leaving the original and fetched
-inputs untouched.
+Rule promotion produces only build artifacts, leaving the original inputs
+untouched.
 
   $ dune build _build/default/.pkg/foo/source.txt
   $ cat _build/default/.pkg/foo/source.txt
   generated
-  $ find _build/_fetch -path '*-dir/source.txt' -exec cat '{}' \;
+  $ cat _source/source.txt
   authored
   $ test ! -e _build/.to-delete-in-source-tree
   $ dune build --auto-promote _build/default/.pkg/foo/source.txt _build/default/.pkg/foo/escaped.txt

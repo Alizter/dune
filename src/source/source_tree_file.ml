@@ -1,10 +1,104 @@
 open Import
 open Memo.O
 
+module Backing = struct
+  type t =
+    | External of Path.External.t
+    | Build of Path.Build.t
+
+  let repr =
+    Repr.variant
+      "source-backing"
+      [ Repr.case "External" Path.External.repr ~proj:(function
+          | External path -> Some path
+          | Build _ -> None)
+      ; Repr.case "Build" Path.Build.repr ~proj:(function
+          | Build path -> Some path
+          | External _ -> None)
+      ]
+  ;;
+
+  let equal a b =
+    match a, b with
+    | External a, External b -> Path.External.equal a b
+    | Build a, Build b -> Path.Build.equal a b
+    | External _, Build _ | Build _, External _ -> false
+  ;;
+
+  let hash = function
+    | External path -> Poly.hash (0, Path.External.hash path)
+    | Build path -> Poly.hash (1, Path.Build.hash path)
+  ;;
+
+  let to_dyn = Repr.to_dyn repr
+
+  let path = function
+    | External path -> Path.external_ path
+    | Build path -> Path.build path
+  ;;
+
+  let append_local t local =
+    match t with
+    | External path -> External (Path.External.append_local path local)
+    | Build path -> Build (Path.Build.append_local path local)
+  ;;
+
+  let relative_fname t name =
+    match t with
+    | External path -> External (Path.External.relative_fname path name)
+    | Build path -> Build (Path.Build.relative_fname path name)
+  ;;
+
+  let parent_exn = function
+    | External path -> External (Path.External.parent_exn path)
+    | Build path -> Build (Path.Build.parent_exn path)
+  ;;
+
+  let fs_path path = Path.Outside_build_dir.External path
+
+  let file_exists = function
+    | External path -> Fs_memo.file_exists (fs_path path)
+    | Build path -> Build_system.file_exists (Path.build path)
+  ;;
+
+  let read_file = function
+    | External path -> Fs_memo.file_contents (fs_path path)
+    | Build path -> Build_system.read_file (Path.build path)
+  ;;
+
+  let dir_contents = function
+    | Build dir ->
+      let+ contents = Build_system.directory_target_contents_opt ~dir in
+      Ok contents
+    | External dir ->
+      let+ contents = Fs_memo.dir_contents (fs_path dir) in
+      (match contents with
+       | Error (Unix.ENOENT, _, _) -> Ok None
+       | Error error -> Error error
+       | Ok contents ->
+         let files, dirs =
+           Fs_memo.Dir_contents.to_list contents
+           |> List.rev_filter_partition_map ~f:(fun (name, kind) ->
+             let name_s = Filename.to_string name in
+             match kind with
+             | Unix.S_DIR ->
+               (match name_s with
+                | ".hg" | ".git" | "_darcs" | "_opam" | "_build" | "_esy" -> Skip
+                | _ -> Right name)
+             | _ ->
+               let path = Path.External.relative_fname dir name |> Path.external_ in
+               if String.starts_with ~prefix:".#" name_s || Path.is_broken_symlink path
+               then Skip
+               else Left name)
+         in
+         Ok (Some (Filename.Array.Set.of_list files, Filename.Array.Set.of_list dirs)))
+  ;;
+end
+
 module Mount = struct
   type t =
     { logical_root : Path.Build.t
-    ; backing_root : Path.Build.t
+    ; backing_root : Backing.t
     }
 end
 
@@ -14,7 +108,7 @@ module File = struct
     | Mounted of
         { mount : Mount.t
         ; logical : Path.Build.t
-        ; backing : Path.Build.t
+        ; backing : Backing.t
         }
 
   let workspace path = Workspace path
@@ -32,7 +126,7 @@ module File = struct
 
   let backing_path = function
     | Workspace path -> Path.source path
-    | Mounted { backing; _ } -> Path.build backing
+    | Mounted { backing; _ } -> Backing.path backing
   ;;
 
   let as_workspace = function
@@ -46,7 +140,7 @@ module File = struct
       Mounted
         { mount
         ; logical = Path.Build.parent_exn logical
-        ; backing = Path.Build.parent_exn backing
+        ; backing = Backing.parent_exn backing
         }
   ;;
 
@@ -55,22 +149,67 @@ module File = struct
     | Workspace dir -> Workspace (Path.Source.relative ~error_loc:loc dir path)
     | Mounted { mount; logical; backing } ->
       let { Mount.logical_root; backing_root } = mount in
-      let logical = Path.Build.relative ~error_loc:loc logical path in
-      let backing = Path.Build.relative ~error_loc:loc backing path in
-      if
-        not
-          (Path.Build.is_descendant logical ~of_:logical_root
-           && Path.Build.is_descendant backing ~of_:backing_root)
-      then
+      let outside () =
         User_error.raise
           ~loc
-          [ Pp.textf "Included path %S is outside the mounted source tree." path ];
+          [ Pp.textf "Included path %S is outside the mounted source tree." path ]
+      in
+      let backing =
+        match backing, backing_root with
+        | Build dir, Build root ->
+          let backing = Path.Build.relative ~error_loc:loc dir path in
+          if not (Path.Build.is_descendant backing ~of_:root) then outside ();
+          Backing.Build backing
+        | External _, External root ->
+          let local =
+            match Path.Local_gen.descendant logical ~of_:logical_root with
+            | None -> outside ()
+            | Some local -> local
+          in
+          (match Path.Local.relative_result local path with
+           | Error _ -> outside ()
+           | Ok local -> Backing.External (Path.External.append_local root local))
+        | _ ->
+          Code_error.raise
+            "Mounted file and root have different backing kinds"
+            [ "file", Backing.to_dyn backing; "root", Backing.to_dyn backing_root ]
+      in
+      let logical = Path.Build.relative ~error_loc:loc logical path in
+      if not (Path.Build.is_descendant logical ~of_:logical_root) then outside ();
       Mounted { mount; logical; backing }
   ;;
 
   let exists = function
     | Workspace path -> Fs_memo.file_exists (Path.Outside_build_dir.In_source_dir path)
-    | Mounted { backing; _ } -> Build_system.file_exists (Path.build backing)
+    | Mounted { backing = Build _ as backing; _ } -> Backing.file_exists backing
+    | Mounted { mount; logical; backing = External _ as file } ->
+      let local =
+        match Path.Local_gen.descendant logical ~of_:mount.logical_root with
+        | Some local -> local
+        | None ->
+          Code_error.raise
+            "Mounted file is outside its logical root"
+            [ "file", Path.Build.to_dyn logical ]
+      in
+      (* Resolve parent directories through the inventory, not through links. *)
+      let rec lookup directory = function
+        | [] -> Memo.return false
+        | name :: rest ->
+          let* contents = Backing.dir_contents directory in
+          (match contents with
+           | Error _ | Ok None -> Memo.return false
+           | Ok (Some (files, dirs)) ->
+             (match rest with
+              | [] ->
+                if Filename.Array.Set.mem files name
+                then Backing.file_exists file
+                else Memo.return false
+              | _ ->
+                if Filename.Array.Set.mem dirs name
+                then lookup (Backing.relative_fname directory name) rest
+                else Memo.return false))
+      in
+      lookup mount.backing_root (Path.Local.explode local)
   ;;
 
   let read t =
@@ -82,7 +221,7 @@ module File = struct
         match t with
         | Workspace path ->
           Fs_memo.file_contents (Path.Outside_build_dir.In_source_dir path)
-        | Mounted { backing; _ } -> Build_system.read_file (Path.build backing)
+        | Mounted { backing; _ } -> Backing.read_file backing
       in
       Some contents
   ;;
@@ -91,7 +230,7 @@ module File = struct
     match a, b with
     | Workspace a, Workspace b -> Path.Source.equal a b
     | Mounted a, Mounted b ->
-      Path.Build.equal a.logical b.logical && Path.Build.equal a.backing b.backing
+      Path.Build.equal a.logical b.logical && Backing.equal a.backing b.backing
     | Workspace _, Mounted _ | Mounted _, Workspace _ -> false
   ;;
 
@@ -123,6 +262,6 @@ module Dir = struct
       File.mounted
         ~mount
         ~logical:(Path.Build.relative_fname logical filename)
-        ~backing:(Path.Build.relative_fname backing filename)
+        ~backing:(Backing.relative_fname backing filename)
   ;;
 end
