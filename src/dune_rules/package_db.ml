@@ -9,7 +9,7 @@ type any_package =
   | Build of unit Action_builder.t
 
 let find_package ctx pkg =
-  Dune_load.find_package ctx pkg
+  Partitions.find_package ctx pkg
   >>= function
   | Some p -> Memo.return (Some (Local p))
   | None ->

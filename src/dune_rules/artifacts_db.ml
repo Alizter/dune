@@ -52,7 +52,7 @@ let get_installed_binaries stanzas =
     let eval_blang = Expander0.eval_blang expander in
     let binaries_from_install ~enabled_if ~package files =
       let* unexpanded_file_bindings =
-        let* source_tree_root = Dune_load.source_tree_root ~dir >>| Option.value_exn in
+        let* source_tree_root = Partitions.source_tree_root ~dir >>| Option.value_exn in
         Install_entry.File.to_file_bindings_unexpanded
           files
           ~expand:expand_value
@@ -113,10 +113,10 @@ let package_binaries =
   let memo =
     Memo.create
       "package-binaries"
-      ~input:(module Dune_load.Context_and_package)
+      ~input:(module Partitions.Context_and_package)
       (fun (context, package) ->
          let+ binaries =
-           Dune_load.dune_files_of_package context package >>= get_installed_binaries
+           Partitions.dune_files_of_package context package >>= get_installed_binaries
          in
          Filename.Map.to_list_map binaries ~f:(fun name sources ->
            Filename.of_string_exn (Bin.strip_exe (Filename.to_string name)), sources)
@@ -153,7 +153,7 @@ let all =
     let artifacts =
       let local_bins =
         Memo.lazy_ ~name:"get_installed_binaries" (fun () ->
-          Context.name context |> Dune_load.dune_files >>= get_installed_binaries)
+          Context.name context |> Partitions.dune_files >>= get_installed_binaries)
       in
       Artifacts.create
         context

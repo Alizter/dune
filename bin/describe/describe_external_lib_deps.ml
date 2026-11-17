@@ -163,7 +163,7 @@ let exe_names (exes : Dune_rules.Executables.t) =
 
 let libs db (context : Context.t) =
   let open Memo.O in
-  let* dune_files = Context.name context |> Dune_rules.Dune_load.dune_files in
+  let* dune_files = Context.name context |> Dune_rules.Partitions.dune_files in
   Memo.parallel_map dune_files ~f:(fun (dune_file : Dune_rules.Dune_file.t) ->
     Dune_file.stanzas dune_file
     >>= Memo.parallel_map ~f:(fun stanza ->

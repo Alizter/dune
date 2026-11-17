@@ -383,7 +383,7 @@ let gen_rules_group_part_or_root sctx dir_contents cctxs ~source_dir ~dir
   let+ () = gen_common_directory_rules sctx ~dir source_dir
   and+ contexts =
     (* CR-soon rgrinberg: we shouldn't have to fetch the stanzas yet again *)
-    Dune_load.stanzas_in_dir dir
+    Partitions.stanzas_in_dir dir
     >>= function
     | Some dune_file ->
       Super_context.expander sctx ~dir
@@ -580,7 +580,7 @@ let gen_automatic_subdir_rules sctx ~dir ~nearest_src_dir ~src_dir =
 
 let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~components ~dir =
   let* dir_status = Dir_status.DB.get ~dir
-  and* loaded_project = Dune_load.find_loaded_project ~dir in
+  and* loaded_project = Partitions.find_loaded_project ~dir in
   let* source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
   (* The engine finds the sources of a workspace directory itself. Those of a
      mounted package are not in the workspace, so it is told. *)

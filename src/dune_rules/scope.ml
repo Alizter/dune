@@ -479,8 +479,8 @@ module DB = struct
             let* ctx = Context_libs.get context in
             let* loaded =
               match owner with
-              | None -> Dune_load.workspace context >>| Option.some
-              | Some package -> Dune_load.mount context package
+              | None -> Partitions.workspace context >>| Option.some
+              | Some package -> Partitions.mount context package
             in
             match loaded with
             | None -> Memo.return None
@@ -488,7 +488,7 @@ module DB = struct
               let+ candidates = Pkg_sources.candidates context in
               let scopes = Fdecl.create Dyn.opaque in
               let stanzas, rocq_stanzas =
-                library_related_stanzas (Dune_load.Partition.dune_files loaded)
+                library_related_stanzas (Partitions.Partition.dune_files loaded)
               in
               let public = Public_libs.of_stanzas ~scopes stanzas in
               let package_scopes = package_scopes ctx candidates in
@@ -497,7 +497,7 @@ module DB = struct
                   ~scopes
                   ~package_scopes
                   ~lib_config:ctx.lib_config
-                  ~projects_by_root:(Dune_load.Partition.projects_by_output_root loaded)
+                  ~projects_by_root:(Partitions.Partition.projects_by_output_root loaded)
                   ~owner_libs:(fun owner ->
                     owner_db ctx ~package_scopes ~owner ~include_owner:true)
                   ~instrument_with:ctx.instrument_with
@@ -514,7 +514,7 @@ module DB = struct
     lazy
       (Memo.create
          "opaque-package-libraries"
-         ~input:(module Dune_load.Context_and_package)
+         ~input:(module Partitions.Context_and_package)
          (fun (context, name) ->
             let* package = Pkg_rules.find_opaque context name in
             match package with
@@ -577,7 +577,7 @@ module DB = struct
         | None -> Memo.return None
         | Some owner ->
           let+ packages =
-            Dune_load.package_closure_for_context
+            Partitions.package_closure_for_context
               context
               (Package.Name.Set.singleton owner)
           in
@@ -615,7 +615,7 @@ module DB = struct
            let+ eligible = eligible_opaque package in
            if eligible then `Opaque else `None
          | Ok `Dune ->
-           let* errors = Dune_load.package_errors context package in
+           let* errors = Partitions.package_errors context package in
            if List.is_non_empty errors
            then Memo.return `None
            else
@@ -655,7 +655,7 @@ module DB = struct
         match kind with
         | None | Some (Ok `Opam) -> Memo.return []
         | Some (Error messages) -> Memo.return messages
-        | Some (Ok `Dune) -> Dune_load.package_errors context name)
+        | Some (Ok `Dune) -> Partitions.package_errors context name)
       >>| List.map ~f:Lib.DB.Resolve_result.invalid
     in
     let errors_for name candidates =
@@ -936,10 +936,10 @@ module DB = struct
     let entries =
       Memo.create
         "package-library-entries"
-        ~input:(module Dune_load.Context_and_package)
+        ~input:(module Partitions.Context_and_package)
         (fun (ctx, pkg_name) ->
            let* public_libs = public_libs ctx
-           and* stanzas = Dune_load.stanzas_of_package ctx pkg_name in
+           and* stanzas = Partitions.stanzas_of_package ctx pkg_name in
            package_entries public_libs stanzas)
     in
     fun (ctx : Context_name.t) pkg_name ->

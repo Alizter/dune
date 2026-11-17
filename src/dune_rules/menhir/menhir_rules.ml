@@ -406,7 +406,7 @@ module Run (P : PARAMS) = struct
           let source =
             Module.File.path (Option.value_exn impl) |> Path.as_in_build_dir_exn
           in
-          let+ files = Dune_load.source_files ~dir:(Path.Build.parent_exn source) in
+          let+ files = Partitions.source_files ~dir:(Path.Build.parent_exn source) in
           if Path.Build.Set.mem files source then Action_builder.return [] else impl_deps
       in
       let path = Module.Source.path target in

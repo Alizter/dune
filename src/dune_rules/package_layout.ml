@@ -27,7 +27,7 @@ let materialize_ordered context names =
              ~variables:(Dune_pkg.Lock_dir.Pkg_info.variables info)
              ~exported_env)
       | None ->
-        let* package = Action_builder.of_memo (Dune_load.find_package context name) in
+        let* package = Action_builder.of_memo (Partitions.find_package context name) in
         (match package with
          | None ->
            User_error.raise

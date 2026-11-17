@@ -79,7 +79,7 @@ module Index = struct
            | true -> add_dep_for_libraries acc libraries dir scope)
         | _ -> Memo.return acc)
     in
-    Dune_load.dune_files context_name
+    Partitions.dune_files context_name
     >>= Memo.List.fold_left ~init:Lib.Map.empty ~f:process_dune_file
   ;;
 
@@ -95,7 +95,7 @@ module Index = struct
 end
 
 let libs_in_dir ~scope ~dir =
-  Dune_load.stanzas_in_dir dir
+  Partitions.stanzas_in_dir dir
   >>= function
   | None -> Memo.return []
   | Some dune_file ->

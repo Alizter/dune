@@ -63,7 +63,7 @@ let of_string (root : Workspace_root.t) ~recursive s ~contexts =
 let find_dir_specified_on_command_line ~context ~dir =
   let open Memo.O in
   let build_dir = Path.Build.append_source (Context_name.build_dir context) dir in
-  Dune_rules.Dune_load.source_tree_dir ~dir:build_dir
+  Dune_rules.Partitions.source_tree_dir ~dir:build_dir
   >>| function
   | Some _ -> build_dir
   | None ->

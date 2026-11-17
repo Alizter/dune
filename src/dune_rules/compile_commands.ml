@@ -114,7 +114,7 @@ let enabled_stanzas =
       (fun sctx ->
          let open Memo.O in
          let ctx = Super_context.context sctx in
-         let* dune_files = Dune_load.dune_files (Context.name ctx) in
+         let* dune_files = Partitions.dune_files (Context.name ctx) in
          Dune_file.fold_static_stanzas dune_files ~init:[] ~f:(fun dune_file stanza acc ->
            let enabled_if =
              match Stanza.repr stanza with
@@ -188,7 +188,7 @@ let is_supported sctx =
   then Memo.return false
   else
     let open Memo.O in
-    let+ project = Dune_load.find_project ~dir:(Context.build_dir ctx) in
+    let+ project = Partitions.find_project ~dir:(Context.build_dir ctx) in
     Dune_project.dune_version project >= (3, 23)
 ;;
 

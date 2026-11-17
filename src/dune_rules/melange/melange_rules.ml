@@ -194,7 +194,7 @@ let impl_only_modules_defined_in_this_lib ~sctx ~scope ~info lib =
           let dir = Lib_info.src_dir info |> Path.as_in_build_dir_exn in
           let* scope = Scope.DB.find_by_dir dir in
           let* stanzas =
-            Dune_load.stanzas_in_dir dir
+            Partitions.stanzas_in_dir dir
             >>= function
             | None -> Memo.return []
             | Some dune_file -> Dune_file.find_stanzas dune_file Library.key
@@ -1155,7 +1155,7 @@ let under_melange_emit_target =
          match Path.Build.parent dir with
          | None -> Memo.return None
          | Some parent ->
-           Dune_load.stanzas_in_dir parent
+           Partitions.stanzas_in_dir parent
            >>= (function
             | None -> under_melange_emit_target parent
             | Some stanzas ->
@@ -1226,7 +1226,7 @@ let setup_emit_js_rules sctx ~dir =
        Gen_rules.make ~directory_targets (Memo.return melange))
   | None ->
     (* this should probably be handled by [Dir_status] *)
-    Dune_load.stanzas_in_dir dir
+    Partitions.stanzas_in_dir dir
     >>= (function
      | None -> Memo.return Gen_rules.no_rules
      | Some dune_file ->

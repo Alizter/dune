@@ -24,7 +24,7 @@ let cclibs =
 let expand_c_library_flags sctx expander ~dir ~has_cxx flags =
   let standard =
     let open Action_builder.O in
-    let* project = Action_builder.of_memo (Dune_load.find_project ~dir) in
+    let* project = Action_builder.of_memo (Partitions.find_project ~dir) in
     match Dune_project.use_standard_c_and_cxx_flags project with
     | Some true when has_cxx () ->
       let ctx = Super_context.context sctx in

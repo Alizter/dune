@@ -105,7 +105,7 @@ let add_stanza db ~dir (acc, pps) stanza =
 let libs_and_ppx_under_dir sctx ~db ~dir =
   (match Path.as_in_build_dir dir with
    | None -> Memo.return None
-   | Some dir -> Dune_load.source_tree_dir ~dir)
+   | Some dir -> Partitions.source_tree_dir ~dir)
   >>= function
   | None -> Memo.return ([], [])
   | Some dir ->
@@ -117,7 +117,7 @@ let libs_and_ppx_under_dir sctx ~db ~dir =
         ~trace_event_name:"Utop rules loading"
         ~f:(fun dir ->
           let dir = Path.Build.append_local build_dir (Source_tree.Dir.source_path dir) in
-          Dune_load.stanzas_in_dir dir
+          Partitions.stanzas_in_dir dir
           >>= function
           | None -> Memo.return Libs_and_ppxs.empty
           | Some (d : Dune_file.t) ->

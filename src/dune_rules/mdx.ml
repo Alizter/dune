@@ -277,7 +277,7 @@ let files_to_mdx t ~dir =
     let standard = default_files_of_version t.version in
     Predicate_lang.Glob.test t.files ~standard file
   in
-  Dune_load.source_files ~dir >>| Path.Build.Set.to_list >>| List.filter ~f:must_mdx
+  Partitions.source_files ~dir >>| Path.Build.Set.to_list >>| List.filter ~f:must_mdx
 ;;
 
 (** Generates the rules for a single [src] file covered covered by the given
@@ -537,7 +537,7 @@ let gen_rules t ~sctx ~dir ~scope ~expander =
     match t.package with
     | None -> Memo.return true
     | Some package ->
-      let+ project = Dune_load.find_loaded_project ~dir in
+      let+ project = Partitions.find_loaded_project ~dir in
       (match Loaded_project.stanza_mask project with
        | None -> true
        | Some packages -> Package.Name.Set.mem packages (Package.name package))

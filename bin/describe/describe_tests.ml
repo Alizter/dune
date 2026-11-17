@@ -35,7 +35,7 @@ module Crawl = struct
     =
     let context_name = Context.name context in
     let sctx = Context_name.Map.find_exn scontexts context_name in
-    let* dune_files = Dune_load.dune_files context_name in
+    let* dune_files = Partitions.dune_files context_name in
     Memo.parallel_map dune_files ~f:(fun (dune_file : Dune_file.t) ->
       Dune_file.stanzas dune_file
       >>= fun stanzas ->

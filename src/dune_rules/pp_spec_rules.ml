@@ -59,7 +59,7 @@ let get_rules sctx key =
       in
       let dir = Path.Build.append_source (Context.build_dir ctx) scope_dir in
       let+ scope = Scope.DB.find_by_dir dir
-      and+ loaded_project = Dune_load.find_loaded_project ~dir in
+      and+ loaded_project = Partitions.find_loaded_project ~dir in
       pps, opaque_packages, scope, Loaded_project.partition_root loaded_project
   in
   let exe = Ppx_exe.ppx_exe_path root ~key in

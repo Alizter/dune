@@ -43,7 +43,7 @@ let expander_for_artifacts t ~dir =
       let* host = host in
       Scope.DB.find_by_dir (set_context host dir)
   in
-  let+ project = Dune_load.find_project ~dir in
+  let+ project = Partitions.find_project ~dir in
   Expander.extend_env t.root_expander ~env:external_env
   |> Expander.set_scope ~dir ~project ~scope ~scope_host
 ;;
@@ -51,7 +51,7 @@ let expander_for_artifacts t ~dir =
 let expander t ~dir = t.get_expander dir
 
 let get_env_stanza ~dir =
-  Dune_load.stanzas_in_dir dir
+  Partitions.stanzas_in_dir dir
   >>= (function
    | None -> Memo.return None
    | Some dune_file ->
@@ -66,7 +66,7 @@ let get_env_stanza ~dir =
 let get_impl t dir =
   let inherit_from =
     Memo.lazy_ ~name:"inherited-environment-node" (fun () ->
-      let* project = Dune_load.find_loaded_project ~dir in
+      let* project = Partitions.find_loaded_project ~dir in
       if Path.Build.equal dir (Loaded_project.output_root project)
       then Memo.Lazy.force t.default_env
       else (
@@ -318,7 +318,7 @@ let create ~(context : Context.t) ~(host : t option) ~packages ~stanzas =
     in
     let scope = Scope.DB.find_by_dir (Context.build_dir context) in
     let scope_host = host_build_dir >>= Scope.DB.find_by_dir in
-    let+ project = Dune_load.find_project ~dir:(Context.build_dir context) in
+    let+ project = Partitions.find_project ~dir:(Context.build_dir context) in
     Expander.make_root ~project ~scope ~scope_host ~context ~env ~artifacts_host
   in
   (* Env node that represents the environment configured for the workspace. It
@@ -364,7 +364,7 @@ let all =
           Some sctx
       in
       let* host, stanzas =
-        Memo.fork_and_join host (fun () -> Dune_load.dune_files (Context.name context))
+        Memo.fork_and_join host (fun () -> Partitions.dune_files (Context.name context))
       in
       create ~host ~context ~packages ~stanzas
     in

@@ -180,7 +180,7 @@ let mlg_files ~dir ~modules =
     let filter_mlg file =
       Filename.Extension.Or_empty.check (Path.Build.extension file) Filename.Extension.mlg
     in
-    Dune_load.source_files ~dir >>| Path.Build.Set.to_list >>| List.filter ~f:filter_mlg
+    Partitions.source_files ~dir >>| Path.Build.Set.to_list >>| List.filter ~f:filter_mlg
   in
   let parse ~loc:_ file = Path.Build.relative dir (file ^ ".mlg") in
   Ordered_set_lang.eval modules ~standard ~parse ~eq:Path.Build.equal

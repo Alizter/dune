@@ -802,7 +802,7 @@ module Crawl = struct
     let sctx = Context_name.Map.find_exn scontexts context_name in
     let open Memo.O in
     let* dune_files =
-      Dune_load.dune_files context_name
+      Partitions.dune_files context_name
       >>| List.filter ~f:(dune_file_is_in_dirs ~no_recursive dirs)
     in
     let* exes, exe_libs =

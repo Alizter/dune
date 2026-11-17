@@ -9,7 +9,7 @@ type build_system =
 
 let implicit_default_alias dir =
   let open Memo.O in
-  let+ source_dir = Dune_load.source_tree_dir ~dir in
+  let+ source_dir = Partitions.source_tree_dir ~dir in
   Option.map source_dir ~f:(fun source_dir ->
     let default_alias =
       let dune_version =
@@ -60,7 +60,7 @@ let execution_parameters ~sandbox_actions =
         if opaque
         then Memo.return ep
         else
-          let+ loaded_project = Dune_load.find_loaded_project ~dir:path in
+          let+ loaded_project = Partitions.find_loaded_project ~dir:path in
           Dune_project.update_execution_parameters
             (Loaded_project.project loaded_project)
             ep)

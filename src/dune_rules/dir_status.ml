@@ -317,7 +317,7 @@ end = struct
     (match Path.Build.extract_build_context dir with
      | None -> Memo.return None
      | Some (ctx, _) ->
-       Dune_load.source_tree_dir ~dir
+       Partitions.source_tree_dir ~dir
        >>| (function
         | None -> None
         | Some src_dir -> Some (ctx, src_dir)))
@@ -332,7 +332,7 @@ end = struct
        | true -> Memo.return (Lock_dir st_dir)
        | false ->
          let build_dir_is_project_root = build_dir_is_project_root st_dir in
-         Dune_load.stanzas_in_dir dir
+         Partitions.stanzas_in_dir dir
          >>= (function
           | Some d -> has_dune_file ~dir st_dir ~build_dir_is_project_root d
           | None ->

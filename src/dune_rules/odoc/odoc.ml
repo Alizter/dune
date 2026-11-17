@@ -1201,7 +1201,7 @@ let has_rules ?(directory_targets = Path.Build.Map.empty) m =
 let with_package sctx pkg ~f =
   let pkg = Package.Name.of_string pkg in
   let context = Super_context.context sctx |> Context.name in
-  Dune_load.find_package context pkg
+  Partitions.find_package context pkg
   >>= function
   | Some pkg -> has_rules (f pkg)
   | None -> Memo.return Gen_rules.no_rules
@@ -1303,7 +1303,7 @@ let gen_rules sctx ~dir rest =
        and+ () =
          let ctx = Super_context.context sctx in
          Package.Name.of_string lib_unique_name_or_pkg
-         |> Dune_load.find_package (Context.name ctx)
+         |> Partitions.find_package (Context.name ctx)
          >>= Memo.Option.iter ~f:(fun pkg ->
            let pkg = Package.name pkg in
            setup_pkg_rules sctx ~pkg ~for_)

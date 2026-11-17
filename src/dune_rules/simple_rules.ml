@@ -6,7 +6,7 @@ module Alias_rules = struct
     match Alias.Name.compare (Alias.name alias) Alias0.empty with
     | Lt | Gt -> Memo.return ()
     | Eq ->
-      let* project = Dune_load.find_project ~dir in
+      let* project = Partitions.find_project ~dir in
       if Dune_project.dune_version project >= (3, 20)
       then
         User_error.raise
@@ -303,7 +303,7 @@ let copy_files sctx ~dir ~expander (def : Copy_files.t) =
   let* source_dir =
     match Path.as_in_build_dir src_in_build with
     | None -> Memo.return None
-    | Some dir -> Dune_load.source_tree_dir ~dir
+    | Some dir -> Partitions.source_tree_dir ~dir
   in
   let* exists_or_generated =
     match src_in_src with

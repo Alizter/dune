@@ -67,7 +67,7 @@ let%expect_test "package library entries and lazy native visibility" =
               (Dune_lang.Package.Name.of_string "a")
           in
           let package_stanzas name =
-            Dune_load.stanzas_of_package
+            Partitions.stanzas_of_package
               Context_name.default
               (Dune_lang.Package.Name.of_string name)
           in
@@ -78,7 +78,7 @@ let%expect_test "package library entries and lazy native visibility" =
              and+ other = package_stanzas "b"
              and+ deprecated = package_stanzas "old-a"
              and+ unknown = package_stanzas "unknown"
-             and+ dune_files = Dune_load.dune_files Context_name.default in
+             and+ dune_files = Partitions.dune_files Context_name.default in
              let expected =
                List.concat_map dune_files ~f:Dune_file.static_stanzas
                |> List.filter ~f:(fun stanza ->
@@ -157,7 +157,7 @@ let%expect_test "package library entries and lazy native visibility" =
              in
              let db = Scope.public_libs scope in
              let* dune_files =
-               Dune_load.dune_files_of_package
+               Partitions.dune_files_of_package
                  Context_name.default
                  (Dune_lang.Package.Name.of_string "native")
              in

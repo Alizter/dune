@@ -63,7 +63,7 @@ let include_action_env = function
 
 let dep_on_alias_rec alias ~loc =
   let src_dir = Pkg_sources.source_location (Alias.dir alias) in
-  Action_builder.of_memo (Dune_load.source_tree_dir ~dir:(Alias.dir alias))
+  Action_builder.of_memo (Partitions.source_tree_dir ~dir:(Alias.dir alias))
   >>= function
   | None ->
     Action_builder.fail

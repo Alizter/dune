@@ -73,7 +73,7 @@ end = struct
         | Some dir -> Memo.return (Path.Build.drop_build_context_exn dir)
         | None ->
           let+ loaded_project =
-            Dune_load.find_loaded_project ~dir:(Scope.root consumer_scope)
+            Partitions.find_loaded_project ~dir:(Scope.root consumer_scope)
           in
           (match Loaded_project.owner loaded_project with
            | None -> Path.Source.root
@@ -129,7 +129,7 @@ let ppx_driver_exe (ctx : Context.t) ~scope libs =
   let* decoded = Key.Decoded.of_libs ~context:(Context.name host) libs ~scope in
   let key = Digest.to_string (Key.encode decoded) in
   let+ loaded_project =
-    Dune_load.find_loaded_project
+    Partitions.find_loaded_project
       ~dir:(Path.Build.append_source (Context.build_dir host) decoded.scope_dir)
   in
   ppx_exe_path (Loaded_project.partition_root loaded_project) ~key

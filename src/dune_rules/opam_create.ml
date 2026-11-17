@@ -370,7 +370,7 @@ let build_path ~build_dir pkg =
 
 let source_file_exists ~build_dir pkg =
   let dir = Path.Build.append_local build_dir (Package.dir pkg) in
-  let* dir = Dune_load.source_tree_dir ~dir in
+  let* dir = Partitions.source_tree_dir ~dir in
   match dir with
   | None -> Memo.return false
   | Some dir ->

@@ -596,7 +596,7 @@ end = struct
         let loc = File_binding.Expanded.src_loc fb in
         let* entry = make_entry ~kind:Source_tree fb in
         let+ () =
-          Dune_load.source_tree_dir ~dir:entry.src
+          Partitions.source_tree_dir ~dir:entry.src
           >>| function
           | Some _ -> ()
           | None ->
@@ -641,7 +641,7 @@ end = struct
   let package_entries (sctx, package_name) =
     let context = Super_context.context sctx in
     let ctx = Context.build_context context in
-    let* package = Dune_load.find_package ctx.name package_name in
+    let* package = Partitions.find_package ctx.name package_name in
     match package with
     | None -> Memo.return []
     | Some pkg ->
@@ -687,7 +687,7 @@ end = struct
           | Some opam_file -> file Lib opam_file "opam" :: deprecated_meta_and_dune_files
         in
         let pkg_dir = Package_paths.build_dir ctx pkg in
-        Dune_load.source_tree_dir ~dir:pkg_dir
+        Partitions.source_tree_dir ~dir:pkg_dir
         >>| function
         | None -> init
         | Some dir ->
@@ -705,7 +705,7 @@ end = struct
               Install.Entry.Sourced.Unexpanded.create entry :: acc)
             else acc)
       and+ entries =
-        let* stanzas = Dune_load.stanzas_of_package ctx.name package_name
+        let* stanzas = Partitions.stanzas_of_package ctx.name package_name
         and* package_db = Package_db.create ctx.name in
         List.rev stanzas
         |> Memo.parallel_map ~f:(fun (dune_file, stanza) ->
@@ -1271,7 +1271,7 @@ let packages_file_is_part_of path =
        (* A file of a mount belongs to its package when the package installs
           it. *)
        let context = Super_context.context sctx |> Context.name in
-       let* package = Dune_load.find_package context name in
+       let* package = Partitions.find_package context name in
        (match package with
         | None -> Memo.return Package.Id.Set.empty
         | Some package ->
@@ -1427,7 +1427,7 @@ let gen_package_install_file_rules sctx (package : Package.t) =
       ~f:(List.rev_map ~f:(fun (e : Install.Entry.Sourced.Expanded.t) -> e.entry.src))
     |> Action_builder.memoize "entries"
   in
-  let* dune_project = Dune_load.find_project ~dir:pkg_build_dir in
+  let* dune_project = Partitions.find_project ~dir:pkg_build_dir in
   let strict_package_deps = Dune_project.strict_package_deps dune_project in
   let packages =
     let open Action_builder.O in
@@ -1479,7 +1479,7 @@ let gen_package_install_file_rules sctx (package : Package.t) =
               (let open Memo.O in
                Package.Id.Set.to_list packages
                |> Memo.List.map ~f:(fun (pkg : Package.Id.t) ->
-                 Dune_load.find_package build_context.name (Package.Id.name pkg)
+                 Partitions.find_package build_context.name (Package.Id.name pkg)
                  >>| Option.value_exn))
           in
           ( ()
@@ -1597,7 +1597,7 @@ let scheme_per_ctx_memo =
              ( Dir_set.subtree (Install.Context.dir ~context)
              , Thunk
                  (fun () ->
-                   Dune_load.package_errors context name
+                   Partitions.package_errors context name
                    >>= function
                    | [] -> scheme sctx name
                    | _ :: _ -> Memo.return Scheme.Empty) ))

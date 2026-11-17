@@ -167,8 +167,8 @@ let context_indexes =
         ~input:(module Input)
         (fun (ctx, for_, owner) ->
            (match owner with
-            | None -> Dune_load.dune_files (Context.name ctx)
-            | Some package -> Dune_load.dune_files_of_package (Context.name ctx) package)
+            | None -> Partitions.dune_files (Context.name ctx)
+            | Some package -> Partitions.dune_files_of_package (Context.name ctx) package)
            >>| Dune_file.fold_static_stanzas ~init:[] ~f:(fun dune_file stanza acc ->
              let obj =
                let dir = Dune_file.output_dir dune_file in

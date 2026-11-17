@@ -257,7 +257,7 @@ let resolve_package_variable
       Package.Name.equal (Candidate.name candidate) package)
   with
   | None ->
-    let+ { Dune_load_workspace.packages; _ } = Dune_load_workspace.load ()
+    let+ packages = Dune_load.packages ()
     and+ direct = Candidate.dependencies candidate in
     if Package.Name.Set.mem direct package && Package.Name.Map.mem packages package
     then Requires_package_build
@@ -509,7 +509,7 @@ let prepare context candidate =
                Package.Name.Map.find (Dune_project.including_hidden_packages project) name
              with
              | None -> Memo.return false
-             | Some package -> Dune_load_workspace.package_enabled package))
+             | Some package -> Dune_load.package_enabled package))
     in
     Memo.return (Option.some_if has_dune_file tree)
 ;;

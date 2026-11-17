@@ -21,7 +21,7 @@ module Node = struct
   ;;
 
   let in_dir ~dir =
-    Dune_load.stanzas_in_dir dir
+    Partitions.stanzas_in_dir dir
     >>= function
     | None -> Memo.return None
     | Some stanzas ->
@@ -33,7 +33,7 @@ module Node = struct
 
   let rec by_dir dir =
     let parent =
-      let* project = Dune_load.find_loaded_project ~dir in
+      let* project = Partitions.find_loaded_project ~dir in
       if Path.Build.equal dir (Loaded_project.output_root project)
       then by_context dir
       else (
@@ -139,7 +139,7 @@ module Inherit = struct
         (sprintf "%s-root" name)
         ~input:(module Path.Build)
         (fun dir ->
-           let* loaded_project = Dune_load.find_loaded_project ~dir
+           let* loaded_project = Partitions.find_loaded_project ~dir
            and* envs = Memo.Lazy.force for_context in
            let project = Loaded_project.project loaded_project in
            let root = root context project in
@@ -164,7 +164,7 @@ module Inherit = struct
               match Path.Build.parent path with
               | None -> Code_error.raise "invalid path" []
               | Some parent ->
-                let+ project = Dune_load.find_loaded_project ~dir:path in
+                let+ project = Partitions.find_loaded_project ~dir:path in
                 if Path.Build.equal (Loaded_project.output_root project) path
                 then `Root path
                 else `Parent parent

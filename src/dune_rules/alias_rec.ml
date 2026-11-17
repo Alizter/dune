@@ -46,7 +46,7 @@ include Alias_builder.Alias_rec (struct
             =
             f ~path:build_path
           and* stanzas_in_dir =
-            Action_builder.of_memo (Dune_load.stanzas_in_dir build_path)
+            Action_builder.of_memo (Partitions.stanzas_in_dir build_path)
           in
           match stanzas_in_dir with
           | None -> Action_builder.return found_in_source
@@ -67,7 +67,7 @@ include Alias_builder.Alias_rec (struct
               ~init:found_in_source
               ~f:Alias_status.combine
       in
-      Dune_load.source_tree_dir ~dir
+      Partitions.source_tree_dir ~dir
       |> Action_builder.of_memo
       >>= function
       | None -> Action_builder.return Alias_builder.Alias_status.Not_defined

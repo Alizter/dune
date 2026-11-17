@@ -1544,7 +1544,7 @@ module DB = struct
         (fun ctx ->
            let+ lock_dir = Lock_dir.get_exn ctx
            and+ platform = Lock_dir.Sys_vars.solver_env
-           and+ { Dune_load_workspace.packages; _ } = Dune_load_workspace.load () in
+           and+ packages = Dune_load.packages () in
            entries_by_name_of_lock_dir
              lock_dir
              ~platform
@@ -3286,9 +3286,7 @@ let workspace_dependencies =
       ~input:(module Context_name)
       (fun context ->
          let+ depends = Pkg_sources.dependencies context
-         and+ { Dune_load_workspace.packages = workspace; _ } =
-           Dune_load_workspace.load ()
-         in
+         and+ workspace = Dune_load.packages () in
          let step reached =
            Package.Name.Map.filter_map depends ~f:(fun depends ->
              let workspace_deps =

@@ -65,7 +65,7 @@ let dir t = t.dir
 
 let source_tree_root t =
   let open Memo.O in
-  Dune_load.source_tree_root ~dir:t.dir >>| Option.value_exn
+  Partitions.source_tree_root ~dir:t.dir >>| Option.value_exn
 ;;
 
 let project t = t.project
@@ -854,11 +854,11 @@ let visible_packages t =
   if not lock_dir_active
   then Memo.return Package.Name.Selection.All
   else
-    let* project = Dune_load.find_loaded_project ~dir:t.dir in
+    let* project = Partitions.find_loaded_project ~dir:t.dir in
     match Loaded_project.owner project with
     | Some name ->
       let+ closure =
-        Dune_load.package_closure_for_context context (Package.Name.Set.singleton name)
+        Partitions.package_closure_for_context context (Package.Name.Set.singleton name)
       in
       Package.Name.Selection.Only closure
     | None ->
@@ -868,7 +868,9 @@ let visible_packages t =
        | Some pkg_id ->
          let name = Package.Id.name pkg_id in
          let+ closure =
-           Dune_load.package_closure_for_context context (Package.Name.Set.singleton name)
+           Partitions.package_closure_for_context
+             context
+             (Package.Name.Set.singleton name)
          and+ reverse = Pkg_rules.workspace_dependencies context in
          (* A locked package that needs this package cannot be built while
             generating this package's rules. *)

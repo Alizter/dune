@@ -13,7 +13,7 @@ module Library_key = struct
 end
 
 let find_library ~expander ~dir ~lib_name =
-  Dune_load.stanzas_in_dir dir
+  Partitions.stanzas_in_dir dir
   >>= function
   | None -> Memo.return None
   | Some dune_file ->

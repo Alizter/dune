@@ -8,7 +8,7 @@ let mlds_def =
     ~input:(module Super_context.As_memo_key.And_package_name)
     (fun (sctx, package) ->
        let ctx = Super_context.context sctx in
-       Dune_load.dune_files_of_package (Context.name ctx) package
+       Partitions.dune_files_of_package (Context.name ctx) package
        >>= Memo.parallel_map ~f:(fun dune_file ->
          Dune_file.stanzas dune_file
          >>= Memo.parallel_map ~f:(fun stanza ->

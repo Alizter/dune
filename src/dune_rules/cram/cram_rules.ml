@@ -194,7 +194,7 @@ let stanzas_in_dir =
     "cram-stanzas-in-dir"
     ~input:(module Path.Build)
     (fun dir ->
-       Dune_load.stanzas_in_dir dir
+       Partitions.stanzas_in_dir dir
        >>= function
        | None -> Memo.return []
        | Some (d : Dune_file.t) ->

@@ -133,7 +133,7 @@ let resolve_path path ~(setup : Dune_rules.Main.build_system)
     let+ exists =
       Memo.List.exists contexts ~f:(fun context ->
         let dir = Path.Build.append_source (Context.build_dir context) src in
-        Dune_rules.Dune_load.source_tree_dir ~dir >>| Option.is_some)
+        Dune_rules.Partitions.source_tree_dir ~dir >>| Option.is_some)
     in
     Option.some_if
       exists

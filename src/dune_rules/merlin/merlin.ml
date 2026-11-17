@@ -1301,7 +1301,7 @@ module Unprocessed = struct
       Action_builder.of_memo
         (let open Memo.O in
          Memo.List.fold_left more_src_dirs ~init:Path.Build.Map.empty ~f:(fun dirs dir ->
-           Dune_load.source_tree_dir ~dir
+           Partitions.source_tree_dir ~dir
            >>| function
            | None -> dirs
            | Some source_dir ->

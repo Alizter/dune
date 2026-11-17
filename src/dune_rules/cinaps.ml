@@ -104,7 +104,7 @@ let gen_rules sctx t ~dir ~scope =
   let loc = t.loc in
   (* Files checked by cinaps *)
   let* cinapsed_files =
-    Dune_load.source_files ~dir
+    Partitions.source_files ~dir
     >>| Path.Build.Set.to_list
     >>| List.filter ~f:(fun p ->
       Predicate_lang.Glob.test
