@@ -2,10 +2,7 @@ A mounted package whose source is a local directory uses that directory as
 its backing, without first copying a snapshot into _build/_fetch.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty) (depends foo))
-  > EOF2
+  $ make_named_package_project main 3.25 foo
   $ cat > dune <<'EOF2'
   > (dirs :standard \ _source)
   > (executable (name main) (libraries foo))

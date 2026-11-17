@@ -4,10 +4,7 @@ that the file works from either (rocq/coqproject.t). A mounted theory's source
 directory is its build directory, and a mount is never promoted into.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ mkdir -p _source/thy
   $ cat > _source/dune-project <<'EOF'
   > (lang dune 3.25)

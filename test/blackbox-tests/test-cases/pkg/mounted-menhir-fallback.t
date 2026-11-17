@@ -4,10 +4,7 @@ mounted from a lock directory must behave like a workspace project
 (menhir/inferred-deps-modes.t).
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF2
+  $ make_named_package_project main 3.25 foo
   $ mkdir -p _source/fallback
   $ cat > _source/dune-project <<'EOF2'
   > (lang dune 3.25)

@@ -3,10 +3,7 @@ loaded locked library declares them with (javascript_files); an opaque locked
 library's META names them in jsoo_runtime.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty) (depends foo bar))
-  > EOF2
+  $ make_named_package_project main 3.25 foo bar
   $ mkdir _foo _bar
 
 [foo] is a dune project whose library ships a JavaScript primitive.

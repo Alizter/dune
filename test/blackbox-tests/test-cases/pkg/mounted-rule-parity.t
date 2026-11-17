@@ -2,10 +2,7 @@ The same authored project uses the same directory rules as a workspace project
 and as a mounted dependency. Include-subdirs groups retain their source view.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ mkdir -p _source/group/sub
   $ cat > _source/dune-project <<'EOF'
   > (lang dune 3.25)
@@ -362,10 +359,7 @@ unusable lock recipe ensures the mounted build uses ordinary native rules.
   > (lang dune 3.25)
   > (pkg enabled)
   > EOF
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends dep))
-  > EOF
+  $ make_named_package_project main 3.25 dep
   $ mkdir -p _source/warning _source/alert _source/modules
   $ (cd _source && make_dune_project_with_package 3.25 dep)
   $ cat > _source/warning/dune <<'EOF'

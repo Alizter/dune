@@ -2,10 +2,7 @@ Mounted packages can produce build artifacts, but must never register or apply
 promotions. Promotion controls on the command line must not override this.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ mkdir _source
   $ cat > _source/dune-project <<'EOF'
   > (lang dune 3.25)

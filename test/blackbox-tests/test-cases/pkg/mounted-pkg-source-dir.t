@@ -2,10 +2,7 @@ A workspace may contain a directory with the name used for mounted packages.
 Its contents are not sources of the build.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty) (depends foo))
-  > EOF2
+  $ make_named_package_project main 3.25 foo
   $ echo '(executable (name main) (libraries foo))' > dune
   $ echo 'let () = print_endline Foo.message' > main.ml
   $ mkdir _source

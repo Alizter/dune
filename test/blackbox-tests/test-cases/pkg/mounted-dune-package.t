@@ -3,10 +3,7 @@ opaque recipe must not run, and the fetched inputs must not own the artifact
 root.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ cat > dune <<'EOF'
   > (executable (name main) (libraries foo))
   > EOF
@@ -56,10 +53,7 @@ installed library retains the native provider when resolving its requirements.
   >   (write-file META "requires = \"foo\"\narchive(byte) = \"opaque.cma\"\narchive(native) = \"opaque.cmxa\"\n")
   >   (write-file opaque.install "lib: [ \"META\" \"opaque.cmi\" \"opaque.cma\" \"opaque.cmx\" \"opaque.cmxa\" \"opaque.a\" ]")))
   > EOF
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends opaque))
-  > EOF
+  $ make_named_package_project main 3.25 opaque
   $ echo '(executable (name main) (libraries opaque))' > dune
   $ echo 'let () = print_endline Opaque.message' > main.ml
   $ dune build main.exe
@@ -206,10 +200,7 @@ through %{lib:...}. This must not require installing the whole package.
   $ mkdir lib-pform
   $ cd lib-pform
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ echo '(executable (name main) (libraries foo))' > dune
   $ echo 'let () = print_endline Foo.message' > main.ml
   $ mkdir -p _foo/src _foo/support

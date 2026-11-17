@@ -3,10 +3,7 @@ find them when the project is mounted from a lock directory. The workspace
 behaviour of each feature is covered by the test named with it.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ mkdir -p _source/docs/nested _source/stubs/inc _source/escape
   $ cat > _source/dune-project <<'EOF'
   > (lang dune 3.25)

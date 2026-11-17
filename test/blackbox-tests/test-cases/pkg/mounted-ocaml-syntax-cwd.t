@@ -2,10 +2,7 @@ A dune file in OCaml syntax is a program. For a mounted package it does not
 run in the fetched source, which is shared by every package built from it.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name main) (depends foo))
-  > EOF2
+  $ make_named_package_project main 3.25 foo
   $ mkdir _source
   $ cat > _source/dune-project <<'EOF2'
   > (lang dune 3.25)

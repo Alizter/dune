@@ -165,10 +165,7 @@ keeps vendored packages and the build succeeds.
   $ mkdir vendored-project
   $ cd vendored-project
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty) (depends bundle))
-  > EOF
+  $ make_named_package_project main 3.25 bundle
   $ mkdir -p _bundle/vendor
   $ (cd _bundle && make_dune_project_with_package 3.25 bundle)
   $ cat > _bundle/dune <<'EOF'

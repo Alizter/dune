@@ -2,10 +2,7 @@ Errors about a mounted package's project name its directory by its build
 path, since that is where its files are.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ cat > dune <<'EOF'
   > (rule (alias use) (deps (package foo)) (action (echo used)))
   > EOF

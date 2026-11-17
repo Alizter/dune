@@ -12,10 +12,7 @@ the compiler, not once from each package.
   >   (write-file $p.install "lib: [ \"META\" ]")))
   > EOF
   > done
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (depends left right))
-  > EOF
+  $ make_named_package_project main 3.25 left right
   $ echo '(executable (name main) (libraries left right))' > dune
   $ echo 'let () = print_endline (Str.global_replace (Str.regexp "a") "b" "aaa")' > main.ml
   $ dune build main.exe
