@@ -111,13 +111,12 @@ let rec parse_file_includes ~stanza_parser ~allow_rule_plugins ~project ~context
 ;;
 
 type eval =
-  { loaded_project : Loaded_project.t
-  ; project : Dune_project.t
+  { project : Dune_project.t
+  ; dir : Path.Local.t
+  ; loaded_project : Loaded_project.t
   ; source_dir : Source_tree.Dir.t
   ; mask : Stanza.t Mask.t
   }
-
-let eval_source_path eval = Source_tree.Dir.source_path eval.source_dir
 
 type dynamic =
   | Dynamic_include of Loc.t * string
@@ -132,7 +131,7 @@ let parse_stanzas ~file ~(eval : eval) sexps =
   in
   let* stanzas =
     let context =
-      Source.Include_stanza.in_src_file
+      Include_stanza.in_src_file
       @@
       match file with
       | Some f -> f
@@ -143,7 +142,7 @@ let parse_stanzas ~file ~(eval : eval) sexps =
           (Path.Local.relative_fname Path.Local.root Source.Dune_file.fname)
     in
     let stanza_parser =
-      Dune_project.stanza_parser ~dir:(eval_source_path eval) eval.project
+      Dune_project.stanza_parser ~dir:eval.dir eval.project
       |> Warning_emit.Bag.set warnings
     in
     let allow_rule_plugins = Dune_project.dune_version eval.project >= (3, 26) in
@@ -182,7 +181,7 @@ let parse_stanzas ~file ~(eval : eval) sexps =
 
 let parse sexps ~file ~(eval : eval) =
   let+ stanzas, dynamic = parse_stanzas sexps ~file ~eval in
-  ( { dir = eval_source_path eval
+  ( { dir = eval.dir
     ; loaded_project = eval.loaded_project
     ; static_stanzas = stanzas
     ; stanzas = Memo.Lazy.of_val stanzas
@@ -435,7 +434,7 @@ module Eval = struct
 
   open Memo.O
 
-  let context_independent ~(eval : eval) dune_file =
+  let context_independent ~eval dune_file =
     let file = Source.Dune_file.file dune_file in
     let static = Source.Dune_file.get_static_sexp dune_file in
     match Source.Dune_file.kind dune_file with
@@ -466,7 +465,7 @@ module Eval = struct
                 (Include_stanza.file_path include_context loc include_file
                  |> Pkg_sources.source_location
                  |> Path.to_string_maybe_quoted)
-                (Loaded_project.output_path eval.loaded_project (eval_source_path eval)
+                (Loaded_project.output_path eval.loaded_project eval.dir
                  |> Pkg_sources.source_location
                  |> Path.to_string_maybe_quoted))
             (fun () ->
@@ -497,7 +496,7 @@ module Eval = struct
     stanzas @ nested
   ;;
 
-  let set_dynamic_stanzas t ~registry ~context ~(eval : eval) ~dynamic =
+  let set_dynamic_stanzas t ~registry ~context ~eval ~dynamic =
     let stanzas =
       match dynamic with
       | [] -> Memo.Lazy.of_val t.static_stanzas
@@ -505,9 +504,7 @@ module Eval = struct
         Memo.lazy_ ~name:"dynamic-includes"
         @@ fun () ->
         let+ stanzas =
-          let source_file =
-            Path.Local.relative_fname (eval_source_path eval) Source.Dune_file.fname
-          in
+          let source_file = Path.Local.relative_fname eval.dir Source.Dune_file.fname in
           let origin = Loaded_project.output_path eval.loaded_project source_file in
           let root =
             if Loaded_project.is_workspace eval.loaded_project
@@ -524,12 +521,12 @@ module Eval = struct
   ;;
 
   let registry entries =
-    List.concat_map entries ~f:(fun ((eval : eval), dune_file, _) ->
+    List.concat_map entries ~f:(fun (eval, dune_file, _) ->
       List.filter_map dune_file.static_stanzas ~f:(fun stanza ->
         match Stanza.repr stanza with
         | Rule_plugin.Definition.T definition ->
           Some
-            { Rule_plugin_runner.Registry.dir = eval_source_path eval
+            { Rule_plugin_runner.Registry.dir = eval.dir
             ; project = eval.project
             ; definition
             }
@@ -542,14 +539,12 @@ module Eval = struct
        some work in multi context builds. Is it worth it? *)
     let+ dune_syntax, ocaml_syntax =
       Appendable_list.to_list_rev dune_files
-      |> Memo.parallel_map ~f:(fun (loaded_project, dir, dune_file) ->
+      |> Memo.parallel_map ~f:(fun (loaded_project, source_dir, dune_file) ->
         let project = Loaded_project.project loaded_project in
-        let mask =
-          Mask.combine
-            (Mask.ignore_promote project)
-            (Mask.of_packages (Loaded_project.stanza_mask loaded_project))
-        in
-        let eval = { loaded_project; source_dir = dir; project; mask } in
+        let dir = Source_tree.Dir.source_path source_dir in
+        let mask = Mask.of_packages (Loaded_project.stanza_mask loaded_project) in
+        let mask = Mask.combine mask (Mask.ignore_promote project) in
+        let eval = { dir; project; loaded_project; source_dir; mask } in
         context_independent ~eval dune_file)
       >>| List.partition_map ~f:(function
         | Literal (eval, t, dynamic) -> Left (eval, t, dynamic)
