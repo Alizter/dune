@@ -38,10 +38,7 @@ module DB = struct
        | Some package -> Package.Name.Map.find_exn t.by_package (Package.Id.name package))
   ;;
 
-  let find_by_project t dune_project =
-    Path.Build.Map.values t.by_dir
-    |> List.find_exn ~f:(fun scope -> Dune_project.equal (project scope) dune_project)
-  ;;
+  let find_by_project_root t root = Path.Build.Map.find_exn t.by_dir root
 
   module Found_or_redirect : sig
     type t = private
@@ -102,7 +99,7 @@ module DB = struct
   let create_db_from_stanzas =
     (* Here, [parent] is always the public_libs DB. Check the call to
        [create_db_from_stanzas] below. *)
-    let resolve_found_or_redirect ~scopes ~project ~owner ~public_libs fr =
+    let resolve_found_or_redirect ~scopes ~root ~owner ~public_libs fr =
       match (fr : Found_or_redirect.t) with
       | Redirect { loc; to_; enabled; _ } ->
         let+ enabled =
@@ -120,7 +117,7 @@ module DB = struct
             let scopes = Fdecl.get scopes in
             let scope =
               match library_owner with
-              | None -> find_by_project scopes project
+              | None -> find_by_project_root scopes root
               | Some package -> Package.Name.Map.find_exn scopes.by_package package
             in
             Lib.DB.Resolve_result.redirect_by_id scope.db (Lib_info.lib_id info))
@@ -131,6 +128,7 @@ module DB = struct
     in
     fun ~lib_config ~loaded_project stanzas ->
       let project = Loaded_project.project loaded_project in
+      let root = Loaded_project.output_root loaded_project in
       let by_name, by_id, _ =
         List.fold_left
           stanzas
@@ -230,7 +228,7 @@ module DB = struct
       in
       Staged.stage (fun ~scopes ~owner ~public_libs ~instrument_with ~package_scopes ->
         let resolve_found_or_redirect =
-          resolve_found_or_redirect ~scopes ~project ~owner ~public_libs
+          resolve_found_or_redirect ~scopes ~root ~owner ~public_libs
         in
         let resolve name =
           match Lib_name.Map.find by_name name with
@@ -254,7 +252,7 @@ module DB = struct
 
   type redirect_to =
     | Project of
-        { project : Dune_project.t
+        { root : Path.Build.t
         ; lib_id : Lib_id.Local.t
         ; enabled : Toggle.t Memo.t
         ; loc : Loc.t
@@ -271,14 +269,14 @@ module DB = struct
 
     let resolve_redirect_to t rt =
       match rt with
-      | Project { project; lib_id; enabled; _ } ->
+      | Project { root; lib_id; enabled; _ } ->
         let+ enabled =
           let+ toggle = enabled in
           Toggle.enabled toggle
         in
         if enabled
         then (
-          let scope = find_by_project (Fdecl.get t.scopes) project in
+          let scope = find_by_project_root (Fdecl.get t.scopes) root in
           Lib.DB.Resolve_result.redirect_by_id scope.db (Local lib_id))
         else Lib.DB.Resolve_result.not_found
       | Name name -> Memo.return (Lib.DB.Resolve_result.redirect_in_the_same_db name)
@@ -297,7 +295,7 @@ module DB = struct
             let dir = Dune_file.output_dir dune_file in
             let candidate =
               match stanza with
-              | Library ({ project; visibility = Public p; _ } as conf) ->
+              | Library ({ visibility = Public p; _ } as conf) ->
                 let lib_id =
                   let src_dir = Dune_file.dir dune_file in
                   Library.to_lib_id ~src_dir conf
@@ -308,9 +306,12 @@ module DB = struct
                     Expander0.eval_blang expander conf.enabled_if >>| Toggle.of_bool)
                   |> Memo.Lazy.force
                 in
+                let root =
+                  Loaded_project.output_root (Dune_file.loaded_project dune_file)
+                in
                 Some
                   ( Public_lib.name p
-                  , Project { project; lib_id; enabled; loc = Public_lib.loc p }
+                  , Project { root; lib_id; enabled; loc = Public_lib.loc p }
                   , Some lib_id )
               | Library _ | Library_redirect _ -> None
               | Deprecated_library_name s ->
@@ -794,7 +795,10 @@ module DB = struct
 
   let with_all context ~f =
     let+ scopes = workspace (Context.name context) in
-    let find = find_by_project scopes in
+    let find project =
+      Path.Build.append_local (Context.build_dir context) (Dune_project.root project)
+      |> find_by_project_root scopes
+    in
     f find
   ;;
 
@@ -811,11 +815,11 @@ module DB = struct
   ;;
 
   let find_by_project context project =
-    let+ scopes =
+    let root =
       Path.Build.append_local (Context_name.build_dir context) (Dune_project.root project)
-      |> of_dir context
     in
-    find_by_project scopes project
+    let+ scopes = of_dir context root in
+    find_by_project_root scopes root
   ;;
 
   let for_package (scope : scope) = function
