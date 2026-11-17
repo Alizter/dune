@@ -685,10 +685,10 @@ module Toplevel_index = struct
 end
 
 let setup_toplevel_index_rule sctx output =
-  let ctx = Super_context.context sctx in
   let* packages = Dune_load.packages () in
   let index = Toplevel_index.of_packages packages output in
   let content = Toplevel_index.content output index in
+  let ctx = Super_context.context sctx in
   let path = Output_format.toplevel_index_path output ctx in
   add_rule sctx (Action_builder.write_file path content)
 ;;
@@ -1220,8 +1220,8 @@ let gen_rules sctx ~dir rest =
        >>> setup_toplevel_index_rule sctx Html
        >>> setup_toplevel_index_rule sctx Json)
   | [ "_markdown" ] ->
-    let ctx = Super_context.context sctx in
     let* packages = Dune_load.packages () in
+    let ctx = Super_context.context sctx in
     let all_package_dirs =
       Package.Name.Map.to_list packages
       |> List.map ~f:(fun (_, (pkg : Package.t)) ->
