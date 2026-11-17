@@ -528,17 +528,10 @@ module DB = struct
                 Findlib.create_for_package context ~package:name ~lib_root:roots.lib_root
               in
               let* ctx = Context_libs.get context in
-              let+ candidates = Pkg_sources.candidates context in
+              let+ parent = package_db context name ~include_owner:false in
               let resolve library =
                 let+ entry = Findlib.find findlib library in
                 Lib.DB.Resolve_result.of_findlib entry
-              in
-              let parent =
-                owner_db
-                  ctx
-                  ~package_scopes:(package_scopes ctx candidates)
-                  ~owner:(Some name)
-                  ~include_owner:false
               in
               let db =
                 Lib.DB.create
@@ -551,6 +544,15 @@ module DB = struct
                   ~instrument_with:ctx.instrument_with
               in
               Some (findlib, db)))
+
+  and package_db context name ~include_owner =
+    let* ctx = Context_libs.get context in
+    let+ candidates = Pkg_sources.candidates context in
+    owner_db
+      ctx
+      ~package_scopes:(package_scopes ctx candidates)
+      ~owner:(Some name)
+      ~include_owner
 
   (* Transitive libraries installed by an opaque package are checked in that
      package's own database; see [Lib.DB.with_package_scopes]. *)
@@ -834,15 +836,7 @@ module DB = struct
     let* package = Pkg_rules.find_opaque context name in
     match package with
     | None -> Memo.return None
-    | Some _ ->
-      let* ctx = Context_libs.get context in
-      let+ candidates = Pkg_sources.candidates context in
-      Some
-        (owner_db
-           ctx
-           ~package_scopes:(package_scopes ctx candidates)
-           ~owner:(Some name)
-           ~include_owner:true)
+    | Some _ -> package_db context name ~include_owner:true >>| Option.some
   ;;
 
   module Lib_entry = struct
