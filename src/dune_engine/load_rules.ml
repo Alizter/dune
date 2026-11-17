@@ -734,14 +734,18 @@ end = struct
     ;;
   end
 
-  let source_files_and_dirs dir =
+  let source_files_and_dirs source_paths_to_ignore dir =
     (* Take into account the source files *)
     let+ source_filenames, source_dirs =
-      let module Source_tree = (val (Build_config.get ()).source_tree) in
-      Source_tree.find_dir dir
-      >>| function
-      | None -> Filename.Array.Set.empty, Filename.Array.Set.empty
-      | Some dir -> Source_tree.Dir.filenames dir, Source_tree.Dir.sub_dir_names dir
+      let+ filenames, dirnames =
+        let module Source_tree = (val (Build_config.get ()).source_tree) in
+        Source_tree.find_dir dir
+        >>| function
+        | None -> Filename.Array.Set.empty, Filename.Array.Set.empty
+        | Some dir -> Source_tree.Dir.filenames dir, Source_tree.Dir.sub_dir_names dir
+      in
+      ( Filename.Array.Set.diff filenames source_paths_to_ignore.filenames
+      , Filename.Array.Set.diff dirnames source_paths_to_ignore.dirnames )
     in
     (* Compile the rules and cleanup stale artifacts *)
     { Source_files_and_dirs.source_filenames; source_dirs }
@@ -869,32 +873,25 @@ end = struct
       in
       let collected = Rules.Dir_rules.consume rules in
       let rules = collected.rules in
-      let sources = Path.Build.Map.find sources dir in
-      let* source_files_and_dirs =
-        match sources with
-        | Some (files, source_dirs) ->
-          Memo.return
-            { Source_files_and_dirs.source_filenames =
-                Filename.Map.keys files |> Filename.Array.Set.of_sorted_list
-            ; source_dirs
-            }
-        | None ->
-          (match context_type with
-           | Empty -> Memo.return Source_files_and_dirs.empty
-           | With_sources _ -> source_files_and_dirs sub_dir)
-      in
+      (* Compute the set of sources and targets promoted to the source tree that
+         must not be copied to the build directory. *)
       let source_paths_to_ignore =
         source_paths_to_ignore ~dir build_dir_only_sub_dirs rules
       in
-      let source_filenames =
-        Filename.Array.Set.diff
-          source_files_and_dirs.source_filenames
-          source_paths_to_ignore.filenames
-      in
-      let source_dirs =
-        Filename.Array.Set.diff
-          source_files_and_dirs.source_dirs
-          source_paths_to_ignore.dirnames
+      let sources = Path.Build.Map.find sources dir in
+      (* Take into account the source files *)
+      let* { source_filenames; source_dirs } =
+        match sources, context_type with
+        | Some (files, dirs), _ ->
+          Memo.return
+            { Source_files_and_dirs.source_filenames =
+                Filename.Array.Set.diff
+                  (Filename.Map.keys files |> Filename.Array.Set.of_sorted_list)
+                  source_paths_to_ignore.filenames
+            ; source_dirs = Filename.Array.Set.diff dirs source_paths_to_ignore.dirnames
+            }
+        | None, Empty -> Memo.return Source_files_and_dirs.empty
+        | None, With_sources _ -> source_files_and_dirs source_paths_to_ignore sub_dir
       in
       let copy_rules =
         match sources with
