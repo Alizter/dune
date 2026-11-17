@@ -42,8 +42,8 @@ refused.
   >  (libraries lib))
   > EOF2
   $ dune build @_build/default/.pkg/foo/melange
+  File "_build/default/.pkg/foo", line 1, characters 0-0:
   Error: Promotion is not supported for mounted package sources.
-  -> required by alias .pkg/foo/melange
   [1]
 
 The mount only sees libraries from the lock directory, so the melange standard

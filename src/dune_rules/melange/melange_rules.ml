@@ -453,6 +453,7 @@ let compute_promote_in_source ~promote_in_source ~project ~dir ~mode ~output ~sr
            if Option.is_some (Pkg_sources.package_of_dir_in_context root)
            then
              User_error.raise
+               ~loc:(Loc.in_dir dir)
                [ Pp.text "Promotion is not supported for mounted package sources." ];
            let into_dir =
              Path.Source.append_local (Path.Source.of_local root) output_dir
