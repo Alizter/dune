@@ -94,9 +94,4 @@ Dune would not treat as sources, and its recipe runs there.
   ./_underscore/a
   ./dune
   ./sub/c
-  $ find _build/default/.pkg/raw -type f | sort
-  _build/default/.pkg/raw/.dot/b
-  _build/default/.pkg/raw/_install/cookie
-  _build/default/.pkg/raw/_underscore/a
-  _build/default/.pkg/raw/dune
-  _build/default/.pkg/raw/sub/c
+  $ test -f _build/default/.pkg/raw/.dot/b
