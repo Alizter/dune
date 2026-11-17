@@ -191,10 +191,7 @@ let include_dir_flags ~expander ~dir ~include_dirs =
                        ~f:(fun t ->
                          let deps =
                            let dir =
-                             Source_tree.Dir.source_path t
-                             |> Path.Build.append_local
-                                  (Path.as_in_build_dir_exn build_dir)
-                             |> Path.build
+                             Path.append_local build_dir (Source_tree.Dir.source_path t)
                            in
                            File_selector.of_predicate_lang ~dir Predicate_lang.true_
                            |> Dep.file_selector

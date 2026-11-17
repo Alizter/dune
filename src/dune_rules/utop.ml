@@ -116,9 +116,7 @@ let libs_and_ppx_under_dir sctx ~db ~dir =
         ~traverse:Source_dir_status.Set.all
         ~trace_event_name:"Utop rules loading"
         ~f:(fun dir ->
-          let dir =
-            Source_tree.Dir.source_path dir |> Path.Build.append_local build_dir
-          in
+          let dir = Path.Build.append_local build_dir (Source_tree.Dir.source_path dir) in
           Dune_load.stanzas_in_dir dir
           >>= function
           | None -> Memo.return Libs_and_ppxs.empty
