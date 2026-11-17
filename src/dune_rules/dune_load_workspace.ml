@@ -2,8 +2,7 @@ open Import
 open Memo.O
 
 type t =
-  { dune_files :
-      (Source_tree.Dir.t * Dune_project.t * Source.Dune_file.t) Appendable_list.t
+  { dune_files : (Source_tree.Dir.t * Source.Dune_file.t) Appendable_list.t
   ; packages : Package.t Package.Name.Map.t
   ; projects : (Dune_project.t * Source_tree.Dir.t) list
   ; mask : Only_packages.t
@@ -36,7 +35,7 @@ module Projects_and_dune_files =
       type t = status * Dune_project.t * Source_tree.Dir.t
     end))
     (Monoid.Appendable_list (struct
-         type t = Source_tree.Dir.t * Dune_project.t * Source.Dune_file.t
+         type t = Source_tree.Dir.t * Source.Dune_file.t
        end))
 
 module Source_tree_map_reduce =
@@ -70,7 +69,7 @@ let load () =
       let dune_files =
         match Source_tree.Dir.dune_file dir with
         | None -> Appendable_list.empty
-        | Some d -> Appendable_list.singleton (dir, project, d)
+        | Some d -> Appendable_list.singleton (dir, d)
       in
       Memo.return (projects, dune_files)
     in

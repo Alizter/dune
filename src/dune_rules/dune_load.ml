@@ -36,7 +36,18 @@ module Partition = struct
     ; dune_file_by_dir : Dune_file_db.t
     }
 
-  let make projects dune_files =
+  let make context_name projects dune_files =
+    let projects_by_root =
+      Path.Local.Map.of_list_map_exn projects ~f:(fun project ->
+        Loaded_project.source_root project, project)
+    in
+    let* eval =
+      Appendable_list.map dune_files ~f:(fun (dir, file) ->
+        let root = Source_tree.Dir.project dir |> Dune_project.root in
+        Path.Local.Map.find_exn projects_by_root root, dir, file)
+      |> Dune_file.eval
+    in
+    let+ dune_files = eval context_name in
     { projects_by_output_root =
         Path.Build.Map.of_list_map_exn projects ~f:(fun project ->
           Loaded_project.output_root project, project)
@@ -79,10 +90,6 @@ let load_mount context mounted =
             ~stanza_mask:(Some visible_packages)
           |> Memo.return)
       in
-      let projects_by_root =
-        Path.Local.Map.of_list_map_exn projects ~f:(fun project ->
-          Loaded_project.source_root project, project)
-      in
       let+ files =
         Mounted_dune_files.map_reduce
           (Source_tree.Rules.Mounted.root tree)
@@ -93,16 +100,9 @@ let load_mount context mounted =
             | None -> Memo.return Appendable_list.empty
             | Some file -> Memo.return (Appendable_list.singleton (dir, file)))
       in
-      let files =
-        Appendable_list.map files ~f:(fun (dir, file) ->
-          let root = Source_tree.Dir.project dir |> Dune_project.root in
-          Path.Local.Map.find_exn projects_by_root root, dir, file)
-      in
       projects, files
   in
-  let* eval = Dune_file.eval files in
-  let+ files = eval (Context.name context) in
-  projects, files
+  Partition.make (Context.name context) projects files
 ;;
 
 (* One node per locked package: loading a mounted package fetches its source, so
@@ -118,8 +118,7 @@ let mount =
          | None -> Memo.return None
          | Some mounted ->
            let* context = Context.DB.get context in
-           let+ projects, dune_files = load_mount context mounted in
-           Some (Partition.make projects dune_files))
+           load_mount context mounted >>| Option.some)
   in
   fun context name -> Memo.exec memo (context, name)
 ;;
@@ -144,20 +143,7 @@ let workspace =
             ~partition_root:(Context.build_dir context)
             ~stanza_mask)
       in
-      let projects_by_root =
-        Path.Local.Map.of_list_map_exn projects ~f:(fun project ->
-          Loaded_project.source_root project, project)
-      in
-      let source_dune_files =
-        Appendable_list.map workspace.dune_files ~f:(fun (dir, project, dune_file) ->
-          let project =
-            Path.Local.Map.find_exn projects_by_root (Dune_project.root project)
-          in
-          project, dir, dune_file)
-      in
-      let* eval = Dune_file.eval source_dune_files in
-      let+ dune_files = eval context_name in
-      Partition.make projects dune_files)
+      Partition.make context_name projects workspace.dune_files)
     |> Memo.Lazy.force)
   |> Staged.unstage
 ;;
