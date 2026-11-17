@@ -479,7 +479,6 @@ let resolve_config sctx ~dir ~(mode : Js_of_ocaml.Mode.t) flags =
 
 let js_of_ocaml_rule
       sctx
-      ~compiler:jsoo
       ~(mode : Js_of_ocaml.Mode.t)
       ~sub_command
       ~dir
@@ -491,6 +490,7 @@ let js_of_ocaml_rule
       ~directory_targets
   =
   let open Action_builder.O in
+  let jsoo = compiler_for_config sctx ~dir ~mode ~config in
   let flags = js_of_ocaml_flags sctx ~dir ~mode ~sub_command flags in
   let flags =
     (* Avoid duplicating flags that are covered by the config *)
@@ -674,7 +674,6 @@ let standalone_runtime_rule ~mode cc ~runtime_files ~target ~flags ~sourcemap =
   let dir = Compilation_context.dir cc in
   js_of_ocaml_rule
     (Compilation_context.super_context cc)
-    ~compiler:(compiler_for_config sctx ~dir ~mode ~config:(Some config))
     ~mode
     ~sub_command:Build_runtime
     ~dir
@@ -726,7 +725,6 @@ let exe_rule
   in
   js_of_ocaml_rule
     sctx
-    ~compiler
     ~mode
     ~sub_command:Compile
     ~dir
@@ -851,7 +849,6 @@ let link_rule
   let spec = Command.Args.S [ Dyn runtime_dep; Dyn get_all ] in
   js_of_ocaml_rule
     sctx
-    ~compiler
     ~mode
     ~sub_command:Link
     ~dir
@@ -893,7 +890,6 @@ let build_cm'
   in
   js_of_ocaml_rule
     sctx
-    ~compiler
     ~mode
     ~sub_command:Compile
     ~dir
@@ -972,9 +968,7 @@ let setup_shared_runtime_rule sctx s_config s_digest =
   | Some digest ->
     let { Runtime_key.Decoded.mode; lib_names; scope_dir } = Runtime_key.decode digest in
     let* scope =
-      match scope_dir with
-      | None -> Scope.DB.find_by_dir (Context.build_dir ctx)
-      | Some dir -> Scope.DB.find_by_dir dir
+      Scope.DB.find_by_dir (Option.value scope_dir ~default:(Context.build_dir ctx))
     in
     let* libs =
       let lib_db = Scope.libs scope in
@@ -994,12 +988,6 @@ let setup_shared_runtime_rule sctx s_config s_digest =
     in
     js_of_ocaml_rule
       sctx
-      ~compiler:
-        (compiler_for_config
-           sctx
-           ~dir
-           ~mode
-           ~config:(Some (Action_builder.return config)))
       ~mode
       ~sub_command:Build_runtime
       ~dir
