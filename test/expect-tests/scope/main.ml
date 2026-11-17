@@ -5,7 +5,7 @@ module Workspace = Source.Workspace
 module Dune_config = Dune_config_file.Dune_config
 module Scheduler = Dune_scheduler.Scheduler
 
-let%expect_test "package library entries release obsolete cache results" =
+let%expect_test "package library entries and lazy native visibility" =
   let cwd = Path.External.cwd () in
   Temp.with_temp_dir
     ~parent_dir:(Path.external_ cwd)
@@ -109,7 +109,107 @@ let%expect_test "package library entries release obsolete cache results" =
                "updated deprecated names: %d"
                (List.length entries.deprecated_library_names));
           Gc.full_major ();
-          printfn "obsolete entries retained: %b" (Weak.check previous 0)));
+          printfn "obsolete entries retained: %b" (Weak.check previous 0);
+          Config.init String.Map.empty;
+          Execution_parameters.init (Memo.return Execution_parameters.builtin_default);
+          Main.init ~sandbox_actions:false ~sandboxing_preference:[] ();
+          Io.write_file_exn
+            (Path.relative Path.root "dune-project")
+            "(lang dune 3.25)\n(package (name app) (dir .) (depends declared))\n";
+          Io.write_file_exn
+            (Path.relative Path.root "dune")
+            "(library (public_name app) (modules))\n";
+          Path.mkdir_p (Path.relative Path.root "dune.lock");
+          Io.write_file_exn
+            (Path.relative Path.root "dune.lock/lock.dune")
+            "(lang package 0.1)\n(repositories (complete true))\n";
+          Io.write_file_exn
+            (Path.relative Path.root "dune.lock/declared.pkg")
+            "(version 1.0)\n\
+            \ (build (progn (write-file META \"version = \\\"1\\\"\\n\")\n\
+            \ (write-file declared.install \"lib: [ \\\"META\\\" ]\")))\n";
+          Io.write_file_exn
+            (Path.relative Path.root "dune.lock/hidden.pkg")
+            "(version 1.0)\n(build (run false))\n";
+          Path.mkdir_p (Path.relative Path.root "_native");
+          Io.write_file_exn
+            (Path.relative Path.root "_native/dune-project")
+            "(lang dune 3.25)\n(package (name native))\n";
+          Io.write_file_exn
+            (Path.relative Path.root "_native/dune")
+            "(library (name implementation) (public_name native)\n\
+            \ (modules exported))\n\
+            \ (library (name private_impl) (modules private_mod))\n";
+          List.iter [ "exported"; "private_mod" ] ~f:(fun name ->
+            Io.write_file_exn (Path.relative Path.root ("_native/" ^ name ^ ".ml")) "");
+          Io.write_file_exn
+            (Path.relative Path.root "dune.lock/native.pkg")
+            (sprintf
+               "(version 1.0)\n(source (copy %S))\n(build (run false))\n"
+               (Path.to_absolute_filename (Path.relative Path.root "_native")));
+          run
+            (let open Memo.O in
+             let+ _ =
+               Fs_memo.dir_contents
+                 ~force_update:true
+                 (Path.Outside_build_dir.In_source_dir Path.Source.root)
+             in
+             ());
+          Memo.reset
+            (Memo.Invalidation.invalidate_caches ~reason:Memo.Invalidation.Reason.Test);
+          run
+            (let open Memo.O in
+             let* scope =
+               Scope.DB.find_by_dir (Context_name.build_dir Context_name.default)
+             in
+             let db = Scope.public_libs scope in
+             let* dune_files =
+               Dune_load.dune_files_of_package
+                 Context_name.default
+                 (Dune_lang.Package.Name.of_string "native")
+             in
+             let ids =
+               Dune_file.fold_static_stanzas
+                 dune_files
+                 ~init:String.Map.empty
+                 ~f:(fun dune_file stanza ids ->
+                   match Dune_lang.Stanza.repr stanza with
+                   | Library.T library ->
+                     let id =
+                       Library.to_lib_id ~src_dir:(Dune_file.dir dune_file) library
+                     in
+                     String.Map.set
+                       ids
+                       (Dune_lang.Lib_name.to_string (Lib_id.Local.name id))
+                       (Lib_id.Local id)
+                   | _ -> ids)
+             in
+             let* public =
+               Lib.DB.find_lib_id db (String.Map.find_exn ids "implementation")
+             in
+             printfn "undeclared native local id: %b" (Option.is_some public);
+             let* private_ =
+               Lib.DB.find_lib_id db (String.Map.find_exn ids "private_impl")
+             in
+             printfn "private local id visible: %b" (Option.is_some private_);
+             let+ libraries = Lib.DB.all db in
+             let names =
+               Lib.Set.to_list libraries
+               |> List.map ~f:(fun lib -> Dune_lang.Lib_name.to_string (Lib.name lib))
+               |> List.filter ~f:(fun name ->
+                 List.mem
+                   [ "app"; "declared"; "native"; "hidden" ]
+                   name
+                   ~equal:String.equal)
+               |> List.sort ~compare:String.compare
+             in
+             printfn "owned public enumeration: %s" (String.concat ~sep:", " names);
+             printfn
+               "declared opaque recipe ran: %b"
+               (Stdlib.Sys.file_exists "_build/default/.pkg/declared/_install/cookie");
+             printfn
+               "undeclared opaque recipe ran: %b"
+               (Stdlib.Sys.file_exists "_build/default/.pkg/hidden/_install/cookie"))));
   [%expect
     {|
     indexed a stanzas: 2
@@ -120,5 +220,10 @@ let%expect_test "package library entries release obsolete cache results" =
     initial deprecated names: 1
     updated deprecated names: 2
     obsolete entries retained: false
+    undeclared native local id: true
+    private local id visible: false
+    owned public enumeration: app, declared, native
+    declared opaque recipe ran: true
+    undeclared opaque recipe ran: false
     |}]
 ;;

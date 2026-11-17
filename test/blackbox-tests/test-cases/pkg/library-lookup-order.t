@@ -189,3 +189,45 @@ Declaring the dependency on its provider repairs the lookup.
   built second
   $ _build/default/main.exe
   first
+
+Two eligible opaque packages exporting the same differently named library still
+report the duplicate provider, rather than selecting one by lookup order.
+
+  $ dune_cmd subst second third < dune.lock/second.pkg > dune.lock/third.pkg
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name app) (dir .) (depends second third))
+  > EOF
+  $ echo '(executable (name main) (libraries mismatch))' > dune
+  $ echo 'let () = print_endline Mismatch.v' > main.ml
+  $ dune build main.exe > duplicate.log 2>&1
+  [1]
+  $ cat duplicate.log
+  built third
+  File "_build/default/.pkg/third/_install/lib/mismatch/META", line 1, characters 0-0:
+  Error: Library with name "mismatch" is already defined in
+  _build/default/.pkg/second/_install/lib/mismatch/META:1. Either change one of
+  the names, or enable them conditionally using the 'enabled_if' field.
+
+An opaque META requirement can name an undeclared native provider. The native
+public library has ordinary Dune visibility even in the opaque provider's own
+scope; it is not borrowed from the consumer's declarations.
+
+  $ mkdir _native
+  $ (cd _native && make_dune_project_with_package 3.25 native)
+  $ echo '(library (public_name native))' > _native/dune
+  $ echo 'let value = ()' > _native/native.ml
+  $ make_dune_source_lockpkg native native "$PWD/_native"
+  $ dune_cmd subst 'archive\(byte\)' 'requires = \"native\"\narchive(byte)' < dune.lock/second.pkg > second.pkg
+  $ mv second.pkg dune.lock/second.pkg
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name app) (dir .) (depends second))
+  > EOF
+  $ dune build main.exe
+  built second
+  $ grep '^requires' _build/default/.pkg/second/_install/lib/mismatch/META
+  requires = "native"
+  $ _build/default/main.exe
+  mismatch
+  $ test -f _build/default/.pkg/native/native.cmxa
