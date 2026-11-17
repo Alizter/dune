@@ -27,11 +27,9 @@ file in the package's source.
 
   $ build_pkg foo
 
-Even without build or install actions, overlays must not modify either input.
-
-  $ cat foo-source/foo.txt foo.txt
+Make sure that the package's source keeps its version of foo.txt:
+  $ cat foo-source/foo.txt
   from source
-  from extra source
 
 If foo.txt exists in both the main source and extra_sources, a build action
 must read the extra_sources version. Both original inputs must retain their
