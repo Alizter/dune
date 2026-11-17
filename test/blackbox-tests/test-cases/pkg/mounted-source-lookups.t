@@ -5,10 +5,7 @@ behaviour of each feature is covered by the test named with it.
   $ make_lockdir
   $ make_named_package_project main 3.25 foo
   $ mkdir -p _source/docs/nested _source/stubs/inc _source/escape
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo) (dir .))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ mount=_build/default/.pkg/foo
 

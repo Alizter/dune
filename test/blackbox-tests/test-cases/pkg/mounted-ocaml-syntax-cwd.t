@@ -4,10 +4,7 @@ run in the fetched source, which is shared by every package built from it.
   $ make_lockdir
   $ make_named_package_project main 3.25 foo
   $ mkdir _source
-  $ cat > _source/dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name foo) (dir .))
-  > EOF2
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ cat > _source/dune <<'EOF2'
   > (* -*- tuareg -*- *)
   > let () =

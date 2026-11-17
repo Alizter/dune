@@ -2,15 +2,9 @@ Merlin configuration for a library mounted from a lock directory. Its source
 directories are in the mount (workspace libraries: merlin/src-dirs-of-deps.t).
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name main) (dir .) (depends foo))
-  > EOF2
+  $ make_named_package_project main 3.25 foo
   $ mkdir -p _source/lib bin
-  $ cat > _source/dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name foo) (dir .))
-  > EOF2
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ cat > _source/lib/dune <<'EOF2'
   > (library (public_name foo))
   > EOF2

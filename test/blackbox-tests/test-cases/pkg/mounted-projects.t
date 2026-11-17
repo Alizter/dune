@@ -3,10 +3,7 @@ projects retain their relative paths, and each view hides the other selected
 package. Cram test fixtures are data-only before project parsing.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (dir .) (depends left right))
-  > EOF
+  $ make_named_package_project main 3.25 left right
   $ echo '(executable (name main) (libraries left right))' > dune
   $ echo 'let () = Printf.printf "%s/%s\n" Left.message Right.message' > main.ml
   $ mkdir -p _shared/sub _shared/invalid.t

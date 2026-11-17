@@ -4,10 +4,7 @@ promotions. Promotion controls on the command line must not override this.
   $ make_lockdir
   $ make_named_package_project main 3.25 foo
   $ mkdir _source
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo) (dir .))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo authored > _source/source.txt
   $ echo workspace > expected
   $ cat > _source/dune <<'EOF'

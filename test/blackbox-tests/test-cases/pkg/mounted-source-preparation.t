@@ -4,10 +4,7 @@ independently.
 
   $ make_consumer() {
   >   make_lockdir
-  >   cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (dir .) (depends foo))
-  > EOF
+  >   make_named_package_project main 3.25 foo
   >   echo '(executable (name main) (libraries foo))' > dune
   >   echo 'let () = print_endline Foo.message' > main.ml
   >   mkdir _source

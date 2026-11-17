@@ -88,10 +88,7 @@ unrelated provider. Its actions use the mounted project root.
   > (source (copy $PWD/_bar))
   > (build (run false))
   > EOF
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (dir .) (depends bar))
-  > EOF
+  $ make_named_package_project main 3.25 bar
   $ echo '(executable (name main) (libraries bar))' > dune
   $ echo 'let () = print_endline Bar.message' > main.ml
   $ dune build main.exe
@@ -148,10 +145,7 @@ package's stored error. Availability remains false rather than raising. Remove
 the unrelated failing opaque sentinel just for this miss.
 
   $ mv dune.lock/unrelated.pkg unrelated.pkg
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (dir .) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.25 foo
   $ cat > dune <<'EOF'
   > (executable (name main) (libraries absent))
   > (rule
@@ -453,10 +447,7 @@ finding its declared tools does not require enumerating its library installs.
   $ mkdir ../native-binary-inventory
   $ cd ../native-binary-inventory
   $ mkdir -p _source/src _source/tools
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo) (dir .))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ cat > _source/src/dune <<'EOF'
   > (library (public_name foo))
   > (rule

@@ -4,10 +4,7 @@ and as a mounted dependency. Include-subdirs groups retain their source view.
   $ make_lockdir
   $ make_named_package_project main 3.25 foo
   $ mkdir -p _source/group/sub
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo) (dir .))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ cat > _source/dune <<'EOF'
   > (library (public_name foo) (modules foo))
   > (executable
