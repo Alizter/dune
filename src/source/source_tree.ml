@@ -92,7 +92,7 @@ end
 module Physical_input = struct
   type t =
     { default_vcs : Dir0.Vcs.t
-    ; path : Path.Source.t
+    ; dir : Source_tree_file.Dir.t
     ; basename : Filename.t
     ; dirs_visited : Dirs_visited.t
     ; dune_file : Dune_file.t option
@@ -100,13 +100,17 @@ module Physical_input = struct
     ; project : Dune_project.t
     }
 
-  let repr = Repr.view Path.Source.repr ~to_:(fun { path; _ } -> path)
+  let repr =
+    Repr.view Path.Local.repr ~to_:(fun { dir; _ } ->
+      Source_tree_file.Dir.source_path dir)
+  ;;
+
   let to_dyn = Repr.to_dyn repr
 end
 
 module Virtual_input = struct
   type t =
-    { parent_dir : Path.Source.t
+    { parent_dir : Source_tree_file.Dir.t
     ; basename : Filename.t
     ; dune_file : Dune_file.t option
     ; status : Source_dir_status.t
@@ -114,8 +118,8 @@ module Virtual_input = struct
     }
 
   let repr =
-    Repr.view Path.Source.repr ~to_:(fun { parent_dir; basename; _ } ->
-      Path.Source.relative_fname parent_dir basename)
+    Repr.view Path.Local.repr ~to_:(fun { parent_dir; basename; _ } ->
+      Path.Local.relative_fname (Source_tree_file.Dir.source_path parent_dir) basename)
   ;;
 
   let to_dyn = Repr.to_dyn repr
@@ -158,35 +162,25 @@ let rec physical
     match eval_status ~status_map ~parent_status fn with
     | None -> None
     | Some dir_status ->
+      let sub_dir = Source_tree_file.Dir.file dir fn in
+      let dirs_visited =
+        match Source_tree_file.Dir.as_workspace sub_dir with
+        | None -> dirs_visited
+        | Some path -> Dirs_visited.add dirs_visited path file
+      in
       Some
         { Dir0.sub_dir_status = dir_status
         ; sub_dir_as_t =
-            (match Source_tree_file.Dir.as_workspace dir with
-             | None ->
-               Memo.lazy_ ~name:"mounted-sub-dir" (fun () ->
-                 find_dir_raw
-                   ~default_vcs
-                   ~dir:(Source_tree_file.Dir.file dir fn)
-                   ~basename:fn
-                   ~virtual_:false
-                   ~dirs_visited
-                   ~dune_file
-                   ~status:dir_status
-                   ~project)
-               |> Memo.Lazy.force
-             | Some dir ->
-               let path = Path.Source.relative_fname dir fn in
-               let dirs_visited = Dirs_visited.add dirs_visited path file in
-               (Lazy.force physical_node)
-                 { Physical_input.default_vcs
-                 ; path
-                 ; basename = fn
-                 ; dirs_visited
-                 ; dune_file
-                 ; status = dir_status
-                 ; project
-                 }
-               |> Memo.Node.read)
+            (Lazy.force physical_node)
+              { Physical_input.default_vcs
+              ; dir = sub_dir
+              ; basename = fn
+              ; dirs_visited
+              ; dune_file
+              ; status = dir_status
+              ; project
+              }
+            |> Memo.Node.read
         })
 
 and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~dir =
@@ -209,28 +203,14 @@ and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~dir =
               ( fn
               , { Dir0.sub_dir_status = status
                 ; sub_dir_as_t =
-                    (match Source_tree_file.Dir.as_workspace dir with
-                     | None ->
-                       Memo.lazy_ ~name:"mounted-virtual-sub-dir" (fun () ->
-                         find_dir_raw
-                           ~default_vcs:Dir0.Vcs.Ancestor_vcs
-                           ~dir:(Source_tree_file.Dir.file dir fn)
-                           ~basename:fn
-                           ~virtual_:true
-                           ~dune_file
-                           ~status
-                           ~dirs_visited:Dirs_visited.empty
-                           ~project)
-                       |> Memo.Lazy.force
-                     | Some parent_dir ->
-                       (Lazy.force virtual_node)
-                         { Virtual_input.parent_dir
-                         ; basename = fn
-                         ; dune_file
-                         ; status
-                         ; project
-                         }
-                       |> Memo.Node.read)
+                    (Lazy.force virtual_node)
+                      { Virtual_input.parent_dir = dir
+                      ; basename = fn
+                      ; dune_file
+                      ; status
+                      ; project
+                      }
+                    |> Memo.Node.read
                 } ))
       |> List.filter_opt
       |> Filename.Array.Map.of_sorted_list_exn
@@ -335,7 +315,7 @@ and physical_node =
        ~name:"source-tree-sub-dir"
        ~input:(module Physical_input)
        (fun { Physical_input.default_vcs
-            ; path
+            ; dir
             ; basename
             ; dirs_visited
             ; dune_file
@@ -344,7 +324,7 @@ and physical_node =
             } ->
           find_dir_raw
             ~default_vcs
-            ~dir:(Source_tree_file.Dir.workspace path)
+            ~dir
             ~basename
             ~virtual_:false
             ~dirs_visited
@@ -361,9 +341,7 @@ and virtual_node =
        (fun { Virtual_input.parent_dir; basename; dune_file; status; project } ->
           find_dir_raw
             ~default_vcs:Dir0.Vcs.Ancestor_vcs
-            ~dir:
-              (Source_tree_file.Dir.workspace
-                 (Path.Source.relative_fname parent_dir basename))
+            ~dir:(Source_tree_file.Dir.file parent_dir basename)
             ~basename
             ~virtual_:true
             ~dune_file
