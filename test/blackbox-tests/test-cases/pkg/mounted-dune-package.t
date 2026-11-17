@@ -56,7 +56,6 @@ installed library retains the native provider when resolving its requirements.
   >   (write-file META "requires = \"foo\"\narchive(byte) = \"opaque.cma\"\narchive(native) = \"opaque.cmxa\"\n")
   >   (write-file opaque.install "lib: [ \"META\" \"opaque.cmi\" \"opaque.cma\" \"opaque.cmx\" \"opaque.cmxa\" \"opaque.a\" ]")))
   > EOF
-  $ build_pkg opaque
   $ cat > dune-project <<'EOF'
   > (lang dune 3.25)
   > (package (name main) (depends opaque))
@@ -70,7 +69,6 @@ installed library retains the native provider when resolving its requirements.
 A source update to the native library is observed through its opaque consumer.
 
   $ echo 'let message = "native/false"' > _foo/foo.ml
-  $ dune build _build/default/.pkg/foo/foo.cma
 
 A second native project can consume that opaque library without searching an
 unrelated provider. Its actions use the mounted project root.
@@ -261,13 +259,12 @@ reads it from this file.
   $ grep 'package "support"' _build/default/.pkg/foo/META.foo
   package "support" (
 
-Keep renamed library/libexec data for the ordinary installation checks below.
-Their file-pform consumption is covered by pkg-pform/artifacts.t.
+Keep renamed library data for the ordinary installation checks below.
+Library/libexec file-pform consumption is covered by pkg-pform/artifacts.t.
 
   $ echo installed-name > _foo/support/data
   $ cat >> _foo/support/dune <<'EOF'
   > (install (section lib) (files (data as support/renamed.txt)))
-  > (install (section libexec) (files (data as support/executable-data)))
   > EOF
 
 Public files and binaries must also have ordinary installation rules. A special

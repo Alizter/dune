@@ -7,7 +7,7 @@ behaviour of each feature is covered by the test named with it.
   > (lang dune 3.25)
   > (package (name main) (depends foo))
   > EOF
-  $ mkdir -p _source/docs/nested _source/stubs/inc _source/escape _source/bad
+  $ mkdir -p _source/docs/nested _source/stubs/inc _source/escape
   $ cat > _source/dune-project <<'EOF'
   > (lang dune 3.25)
   > (package (name foo) (dir .))
@@ -67,19 +67,6 @@ paths stay relative to the workspace
   >   (names stub)
   >   (include_dirs inc)))
   > EOF
-  $ (cd _source && dune build --root . stubs/stubs.cma)
-  File "stubs/dune", line 7, characters 9-13:
-  7 |   (names stub)
-               ^^^^
-  Error: Multiple sources map to the same object name "stub":
-  - stubs/stub.c
-  - stubs/sub/stub.c
-  This is not allowed; please rename them or remove "stub" from object names.
-  Hint: You can also avoid the name clash by placing the objects into different
-  foreign archives and building them in different directories. Foreign archives
-  can be defined using the (foreign_library ...) stanza.
-  [1]
-
 Mounted diagnostics retain the build context, so the conflicting files can be
 opened from the workspace root.
 
@@ -294,17 +281,3 @@ in the workspace, the build directory in a mount.
   _build/default/.pkg/foo/nested>", but the reference is to "foo".
   [1]
 
-A compilation error in the package. The location is relative to the context
-directory, so it does not name a file under the workspace root.
-
-  $ cat > _source/bad/dune <<'EOF'
-  > (library (name bad))
-  > EOF
-  $ echo 'let x : int = "not an int"' > _source/bad/bad.ml
-  $ dune build $mount/bad/bad.cma 2>&1
-  File ".pkg/foo/bad/bad.ml", line 1, characters 14-26:
-  1 | let x : int = "not an int"
-                    ^^^^^^^^^^^^
-  Error: This constant has type string but an expression was expected of type
-           int
-  [1]

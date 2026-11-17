@@ -1,6 +1,12 @@
 The test-source folder has a file to use substitution on.
 
+  $ make_dune_project 3.25
   $ mkdir test-source
+  $ echo '(data_only_dirs test-source)' > dune
+  $ echo '(' > test-source/dune-project
+
+Substitution keeps the recipe opaque: its invalid Dune project is not loaded.
+
   $ cat >test-source/foo.ml.in <<EOF
   > This file will be fed to the substitution mechanism
   > EOF

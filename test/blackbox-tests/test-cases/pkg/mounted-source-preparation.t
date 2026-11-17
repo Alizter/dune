@@ -196,24 +196,6 @@ preparation fixtures.
   $ make_dune_project 3.25
   $ make_lockdir
 
-A recipe that starts with a substitution is built by its recipe: a
-substitution reads package variables while it runs. The package's Dune
-configuration must not be interpreted by the outer graph.
-
-  $ mkdir _subst
-  $ echo '(' > _subst/dune-project
-  $ echo 'subst/%{version}%' > _subst/input.in
-  $ make_lockpkg subst <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_subst))
-  > (build
-  >  (progn
-  >   (substitute input.in input)
-  >   (run cat input)))
-  > EOF
-  $ build_pkg subst
-  subst/1.0
-
 OCaml configuration scripts read a physical prepared view, not the backing
 snapshot. Their ordinary rules run natively without invoking the opaque recipe.
 

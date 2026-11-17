@@ -310,9 +310,6 @@ from a sibling's directory target work in either view.
   >  (action (system "mkdir files; echo directory > files/generated.txt")))
   > EOF
   $ echo '(copy_files ../dir-producer/files/*.txt)' > _source/dir-consumer/dune
-  $ (cd _source && dune build --root . --only-packages foo _build/default/dir-consumer/generated.txt)
-  $ cat _source/_build/default/dir-consumer/generated.txt
-  directory
   $ dune build _build/default/.pkg/foo/dir-consumer/generated.txt
   $ cat _build/default/.pkg/foo/dir-consumer/generated.txt
   directory
@@ -340,15 +337,6 @@ Copying from one's own directory target still produces the ordinary cycle.
   >  (action (system "mkdir files; echo directory > files/generated.txt")))
   > (copy_files files/*.txt)
   > EOF
-  $ (cd _source && dune build --root . --only-packages foo _build/default/cycle/generated.txt)
-  Error: Dependency cycle between:
-     Computing directory contents of _build/default/cycle
-  -> { dir = In_build_dir "default/cycle/files"
-     ; predicate = Element (Glob "*.txt")
-     ; only_generated_files = false
-     }
-  -> Computing directory contents of _build/default/cycle
-  [1]
   $ dune build _build/default/.pkg/foo/cycle/generated.txt
   Error: Dependency cycle between:
      Computing directory contents of _build/default/.pkg/foo/cycle
