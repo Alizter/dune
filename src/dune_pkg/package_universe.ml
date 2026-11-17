@@ -123,19 +123,8 @@ let immediate_dependencies t name ~with_test =
      | Some pkg ->
        Lock_dir.Conditional_choice.choose_for_platform pkg.depends ~platform:t.platform
        |> Option.value ~default:[]
-       |> List.filter_map ~f:(fun { Lock_dir.Dependency.name; loc } ->
-         if Package_name.equal name Dune_dep.name
-         then None
-         else if Package_name.Map.mem t.version_by_package_name name
-         then Some name
-         else
-           User_error.raise
-             ~loc
-             [ Pp.textf
-                 "Dependency %S of package %S is not available on the current platform."
-                 (Package_name.to_string name)
-                 (Package_name.to_string pkg.info.name)
-             ]))
+       |> List.filter_map ~f:(fun { Lock_dir.Dependency.name; loc = _ } ->
+         if Package_name.equal name Dune_dep.name then None else Some name))
 ;;
 
 let transitive_dependency_closure_without_test t start =
