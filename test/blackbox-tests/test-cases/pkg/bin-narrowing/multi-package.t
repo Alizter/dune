@@ -69,13 +69,29 @@ requester rules. Lookup must use the installed name, not the source basename.
   $ make_case native
   $ make_case opaque
 
+Each owner check builds the three outputs of one requester directory and
+prints them. A denied owner builds each output separately, so the pform and
+literal lookups fail on their own.
+
+  $ show_owner() (
+  >   cd "$1"
+  >   dune build "$2"/{available,pform-output,literal-output}
+  >   echo "$(cat "$2/available")"
+  >   cat "$2"/{pform-output,literal-output}
+  > )
+  $ show_denied() (
+  >   cd "$1"
+  >   dune build "$2/available"
+  >   echo "$(cat "$2/available")"
+  >   dune build "$2/pform-output"
+  >   dune build "$2/literal-output"
+  > )
+
 First build only owner a. Looking up its declared tool must not materialise
 the unrelated tool: inspect the native artifact, not its unused install prefix.
 
-  $ (cd native && dune build a/available a/pform-output a/literal-output)
-  $ cat native/_build/default/a/available
+  $ show_owner native _build/default/a
   true false
-  $ cat native/_build/default/a/{pform-output,literal-output}
   from-a
   from-a
   $ test -f native/_build/default/.pkg/tool-a/tool-a.sh
@@ -85,10 +101,8 @@ the unrelated tool: inspect the native artifact, not its unused install prefix.
 The opaque case has the same cold lookup, but cookie existence is the
 load-bearing build check for this backend.
 
-  $ (cd opaque && dune build a/available a/pform-output a/literal-output)
-  $ cat opaque/_build/default/a/available
+  $ show_owner opaque _build/default/a
   true false
-  $ cat opaque/_build/default/a/{pform-output,literal-output}
   from-a
   from-a
   $ test ! -e opaque/_build/default/.pkg/tool-b/_install/cookie
@@ -96,16 +110,12 @@ load-bearing build check for this backend.
 The reciprocal owner sees b, not a. Both providers are now built, so later
 denials cannot pass just because their program has not been built yet.
 
-  $ (cd native && dune build b/available b/pform-output b/literal-output)
-  $ cat native/_build/default/b/available
+  $ show_owner native _build/default/b
   false true
-  $ cat native/_build/default/b/{pform-output,literal-output}
   from-b
   from-b
-  $ (cd opaque && dune build b/available b/pform-output b/literal-output)
-  $ cat opaque/_build/default/b/available
+  $ show_owner opaque _build/default/b
   false true
-  $ cat opaque/_build/default/b/{pform-output,literal-output}
   from-b
   from-b
   $ cat opaque/_build/default/.pkg/tool-{a,b}/_install/opaque-recipe
@@ -133,31 +143,20 @@ dependencies. Both reciprocal owners must still resolve their own tool.
   $ mounted_a=$pkg_root/mounted-a/a
   $ mounted_b=$pkg_root/mounted-b/b
   $ mounted_denied=$pkg_root/mounted-denied/denied
-  $ (cd native &&
-  >  dune build "$mounted_a"/{available,pform-output,literal-output} \
-  >   "$mounted_b"/{available,pform-output,literal-output})
-  $ cat native/$mounted_a/available
+  $ show_owner native $mounted_a
   true false
-  $ cat native/$mounted_b/available
+  from-a
+  from-a
+  $ show_owner native $mounted_b
   false true
-  $ cat native/$mounted_a/{pform-output,literal-output}
-  from-a
-  from-a
-  $ cat native/$mounted_b/{pform-output,literal-output}
   from-b
   from-b
-
-  $ (cd opaque &&
-  >  dune build "$mounted_a"/{available,pform-output,literal-output} \
-  >   "$mounted_b"/{available,pform-output,literal-output})
-  $ cat opaque/$mounted_a/available
+  $ show_owner opaque $mounted_a
   true false
-  $ cat opaque/$mounted_b/available
+  from-a
+  from-a
+  $ show_owner opaque $mounted_b
   false true
-  $ cat opaque/$mounted_a/{pform-output,literal-output}
-  from-a
-  from-a
-  $ cat opaque/$mounted_b/{pform-output,literal-output}
   from-b
   from-b
 
@@ -165,18 +164,14 @@ An empty-dependency owner cannot discover or run either warmed provider.
 Keep the failing pform and literal lookups separate, including the logical
 mounted paths in their diagnostics.
 
-  $ (cd native && dune build denied/available)
-  $ cat native/_build/default/denied/available
+  $ show_denied native _build/default/denied
   false false
-  $ (cd native && dune build denied/pform-output)
   File "denied/dune", line 8, characters 40-52:
   8 |  (action (with-stdout-to %{target} (run %{bin:bin-a}))))
                                               ^^^^^^^^^^^^
   Error: Program bin-a not found in the tree or in PATH
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
-  [1]
-  $ (cd native && dune build denied/literal-output)
   File "denied/dune", line 11, characters 40-45:
   11 |  (action (with-stdout-to %{target} (run bin-a))))
                                                ^^^^^
@@ -184,34 +179,25 @@ mounted paths in their diagnostics.
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
   [1]
-  $ (cd native && dune build "$mounted_denied/available")
-  $ cat native/$mounted_denied/available
+  $ show_denied native $mounted_denied
   false false
-  $ (cd native && dune build "$mounted_denied/pform-output")
   File "_build/default/.pkg/mounted-denied/denied/dune", line 8, characters 40-52:
   Error: Program bin-a not found in the tree or in PATH
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
-  [1]
-  $ (cd native && dune build "$mounted_denied/literal-output")
   File "_build/default/.pkg/mounted-denied/denied/dune", line 11, characters 40-45:
   Error: Program bin-a not found in the tree or in PATH
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
   [1]
-
-  $ (cd opaque && dune build denied/available)
-  $ cat opaque/_build/default/denied/available
+  $ show_denied opaque _build/default/denied
   false false
-  $ (cd opaque && dune build denied/pform-output)
   File "denied/dune", line 8, characters 40-52:
   8 |  (action (with-stdout-to %{target} (run %{bin:bin-a}))))
                                               ^^^^^^^^^^^^
   Error: Program bin-a not found in the tree or in PATH
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
-  [1]
-  $ (cd opaque && dune build denied/literal-output)
   File "denied/dune", line 11, characters 40-45:
   11 |  (action (with-stdout-to %{target} (run bin-a))))
                                                ^^^^^
@@ -219,19 +205,14 @@ mounted paths in their diagnostics.
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
   [1]
-  $ (cd opaque && dune build "$mounted_denied/available")
-  $ cat opaque/$mounted_denied/available
+  $ show_denied opaque $mounted_denied
   false false
-  $ (cd opaque && dune build "$mounted_denied/pform-output")
   File "_build/default/.pkg/mounted-denied/denied/dune", line 8, characters 40-52:
   Error: Program bin-a not found in the tree or in PATH
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
-  [1]
-  $ (cd opaque && dune build "$mounted_denied/literal-output")
   File "_build/default/.pkg/mounted-denied/denied/dune", line 11, characters 40-45:
   Error: Program bin-a not found in the tree or in PATH
    (context: default)
   Hint: add a dependency on the package installing "bin-a" to this package
   [1]
-
