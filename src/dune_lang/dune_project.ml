@@ -127,24 +127,19 @@ let dir_in_context dir =
     Code_error.raise "directory outside a build context" [ "dir", Path.Build.to_dyn dir ]
 ;;
 
+let package_env t ~dir =
+  let { exclusive_dir_packages = packages; exclusive_dirs_by_package = by_id; _ } = t in
+  Package_mask.package_env ~dir ~packages ~by_id
+;;
+
 let stanza_parser t ~dir =
-  let mask =
-    Package_mask.package_env
-      ~dir
-      ~packages:t.exclusive_dir_packages
-      ~by_id:t.exclusive_dirs_by_package
-  in
+  let mask = package_env t ~dir in
   let parser = Decoder.set key t t.stanza_parser in
   Decoder.set Package_mask.key mask parser
 ;;
 
 let exclusive_package t ~dir =
-  match
-    Package_mask.package_env
-      ~dir
-      ~packages:t.exclusive_dir_packages
-      ~by_id:t.exclusive_dirs_by_package
-  with
+  match package_env t ~dir with
   | Inside_package p -> Some p
   | Forbidden_packages _ -> None
 ;;
