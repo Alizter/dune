@@ -1268,8 +1268,7 @@ module Action_expander = struct
              (Bin.strip_exe (Filename.to_string (Path.basename path))))
           path)
     in
-    { Expander.name = paths.name
-    ; paths
+    { Expander.paths
     ; depends = Memo.return depends
     ; artifacts = Memo.return artifacts
     ; depexts
@@ -1415,8 +1414,7 @@ let layout_env { Layout.context; root; dependencies } ~path ~base =
           Path.of_string (Path.to_absolute_filename path))
       in
       let depends = Package.Name.Map.set depends paths.name (dep.variables, paths) in
-      { Action_expander.Expander.name = paths.name
-      ; paths
+      { Action_expander.Expander.paths
       ; artifacts = Memo.return Filename.Map.empty
       ; depends = Memo.return depends
       ; depexts = []
