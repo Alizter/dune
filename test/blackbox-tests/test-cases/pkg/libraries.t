@@ -2,6 +2,14 @@ The same library can be consumed through native rules or an opaque recipe.
 Both cases use the same source and consumer, in independent build roots.
 
   $ make_external_mypkg_lib_source 'let x = 42'
+  $ cat > external_sources/dune <<'EOF'
+  > (library
+  >  (public_name mypkg.lib)
+  >  (name test_lib)
+  >  (modules test_lib))
+  > (executable (name tool) (modules tool))
+  > EOF
+  $ echo 'let () = ()' > external_sources/tool.ml
   $ mkdir _consumer native opaque
   $ cat > _consumer/dune-project <<'EOF'
   > (lang dune 3.11)
@@ -25,6 +33,19 @@ Both cases use the same source and consumer, in independent build roots.
   $ (cd opaque && make_lockdir &&
   >  make_dune_source_lockpkg opaque mypkg "$PWD/../external_sources")
 
+Describe the cold workspace before compilation. The consumer's executable and
+library, and the native dependency's library/modules, are included; the
+provider's unrelated executable is not part of the workspace description.
+
+  $ (cd native && dune describe workspace) > native-description
+  $ grep -E 'names|\(name ' native-description
+    ((names (main))
+      (((name Main)
+    ((name foo)
+      (((name Foo)
+    ((name mypkg.lib)
+      (((name Test_lib)
+
 The native recipe deliberately fails. Successful compilation and execution
 therefore require native loading, without an opaque installation.
 
@@ -38,6 +59,13 @@ The opaque recipe performs a harmless substitution before building the same
 Dune project. Its marker and cookie prove this really exercised installation,
 not another native build.
 
+  $ (cd opaque && dune describe workspace) > opaque-description
+  $ grep -E 'names|\(name ' opaque-description
+    ((names (main))
+      (((name Main)
+    ((name foo)
+      (((name Foo)
+    ((name mypkg.lib)
   $ (cd opaque && dune build foo.cma main.exe)
   $ opaque/_build/default/main.exe
   42
