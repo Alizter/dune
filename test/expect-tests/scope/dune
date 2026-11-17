@@ -10,9 +10,7 @@
   dune_tests_common
   source
   stdune
-  fiber
   memo
-  unix
   ppx_expect.config
   ppx_expect.config_types
   base
