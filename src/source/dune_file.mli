@@ -23,7 +23,7 @@ val kind : t -> kind
 val path : t -> Path.Source.t option
 
 (** Where the dune file is seen: the workspace, or a mount in a build context. *)
-val logical_path : t -> Path.t option
+val file : t -> Source_tree_file.File.t option
 
 val sub_dir_status : t -> Source_dir_status.Spec.t
 

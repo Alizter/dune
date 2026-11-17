@@ -131,7 +131,7 @@ let parse_stanzas ~file ~(eval : eval) sexps =
   in
   let* stanzas =
     let context =
-      Source_tree.Rules.File.include_context
+      Source.Include_stanza.in_src_file
       @@
       match file with
       | Some f -> f
@@ -435,13 +435,7 @@ module Eval = struct
   open Memo.O
 
   let context_independent ~(eval : eval) dune_file =
-    let file =
-      Source.Dune_file.logical_path dune_file
-      |> Option.map ~f:(fun path ->
-        Source_tree.Rules.Dir.file
-          eval.source_dir
-          (Path.Local.relative_fname Path.Local.root (Path.basename path)))
-    in
+    let file = Source.Dune_file.file dune_file in
     let static = Source.Dune_file.get_static_sexp dune_file in
     match Source.Dune_file.kind dune_file with
     | Plain ->

@@ -43,21 +43,7 @@ val root : unit -> Dir.t Memo.t
     dispatching on generic paths. *)
 module Rules : sig
   module Backing = Source_tree_file.Backing
-
-  module File : sig
-    type t
-
-    val source_path : t -> Path.Local.t
-    val path : t -> Path.t
-    val read : t -> string option Memo.t
-
-    (** The path the file is read from. *)
-    val backing_path : t -> Path.t
-
-    val exists : t -> bool Memo.t
-    val diagnostic_name : t -> string
-    val include_context : t -> t Include_stanza.context
-  end
+  module File = Source_tree_file.File
 
   module Dir : sig
     type t

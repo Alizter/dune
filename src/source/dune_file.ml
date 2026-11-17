@@ -503,7 +503,7 @@ let to_dyn { path; kind; plain } =
 let get_static_sexp t = (Dir_map.root t.plain).sexps
 let kind t = t.kind
 let path t = Option.bind t.path ~f:Source_tree_file.File.as_workspace
-let logical_path t = Option.map t.path ~f:Source_tree_file.File.path
+let file t = t.path
 let sub_dir_status t = Source_dir_status.Spec.create (Dir_map.root t.plain).subdir_status
 
 let dirs_stanza_loc t =

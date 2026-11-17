@@ -489,12 +489,7 @@ module Workspace_dir = Dir
 
 module Rules = struct
   module Backing = Source_tree_file.Backing
-
-  module File = struct
-    include Source_tree_file.File
-
-    let include_context = Include_stanza.in_src_file
-  end
+  module File = Source_tree_file.File
 
   module Dir = struct
     type loaded =
