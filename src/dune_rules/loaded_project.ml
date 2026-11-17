@@ -34,7 +34,6 @@ let create
 
 let project t = t.project
 let source_root t = Source_tree.Rules.Dir.source_path t.source_tree_root
-let source_tree_root t = t.source_tree_root
 let build_context t = Context.build_context t.context
 let partition_root t = t.partition_root
 let output_root t = t.output_root

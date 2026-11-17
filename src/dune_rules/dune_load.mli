@@ -23,9 +23,6 @@ val workspace : Context_name.t -> Partition.t Memo.t
 
 val dune_files : Context_name.t -> Dune_file.t list Memo.t
 
-(** The workspace's projects, keyed by their build directory. *)
-val projects_by_output_root : Context_name.t -> Loaded_project.t Path.Build.Map.t Memo.t
-
 (** A mounted package's projects and dune files: [None] when the package has
     no mounted source. Loading one fetches its source and raises its errors. *)
 val mount : Context_name.t -> Package.Name.t -> Partition.t option Memo.t

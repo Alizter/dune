@@ -172,11 +172,6 @@ let package_errors context name =
   | Error messages -> messages
 ;;
 
-let projects_by_output_root context =
-  let+ { Partition.projects_by_output_root; _ } = workspace context in
-  projects_by_output_root
-;;
-
 let find_package context name =
   let* { packages; _ } = load () in
   match Package.Name.Map.find packages name with

@@ -528,11 +528,6 @@ module Rules = struct
       | Mounted { logical_path; _ } -> Path.build logical_path
     ;;
 
-    let backing_path = function
-      | Source dir -> Path.source (Workspace_dir.path dir)
-      | Mounted { backing; _ } -> Backing.path backing
-    ;;
-
     let file t local =
       match t with
       | Source dir ->

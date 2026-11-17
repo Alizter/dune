@@ -60,9 +60,6 @@ module Rules : sig
     (** The logical directory used by source semantics. *)
     val path : t -> Path.t
 
-    (** The directory from which source contents are enumerated. *)
-    val backing_path : t -> Path.t
-
     val file : t -> Path.Local.t -> File.t
     val filenames : t -> Filename.Array.Set.t
     val sub_dirs : t -> sub_dir Filename.Array.Map.t
