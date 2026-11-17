@@ -31,7 +31,7 @@ let available_exes ~dir (exes : Executables.t) =
 
 let get_installed_binaries stanzas =
   let merge _ x y = Some (Appendable_list.( @ ) x y) in
-  Memo.List.map stanzas ~f:(fun (d, stanza) ->
+  Memo.List.map stanzas ~f:(fun d ->
     let dir = Dune_file.output_dir d in
     let* expander = Expander0.get ~dir in
     let expand_value sw =
@@ -80,33 +80,31 @@ let get_installed_binaries stanzas =
         y)
       >>| Filename.Map.map ~f:Appendable_list.singleton
     in
-    match Stanza.repr stanza with
-    | Install_conf.T { section = _loc, Section Bin; files; enabled_if; package; _ } ->
-      let enabled_if = eval_blang enabled_if in
-      let package = Some (Package.name package) in
-      binaries_from_install ~enabled_if ~package files
-    | Executables.T
-        ({ install_conf = Some { section = _loc, Section Bin; files; package; _ }; _ } as
-         exes) ->
-      let enabled_if =
-        let enabled_if = eval_blang exes.enabled_if in
-        match exes.optional with
-        | false -> enabled_if
-        | true ->
-          enabled_if
-          >>= (function
-           | false -> Memo.return false
-           | true -> available_exes ~dir exes)
-      in
-      let package = Some (Package.name package) in
-      binaries_from_install ~enabled_if ~package files
-    | _ -> Memo.return Filename.Map.empty)
+    Dune_file.static_stanzas d
+    |> Memo.List.map ~f:(fun stanza ->
+      match Stanza.repr stanza with
+      | Install_conf.T { section = _loc, Section Bin; files; enabled_if; package; _ } ->
+        let enabled_if = eval_blang enabled_if in
+        let package = Some (Package.name package) in
+        binaries_from_install ~enabled_if ~package files
+      | Executables.T
+          ({ install_conf = Some { section = _loc, Section Bin; files; package; _ }; _ }
+           as exes) ->
+        let enabled_if =
+          let enabled_if = eval_blang exes.enabled_if in
+          match exes.optional with
+          | false -> enabled_if
+          | true ->
+            enabled_if
+            >>= (function
+             | false -> Memo.return false
+             | true -> available_exes ~dir exes)
+        in
+        let package = Some (Package.name package) in
+        binaries_from_install ~enabled_if ~package files
+      | _ -> Memo.return Filename.Map.empty)
+    >>| Filename.Map.union_all ~f:merge)
   >>| Filename.Map.union_all ~f:merge
-;;
-
-let static_stanzas dune_files =
-  List.concat_map dune_files ~f:(fun dune_file ->
-    Dune_file.static_stanzas dune_file |> List.map ~f:(fun stanza -> dune_file, stanza))
 ;;
 
 (* The binaries a natively built locked package installs, under the names a
@@ -118,7 +116,7 @@ let package_binaries =
       ~input:(module Dune_load.Context_and_package)
       (fun (context, package) ->
          let+ binaries =
-           Dune_load.stanzas_of_package context package >>= get_installed_binaries
+           Dune_load.dune_files_of_package context package >>= get_installed_binaries
          in
          Filename.Map.to_list_map binaries ~f:(fun name sources ->
            Filename.of_string_exn (Bin.strip_exe (Filename.to_string name)), sources)
@@ -160,10 +158,7 @@ let all =
     let artifacts =
       let local_bins =
         Memo.lazy_ ~name:"get_installed_binaries" (fun () ->
-          Context.name context
-          |> Dune_load.dune_files
-          >>| static_stanzas
-          >>= get_installed_binaries)
+          Context.name context |> Dune_load.dune_files >>= get_installed_binaries)
       in
       Artifacts.create
         context
