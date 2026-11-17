@@ -148,36 +148,24 @@ module File = struct
   let relative t loc path =
     match t with
     | Workspace dir -> Workspace (Path.Source.relative ~error_loc:loc dir path)
-    | Mounted { mount; logical; backing } ->
+    | Mounted { mount; logical; backing = _ } ->
       let { Mount.logical_root; backing_root; loc = _ } = mount in
-      let outside () =
-        User_error.raise
-          ~loc
-          [ Pp.textf "Included path %S is outside the mounted source tree." path ]
+      let local =
+        match
+          Option.bind (Path.Local_gen.descendant logical ~of_:logical_root) ~f:(fun l ->
+            Path.Local.relative_result l path |> Result.to_option)
+        with
+        | Some local -> local
+        | None ->
+          User_error.raise
+            ~loc
+            [ Pp.textf "Included path %S is outside the mounted source tree." path ]
       in
-      let backing =
-        match backing, backing_root with
-        | Build dir, Build root ->
-          let backing = Path.Build.relative ~error_loc:loc dir path in
-          if not (Path.Build.is_descendant backing ~of_:root) then outside ();
-          Backing.Build backing
-        | External _, External root ->
-          let local =
-            match Path.Local_gen.descendant logical ~of_:logical_root with
-            | None -> outside ()
-            | Some local -> local
-          in
-          (match Path.Local.relative_result local path with
-           | Error _ -> outside ()
-           | Ok local -> Backing.External (Path.External.append_local root local))
-        | _ ->
-          Code_error.raise
-            "Mounted file and root have different backing kinds"
-            [ "file", Backing.to_dyn backing; "root", Backing.to_dyn backing_root ]
-      in
-      let logical = Path.Build.relative ~error_loc:loc logical path in
-      if not (Path.Build.is_descendant logical ~of_:logical_root) then outside ();
-      Mounted { mount; logical; backing }
+      Mounted
+        { mount
+        ; logical = Path.Build.append_local logical_root local
+        ; backing = Backing.append_local backing_root local
+        }
   ;;
 
   let exists = function
