@@ -62,8 +62,7 @@ version rather than the repository's unrelated util version.
 Changing a supplied workspace version invalidates the saved solution. Both
 validation and building require relocking before using that changed provider.
 
-  $ sed 's/(version 1.2)/(version 2.0)/' dune-project > dune-project.new
-  $ mv dune-project.new dune-project
+  $ sed -i 's/(version 1.2)/(version 2.0)/' dune-project
   $ dune pkg validate-lockdir
   Lockdir dune.lock does not contain a solution for local packages:
   File "dune.lock/lock.dune", line 3, characters 17-49:
@@ -88,20 +87,16 @@ A fresh solve reports the incompatible workspace version.
   [1]
   $ grep '^Error:' solve-error
   Error:
-  $ grep -q '1.2' solve-error
-  $ grep -q '2.0' solve-error
+  $ grep -q '1.2' solve-error && grep -q '2.0' solve-error
 
 Autolocking must rerun the solver when supplied metadata changes, rather than
 restore the previous solution from an action keyed only by missing packages.
 
-  $ sed 's/(version 2.0)/(version 1.2)/' dune-project > dune-project.new
-  $ mv dune-project.new dune-project
+  $ sed -i 's/(version 2.0)/(version 1.2)/' dune-project
   $ rm -r dune.lock
   $ echo '(pkg enabled)' >> dune-workspace
   $ dune build result
-  $ sed 's/(version 1.2)/(version 2.0)/' dune-project > dune-project.new
-  $ mv dune-project.new dune-project
+  $ sed -i 's/(version 1.2)/(version 2.0)/' dune-project
   $ dune build result 2>autolock-error
   [1]
-  $ grep -q '1.2' autolock-error
-  $ grep -q '2.0' autolock-error
+  $ grep -q '1.2' autolock-error && grep -q '2.0' autolock-error
