@@ -42,7 +42,23 @@ let version_by_package_name local_packages lock_packages =
   let from_lock_dir =
     Package_name.Map.map lock_packages ~f:(fun (pkg : Lock_dir.Pkg.t) -> pkg.info.version)
   in
-  Package_name.Map.union_exn from_local_packages from_lock_dir
+  let exception Duplicate_package of Package_name.t in
+  try
+    Package_name.Map.union
+      from_local_packages
+      from_lock_dir
+      ~f:(fun duplicate_package_name _ _ ->
+        raise (Duplicate_package duplicate_package_name))
+  with
+  | Duplicate_package duplicate_package_name ->
+    let local_package = Package_name.Map.find_exn local_packages duplicate_package_name in
+    User_error.raise
+      ~hints:lockdir_regenerate_hints
+      ~loc:local_package.loc
+      [ Pp.textf
+          "A package named %S is defined locally but is also present in the lockdir"
+          (Package_name.to_string local_package.name)
+      ]
 ;;
 
 let lock_dir_filter_env t =
@@ -258,10 +274,6 @@ let validate t =
 ;;
 
 let create_unvalidated ~platform local_packages lock_dir =
-  check_package_names
-    lock_dir
-    ~local_packages:
-      (Package_name.Map.map local_packages ~f:(fun (pkg : Local_package.t) -> pkg.loc));
   let lock_packages =
     Lock_dir.Packages.pkgs_on_platform_by_name lock_dir.Lock_dir.packages ~platform
   in
