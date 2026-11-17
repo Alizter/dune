@@ -1,6 +1,7 @@
 open Stdune
 open Dune_engine
 open Dune_rules
+open Memo.O
 module Workspace = Source.Workspace
 module Dune_config = Dune_config_file.Dune_config
 module Scheduler = Dune_scheduler.Scheduler
@@ -29,8 +30,9 @@ let%expect_test "package library entries and lazy native visibility" =
             };
           Source.Only_packages.Clflags.set No_restriction;
           Memo.reset (Fs_memo.init ~dune_file_watcher:None);
-          Io.write_file_exn
-            (Path.relative Path.root "dune-project")
+          let write file = Io.write_file_exn (Path.relative Path.root file) in
+          write
+            "dune-project"
             "(lang dune 3.21)\n\
             \ (package (name a) (deprecated_package_names old-a))\n\
             \ (package (name b))\n";
@@ -43,8 +45,8 @@ let%expect_test "package library entries and lazy native visibility" =
                   name)
               |> String.concat ~sep:""
             in
-            Io.write_file_exn
-              (Path.relative Path.root "dune")
+            write
+              "dune"
               (redirects
                ^ "(install (package a) (section share) (files missing))\n"
                ^ "(library (name unowned))\n"
@@ -72,8 +74,7 @@ let%expect_test "package library entries and lazy native visibility" =
           let previous = Weak.create 1 in
           write_stanzas [ "old" ];
           run
-            (let open Memo.O in
-             let+ stanzas = package_stanzas "a"
+            (let+ stanzas = package_stanzas "a"
              and+ other = package_stanzas "b"
              and+ deprecated = package_stanzas "old-a"
              and+ unknown = package_stanzas "unknown"
@@ -93,18 +94,19 @@ let%expect_test "package library entries and lazy native visibility" =
              printfn "deprecated package bucket: %d" (List.length deprecated);
              printfn "unknown package bucket: %d" (List.length unknown));
           run
-            (let open Memo.O in
-             let+ entries = entries () in
+            (let+ entries = entries () in
              printfn
                "initial deprecated names: %d"
                (List.length entries.deprecated_library_names);
              Weak.set previous 0 (Some entries));
           write_stanzas [ "old"; "new" ];
-          Memo.reset
-            (Memo.Invalidation.invalidate_caches ~reason:Memo.Invalidation.Reason.Test);
+          let invalidate () =
+            Memo.reset
+              (Memo.Invalidation.invalidate_caches ~reason:Memo.Invalidation.Reason.Test)
+          in
+          invalidate ();
           run
-            (let open Memo.O in
-             let+ entries = entries () in
+            (let+ entries = entries () in
              printfn
                "updated deprecated names: %d"
                (List.length entries.deprecated_library_names));
@@ -113,53 +115,44 @@ let%expect_test "package library entries and lazy native visibility" =
           Config.init String.Map.empty;
           Execution_parameters.init (Memo.return Execution_parameters.builtin_default);
           Main.init ~sandbox_actions:false ~sandboxing_preference:[] ();
-          Io.write_file_exn
-            (Path.relative Path.root "dune-project")
+          write
+            "dune-project"
             "(lang dune 3.25)\n(package (name app) (dir .) (depends declared))\n";
-          Io.write_file_exn
-            (Path.relative Path.root "dune")
-            "(library (public_name app) (modules))\n";
+          write "dune" "(library (public_name app) (modules))\n";
           Path.mkdir_p (Path.relative Path.root "dune.lock");
-          Io.write_file_exn
-            (Path.relative Path.root "dune.lock/lock.dune")
+          write
+            "dune.lock/lock.dune"
             "(lang package 0.1)\n(repositories (complete true))\n";
-          Io.write_file_exn
-            (Path.relative Path.root "dune.lock/declared.pkg")
+          write
+            "dune.lock/declared.pkg"
             "(version 1.0)\n\
             \ (build (progn (write-file META \"version = \\\"1\\\"\\n\")\n\
             \ (write-file declared.install \"lib: [ \\\"META\\\" ]\")))\n";
-          Io.write_file_exn
-            (Path.relative Path.root "dune.lock/hidden.pkg")
-            "(version 1.0)\n(build (run false))\n";
+          write "dune.lock/hidden.pkg" "(version 1.0)\n(build (run false))\n";
           Path.mkdir_p (Path.relative Path.root "_native");
-          Io.write_file_exn
-            (Path.relative Path.root "_native/dune-project")
-            "(lang dune 3.25)\n(package (name native))\n";
-          Io.write_file_exn
-            (Path.relative Path.root "_native/dune")
+          write "_native/dune-project" "(lang dune 3.25)\n(package (name native))\n";
+          write
+            "_native/dune"
             "(library (name implementation) (public_name native)\n\
             \ (modules exported))\n\
             \ (library (name private_impl) (modules private_mod))\n";
           List.iter [ "exported"; "private_mod" ] ~f:(fun name ->
-            Io.write_file_exn (Path.relative Path.root ("_native/" ^ name ^ ".ml")) "");
-          Io.write_file_exn
-            (Path.relative Path.root "dune.lock/native.pkg")
+            write ("_native/" ^ name ^ ".ml") "");
+          write
+            "dune.lock/native.pkg"
             (sprintf
                "(version 1.0)\n(source (copy %S))\n(build (run false))\n"
                (Path.to_absolute_filename (Path.relative Path.root "_native")));
           run
-            (let open Memo.O in
-             let+ _ =
+            (let+ _ =
                Fs_memo.dir_contents
                  ~force_update:true
                  (Path.Outside_build_dir.In_source_dir Path.Source.root)
              in
              ());
-          Memo.reset
-            (Memo.Invalidation.invalidate_caches ~reason:Memo.Invalidation.Reason.Test);
+          invalidate ();
           run
-            (let open Memo.O in
-             let* scope =
+            (let* scope =
                Scope.DB.find_by_dir (Context_name.build_dir Context_name.default)
              in
              let db = Scope.public_libs scope in
