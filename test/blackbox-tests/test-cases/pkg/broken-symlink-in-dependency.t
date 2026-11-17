@@ -22,7 +22,6 @@ Create a lockdir for the project.
 The package "foo" exercises copying package sources from a local directory.
   $ make_lockpkg foo <<EOF
   > (version 0.0.1)
-  > (build (run ls))
   > (source
   >  (fetch
   >   (url
@@ -32,7 +31,6 @@ The package "foo" exercises copying package sources from a local directory.
 The package "bar" exercises extracting a source archive from a local file.
   $ make_lockpkg bar <<EOF
   > (version 0.0.1)
-  > (build (run ls))
   > (source
   >  (fetch
   >   (url
@@ -42,7 +40,6 @@ The package "bar" exercises extracting a source archive from a local file.
 The package "bar" exercises extracting a source archive from a downloaded file.
   $ make_lockpkg baz <<EOF
   > (version 0.0.1)
-  > (build (run ls))
   > (source
   >  (fetch
   >   (url http://0.0.0.0:1)
@@ -61,17 +58,18 @@ Make a project file that depends on all the packages.
   >  (depends foo bar baz))
   > EOF
 
-The recipe working directories contain all files except the broken symlinks:
+Build the packages.
   $ build_pkg foo
-  a.txt
   $ build_pkg bar
-  a.txt
   $ build_pkg baz
-  a.txt
 
-The built source trees contain the real file but no broken link:
-  $ for package in foo bar baz; do
-  >   test -f _build/default/.pkg/$package/a.txt
-  >   test ! -e _build/default/.pkg/$package/b.txt
-  >   test ! -L _build/default/.pkg/$package/b.txt
-  > done
+All files were copied except for the broken symlinks:
+  $ ls _build/default/.pkg/foo
+  _install
+  a.txt
+  $ ls _build/default/.pkg/bar
+  _install
+  a.txt
+  $ ls _build/default/.pkg/baz
+  _install
+  a.txt
