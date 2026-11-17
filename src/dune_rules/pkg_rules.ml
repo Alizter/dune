@@ -373,6 +373,8 @@ module Dependency = struct
     { paths; files = Section.Map.empty; variables; exported_env; export_paths = paths }
   ;;
 
+  let info { paths; variables; _ } = paths.name, (variables, paths)
+
   let install_entries { paths; files; _ } =
     Section.Map.to_list files
     |> List.concat_map ~f:(fun (section, files) ->
@@ -1253,8 +1255,7 @@ module Action_expander = struct
         Package.Name.Set.mem direct dep.paths.name)
     in
     let depends =
-      List.map direct_dependencies ~f:(fun (dep : Dependency.t) ->
-        dep.paths.name, (dep.variables, dep.paths))
+      List.map direct_dependencies ~f:Dependency.info
       |> Package.Name.Map.of_list_exn
       |> fun deps -> Package.Name.Map.add_exn deps paths.name (variables, paths)
     in
@@ -1311,10 +1312,8 @@ module Action_expander = struct
                   bin)
             in
             let dep_info =
-              Package.Name.Map.add_exn
-                dep_info
-                dependency.paths.name
-                (dependency.variables, dependency.paths)
+              let name, info = Dependency.info dependency in
+              Package.Name.Map.add_exn dep_info name info
             in
             { binaries; dep_info }))
     ;;
@@ -1411,9 +1410,7 @@ let layout_env { Layout.context; root; dependencies } ~path ~base =
     |> Install.Roots.extend_env_concat_path_vars base
   in
   let depends =
-    List.map dependencies ~f:(fun (dep : Dependency.t) ->
-      dep.paths.name, (dep.variables, dep.paths))
-    |> Package.Name.Map.of_list_exn
+    List.map dependencies ~f:Dependency.info |> Package.Name.Map.of_list_exn
   in
   Action_builder.List.fold_left dependencies ~init:env ~f:(fun env (dep : Dependency.t) ->
     let expander =
