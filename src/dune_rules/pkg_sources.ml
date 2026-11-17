@@ -1,6 +1,6 @@
 open Import
 open Memo.O
-module Backing = Source_tree.Rules.Backing
+module Backing = Source_tree_file.Backing
 
 let package_of_dir_in_context dir =
   match Path.Local.explode dir |> Filename.L.to_string with
@@ -470,7 +470,7 @@ let prepare context candidate =
   | (Plain { native = true; _ } | Prepared { native = true; _ }), Some backing_root ->
     let logical_root = Candidate.artifact_root candidate in
     let* tree =
-      Source_tree.Rules.Mounted.load
+      Source_tree.load_mounted
         ~loc:(Candidate.source_loc candidate)
         ~logical_root
         ~backing_root

@@ -19,7 +19,7 @@ let rules ~dir source_dir =
       Source_tree.Dir.file source_dir (Path.Local.relative_fname Path.Local.root filename)
     in
     copy_rule
-      ~src:(Source_tree.Rules.File.backing_path file)
+      ~src:(Source_tree_file.File.backing_path file)
       ~dst:(Path.Build.relative_fname dir filename)
   in
   Source_tree.Dir.filenames source_dir

@@ -1,5 +1,5 @@
 open Import
-module Backing = Source_tree.Rules.Backing
+module Backing = Source_tree_file.Backing
 
 val package_of_artifact_path : Path.Build.t -> Package.Name.t option
 

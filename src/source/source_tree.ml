@@ -504,30 +504,23 @@ module Dir = struct
   end
 end
 
-module Rules = struct
-  module Backing = Source_tree_file.Backing
-  module File = Source_tree_file.File
-
-  module Mounted = struct
-    let load ~loc ~logical_root ~backing_root =
-      let dir = Source_tree_file.Dir.mounted ~loc ~logical_root ~backing_root in
-      find_dir_raw
-        ~default_vcs:Ancestor_vcs
-        ~dir
-        ~basename:(Source_tree_file.Dir.basename dir)
-        ~virtual_:false
-        ~dirs_visited:Dirs_visited.empty
-        ~dune_file:None
-        ~status:Normal
-        ~project:
-          (Dune_project.anonymous
-             ~dir:(Source_tree_file.Dir.source_path dir)
-             ~display_dir:(Path.build logical_root)
-             Package_info.empty
-             Package.Name.Map.empty)
-    ;;
-  end
-end
+let load_mounted ~loc ~logical_root ~backing_root =
+  let dir = Source_tree_file.Dir.mounted ~loc ~logical_root ~backing_root in
+  find_dir_raw
+    ~default_vcs:Ancestor_vcs
+    ~dir
+    ~basename:(Source_tree_file.Dir.basename dir)
+    ~virtual_:false
+    ~dirs_visited:Dirs_visited.empty
+    ~dune_file:None
+    ~status:Normal
+    ~project:
+      (Dune_project.anonymous
+         ~dir:(Source_tree_file.Dir.source_path dir)
+         ~display_dir:(Path.build logical_root)
+         Package_info.empty
+         Package.Name.Map.empty)
+;;
 
 module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) = struct
   open M.O

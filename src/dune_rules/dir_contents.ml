@@ -9,7 +9,7 @@ let loc_of_dune_file st_dir =
      let open Option.O in
      let* dune_file = Source_tree.Dir.dune_file st_dir in
      (* TODO not really correct. we need to know the [(subdir ..)] that introduced this *)
-     Source.Dune_file.file dune_file |> Option.map ~f:Source_tree.Rules.File.path
+     Source.Dune_file.file dune_file |> Option.map ~f:Source_tree_file.File.path
    with
    | Some s -> s
    | None -> Path.relative (Source_tree.Dir.logical_path st_dir) "_unknown_")

@@ -378,7 +378,7 @@ let source_file_exists ~build_dir pkg =
       Path.Local.descendant (Package.opam_file pkg) ~of_:(Package.dir pkg)
       |> Option.value_exn
     in
-    Source_tree.Dir.file dir local |> Source_tree.Rules.File.exists
+    Source_tree.Dir.file dir local |> Source_tree_file.File.exists
 ;;
 
 let opam_template ~opam_path =

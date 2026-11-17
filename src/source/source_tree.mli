@@ -45,22 +45,12 @@ end
 
 val root : unit -> Dir.t Memo.t
 
-(** The source view used by rule generation. Its directories and files retain
-    either workspace or build-target ownership; callers use this API rather than
-    dispatching on generic paths. *)
-module Rules : sig
-  module Backing = Source_tree_file.Backing
-  module File = Source_tree_file.File
-
-  module Mounted : sig
-    (** Load the tree at [logical_root] from its external or built backing. *)
-    val load
-      :  loc:Loc.t
-      -> logical_root:Path.Build.t
-      -> backing_root:Backing.t
-      -> Dir.t Memo.t
-  end
-end
+(** Load the tree at [logical_root] from its external or built backing. *)
+val load_mounted
+  :  loc:Loc.t
+  -> logical_root:Path.Build.t
+  -> backing_root:Source_tree_file.Backing.t
+  -> Dir.t Memo.t
 
 module Make_map_reduce_with_progress (M : Memo.S) (Outcome : Monoid) : sig
   (** Traverse starting from the root and report progress in the status line *)

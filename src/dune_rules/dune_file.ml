@@ -223,7 +223,7 @@ module Jbuild_plugin : sig
     :  Context_name.t
     -> Ocaml_config.t
     -> exec_dir:Path.t
-    -> plugin:Source_tree.Rules.File.t
+    -> plugin:Source_tree_file.File.t
     -> wrapper:Path.Build.t
     -> target:Path.Build.t
     -> unit Memo.t
@@ -325,8 +325,8 @@ end = struct
   ;;
 
   let create_plugin_wrapper context ocaml_config ~exec_dir ~plugin ~wrapper ~target =
-    let+ plugin_contents = Source_tree.Rules.File.read plugin >>| Option.value_exn in
-    let plugin = Source_tree.Rules.File.path plugin in
+    let+ plugin_contents = Source_tree_file.File.read plugin >>| Option.value_exn in
+    let plugin = Source_tree_file.File.path plugin in
     Io.with_file_out (Path.build wrapper) ~f:(fun oc ->
       write oc ~context ~ocaml_config ~target ~exec_dir ~plugin ~plugin_contents);
     check_no_requires plugin plugin_contents
@@ -337,7 +337,7 @@ module Script = struct
   open Memo.O
 
   type t =
-    { file : Source_tree.Rules.File.t
+    { file : Source_tree_file.File.t
     ; eval : eval
     ; from_parent : Dune_lang.Ast.t list
     }
@@ -347,7 +347,7 @@ module Script = struct
   let generated_dune_files_dir = Path.Build.relative Path.Build.root ".dune"
 
   let eval_one ~context { file; from_parent; eval } =
-    let source_path = Source_tree.Rules.File.source_path file in
+    let source_path = Source_tree_file.File.source_path file in
     let generated_dune_file =
       Loaded_project.output_path eval.loaded_project source_path
       |> Path.Build.append generated_dune_files_dir
@@ -358,7 +358,7 @@ module Script = struct
         ~suffix:(Filename.Extension.to_filename Filename.Extension.ml)
     in
     generated_dune_file |> Path.build |> Path.parent |> Option.iter ~f:Path.mkdir_p;
-    let plugin = Source_tree.Rules.File.path file in
+    let plugin = Source_tree_file.File.path file in
     let* context = Context.DB.get context in
     let* exec_dir =
       match Loaded_project.owner eval.loaded_project with
@@ -398,7 +398,7 @@ module Script = struct
         ~loc:(Loc.in_file plugin)
         [ Pp.textf
             "%s failed to produce a valid dune file."
-            (Source_tree.Rules.File.diagnostic_name file |> String.maybe_quoted)
+            (Source_tree_file.File.diagnostic_name file |> String.maybe_quoted)
         ; Pp.textf "Did you forgot to call [Jbuild_plugin.V*.send]?"
         ];
     Path.build generated_dune_file
@@ -557,7 +557,7 @@ module Eval = struct
               ~human_readable_description:(fun () ->
                 Pp.textf
                   "- evaluating dune file %S in OCaml syntax"
-                  (Source_tree.Rules.File.diagnostic_name script.file))
+                  (Source_tree_file.File.diagnostic_name script.file))
               (fun () -> Script.eval_one ~context script)
           in
           script.eval, dune_file, dynamic)

@@ -1,6 +1,6 @@
 open Import
 open Memo.O
-module Backing = Source_tree.Rules.Backing
+module Backing = Source_tree_file.Backing
 
 (* The source files and directories of a recipe-built package's mount. *)
 let source_inventory context candidate ~dir components =
