@@ -8,16 +8,21 @@ type build_system =
   }
 
 let implicit_default_alias dir =
-  let open Memo.O in
-  let+ source_dir = Partitions.source_tree_dir ~dir in
-  Option.map source_dir ~f:(fun source_dir ->
-    let default_alias =
-      let dune_version =
-        Source_tree.Dir.project source_dir |> Dune_project.dune_version
-      in
-      if dune_version >= (2, 0) then Alias0.all else Alias0.install
-    in
-    Action_builder.ignore (Alias_rec.dep_on_alias_rec default_alias dir))
+  match Path.Build.drop_build_context dir with
+  | None -> Memo.return None
+  | Some _ ->
+    let open Memo.O in
+    Partitions.source_tree_dir ~dir
+    >>| (function
+     | None -> None
+     | Some src_dir ->
+       let default_alias =
+         let dune_version =
+           Source_tree.Dir.project src_dir |> Dune_project.dune_version
+         in
+         if dune_version >= (2, 0) then Alias0.all else Alias0.install
+       in
+       Some (Action_builder.ignore (Alias_rec.dep_on_alias_rec default_alias dir)))
 ;;
 
 let execution_parameters ~sandbox_actions =
