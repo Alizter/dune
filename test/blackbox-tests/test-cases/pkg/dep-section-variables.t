@@ -152,10 +152,7 @@ requesters: their output matches the direct provider's.
 
   $ sections="lib libexec bin sbin share etc doc man toplevel stublibs"
   $ mkdir -p _dep native opaque
-  $ cat > _dep/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name dep))
-  > EOF
+  $ (cd _dep && make_dune_project_with_package 3.25 dep)
   $ for section in $sections; do
   >   echo "$section-data" > "_dep/$section-file"
   >   echo "(install (section $section) (files $section-file))" >> _dep/dune
@@ -246,10 +243,7 @@ binary and each provider's own share file must remain available.
 
 Different packages installing the same destination are still a real collision.
 
-  $ for package in left right; do
-  >   dune_cmd subst "z-$package-tool" shared-tool < "dune.lock/$package.pkg" > "$package.pkg"
-  >   mv "$package.pkg" "dune.lock/$package.pkg"
-  > done
+  $ sed -i 's/z-[a-z]*-tool/shared-tool/' dune.lock/{left,right}.pkg
   $ make_lockpkg conflict-consumer <<'EOF'
   > (version 1.0)
   > (depends left right)
