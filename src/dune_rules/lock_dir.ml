@@ -283,20 +283,14 @@ let get_with_path =
 let get ctx = get_with_path ctx >>| Result.map ~f:snd
 let get_exn ctx = get ctx >>| User_error.ok_exn
 
-(* Dev tool lock directories are closed: no workspace package supplies their
-   dependencies. *)
-let load_dev_tool_exn path =
-  let+ t = Load.load_exn path in
-  check_dependencies t ~lock_dir_path:path ~local_packages:Package.Name.Map.empty
-  |> User_error.ok_exn;
-  t
-;;
-
 let of_dev_tool dev_tool =
   let path = dev_tool |> dev_tool_external_lock_dir |> Path.external_ in
   (* Ensure the internal lock dir is built so copy rules run *)
   let* () = Build_system.build_dir (dev_tool_lock_dir dev_tool) in
-  load_dev_tool_exn path
+  let+ t = Load.load_exn path in
+  check_dependencies t ~lock_dir_path:path ~local_packages:Package.Name.Map.empty
+  |> User_error.ok_exn;
+  t
 ;;
 
 let lock_dirs_of_workspace (workspace : Workspace.t) =

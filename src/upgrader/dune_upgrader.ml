@@ -328,10 +328,7 @@ language. Use the (foreign_archives ...) field instead.|}
     let lang_version = 2, 0 in
     Dune_project.default_dune_language_version := lang_version;
     let project = Source_tree.Dir.project dir in
-    if
-      Path.Local.equal
-        (Dune_project.root project)
-        (Path.Source.to_local (Source_tree.Dir.path dir))
+    if Dune_project.root project = Path.Source.to_local (Source_tree.Dir.path dir)
     then ensure_project_file_exists project ~lang_version;
     update_project_file todo project;
     upgrade_dune_files todo dir

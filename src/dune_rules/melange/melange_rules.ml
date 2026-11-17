@@ -456,10 +456,11 @@ let compute_promote_in_source ~promote_in_source ~project ~dir ~mode ~output ~sr
                ~loc:(Loc.in_dir dir)
                [ Pp.text "Promotion is not supported for mounted package sources." ];
            let into_dir =
-             Path.Source.append_local (Path.Source.of_local root) output_dir
+             let root = Path.Source.of_local root in
+             let into_dir = Path.Source.append_local root output_dir in
+             let segment = Path.drop_prefix_exn src_dir ~prefix:lib_dir in
+             Path.Source.append_local into_dir segment
            in
-           let segment = Path.drop_prefix_exn src_dir ~prefix:lib_dir in
-           let into_dir = Path.Source.append_local into_dir segment in
            let from = Path.drop_build_context_exn dst_dir |> Path.source in
            Path.reach ~from (Path.source into_dir)
        in
