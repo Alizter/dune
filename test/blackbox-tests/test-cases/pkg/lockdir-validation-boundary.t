@@ -38,9 +38,7 @@ Building an unrelated workspace target:
 A locked package depending on a package that is neither locked nor in the
 workspace:
 
-  $ cat > dune-project <<EOF
-  > (lang dune 3.20)
-  > EOF
+  $ (make_dune_project 3.20)
   $ make_lockpkg foo <<EOF
   > (version 0.0.1)
   > (depends missing)

@@ -4,9 +4,7 @@ means building it. The lookup tries the package named like the library, then
 the compiler's own libraries, and only then the other packages.
 
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > EOF
+  $ (make_dune_project 3.25)
   $ lib() {
   >   cat <<EOF
   > (version 1.0)

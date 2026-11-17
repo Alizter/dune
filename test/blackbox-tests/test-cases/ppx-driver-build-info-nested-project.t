@@ -2,9 +2,7 @@ A ppx driver of a nested project can link dune-build-info.
 
   $ make_dune_project 3.25
   $ mkdir -p sub/driver
-  $ cat > sub/dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > EOF2
+  $ (cd sub && make_dune_project 3.25)
   $ cat > sub/dune <<'EOF2'
   > (library (name bar) (preprocess (pps identity)))
   > EOF2

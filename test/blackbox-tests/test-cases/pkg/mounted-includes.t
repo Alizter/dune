@@ -5,10 +5,7 @@ project root. They must not leave either the logical mount or its backing tree.
   $ make_dune_project 3.25
   $ mkdir -p _source/project/sub
   $ echo '(lang dune 3.25)' > _source/dune-project
-  $ cat > _source/project/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _source/project && make_dune_project_with_package 3.25 foo)
   $ cat > _source/project/sub/dune <<'EOF'
   > (include ../../shared.inc)
   > EOF

@@ -5,9 +5,7 @@ without modifying the original source or the logical mount.
 Start with a prebuilt plugin so the source-preparation checks do not depend on
 its build rules. The last case compiles a fresh executable from mounted source.
 
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.26)
-  > EOF
+  $ (make_dune_project 3.26)
   $ mkdir driver
   $ cat > driver/dune <<'EOF'
   > (executable

@@ -14,10 +14,7 @@ that reached it would fail.
   >   (echo "workspace test\n")))
   > EOF2
   $ mkdir _source
-  $ cat > _source/dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF2
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ cat > _source/dune <<'EOF2'
   > (library (public_name foo))
   > (rule (target generated) (action (run false)))

@@ -10,20 +10,14 @@ package. Cram test fixtures are data-only before project parsing.
   $ echo '(executable (name main) (libraries left right))' > dune
   $ echo 'let () = Printf.printf "%s/%s\n" Left.message Right.message' > main.ml
   $ mkdir -p _shared/sub _shared/invalid.t
-  $ cat > _shared/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name left))
-  > EOF
+  $ (cd _shared && make_dune_project_with_package 3.25 left)
   $ cat > _shared/dune <<'EOF'
   > (library (public_name left))
   > (cram (applies_to :whole_subtree))
   > EOF
   $ echo 'let message = "left"' > _shared/left.ml
   $ echo '(' > _shared/invalid.t/dune-project
-  $ cat > _shared/sub/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name right))
-  > EOF
+  $ (cd _shared/sub && make_dune_project_with_package 3.25 right)
   $ echo '(library (public_name right))' > _shared/sub/dune
   $ echo 'let message = "right"' > _shared/sub/right.ml
   $ for package in left right; do
@@ -48,10 +42,7 @@ In particular, their libraries must not replace a selected workspace provider
 or be reassigned to the mounted package during installation.
 
   $ mkdir workspace-support
-  $ cat > workspace-support/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name support))
-  > EOF
+  $ (cd workspace-support && make_dune_project_with_package 3.25 support)
   $ echo '(library (public_name support))' > workspace-support/dune
   $ echo 'let message = "workspace"' > workspace-support/support.ml
   $ mkdir -p _shared/other
@@ -187,19 +178,13 @@ keeps vendored packages and the build succeeds.
   > (package (name main) (allow_empty) (depends bundle))
   > EOF
   $ mkdir -p _bundle/vendor
-  $ cat > _bundle/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name bundle))
-  > EOF
+  $ (cd _bundle && make_dune_project_with_package 3.25 bundle)
   $ cat > _bundle/dune <<'EOF'
   > (vendored_dirs vendor)
   > (library (public_name bundle) (libraries vendored_support))
   > EOF
   $ touch _bundle/bundle.ml
-  $ cat > _bundle/vendor/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name vendored_support))
-  > EOF
+  $ (cd _bundle/vendor && make_dune_project_with_package 3.25 vendored_support)
   $ echo '(library (public_name vendored_support))' > _bundle/vendor/dune
   $ touch _bundle/vendor/vendored_support.ml
   $ make_lockpkg bundle <<EOF

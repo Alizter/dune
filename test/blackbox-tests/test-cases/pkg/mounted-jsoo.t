@@ -11,10 +11,7 @@ library's META names them in jsoo_runtime.
 
 [foo] is a dune project whose library ships a JavaScript primitive.
 
-  $ cat > _foo/dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF2
+  $ (cd _foo && make_dune_project_with_package 3.25 foo)
   $ cat > _foo/dune <<'EOF2'
   > (library (public_name foo) (js_of_ocaml (javascript_files foo_runtime.js)))
   > EOF2

@@ -40,10 +40,7 @@ A stanza that could belong to several packages lists their opam files.
 A stanza naming a package in a project that defines none says where the
 project was found.
 
-  $ cat > _foo/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _foo && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _foo/dune
   $ mkdir _foo/nested
   $ echo '(lang dune 3.25)' > _foo/nested/dune-project

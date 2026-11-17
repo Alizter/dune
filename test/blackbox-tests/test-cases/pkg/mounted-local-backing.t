@@ -12,10 +12,7 @@ its backing, without first copying a snapshot into _build/_fetch.
   > EOF2
   $ echo 'let () = print_endline Foo.message' > main.ml
   $ mkdir -p _source/sub _source/empty _source/_build _source/.git
-  $ cat > _source/dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF2
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ cat > _source/dune <<'EOF2'
   > (library (public_name foo))
   > (include stanzas.inc)
@@ -187,10 +184,7 @@ an external backing. Only file links retain the main copy semantics.
   $ make_dune_project 3.25
   $ make_lockdir
   $ mkdir _source _outside
-  $ cat > _source/dune-project <<'EOF2'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF2
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(include link/secret.inc)' > _source/dune
   $ cat > _outside/secret.inc <<'EOF2'
   > (rule (target escaped) (action (write-file %{target} outside)))

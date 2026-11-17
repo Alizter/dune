@@ -15,10 +15,7 @@ A package that builds, one whose source does not exist, and one whose Dune
 project does not load.
 
   $ mkdir _good _broken
-  $ cat > _good/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name good))
-  > EOF
+  $ (cd _good && make_dune_project_with_package 3.25 good)
   $ echo '(library (public_name good))' > _good/dune
   $ make_lockpkg good <<EOF
   > (version 1.0)
@@ -30,10 +27,7 @@ project does not load.
   > (source (copy $PWD/_absent))
   > (build (run false))
   > EOF
-  $ cat > _broken/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name broken))
-  > EOF
+  $ (cd _broken && make_dune_project_with_package 3.25 broken)
   $ echo '(library (public_name broken) (unknown_field))' > _broken/dune
   $ make_lockpkg broken <<EOF
   > (version 1.0)
