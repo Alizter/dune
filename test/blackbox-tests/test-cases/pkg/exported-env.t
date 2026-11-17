@@ -1,7 +1,7 @@
 Packages can export environment variables.
 
-Inspect the final rule, not just rebuilds: digest-qualified paths currently
-mask missing environment dependencies. These checks should report true.
+Inspect the final rule, not just rebuilds: the package rule records its
+dependency on the exported environment.
 
   $ make_lockdir
   $ make_lockpkg test <<EOF
@@ -38,7 +38,7 @@ mask missing environment dependencies. These checks should report true.
   bar/1.2.3
   $ dune rules --format=json "$(get_build_pkg_dir usetest)/_install" \
   >   | jq '.[] | .deps | index({Env: "FOO"}) != null'
-  false
+  true
 
 Changing only a dependency's exported environment must rebuild its consumer.
 
@@ -55,7 +55,7 @@ Changing only a dependency's exported environment must rebuild its consumer.
   baz/1.2.3
   $ dune rules --format=json "$(get_build_pkg_dir usetest)/_install" \
   >   | jq '.[] | .deps | index({Env: "FOO"}) != null'
-  false
+  true
 
 Changing the package version also invalidates the build.
 
