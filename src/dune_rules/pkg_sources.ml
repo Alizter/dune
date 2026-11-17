@@ -468,17 +468,11 @@ let prepare context candidate =
     "Prepare package sources"
     [ "context", Context_name.to_dyn context; "package", Package.Name.to_dyn name ];
   let* preparation = preparation context name >>| Option.value_exn in
-  match
-    match preparation with
-    | Opaque
-    | Plain { dir = _; native = false }
-    | Prepared { patches = _; rest = _; native = false } -> None
-    | Plain { dir; native = true } -> Some dir
-    | Prepared { patches = _; rest = _; native = true } ->
-      Some (Backing.Build (prepared_source context name))
-  with
-  | None -> Memo.return None
-  | Some backing_root ->
+  let* backing = mount_backing context name in
+  match preparation, backing with
+  | (Opaque | Plain { native = false; _ } | Prepared { native = false; _ }), _ | _, None
+    -> Memo.return None
+  | (Plain { native = true; _ } | Prepared { native = true; _ }), Some backing_root ->
     let logical_root = Candidate.artifact_root candidate in
     let* tree =
       Source_tree.Rules.Mounted.load
