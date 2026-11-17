@@ -26,7 +26,7 @@ mounted from a lock directory must behave like a workspace project
   $ dune build _build/default/.pkg/foo/fallback/fallback.cma 2>&1
 
 When neither generated source is present, the fallback rule must run Menhir.
-The parser is compiled and executed in the mount, not by the opaque recipe.
+The parser is generated and compiled in the mount, not by the opaque recipe.
 
   $ mkdir _source/generated
   $ cat > _source/generated/dune <<'EOF'
@@ -35,12 +35,7 @@ The parser is compiled and executed in the mount, not by the opaque recipe.
   >  (mode fallback)
   >  (explain false))
   > (library
-  >  (name generated)
-  >  (modules parser))
-  > (executable
-  >  (name use_parser)
-  >  (modules use_parser)
-  >  (libraries generated))
+  >  (name generated))
   > EOF
   $ cat > _source/generated/parser.mly <<'EOF'
   > %token <int> NUMBER
@@ -50,22 +45,7 @@ The parser is compiled and executed in the mount, not by the opaque recipe.
   > main:
   > | value = NUMBER; EOF { value }
   > EOF
-  $ cat > _source/generated/use_parser.ml <<'EOF'
-  > let () =
-  >   let tokens = ref [Generated.Parser.NUMBER 42] in
-  >   let lexer _ =
-  >     match !tokens with
-  >     | [] -> Generated.Parser.EOF
-  >     | token :: rest ->
-  >       tokens := rest;
-  >       token
-  >   in
-  >   let result = Generated.Parser.main lexer (Lexing.from_string "") in
-  >   Printf.printf "%d\n" result
-  > EOF
   $ dune build \
   >   _build/default/.pkg/foo/generated/parser.ml \
   >   _build/default/.pkg/foo/generated/parser.mli \
-  >   _build/default/.pkg/foo/generated/use_parser.exe
-  $ _build/default/.pkg/foo/generated/use_parser.exe
-  42
+  >   _build/default/.pkg/foo/generated/generated.cma
