@@ -41,6 +41,14 @@
  (alias runtest-js))
 
 (cram
+ (applies_to mounted-melange.t)
+ (deps
+  %{bin:node}
+  %{bin:melc}
+  (package melange))
+ (alias runtest-melange))
+
+(cram
  (applies_to sites-plugin.t)
  (deps
   (package dune-site)
