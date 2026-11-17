@@ -27,14 +27,6 @@ module Backing : sig
          Memo.t
 end
 
-module Mount : sig
-  type t =
-    { loc : Loc.t
-    ; logical_root : Path.Build.t
-    ; backing_root : Backing.t
-    }
-end
-
 module File : sig
   type t
 
@@ -60,7 +52,7 @@ module Dir : sig
   type t = File.t
 
   val workspace : Path.Source.t -> t
-  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Backing.t -> t
+  val mounted : loc:Loc.t -> logical_root:Path.Build.t -> backing_root:Backing.t -> t
   val source_path : t -> Path.Local.t
   val path : t -> Path.t
   val as_workspace : t -> Path.Source.t option

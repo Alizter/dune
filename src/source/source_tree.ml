@@ -511,12 +511,7 @@ module Rules = struct
 
   module Mounted = struct
     let load ~loc ~logical_root ~backing_root =
-      let dir =
-        Source_tree_file.Dir.mounted
-          ~mount:{ loc; logical_root; backing_root }
-          ~logical:logical_root
-          ~backing:backing_root
-      in
+      let dir = Source_tree_file.Dir.mounted ~loc ~logical_root ~backing_root in
       find_dir_raw
         ~default_vcs:Ancestor_vcs
         ~dir

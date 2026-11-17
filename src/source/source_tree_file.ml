@@ -239,6 +239,13 @@ end
 module Dir = struct
   include File
 
+  let mounted ~loc ~logical_root ~backing_root =
+    File.mounted
+      ~mount:{ Mount.loc; logical_root; backing_root }
+      ~logical:logical_root
+      ~backing:backing_root
+  ;;
+
   let basename = function
     | Workspace path -> Path.Source.basename path
     | Mounted { logical; _ } -> Path.Build.basename logical
