@@ -850,21 +850,14 @@ let filter_packages t ~f =
 ;;
 
 let set_package_version t ~package:name ~version =
-  let set_version packages =
-    match Package.Name.Map.find packages name with
-    | None -> packages
-    | Some package ->
-      let package =
-        Package.set_version_and_info
-          package
-          ~version:(Some version)
-          ~info:(Package.info package)
-      in
-      Package.Name.Map.set packages name package
+  let set p =
+    if Package.Name.equal (Package.name p) name
+    then Package.set_version_and_info p ~version:(Some version) ~info:(Package.info p)
+    else p
   in
   { t with
-    packages = set_version t.packages
-  ; including_hidden_packages = set_version t.including_hidden_packages
+    packages = Package.Name.Map.map t.packages ~f:set
+  ; including_hidden_packages = Package.Name.Map.map t.including_hidden_packages ~f:set
   }
 ;;
 
