@@ -445,7 +445,6 @@ let root () = Memo.Node.read root
 module Dir = struct
   include Dir0
 
-  let as_source t = Source_tree_file.Dir.as_workspace t.dir |> Option.map ~f:(fun _ -> t)
   let source_path t = Source_tree_file.Dir.source_path t.dir
   let logical_path t = Source_tree_file.Dir.path t.dir
   let file t local = Source_tree_file.Dir.append_local t.dir local

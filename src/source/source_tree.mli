@@ -34,10 +34,6 @@ module Dir : sig
   val project : t -> Dune_project.t
 
   val to_dyn : t -> Dyn.t
-
-  (** The directory, unless it belongs to a mounted package. *)
-  val as_source : t -> t option
-
   val source_path : t -> Path.Local.t
 
   (** The logical directory used by source semantics. *)

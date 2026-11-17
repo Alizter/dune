@@ -360,9 +360,9 @@ let gen_common_directory_rules sctx ~dir source_dir =
   let+ () = Format_rules.setup_alias sctx ~dir
   and+ () =
     (* Cram tests of mounted packages are not run. *)
-    match Source_tree.Dir.as_source source_dir with
-    | None -> Memo.return ()
-    | Some source_dir -> Cram_rules.rules source_dir ~sctx ~dir
+    match Pkg_sources.package_of_artifact_path dir with
+    | Some _ -> Memo.return ()
+    | None -> Cram_rules.rules source_dir ~sctx ~dir
   and+ () = Revdep_rules.add ~sctx ~dir in
   ()
 ;;
