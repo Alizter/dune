@@ -452,15 +452,10 @@ let add_alias_rule (ctx : Build_context.t) ~profile ~project ~pkg =
            then Action_builder.path (Path.build opam_path)
            else Action_builder.return ()
          in
-         let action =
-           Action.diff (Path.build opam_path) generated_opam_path
-           |> Action.Full.make
-           |> Action.Full.add_sandbox Sandbox_config.needs_sandboxing
-         in
-         (* Nothing in a locked package is promoted. *)
-         match Pkg_sources.package_of_artifact_path dir with
-         | None -> action
-         | Some _ -> Action.Full.disable_promotion action)
+         Action.diff (Path.build opam_path) generated_opam_path
+         |> Action.Full.make
+         |> Action.Full.add_sandbox Sandbox_config.needs_sandboxing
+         |> Pkg_sources.disable_promotion_in_package ~dir)
     | Exists _ | Generated | Generated_with_diff -> Memo.return ()
   in
   Memo.parallel_iter aliases ~f:(fun alias ->

@@ -6,6 +6,9 @@ val package_of_artifact_path : Path.Build.t -> Package.Name.t option
 (** The same question for a directory named by its place in a context. *)
 val package_of_dir_in_context : Path.Local.t -> Package.Name.t option
 
+(** Nothing in a locked package is promoted. *)
+val disable_promotion_in_package : dir:Path.Build.t -> Action.Full.t -> Action.Full.t
+
 (** Where the source of a build path of a context is: the workspace, or the
     path itself inside a mounted package. *)
 val source_location : Path.Build.t -> Path.t

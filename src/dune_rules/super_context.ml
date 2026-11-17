@@ -178,12 +178,7 @@ let extend_action_env t ~dir action =
      added last: a binary staged by [(deps (package ...))] must not shadow one
      the user bound explicitly. *)
   let env = Env_path.cons_multi env ~dirs:local_bin_dirs in
-  let action =
-    (* Nothing in a locked package is promoted. *)
-    match Pkg_sources.package_of_artifact_path dir with
-    | None -> action
-    | Some _ -> Action.Full.disable_promotion action
-  in
+  let action = Pkg_sources.disable_promotion_in_package ~dir action in
   Action.Full.add_env env action
 ;;
 

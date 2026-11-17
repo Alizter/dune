@@ -16,6 +16,12 @@ let package_of_artifact_path path =
   | Some (_, dir) -> package_of_dir_in_context dir
 ;;
 
+let disable_promotion_in_package ~dir action =
+  match package_of_artifact_path dir with
+  | None -> action
+  | Some _ -> Action.Full.disable_promotion action
+;;
+
 let source_location path =
   match package_of_artifact_path path with
   | Some _ -> Path.build path
