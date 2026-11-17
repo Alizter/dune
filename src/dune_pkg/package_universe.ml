@@ -85,21 +85,6 @@ let concrete_dependencies_of_local_package t local_package_name ~with_test =
     unsatisfied_dependencies_error local_package ~with_test hints
 ;;
 
-let selected_dependencies_of_local_package t local_package_name ~with_test =
-  let local_package = Package_name.Map.find_exn t.local_packages local_package_name in
-  match
-    Lock_pkg.local_package_dependencies_with_depopts
-      (Local_package.for_solver local_package)
-      ~env:(lock_dir_filter_env t)
-      ~with_test
-      ~packages:t.version_by_package_name
-      ~dune_version:(Package_version.of_opam_package_version Dune_dep.version)
-  with
-  | Ok selected -> selected
-  | Error (`Formula_could_not_be_satisfied hints) ->
-    unsatisfied_dependencies_error local_package ~with_test hints
-;;
-
 let all_non_local_dependencies_of_local_packages t =
   let all_dependencies_of_local_packages =
     Package_name.Map.keys t.local_packages

@@ -26,8 +26,6 @@ module Candidate : sig
   val files_dir : t -> Path.Build.t
   val artifact_root : t -> Path.Build.t
   val dependencies : t -> Package.Name.Set.t Memo.t
-
-  (** Root of the package's opaque build and install directories. *)
 end
 
 val candidates : Context_name.t -> Candidate.t list Memo.t
