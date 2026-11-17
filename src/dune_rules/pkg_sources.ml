@@ -402,14 +402,13 @@ module Preparation = struct
         ; native : bool
         }
     | Prepared of
-        { dir : Path.Build.t
-        ; patches : (Loc.t * Path.Local.t) list
+        { patches : (Loc.t * Path.Local.t) list
         ; rest : Package_action.t list
         ; native : bool
         }
 end
 
-let preparation_of_candidate context candidates candidate =
+let preparation_of_candidate candidates candidate =
   let* direct = Candidate.dependencies candidate in
   let candidates =
     List.filter candidates ~f:(fun other ->
@@ -436,14 +435,7 @@ let preparation_of_candidate context candidates candidate =
     has_files
     || List.is_non_empty lock_pkg.info.extra_sources
     || List.is_non_empty patches
-  then
-    Memo.return
-      (Preparation.Prepared
-         { dir = prepared_source context (Candidate.name candidate)
-         ; patches
-         ; rest
-         ; native
-         })
+  then Memo.return (Preparation.Prepared { patches; rest; native })
   else
     let* root = Candidate.source_root candidate in
     match root with
@@ -460,7 +452,7 @@ let preparations =
       Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
         ( Candidate.name candidate
         , Memo.lazy_ ~name:"package-source-preparation" (fun () ->
-            preparation_of_candidate context candidates candidate) )))
+            preparation_of_candidate candidates candidate) )))
     |> Memo.Lazy.force)
   |> Staged.unstage
 ;;
@@ -477,7 +469,8 @@ let mount_backing context name =
   >>| function
   | None | Some Opaque -> None
   | Some (Plain { dir; native = _ }) -> Some dir
-  | Some (Prepared { dir; patches = _; rest = _; native = _ }) -> Some (Backing.Build dir)
+  | Some (Prepared { patches = _; rest = _; native = _ }) ->
+    Some (Backing.Build (prepared_source context name))
 ;;
 
 let prepare context candidate =
@@ -490,9 +483,10 @@ let prepare context candidate =
     match preparation with
     | Opaque
     | Plain { dir = _; native = false }
-    | Prepared { dir = _; patches = _; rest = _; native = false } -> None
+    | Prepared { patches = _; rest = _; native = false } -> None
     | Plain { dir; native = true } -> Some dir
-    | Prepared { dir; patches = _; rest = _; native = true } -> Some (Backing.Build dir)
+    | Prepared { patches = _; rest = _; native = true } ->
+      Some (Backing.Build (prepared_source context name))
   with
   | None -> Memo.return None
   | Some backing_root ->

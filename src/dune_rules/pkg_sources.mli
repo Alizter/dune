@@ -60,16 +60,15 @@ module Preparation : sig
         ; native : bool
         } (** The external or fetched directory is used as it is. *)
     | Prepared of
-        { dir : Path.Build.t
-        ; patches : (Loc.t * Path.Local.t) list
+        { patches : (Loc.t * Path.Local.t) list
         ; rest : Dune_lang.Action.t list
         ; native : bool
         }
-    (** [dir] holds the fetched source with the package's lock directory files
-        and extra sources added, then [patches] applied. [rest] is what
-        remains of the build action after those patches. [native] is false
-        when [rest] still transforms the source, so a dune project found in
-        it cannot be loaded before the recipe has run. *)
+    (** [prepared_source] holds the fetched source with the package's lock
+        directory files and extra sources added, then [patches] applied.
+        [rest] is what remains of the build action after those patches.
+        [native] is false when [rest] still transforms the source, so a dune
+        project found in it cannot be loaded before the recipe has run. *)
 end
 
 val preparation : Context_name.t -> Package.Name.t -> Preparation.t option Memo.t

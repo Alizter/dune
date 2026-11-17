@@ -2738,17 +2738,18 @@ let gen_prepared_source_rules context ~dir components =
     let name = Package.Name.of_string name in
     let+ candidate = Pkg_sources.find_candidate context name
     and+ preparation = Pkg_sources.preparation context name in
-    (match candidate, preparation with
-     | Some candidate, Some (Prepared { dir = target; patches; rest = _; native = _ }) ->
-       Gen_rules.make
-         ~directory_targets:(Path.Build.Map.singleton target Loc.none)
-         (Rules.collect_unit (fun () -> prepared_source_rule candidate ~target ~patches))
-     | Some candidate, Some (Plain _) ->
+    (match
+       ( candidate
+       , match preparation with
+         | None | Some Opaque -> None
+         | Some (Plain _) -> Some []
+         | Some (Prepared { patches; rest = _; native = _ }) -> Some patches )
+     with
+     | Some candidate, Some patches ->
        let target = Pkg_sources.prepared_source context name in
        Gen_rules.make
          ~directory_targets:(Path.Build.Map.singleton target Loc.none)
-         (Rules.collect_unit (fun () ->
-            prepared_source_rule candidate ~target ~patches:[]))
+         (Rules.collect_unit (fun () -> prepared_source_rule candidate ~target ~patches))
      | _ -> Gen_rules.no_rules)
   | _ -> Gen_rules.Redirect_to_parent Gen_rules.Rules.empty |> Memo.return
 ;;
@@ -3053,7 +3054,7 @@ let gen_mounted_rule context candidate ~dependencies =
   (* A mounted source already has the recipe's leading patches applied. *)
   let build =
     match preparation, pkg.build_command with
-    | Some (Prepared { rest; dir = _; patches = _; native = _ }), Some (Action _) ->
+    | Some (Prepared { rest; patches = _; native = _ }), Some (Action _) ->
       Some (Build_command.Action (Progn rest))
     | _, build -> build
   in
