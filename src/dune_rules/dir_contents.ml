@@ -11,7 +11,7 @@ let loc_of_dune_file st_dir =
      (* TODO not really correct. we need to know the [(subdir ..)] that introduced this *)
      Source.Dune_file.file dune_file |> Option.map ~f:Source_tree.Rules.File.path
    with
-   | Some path -> path
+   | Some s -> s
    | None -> Path.relative (Source_tree.Dir.logical_path st_dir) "_unknown_")
   |> Loc.in_file
 ;;

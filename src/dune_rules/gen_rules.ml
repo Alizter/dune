@@ -183,8 +183,8 @@ end = struct
         | false -> None
         | true ->
           (match
-             let loc = String_with_vars.loc glob in
-             Simple_rules.copy_files_relative_glob ~dir:ctx_dir ~loc src_glob
+             let error_loc = String_with_vars.loc glob in
+             Simple_rules.copy_files_relative_glob ~dir:ctx_dir ~loc:error_loc src_glob
            with
            | In_source_tree s ->
              let build_dir = Super_context.context sctx |> Context.build_dir in
