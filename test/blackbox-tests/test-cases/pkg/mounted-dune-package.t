@@ -613,11 +613,7 @@ context. Each consumer retains its host-side binding for shared compilation.
   > (env (_ (binaries (../tools/second.exe as js_of_ocaml))))
   > (executable (name main) (modes js) (libraries shared))
   > EOF
-  $ cat > dune-workspace <<'EOF'
-  > (lang dune 3.25)
-  > (context (default (name host)))
-  > (context (default (name target) (host host)))
-  > EOF
+  $ make_host_target_workspace
   $ dune build _build/target/a/main.bc.js _build/target/b/main.bc.js
   $ cat _build/target/a/main.bc.js _build/target/b/main.bc.js
   first
@@ -752,11 +748,7 @@ visible through the environment of the original package set.
 Cross-context actions materialize the same set in the host context, rather
 than mixing host and target native prefixes.
 
-  $ cat > dune-workspace <<'EOF'
-  > (lang dune 3.25)
-  > (context (default (name host)))
-  > (context (default (name target) (host host)))
-  > EOF
+  $ make_host_target_workspace
   $ dune build _build/target/paths _build/target/libraries
   $ jq -R 'split(":") | map(select(contains("/.packages/"))) | length' _build/target/paths
   1

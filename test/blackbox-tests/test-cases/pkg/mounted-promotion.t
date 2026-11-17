@@ -229,12 +229,7 @@ registering promotions, whether the interface is missing or outdated.
 
 The invariant is not tied to a context named default.
 
-  $ cat > dune-workspace <<'EOF'
-  > (lang dune 3.25)
-  > (pkg enabled)
-  > (context (default (name host)))
-  > (context (default (name target) (host host)))
-  > EOF
+  $ make_host_target_workspace
   $ dune build --auto-promote _build/target/.pkg/foo/source.txt
   $ cat _build/target/.pkg/foo/source.txt
   generated

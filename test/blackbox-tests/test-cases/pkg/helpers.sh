@@ -479,6 +479,14 @@ setup_dev_tool_workspace() {
 	EOF
 }
 
+make_host_target_workspace() {
+  cat > dune-workspace <<- EOF
+	(lang dune 3.25)
+	(context (default (name host)))
+	(context (default (name target) (host host)))
+	EOF
+}
+
 make_mock_dev_tool_package() {
   local pkg="$1"
   local exe="$2"

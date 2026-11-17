@@ -84,23 +84,12 @@ Internal outputs must use the build partition, not the nested source root.
 With distinct host and target contexts, both builds put the driver in the host
 partition while compiling the consuming library in the target context.
 
-  $ cat > _source/dune-workspace <<'EOF'
-  > (lang dune 3.25)
-  > (context (default))
-  > (context (default (name host)))
-  > (context (default (name target) (host host)))
-  > EOF
+  $ (cd _source && make_host_target_workspace)
   $ (cd _source && dune build --root . --only-packages bar _build/target/nested/bar.cma)
   $ find _source/_build/host/.ppx -name ppx.exe | wc -l
   1
   $ test ! -e _source/_build/target/.ppx
-  $ cat > dune-workspace <<'EOF'
-  > (lang dune 3.25)
-  > (pkg enabled)
-  > (context (default))
-  > (context (default (name host)))
-  > (context (default (name target) (host host)))
-  > EOF
+  $ make_host_target_workspace
   $ dune build _build/target/.pkg/bar/nested/bar.cma
   $ test -f _build/target/.pkg/bar/nested/bar.cma
   $ find _build/host/.pkg/bar/.ppx -name ppx.exe | wc -l
