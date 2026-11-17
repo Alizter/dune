@@ -292,10 +292,17 @@ let rec action_contains_source_transformation = function
   | _ -> false
 ;;
 
-let rec flatten_progn = function
-  | Package_action.Progn actions -> List.concat_map actions ~f:flatten_progn
-  | Withenv (_, action) -> flatten_progn action
-  | action -> [ action ]
+(* Each action is paired with the environment updates in its scope, innermost
+   first, so that it can be run outside of its [progn]. *)
+let rec flatten_progn envs = function
+  | Package_action.Progn actions -> List.concat_map actions ~f:(flatten_progn envs)
+  | Withenv (env, action) -> flatten_progn (env :: envs) action
+  | action -> [ envs, action ]
+;;
+
+let in_scope (envs, action) =
+  List.fold_left envs ~init:action ~f:(fun action env ->
+    Package_action.Withenv (env, action))
 ;;
 
 let expand_condition_pform candidates candidate solver_env unsupported ~source = function
@@ -357,27 +364,28 @@ let leading_patches candidates candidate solver_env = function
   | Some (Action action) ->
     let rec loop patches actions =
       let stop () =
+        let actions = List.map actions ~f:in_scope in
         Memo.return
           ( List.rev patches
           , actions
           , not (List.exists actions ~f:action_contains_source_transformation) )
       in
       match actions with
-      | Package_action.Patch path :: rest ->
+      | (_, Package_action.Patch path) :: rest ->
         (match local_path path with
          | Some patch -> loop ((String_with_vars.loc path, patch) :: patches) rest
          | None -> stop ())
-      | Package_action.When (condition, action) :: rest
+      | (envs, Package_action.When (condition, action)) :: rest
         when action_contains_source_transformation action ->
         let condition = Slang.Blang.remove_locs condition |> Slang.simplify_blang in
         eval_source_condition candidates candidate solver_env condition
         >>= (function
          | None -> stop ()
-         | Some true -> loop patches (flatten_progn action @ rest)
+         | Some true -> loop patches (flatten_progn envs action @ rest)
          | Some false -> loop patches rest)
       | _ -> stop ()
     in
-    loop [] (flatten_progn action)
+    loop [] (flatten_progn [] action)
 ;;
 
 module Scan_dune_files = Source_tree.Dir.Make_map_reduce (Memo) (Monoid.Exists)

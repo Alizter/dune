@@ -40,7 +40,7 @@ because of a lock-directory file overlay:
   > overlaid file
   > EOF
   $ build_pkg overlay
-  FOO=
+  FOO=myfoo
   overlaid file
   $ cat overlay-source/origin
   original
@@ -59,7 +59,7 @@ It should also apply when the source is prepared because of an extra source:
   >   (system "echo FOO=\$FOO; cat extra")))
   > EOF
   $ build_pkg extra
-  FOO=
+  FOO=myfoo
   extra
 
 It should also apply to the rest of a recipe whose leading patch is inside
@@ -86,5 +86,5 @@ the environment's scope:
   > +Hello World
   > EOF
   $ build_pkg patched
-  FOO=
+  FOO=myfoo
   Hello World
