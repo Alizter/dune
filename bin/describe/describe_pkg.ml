@@ -6,7 +6,6 @@ module Show_lock = struct
   let print_lock lock_dir_arg () =
     let open Fiber.O in
     let* local_packages = Memo.run Pkg.Pkg_common.find_local_packages in
-    let local_packages = Package_name.Set.of_keys local_packages in
     let* lock_dir_paths =
       Memo.run (Workspace.workspace ())
       >>| Pkg.Pkg_common.Lock_dirs_arg.lock_dirs_of_workspace lock_dir_arg
@@ -149,11 +148,7 @@ module List_locked_dependencies = struct
       let open Memo.O in
       (let* local_packages = Pkg.Pkg_common.find_local_packages in
        let+ workspace = Workspace.workspace () in
-       ( enumerate_lock_dirs_by_path
-           workspace
-           ~lock_dirs
-           ~local_packages:(Package_name.Set.of_keys local_packages)
-       , local_packages ))
+       enumerate_lock_dirs_by_path workspace ~lock_dirs ~local_packages, local_packages)
       |> Memo.run
     in
     let+ pp =

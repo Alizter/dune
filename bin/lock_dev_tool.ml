@@ -170,7 +170,7 @@ let lockdir_status dev_tool =
   | true ->
     let dev_tool_lock_dir = Path.external_ dev_tool_lock_dir in
     (match
-       Lock_dir.read_disk dev_tool_lock_dir ~local_packages:Package_name.Set.empty
+       Lock_dir.read_disk dev_tool_lock_dir ~local_packages:Package_name.Map.empty
      with
      | Error _ -> Memo.return `No_lockdir
      | Ok { packages; _ } ->

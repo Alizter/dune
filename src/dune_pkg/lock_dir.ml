@@ -1758,7 +1758,10 @@ module Load_immediate = Make_load (struct
   end)
 
 let check_dependencies t ~lock_dir_path ~local_packages =
-  Load_immediate.check_packages t.packages ~lock_dir_path ~local_packages
+  Load_immediate.check_packages
+    t.packages
+    ~lock_dir_path
+    ~local_packages:(Package_name.Set.of_keys local_packages)
 ;;
 
 let read_disk lock_dir_path ~local_packages =

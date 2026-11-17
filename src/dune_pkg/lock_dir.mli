@@ -168,9 +168,12 @@ end
 
 (** Load with the names supplied by the workspace. Dependencies absent from
     both the workspace and the lock directory are errors. *)
-val read_disk : Path.t -> local_packages:Package_name.Set.t -> (t, User_message.t) result
+val read_disk
+  :  Path.t
+  -> local_packages:_ Package_name.Map.t
+  -> (t, User_message.t) result
 
-val read_disk_exn : Path.t -> local_packages:Package_name.Set.t -> t
+val read_disk_exn : Path.t -> local_packages:_ Package_name.Map.t -> t
 
 module Make_load (Io : sig
     include Monad.S
@@ -188,7 +191,7 @@ end
 val check_dependencies
   :  t
   -> lock_dir_path:Path.t
-  -> local_packages:Package_name.Set.t
+  -> local_packages:_ Package_name.Map.t
   -> (unit, User_message.t) result
 
 (** Attempt to download and compute checksums for packages that have source

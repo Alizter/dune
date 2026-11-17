@@ -287,7 +287,7 @@ let get_exn ctx = get ctx >>| User_error.ok_exn
    dependencies. *)
 let load_dev_tool_exn path =
   let+ t = Load.load_exn path in
-  check_dependencies t ~lock_dir_path:path ~local_packages:Package.Name.Set.empty
+  check_dependencies t ~lock_dir_path:path ~local_packages:Package.Name.Map.empty
   |> User_error.ok_exn;
   t
 ;;

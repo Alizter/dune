@@ -826,7 +826,7 @@ let raise_on_lock_dir_out_of_sync =
         Dune_pkg.Lock_dir.check_dependencies
           lock_dir
           ~lock_dir_path:path
-          ~local_packages:(Package.Name.Set.of_keys packages)
+          ~local_packages:packages
         |> User_error.ok_exn;
         Dune_pkg.Package_universe.check_package_names
           lock_dir

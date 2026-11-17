@@ -33,11 +33,7 @@ let validate_lock_dirs ~lock_dirs () =
   let open Fiber.O in
   let* local_packages = Memo.run Pkg_common.find_local_packages in
   let* lock_dirs_by_path =
-    enumerate_lock_dirs_by_path
-      ~lock_dirs
-      ~local_packages:(Package_name.Set.of_keys local_packages)
-      ()
-    |> Memo.run
+    enumerate_lock_dirs_by_path ~lock_dirs ~local_packages () |> Memo.run
   in
   if List.is_empty lock_dirs_by_path
   then
