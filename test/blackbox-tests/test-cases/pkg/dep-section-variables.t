@@ -167,16 +167,55 @@ A dependency consumes that artifact once, rather than colliding with itself.
   $ build_pkg overlap-consumer
   installed
 
-Different packages installing the same destination are still a real collision.
+Group two providers' files without mixing their sections or losing an entryless
+dependency's exports. List the binaries in reverse destination order; every
+binary and each provider's own share file must remain available.
 
   $ for package in left right; do
   >   make_lockpkg "$package" <<EOF
   > (version 1.0)
   > (build
   >  (progn
-  >   (write-file tool $package)
-  >   (write-file $package.install "bin: [ \"tool\" {\"shared-tool\"} ]")))
+  >   (write-file a "#!/bin/sh\necho $package-a\n")
+  >   (write-file z "#!/bin/sh\necho $package-z\n")
+  >   (run chmod +x a z)
+  >   (write-file payload "$package-data\n")
+  >   (write-file $package.install
+  >    "bin: [ \"z\" {\"z-$package-tool\"} \"a\" {\"a-$package-tool\"} ]\nshare: [ \"payload\" ]")))
   > EOF
+  > done
+  $ make_lockpkg empty <<'EOF'
+  > (version 1.0)
+  > (exported_env (= EMPTY_MARKER kept))
+  > EOF
+  $ make_lockpkg grouped-consumer <<'EOF'
+  > (version 1.0)
+  > (depends left right empty)
+  > (build
+  >  (progn
+  >   (run a-left-tool)
+  >   (run z-left-tool)
+  >   (run a-right-tool)
+  >   (run z-right-tool)
+  >   (run cat %{pkg:left:share}/payload %{pkg:right:share}/payload)
+  >   (system "echo $EMPTY_MARKER")))
+  > EOF
+  $ build_pkg grouped-consumer
+  left-a
+  left-z
+  right-a
+  right-z
+  left-data
+  right-data
+  kept
+  $ find "$pkg_root/empty/_install" -type f
+  _build/default/.pkg/empty/_install/cookie
+
+Different packages installing the same destination are still a real collision.
+
+  $ for package in left right; do
+  >   dune_cmd subst "z-$package-tool" shared-tool < "dune.lock/$package.pkg" > "$package.pkg"
+  >   mv "$package.pkg" "dune.lock/$package.pkg"
   > done
   $ make_lockpkg conflict-consumer <<'EOF'
   > (version 1.0)
