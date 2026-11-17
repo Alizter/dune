@@ -32,7 +32,8 @@ end
 
 module Mount : sig
   type t =
-    { logical_root : Path.Build.t
+    { loc : Loc.t
+    ; logical_root : Path.Build.t
     ; backing_root : Backing.t
     }
 end
@@ -65,6 +66,15 @@ module Dir : sig
 
   val workspace : Path.Source.t -> t
   val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Backing.t -> t
+  val source_path : t -> Path.Local.t
+  val path : t -> Path.t
+  val as_workspace : t -> Path.Source.t option
   val basename : t -> Filename.t
   val file : t -> Filename.t -> File.t
+  val sub_dir : t -> Filename.t -> t
+  val append_local : t -> Path.Local.t -> File.t
+
+  (** Workspace listings are read as in the workspace tree; mounted listings
+      come from the backing, and failing to read one is an error. *)
+  val contents : t -> Dir_contents.t Memo.t
 end

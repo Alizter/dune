@@ -330,8 +330,7 @@ let source_tree_root ~dir =
     then Memo.return None
     else (
       match Pkg_sources.package_of_artifact_path dir with
-      | None ->
-        Source_tree.root () >>| fun root -> Some (Source_tree.Rules.Dir.source root)
+      | None -> Source_tree.root () >>| Option.some
       | Some package ->
         let+ mounted = Pkg_sources.find_mounted context package in
         Option.bind mounted ~f:Pkg_sources.Mounted.tree

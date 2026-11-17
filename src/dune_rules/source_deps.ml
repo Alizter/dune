@@ -9,7 +9,7 @@ module Map_reduce =
 let files_with_filter path ~filter =
   let* source_dir =
     match Path.as_in_source_tree path with
-    | Some dir -> Source_tree.find_dir dir >>| Option.map ~f:Source_tree.Rules.Dir.source
+    | Some dir -> Source_tree.find_dir dir
     | None -> Dune_load.source_tree_dir ~dir:(Path.as_in_build_dir_exn path)
   in
   match source_dir with

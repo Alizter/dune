@@ -97,7 +97,8 @@ end
 
 module Mount = struct
   type t =
-    { logical_root : Path.Build.t
+    { loc : Loc.t
+    ; logical_root : Path.Build.t
     ; backing_root : Backing.t
     }
 end
@@ -148,7 +149,7 @@ module File = struct
     match t with
     | Workspace dir -> Workspace (Path.Source.relative ~error_loc:loc dir path)
     | Mounted { mount; logical; backing } ->
-      let { Mount.logical_root; backing_root } = mount in
+      let { Mount.logical_root; backing_root; loc = _ } = mount in
       let outside () =
         User_error.raise
           ~loc
@@ -263,5 +264,39 @@ module Dir = struct
         ~mount
         ~logical:(Path.Build.relative_fname logical filename)
         ~backing:(Backing.relative_fname backing filename)
+  ;;
+
+  let sub_dir = file
+
+  let append_local t local =
+    match t with
+    | Workspace path -> Workspace (Path.Source.append_local path local)
+    | Mounted { mount; logical; backing } ->
+      Mounted
+        { mount
+        ; logical = Path.Build.append_local logical local
+        ; backing = Backing.append_local backing local
+        }
+  ;;
+
+  let contents = function
+    | Workspace path ->
+      Dir_contents.of_source_path path
+      >>| (function
+       | Ok dir -> dir
+       | Error _ -> Dir_contents.empty)
+    | Mounted { mount; backing; _ } ->
+      Backing.dir_contents backing
+      >>| (function
+       | Ok None -> Dir_contents.empty
+       | Ok (Some (files, dirs)) -> Dir_contents.of_names ~files ~dirs
+       | Error error ->
+         User_error.raise
+           ~loc:mount.loc
+           [ Pp.textf
+               "Unable to read %s"
+               (Path.to_string_maybe_quoted (Backing.path backing))
+           ; Unix_error.Detailed.pp error
+           ])
   ;;
 end

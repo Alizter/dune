@@ -46,10 +46,8 @@ module Rules : sig
   module File = Source_tree_file.File
 
   module Dir : sig
-    type t
-    type sub_dir
-
-    val source : Dir.t -> t
+    type t = Dir.t
+    type sub_dir = Dir.sub_dir
 
     (** The workspace directory, unless this directory belongs to a mounted
         package. *)

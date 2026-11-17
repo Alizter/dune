@@ -37,19 +37,19 @@ module Dir0 = struct
       | This of Vcs.t
       | Ancestor_vcs
 
-    let get_vcs ~default:vcs ~readdir ~path =
+    let get_vcs ~default:vcs ~readdir ~dir =
       match
         Vcs.Kind.of_dir_contents
           ~files:(Dir_contents.files readdir)
           ~dirs:(Dir_contents.dirs readdir)
       with
       | None -> vcs
-      | Some kind -> This { Vcs.kind; root = Path.(append_source root) path }
+      | Some kind -> This { Vcs.kind; root = Source_tree_file.Dir.path dir }
     ;;
   end
 
   type t =
-    { path : Path.Source.t
+    { dir : Source_tree_file.Dir.t
     ; status : Source_dir_status.t
     ; files : Filename.Array.Set.t
     ; sub_dirs : sub_dir Filename.Array.Map.t
@@ -63,9 +63,9 @@ module Dir0 = struct
     ; sub_dir_as_t : t Memo.t
     }
 
-  let rec to_dyn { path; status; files; dune_file; sub_dirs; vcs = _; project = _ } =
+  let rec to_dyn { dir; status; files; dune_file; sub_dirs; vcs = _; project = _ } =
     Dyn.record
-      [ "path", Path.Source.to_dyn path
+      [ "path", Path.to_dyn (Source_tree_file.Dir.path dir)
       ; "status", Source_dir_status.to_dyn status
       ; "files", Dyn.Set (Filename.Array.Set.to_list_map files ~f:Filename.to_dyn)
       ; ( "sub_dirs"
@@ -79,7 +79,7 @@ module Dir0 = struct
     Dyn.record [ "status", Source_dir_status.to_dyn sub_dir_status ]
   ;;
 
-  let path t = t.path
+  let path t = Option.value_exn (Source_tree_file.Dir.as_workspace t.dir)
   let status t = t.status
   let filenames t = t.files
   let sub_dirs t = t.sub_dirs
@@ -158,24 +158,38 @@ let rec physical
     match eval_status ~status_map ~parent_status fn with
     | None -> None
     | Some dir_status ->
-      let path = Path.Source.relative_fname dir fn in
-      let dirs_visited = Dirs_visited.add dirs_visited path file in
       Some
         { Dir0.sub_dir_status = dir_status
         ; sub_dir_as_t =
-            (Lazy.force physical_node)
-              { Physical_input.default_vcs
-              ; path
-              ; basename = fn
-              ; dirs_visited
-              ; dune_file
-              ; status = dir_status
-              ; project
-              }
-            |> Memo.Node.read
+            (match Source_tree_file.Dir.as_workspace dir with
+             | None ->
+               Memo.lazy_ ~name:"mounted-sub-dir" (fun () ->
+                 find_dir_raw
+                   ~default_vcs
+                   ~dir:(Source_tree_file.Dir.sub_dir dir fn)
+                   ~basename:fn
+                   ~virtual_:false
+                   ~dirs_visited
+                   ~dune_file
+                   ~status:dir_status
+                   ~project)
+               |> Memo.Lazy.force
+             | Some dir ->
+               let path = Path.Source.relative_fname dir fn in
+               let dirs_visited = Dirs_visited.add dirs_visited path file in
+               (Lazy.force physical_node)
+                 { Physical_input.default_vcs
+                 ; path
+                 ; basename = fn
+                 ; dirs_visited
+                 ; dune_file
+                 ; status = dir_status
+                 ; project
+                 }
+               |> Memo.Node.read)
         })
 
-and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
+and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~dir =
   match dune_file with
   | None -> init
   | Some df ->
@@ -195,14 +209,28 @@ and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
               ( fn
               , { Dir0.sub_dir_status = status
                 ; sub_dir_as_t =
-                    (Lazy.force virtual_node)
-                      { Virtual_input.parent_dir = path
-                      ; basename = fn
-                      ; dune_file
-                      ; status
-                      ; project
-                      }
-                    |> Memo.Node.read
+                    (match Source_tree_file.Dir.as_workspace dir with
+                     | None ->
+                       Memo.lazy_ ~name:"mounted-virtual-sub-dir" (fun () ->
+                         find_dir_raw
+                           ~default_vcs:Dir0.Vcs.Ancestor_vcs
+                           ~dir:(Source_tree_file.Dir.sub_dir dir fn)
+                           ~basename:fn
+                           ~virtual_:true
+                           ~dune_file
+                           ~status
+                           ~dirs_visited:Dirs_visited.empty
+                           ~project)
+                       |> Memo.Lazy.force
+                     | Some parent_dir ->
+                       (Lazy.force virtual_node)
+                         { Virtual_input.parent_dir
+                         ; basename = fn
+                         ; dune_file
+                         ; status
+                         ; project
+                         }
+                       |> Memo.Node.read)
                 } ))
       |> List.filter_opt
       |> Filename.Array.Map.of_sorted_list_exn
@@ -212,21 +240,14 @@ and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~path =
 and contents
       readdir
       ~default_vcs
-      ~path
+      ~dir
       ~dune_file
       ~dirs_visited
       ~project
       ~(dir_status : Source_dir_status.t)
   =
   let files = Dir_contents.files readdir in
-  let+ dune_file =
-    Dune_file.load
-      ~dir:(Source_tree_file.Dir.workspace path)
-      dir_status
-      project
-      ~files
-      ~parent:dune_file
-  in
+  let+ dune_file = Dune_file.load ~dir dir_status project ~files ~parent:dune_file in
   let files =
     let predicate =
       match dune_file with
@@ -235,7 +256,7 @@ and contents
     in
     Dune_file.Files.eval predicate ~files
   in
-  let vcs = Dir0.Vcs.get_vcs ~default:default_vcs ~readdir ~path in
+  let vcs = Dir0.Vcs.get_vcs ~default:default_vcs ~readdir ~dir in
   let sub_dirs =
     let sub_dirs =
       match dune_file with
@@ -246,16 +267,16 @@ and contents
       physical
         ~default_vcs:vcs
         ~project
-        ~dir:path
+        ~dir
         ~dirs_visited
         ~dirs:(Dir_contents.dirs readdir)
         ~sub_dirs
         ~dune_file
         ~parent_status:dir_status
     in
-    virtual_ ~project ~sub_dirs ~parent_status:dir_status ~dune_file ~path ~init:dirs
+    virtual_ ~project ~sub_dirs ~parent_status:dir_status ~dune_file ~dir ~init:dirs
   in
-  { Dir0.project; vcs; status = dir_status; path; files; sub_dirs; dune_file }
+  { Dir0.project; vcs; status = dir_status; dir; files; sub_dirs; dune_file }
 
 and find_dir_raw
       ~virtual_
@@ -264,7 +285,7 @@ and find_dir_raw
       ~status
       ~dirs_visited
       ~project
-      ~path
+      ~dir
       ~basename
   : Dir0.t Memo.t
   =
@@ -274,28 +295,39 @@ and find_dir_raw
     else status
   in
   let* readdir =
-    if virtual_
-    then Memo.return Dir_contents.empty
-    else
-      Dir_contents.of_source_path path
-      >>| function
-      | Ok dir -> dir
-      | Error _ -> Dir_contents.empty
+    if virtual_ then Memo.return Dir_contents.empty else Source_tree_file.Dir.contents dir
   in
   let* project =
     if status = Data_only
     then Memo.return project
-    else
-      Dune_project.load
-        ~dir:path
-        ~files:(Dir_contents.files readdir)
-        ~infer_from_opam_files:false
-        ~load_opam_file_with_contents:Dune_pkg.Opam_file.load_opam_file_with_contents
-      >>| Option.map
-            ~f:(Only_packages.filter_packages_in_project ~vendored:(status = Vendored))
-      >>| Option.value ~default:project
+    else (
+      let files = Dir_contents.files readdir in
+      let load_opam_file_with_contents =
+        Dune_pkg.Opam_file.load_opam_file_with_contents
+      in
+      (match Source_tree_file.Dir.as_workspace dir with
+       | Some dir ->
+         Dune_project.load
+           ~dir
+           ~files
+           ~infer_from_opam_files:false
+           ~load_opam_file_with_contents
+         >>| Option.map
+               ~f:(Only_packages.filter_packages_in_project ~vendored:(status = Vendored))
+       | None ->
+         Dune_project.gen_load
+           ~read:(fun path ->
+             Source_tree_file.Dir.file dir (Path.Local.basename path)
+             |> Source_tree_file.File.read
+             >>| Option.value_exn)
+           ~dir:(Source_tree_file.Dir.source_path dir)
+           ~display_dir:(Source_tree_file.Dir.path dir)
+           ~files
+           ~infer_from_opam_files:false
+           ~load_opam_file_with_contents)
+      >>| Option.value ~default:project)
   in
-  contents readdir ~default_vcs ~path ~dune_file ~dirs_visited ~project ~dir_status:status
+  contents readdir ~default_vcs ~dir ~dune_file ~dirs_visited ~project ~dir_status:status
 
 and physical_node =
   lazy
@@ -312,7 +344,7 @@ and physical_node =
             } ->
           find_dir_raw
             ~default_vcs
-            ~path
+            ~dir:(Source_tree_file.Dir.workspace path)
             ~basename
             ~virtual_:false
             ~dirs_visited
@@ -329,7 +361,9 @@ and virtual_node =
        (fun { Virtual_input.parent_dir; basename; dune_file; status; project } ->
           find_dir_raw
             ~default_vcs:Dir0.Vcs.Ancestor_vcs
-            ~path:(Path.Source.relative_fname parent_dir basename)
+            ~dir:
+              (Source_tree_file.Dir.workspace
+                 (Path.Source.relative_fname parent_dir basename))
             ~basename
             ~virtual_:true
             ~dune_file
@@ -350,7 +384,8 @@ let root =
     | Ok dir -> dir
     | Error unix_error -> error_unable_to_load ~path unix_error
   in
-  let vcs = Dir0.Vcs.get_vcs ~default:Ancestor_vcs ~readdir ~path in
+  let dir = Source_tree_file.Dir.workspace path in
+  let vcs = Dir0.Vcs.get_vcs ~default:Ancestor_vcs ~readdir ~dir in
   let* project =
     Dune_project.load
       ~dir:path
@@ -376,7 +411,7 @@ let root =
   contents
     readdir
     ~default_vcs:vcs
-    ~path
+    ~dir
     ~dune_file:None
     ~dirs_visited
     ~project
@@ -413,13 +448,14 @@ let find_excluded_ancestor path =
          let* child = sub_dir.sub_dir_as_t in
          loop child path
        | None ->
-         Dir_contents.of_source_path dir.path
+         let path = Dir0.path dir in
+         Dir_contents.of_source_path path
          >>| (function
           | Ok contents when Filename.Array.Map.mem (Dir_contents.dirs contents) sub_dir
             ->
             dir.dune_file
             |> Option.bind ~f:Dune_file.dirs_stanza_loc
-            |> Option.map ~f:(fun loc -> Path.Source.relative_fname dir.path sub_dir, loc)
+            |> Option.map ~f:(fun loc -> Path.Source.relative_fname path sub_dir, loc)
           | _ -> None))
   in
   let* root = Memo.Node.read root in
@@ -464,7 +500,7 @@ module Dir = struct
                    ~name:trace_event_name
                    ~start
                    ~stop
-                   ~dir:t.path
+                   ~dir:(Path.Source.of_local (Source_tree_file.Dir.source_path t.dir))
                in
                Dune_trace.Out.emit trace event;
                res)
@@ -475,133 +511,31 @@ module Dir = struct
   end
 end
 
-module Workspace_dir = Dir
-
 module Rules = struct
   module Backing = Source_tree_file.Backing
   module File = Source_tree_file.File
 
   module Dir = struct
-    type loaded =
-      { mount : Source_tree_file.Mount.t
-      ; logical_path : Path.Build.t
-      ; backing : Backing.t
-      ; status : Source_dir_status.t
-      ; files : Filename.Array.Set.t
-      ; sub_dirs : loaded Filename.Array.Map.t
-      ; dune_file : Dune_file.t option
-      ; project : Dune_project.t
-      }
+    include Dir
 
-    type t =
-      | Source of Workspace_dir.t
-      | Mounted of loaded
-
-    type sub_dir =
-      | Source_sub_dir of Workspace_dir.sub_dir
-      | Mounted_sub_dir of loaded
-
-    let source dir = Source dir
-
-    let as_source = function
-      | Source dir -> Some dir
-      | Mounted _ -> None
+    let as_source t =
+      Source_tree_file.Dir.as_workspace t.dir |> Option.map ~f:(fun _ -> t)
     ;;
 
-    let source_path = function
-      | Source dir -> Path.Source.to_local (Workspace_dir.path dir)
-      | Mounted { logical_path; _ } -> Dune_project.dir_in_context logical_path
-    ;;
-
-    let path = function
-      | Source dir -> Path.source (Workspace_dir.path dir)
-      | Mounted { logical_path; _ } -> Path.build logical_path
-    ;;
-
-    let file t local =
-      match t with
-      | Source dir ->
-        Path.Source.append_local (Workspace_dir.path dir) local |> File.workspace
-      | Mounted { mount; logical_path; backing; _ } ->
-        File.mounted
-          ~mount
-          ~logical:(Path.Build.append_local logical_path local)
-          ~backing:(Backing.append_local backing local)
-    ;;
-
-    let filenames = function
-      | Source dir -> Workspace_dir.filenames dir
-      | Mounted { files; _ } -> files
-    ;;
-
-    let sub_dirs = function
-      | Source dir ->
-        Workspace_dir.sub_dirs dir
-        |> Filename.Array.Map.mapi ~f:(fun _ dir -> Source_sub_dir dir)
-      | Mounted { sub_dirs; _ } ->
-        Filename.Array.Map.mapi sub_dirs ~f:(fun _ dir -> Mounted_sub_dir dir)
-    ;;
-
-    let sub_dir_names t = sub_dirs t |> Filename.Array.Map.keys
-
-    let sub_dir_as_t = function
-      | Source_sub_dir dir -> Workspace_dir.sub_dir_as_t dir >>| source
-      | Mounted_sub_dir dir -> Memo.return (Mounted dir)
-    ;;
+    let source_path t = Source_tree_file.Dir.source_path t.dir
+    let path t = Source_tree_file.Dir.path t.dir
+    let file t local = Source_tree_file.Dir.append_local t.dir local
 
     let find_dir t path =
       let rec loop t = function
         | [] -> Memo.return (Some t)
         | name :: rest ->
-          (match t with
-           | Source dir ->
-             (match Filename.Array.Map.find (Workspace_dir.sub_dirs dir) name with
-              | None -> Memo.return None
-              | Some sub_dir ->
-                Workspace_dir.sub_dir_as_t sub_dir >>| source >>| Option.some)
-           | Mounted { sub_dirs; _ } ->
-             Memo.return
-               (Filename.Array.Map.find sub_dirs name
-                |> Option.map ~f:(fun dir -> Mounted dir)))
-          >>= (function
+          (match Filename.Array.Map.find t.sub_dirs name with
            | None -> Memo.return None
-           | Some t -> loop t rest)
+           | Some sub_dir -> sub_dir.sub_dir_as_t >>= fun t -> loop t rest)
       in
       loop t (Path.Local.explode path)
     ;;
-
-    let status = function
-      | Source dir -> Workspace_dir.status dir
-      | Mounted { status; _ } -> status
-    ;;
-
-    let dune_file = function
-      | Source dir -> Workspace_dir.dune_file dir
-      | Mounted { dune_file; _ } -> dune_file
-    ;;
-
-    let project = function
-      | Source dir -> Workspace_dir.project dir
-      | Mounted { project; _ } -> project
-    ;;
-
-    module Make_map_reduce (M : Memo.S) (Outcome : Monoid) = struct
-      open M.O
-
-      let rec map_reduce t ~traverse ~trace_event_name:_ ~f =
-        if not (Source_dir_status.Map.find traverse (status t))
-        then M.return Outcome.empty
-        else
-          let+ here = f t
-          and+ children =
-            Filename.Array.Map.values (sub_dirs t)
-            |> M.List.map ~f:(fun child ->
-              let* child = M.of_memo (sub_dir_as_t child) in
-              map_reduce child ~traverse ~trace_event_name:"" ~f)
-          in
-          List.fold_left children ~init:here ~f:Outcome.combine
-      ;;
-    end
   end
 
   module Mounted = struct
@@ -613,157 +547,48 @@ module Rules = struct
     let root t = t.root
     let projects t = t.projects
 
+    module Projects =
+      Dir.Make_map_reduce
+        (Memo)
+        (Monoid.Appendable_list (struct
+             type t = Dune_project.t * Dir.t
+           end))
+
     let load ~loc ~logical_root ~backing_root =
-      let mount = { Source_tree_file.Mount.logical_root; backing_root } in
-      let rec traverse
-                ~logical_path
-                ~backing
-                ~physical
-                ~status
-                ~parent_dune_file
-                ~parent_project
-        =
-        let* files, physical_subdirs =
-          (if physical then Backing.dir_contents backing else Memo.return (Ok None))
-          >>| function
-          | Ok (Some contents) -> contents
-          | Ok None -> Filename.Array.Set.empty, Filename.Array.Set.empty
-          | Error error ->
-            User_error.raise
-              ~loc
-              [ Pp.textf
-                  "Unable to read %s"
-                  (Path.to_string_maybe_quoted (Backing.path backing))
-              ; Unix_error.Detailed.pp error
-              ]
-        in
-        let source_path = Dune_project.dir_in_context logical_path in
-        let* loaded_project =
-          match status with
-          | Source_dir_status.Data_only -> Memo.return None
-          | Source_dir_status.Normal | Source_dir_status.Vendored ->
-            Dune_project.gen_load
-              ~read:(fun path ->
-                match Path.Local.descendant path ~of_:source_path with
-                | Some local ->
-                  Source_tree_file.File.mounted
-                    ~mount
-                    ~logical:(Path.Build.append_local logical_path local)
-                    ~backing:(Backing.append_local backing local)
-                  |> Source_tree_file.File.read
-                  >>| Option.value_exn
-                | None ->
-                  Code_error.raise
-                    "Mounted project requested a source outside its logical root"
-                    [ "source", Path.Local.to_dyn path
-                    ; "root", Path.Local.to_dyn source_path
-                    ])
-              ~dir:source_path
-              ~display_dir:(Path.build logical_path)
-              ~files
-              ~infer_from_opam_files:false
-              ~load_opam_file_with_contents:
-                Dune_pkg.Opam_file.load_opam_file_with_contents
-        in
-        let project, is_project_root =
-          match loaded_project, parent_project with
-          | Some project, _ -> project, true
-          | None, Some project -> project, false
-          | None, None ->
-            ( Dune_project.anonymous
-                ~dir:source_path
-                ~display_dir:(Path.build logical_path)
-                Package_info.empty
-                Package.Name.Map.empty
-            , true )
-        in
-        let* dune_file =
-          Dune_file.load
-            ~dir:(Source_tree_file.Dir.mounted ~mount ~logical:logical_path ~backing)
-            status
-            project
-            ~files
-            ~parent:parent_dune_file
-        in
-        let visible_files =
-          let predicate =
-            match dune_file with
-            | None -> Dune_file.Files.default
-            | Some dune_file -> Dune_file.files dune_file
-          in
-          Dune_file.Files.eval predicate ~files
-        in
-        let sub_dirs_spec =
-          match dune_file with
-          | None -> Source_dir_status.Spec.default
-          | Some dune_file -> Dune_file.sub_dir_status dune_file
-        in
-        let all_subdirs =
-          match dune_file with
-          | None -> physical_subdirs
-          | Some dune_file ->
-            Filename.Array.Set.union physical_subdirs (Dune_file.sub_dirnames dune_file)
-        in
-        let status_map = Source_dir_status.Spec.eval sub_dirs_spec ~dirs:all_subdirs in
-        let* children =
-          Filename.Array.Set.to_list all_subdirs
-          |> Memo.List.filter_map ~f:(fun basename ->
-            let open Source_dir_status.Or_ignored in
-            match Source_dir_status.Per_dir.status status_map ~dir:basename with
-            | Ignored -> Memo.return None
-            | Status child_status ->
-              let child_status =
-                if Dune_project.cram project && Cram_test.is_cram_suffix basename
-                then Source_dir_status.Data_only
-                else (
-                  match status, child_status with
-                  | Source_dir_status.Data_only, _ -> Source_dir_status.Data_only
-                  | Source_dir_status.Vendored, Source_dir_status.Normal ->
-                    Source_dir_status.Vendored
-                  | _, child_status -> child_status)
-              in
-              let+ child, child_projects =
-                traverse
-                  ~logical_path:(Path.Build.relative_fname logical_path basename)
-                  ~backing:(Backing.relative_fname backing basename)
-                  ~physical:(Filename.Array.Set.mem physical_subdirs basename)
-                  ~status:child_status
-                  ~parent_dune_file:dune_file
-                  ~parent_project:(Some project)
-              in
-              Some (basename, child, child_projects))
-        in
-        let sub_dirs =
-          List.map children ~f:(fun (name, child, _) -> name, child)
-          |> Filename.Array.Map.of_list_exn
-        in
-        let projects = List.concat_map children ~f:(fun (_, _, children) -> children) in
-        let dir =
-          { Dir.mount
-          ; logical_path
-          ; backing
-          ; status
-          ; files = visible_files
-          ; sub_dirs
-          ; dune_file
-          ; project
-          }
-        in
-        let projects =
-          if is_project_root then (project, Dir.Mounted dir) :: projects else projects
-        in
-        Memo.return (dir, projects)
-      in
-      let+ root, projects =
-        traverse
-          ~logical_path:logical_root
+      let dir =
+        Source_tree_file.Dir.mounted
+          ~mount:{ loc; logical_root; backing_root }
+          ~logical:logical_root
           ~backing:backing_root
-          ~physical:true
-          ~status:Source_dir_status.Normal
-          ~parent_dune_file:None
-          ~parent_project:None
       in
-      { root = Dir.Mounted root; projects }
+      let* root =
+        find_dir_raw
+          ~default_vcs:Ancestor_vcs
+          ~dir
+          ~basename:(Source_tree_file.Dir.basename dir)
+          ~virtual_:false
+          ~dirs_visited:Dirs_visited.empty
+          ~dune_file:None
+          ~status:Normal
+          ~project:
+            (Dune_project.anonymous
+               ~dir:(Source_tree_file.Dir.source_path dir)
+               ~display_dir:(Path.build logical_root)
+               Package_info.empty
+               Package.Name.Map.empty)
+      in
+      let+ projects =
+        Projects.map_reduce
+          root
+          ~traverse:Source_dir_status.Set.all
+          ~trace_event_name:"Mounted projects"
+          ~f:(fun dir ->
+            Memo.return
+              (if Path.Local.equal (Dune_project.root dir.project) (Dir.source_path dir)
+               then Appendable_list.singleton (dir.project, dir)
+               else Appendable_list.empty))
+      in
+      { root; projects = Appendable_list.to_list projects }
     ;;
   end
 end

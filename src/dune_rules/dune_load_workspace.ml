@@ -62,16 +62,15 @@ let load () =
            ]
        | Some _ | None -> ());
       let project = Source_tree.Dir.project dir in
-      let source_dir = Source_tree.Rules.Dir.source dir in
       let projects =
         if Path.Local.equal (Path.Source.to_local path) (Dune_project.root project)
-        then Appendable_list.singleton (status dir, project, source_dir)
+        then Appendable_list.singleton (status dir, project, dir)
         else Appendable_list.empty
       in
       let dune_files =
         match Source_tree.Dir.dune_file dir with
         | None -> Appendable_list.empty
-        | Some d -> Appendable_list.singleton (source_dir, project, d)
+        | Some d -> Appendable_list.singleton (dir, project, d)
       in
       Memo.return (projects, dune_files)
     in
