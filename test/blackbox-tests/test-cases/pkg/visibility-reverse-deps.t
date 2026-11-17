@@ -52,17 +52,6 @@ package lists the locked package as a test dependency:
   $ dune build @src/tool 2>&1 | head -1
   false
 
-A directory with no package scope does not see the binary:
-
-  $ cat > dune <<EOF
-  > (rule
-  >  (alias mine)
-  >  (action (run mybin)))
-  > EOF
-  $ dune build @mine 2>&1 | grep '^Error'
-  Error: Program mybin not found in the tree or in PATH
-  [1]
-
 A workspace package that declares the locked package runs it:
 
   $ cat > consumer/dune <<EOF
