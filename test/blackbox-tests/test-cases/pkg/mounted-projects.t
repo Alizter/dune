@@ -39,17 +39,9 @@ or be reassigned to the mounted package during installation.
   $ echo '(library (public_name support))' > workspace-support/dune
   $ echo 'let message = "workspace"' > workspace-support/support.ml
   $ mkdir -p _shared/other
-  $ cat > _shared/other/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name support))
-  > (package (name unused))
-  > EOF
-  $ cat > _shared/other/dune <<'EOF'
-  > (library (public_name support) (modules support))
-  > (library (public_name unused) (modules unused))
-  > EOF
+  $ (cd _shared/other && make_dune_project_with_package 3.25 support)
+  $ echo '(library (public_name support))' > _shared/other/dune
   $ echo 'let message = "unselected"' > _shared/other/support.ml
-  $ echo 'let value = ()' > _shared/other/unused.ml
   $ echo '(library (public_name left) (libraries support))' > _shared/dune
   $ echo '(library (public_name right) (libraries support))' > _shared/sub/dune
   $ echo 'let message = "left/" ^ Support.message' > _shared/left.ml
@@ -108,11 +100,7 @@ The same undeclared provider is hidden when it is opaque: requesting the
 package itself runs its recipe. The recipe must not be run while resolving
 left's libraries.
 
-  $ make_lockpkg right <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_shared))
-  > (build (progn (run false) (patch missing.patch)))
-  > EOF
+  $ sed -i '3s/(run false)/(progn & (patch missing.patch))/' dune.lock/right.pkg
   $ build_pkg right 2>&1 | grep -v '^ *$'
   File "dune.lock/right.pkg", line 3, characters 19-24:
   3 | (build (progn (run false) (patch missing.patch)))
@@ -138,12 +126,7 @@ building the metadata-only intermediate package.
   > (depends right)
   > (build (run false))
   > EOF
-  $ make_lockpkg left <<EOF
-  > (version 1.0)
-  > (depends bridge)
-  > (source (copy $PWD/_shared))
-  > (build (run false))
-  > EOF
+  $ echo '(depends bridge)' | append_to_lockpkg left
   $ dune build main_left.exe
   $ _build/default/main_left.exe
   right/workspace
@@ -167,11 +150,7 @@ keeps vendored packages and the build succeeds.
   $ (cd _bundle/vendor && make_dune_project_with_package 3.25 vendored_support)
   $ echo '(library (public_name vendored_support))' > _bundle/vendor/dune
   $ touch _bundle/vendor/vendored_support.ml
-  $ make_lockpkg bundle <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_bundle))
-  > (build (system "echo recipe ran"))
-  > EOF
+  $ make_dune_source_lockpkg native bundle "$PWD/_bundle"
   $ dune build _build/default/.pkg/bundle/bundle.cma
   File "_build/default/.pkg/bundle/dune", line 2, characters 41-57:
   Error: Library "vendored_support" not found.
