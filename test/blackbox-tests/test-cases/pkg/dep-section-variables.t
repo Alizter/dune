@@ -70,7 +70,7 @@ Section variables expanded via (system) produce relative paths:
   >   )))
   > EOF
 
-  $ build_pkg system-consumer 2>&1 | censor
+  $ build_pkg system-consumer 2>&1 | censor | tee direct-output
   ../../../_private/default/.packages/$DIGEST/lib/dep
   ../../../_private/default/.packages/$DIGEST/lib/dep
   ../../../_private/default/.packages/$DIGEST/bin
@@ -123,7 +123,8 @@ These currently expand to absolute paths instead of relative ones:
   >   (run cat %{pkg:dep:stublibs}/stublibs-file)))
   > EOF
 
-  $ build_pkg run-consumer 2>&1 | censor | dune_cmd subst '/[^ ]*/cat:' 'cat:'
+  $ build_pkg run-consumer 2>&1 | censor |
+  >   dune_cmd subst '/[^ ]*/cat:' 'cat:' | tee -a direct-output
   $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/lib/dep
   $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/lib/dep
   $PWD/_build/.sandbox/$DIGEST1/_private/default/.packages/$DIGEST2/bin
@@ -144,6 +145,38 @@ These currently expand to absolute paths instead of relative ones:
   man-data
   toplevel-data
   stublibs-data
+
+A Dune project installing the same payload through install stanzas, built
+natively or by an opaque recipe, exposes the sections the same way to both
+requesters: their output matches the direct provider's.
+
+  $ sections="lib libexec bin sbin share etc doc man toplevel stublibs"
+  $ mkdir -p _dep native opaque
+  $ cat > _dep/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name dep))
+  > EOF
+  $ for section in $sections; do
+  >   echo "$section-data" > "_dep/$section-file"
+  >   echo "(install (section $section) (files $section-file))" >> _dep/dune
+  > done
+  $ make_backend_lockdirs dep "$PWD/_dep"
+  $ for backend in native opaque; do
+  >   cp dune.lock/system-consumer.pkg dune.lock/run-consumer.pkg \
+  >     "$backend/dune.lock"
+  > done
+  $ check() (
+  >   cd "$1"
+  >   build_pkg system-consumer 2>&1 | censor
+  >   build_pkg run-consumer 2>&1 | censor |
+  >     dune_cmd subst '/[^ ]*/cat:' 'cat:'
+  > )
+
+  $ check native | diff direct-output -
+  $ check opaque | diff direct-output -
+  $ cat opaque/$pkg_root/dep/_install/opaque-recipe
+  opaque
+  $ test ! -e native/$pkg_root/dep/_install/opaque-recipe
 
 An install action and an install file can describe the same installed artifact.
 A dependency consumes that artifact once, rather than colliding with itself.
