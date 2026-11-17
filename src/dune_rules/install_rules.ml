@@ -1211,15 +1211,7 @@ let () =
     let* opaque =
       if Package.Name.Map.mem packages package
       then Memo.return None
-      else
-        let* mounted = Pkg_sources.find_mounted context_name package in
-        match mounted with
-        | Some mounted ->
-          let* kind = Pkg_sources.Mounted.kind_exn mounted in
-          (match kind with
-           | `Dune -> Memo.return None
-           | `Opam -> Pkg_rules.dependency context_name package >>| Option.some)
-        | None -> Memo.return None
+      else Pkg_rules.find_opaque context_name package
     in
     match opaque with
     | None ->
@@ -1232,7 +1224,7 @@ let () =
           Install.Entry.Unexpanded.expand entry
           |> fun expanded ->
           Install.Entry.Expanded.set_src expanded (Path.build entry.src) |> Option.some)
-    | Some opaque ->
+    | Some (_, opaque) ->
       let+ dependency, _ = Action_builder.evaluate_and_collect_facts opaque in
       Pkg_rules.Dependency.install_entries dependency)
 ;;
