@@ -428,16 +428,6 @@ let find_excluded_ancestor path =
 
 let root () = Memo.Node.read root
 
-let files_of path =
-  find_dir path
-  >>| function
-  | None -> Path.Source.Set.empty
-  | Some dir ->
-    Dir0.filenames dir
-    |> Filename.Array.Set.to_list
-    |> Path.Source.Set.of_list_map ~f:(Path.Source.relative_fname path)
-;;
-
 module Dir = struct
   include Dir0
 

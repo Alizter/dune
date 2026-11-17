@@ -355,6 +355,16 @@ let source_tree_dir ~dir =
      | Some local -> Source_tree.Rules.Dir.find_dir root local)
 ;;
 
+let source_files ~dir =
+  source_tree_dir ~dir
+  >>| function
+  | None -> Path.Build.Set.empty
+  | Some source_dir ->
+    Source_tree.Rules.Dir.filenames source_dir
+    |> Filename.Array.Set.to_list
+    |> Path.Build.Set.of_list_map ~f:(Path.Build.relative_fname dir)
+;;
+
 let vendored_warnings ~dir =
   let* project = find_loaded_project ~dir in
   if Loaded_project.vendored_warnings project

@@ -114,8 +114,6 @@ val find_excluded_ancestor : Path.Source.t -> (Path.Source.t * Loc.t) option Mem
     ancestor of [fn]. *)
 val nearest_dir : Path.Source.t -> Dir.t Memo.t
 
-val files_of : Path.Source.t -> Path.Source.Set.t Memo.t
-
 (** [true] iff the path is a vendored directory *)
 val is_vendored : Path.Source.t -> bool Memo.t
 

@@ -47,6 +47,7 @@ val stanzas_of_package
 val source_tree_root : dir:Path.Build.t -> Source_tree.Rules.Dir.t option Memo.t
 
 val source_tree_dir : dir:Path.Build.t -> Source_tree.Rules.Dir.t option Memo.t
+val source_files : dir:Path.Build.t -> Path.Build.Set.t Memo.t
 val vendored_warnings : dir:Path.Build.t -> bool Memo.t
 val find_loaded_project : dir:Path.Build.t -> Loaded_project.t Memo.t
 val find_project : dir:Path.Build.t -> Dune_project.t Memo.t
