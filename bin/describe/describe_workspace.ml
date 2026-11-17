@@ -755,22 +755,21 @@ module Crawl = struct
      then it always succeeds, unless [options.no_recursive] is set in which
      case it only matches the workspace root. If [dirs = Some l], then a
      matching directory is search in the list [l]. *)
-  let source_path_is_in_dirs ~no_recursive dirs (p : Path.Local.t) =
+  let source_path_is_in_dirs ~no_recursive dirs (p : Path.Source.t) =
     match dirs with
-    | None -> if no_recursive then Path.Local.is_root p else true
+    | None -> if no_recursive then Path.Source.equal p Path.Source.root else true
     | Some dirs ->
-      let dirs = List.map dirs ~f:Path.Source.to_local in
       if no_recursive
-      then List.exists ~f:(fun dir -> Path.Local.equal p dir) dirs
-      else List.exists ~f:(fun dir -> Path.Local.is_descendant p ~of_:dir) dirs
+      then List.exists ~f:(fun dir -> Path.Source.equal p dir) dirs
+      else List.exists ~f:(fun dir -> Path.Source.is_descendant p ~of_:dir) dirs
   ;;
 
   (* Tests whether a dune file is located in a path that is a descendant of
      some directory *)
   let dune_file_is_in_dirs ~no_recursive dirs dune_file =
-    let dir = Dune_file.dir dune_file in
-    Option.is_none (Dune_rules.Pkg_sources.package_of_dir_in_context dir)
-    && source_path_is_in_dirs ~no_recursive dirs dir
+    Dune_file.dir dune_file
+    |> Path.Source.of_local
+    |> source_path_is_in_dirs ~no_recursive dirs
   ;;
 
   (* Tests whether a library is located in a path that is a descendant of some
@@ -779,10 +778,7 @@ module Crawl = struct
     source_path_is_in_dirs
       ~no_recursive
       dirs
-      (Lib.info lib
-       |> Lib_info.best_src_dir
-       |> Path.as_in_build_dir_exn
-       |> Dune_project.dir_in_context)
+      (Path.drop_build_context_exn @@ Lib_info.best_src_dir @@ Lib.info lib)
   ;;
 
   (* Builds a workspace item for the root path *)
