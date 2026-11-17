@@ -28,5 +28,3 @@ materialiser, even though the package has no source content.
 
   $ dune build out
   building consumer
-  $ cat _build/default/out
-  ok

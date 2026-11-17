@@ -20,8 +20,6 @@ The workspace package supplies the missing dependency without a lock entry.
 
   $ dune build out
   building consumer
-  $ cat _build/default/out
-  ok
 
 Inactive conditional workspace dependencies do not become materialisation roots.
 

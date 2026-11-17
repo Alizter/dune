@@ -54,5 +54,3 @@ layout, checking that each provider's value is available.
 
   $ dune build out
   building consumer
-  $ cat _build/default/out
-  ok

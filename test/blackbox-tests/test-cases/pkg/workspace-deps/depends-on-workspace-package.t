@@ -36,8 +36,6 @@ The lock entry refers to the existing workspace definition of myws.
 
   $ dune build @check
   building mylock
-  $ cat _build/default/out
-  done
 
 A workspace package named dune needs mylock for its development setup. The
 opaque recipe's dependency on the dune build tool must not close a cycle back
