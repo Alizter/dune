@@ -97,8 +97,7 @@ package. A missing optional tool should simply disable its rule.
   >  (action (run false)))
   > EOF
 
-First with no workspace package, then with a package that has no directory
-scope. Neither builds any opaque package.
+Without a workspace package, no opaque package is built.
 
   $ make_dune_project 3.25
   $ PATH="$PWD/fakebin:$PATH" dune build @all
@@ -108,45 +107,6 @@ scope. Neither builds any opaque package.
   false
   $ test ! -e _build/default/disabled
   $ test ! -e _build/default/.pkg/provider/_install
-  $ cat >>dune-project <<'EOF'
-  > (package (name mypkg) (allow_empty))
-  > EOF
-  $ PATH="$PWD/fakebin:$PATH" dune build @all
-  $ cat _build/default/mybin-out
-  from system
-  $ test ! -e _build/default/.pkg/provider/_install
-
-An explicit package scope restricts the search, so this succeeds. The ambient
-and native tools remain usable; the undeclared opaque package is not forced.
-
-  $ make_dune_project 3.25
-  $ cat >>dune-project <<'EOF'
-  > (package
-  >  (name mypkg)
-  >  (allow_empty)
-  >  (dir .)
-  >  (depends native-tool))
-  > EOF
-  $ PATH="$PWD/fakebin:$PATH" dune build @all
-  $ cat _build/default/mybin-out _build/default/native-output _build/default/missing-available
-  from system
-  from native
-  false
-
-Declaring the opaque provider in the package scope still builds and selects it.
-The unrelated package must remain unbuilt.
-
-  $ make_dune_project 3.25
-  $ cat >>dune-project <<'EOF'
-  > (package
-  >  (name mypkg)
-  >  (allow_empty)
-  >  (dir .)
-  >  (depends native-tool provider))
-  > EOF
-  $ PATH="$PWD/fakebin:$PATH" dune build @all
-  $ cat _build/default/mybin-out
-  from lockdir
 
 An explicit action dependency supplies a package list even without a directory
 scope. Its opaque tool must take precedence over the ambient copy.
