@@ -364,55 +364,6 @@ one, the ordinary fallback still generates the installed file.
   $ cmp _workspace/_build/default/opam/foo.opam.generated _build/default/opam
   $ test ! -e .pkg
 
-A context-wide C compiler vendor probe must not build every package to look for
-its compiler. In particular, it must not build an opaque consumer while building
-that consumer's native foreign library dependency. The consumer's recipe lists
-the dependency's stubs archive to show that it was built first.
-
-  $ mkdir ../foreign-lookup
-  $ cd ../foreign-lookup
-  $ make_dune_project 3.25
-  $ make_lockdir
-  $ mkdir _native
-  $ (cd _native && make_dune_project_with_package 3.25 native)
-  $ cat > _native/dune <<'EOF'
-  > (library
-  >  (public_name native)
-  >  (foreign_stubs (language c) (names stubs)))
-  > EOF
-  $ echo 'external answer : unit -> int = "answer"' > _native/native.ml
-  $ cat > _native/stubs.c <<'EOF'
-  > #include <caml/mlvalues.h>
-  > CAMLprim value answer(value unit) { return Val_int(42); }
-  > EOF
-  $ make_lockpkg native <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_native))
-  > (build (run false))
-  > EOF
-  $ make_lockpkg opaque <<'EOF'
-  > (version 1.0)
-  > (depends native)
-  > (build
-  >  (progn
-  >   (system "echo opaque-built")
-  >   (system "ls %{pkg:native:lib} | grep '_stubs[.]a$'")
-  >   (write-file result ready)
-  >   (write-file opaque.install "share: [ \"result\" ]")))
-  > EOF
-  $ make_lockpkg unrelated <<'EOF'
-  > (version 1.0)
-  > (build (run false))
-  > EOF
-  $ cat > dune <<'EOF'
-  > (rule (target result) (action (copy %{pkg:opaque:share:result} %{target})))
-  > EOF
-  $ dune build result
-  opaque-built
-  libnative_stubs.a
-  $ cat _build/default/result
-  ready
-
 A JavaScript executable selects a compiler for its build. Compiling its library
 dependencies must not silently switch to an ambient compiler. Fake compilers
 make selection observable without depending on a particular JSOO version.

@@ -32,7 +32,9 @@ A source tree installed by the package (install/install-source-tree.t).
     "_build/install/default/share/foo/docs/index.txt" {"docs/index.txt"}
     "_build/install/default/share/foo/docs/nested/more.txt" {"docs/nested/more.txt"}
 
-Foreign stubs with an include directory in the source.
+Foreign stubs with an include directory in the source. An opaque consumer
+requests the archive cold: the context-wide C compiler probe must not build
+that consumer or an unrelated package to find the compiler.
 
   $ cat > _source/stubs/dune <<'EOF'
   > (library
@@ -49,6 +51,28 @@ Foreign stubs with an include directory in the source.
   > #include "value.h"
   > value foo_value(value unit) { return Val_int(VALUE); }
   > EOF
+  $ make_lockpkg opaque <<'EOF'
+  > (version 1.0)
+  > (depends foo)
+  > (build
+  >  (progn
+  >   (system "echo opaque-built")
+  >   (system "ls %{pkg:foo:lib}/stubs | grep '_stubs[.]a$'")
+  >   (write-file result ready)
+  >   (write-file opaque.install "share: [ \"result\" ]")))
+  > EOF
+  $ make_lockpkg unrelated <<'EOF'
+  > (version 1.0)
+  > (build (run false))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (rule (target result) (action (copy %{pkg:opaque:share:result} %{target})))
+  > EOF
+  $ dune build result
+  opaque-built
+  libstubs_stubs.a
+  $ cat _build/default/result
+  ready
   $ dune build $mount/stubs/stubs.cma 2>&1
 
 Duplicate foreign-object diagnostics list every conflicting source. Workspace
