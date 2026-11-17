@@ -67,18 +67,16 @@ let materialize_dependencies context owner =
     Action_builder.of_memo
       (let open Memo.O in
        let* workspace = Dune_load.packages ()
-       and* candidates = Pkg_sources.candidates context in
-       let candidates =
-         Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
-           Pkg_sources.Candidate.name candidate, candidate)
-       in
+       and* candidates = Pkg_sources.candidates context
+       and* locked = Pkg_sources.dependencies context in
        let versions =
          Package.Name.Map.union_exn
            (Package.Name.Map.map workspace ~f:(fun package ->
               Package.version package
               |> Option.value ~default:Dune_pkg.Package_version.dev))
-           (Package.Name.Map.map candidates ~f:(fun candidate ->
-              (Pkg_sources.Candidate.lock_pkg candidate).info.version))
+           (Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
+              ( Pkg_sources.Candidate.name candidate
+              , (Pkg_sources.Candidate.lock_pkg candidate).info.version )))
        in
        let* polled = Lock_dir.Sys_vars.solver_env in
        let* active = Lock_dir.lock_dir_active context in
@@ -95,7 +93,6 @@ let materialize_dependencies context owner =
            (Dune_pkg.Solver_env.extend Dune_pkg.Solver_env.with_defaults polled)
            recorded
        in
-       let system_dune name = Package.Name.equal name Dune_pkg.Dune_dep.name in
        let dependencies name =
          match Package.Name.Map.find workspace name with
          | Some package ->
@@ -121,18 +118,11 @@ let materialize_dependencies context owner =
                       hints
                       ~f:Dune_pkg.Resolve_opam_formula.Unsatisfied_formula_hint.pp))
          | None ->
-           (match Package.Name.Map.find candidates name with
+           (match Package.Name.Map.find locked name with
             | None ->
               User_error.raise
                 [ Pp.textf "Package %s does not exist" (Package.Name.to_string name) ]
-            | Some candidate ->
-              let pkg = Pkg_sources.Candidate.lock_pkg candidate in
-              Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
-                pkg.depends
-                ~platform:polled
-              |> Option.value ~default:[]
-              |> List.filter_map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) ->
-                Option.some_if (not (system_dune dep.name)) dep.name))
+            | Some dependencies -> dependencies)
        in
        let direct = dependencies owner in
        let module Closure = Top_closure.Make (Package.Name.Set) (Monad.Id) in

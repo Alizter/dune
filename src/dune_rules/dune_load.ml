@@ -232,15 +232,8 @@ let packages () =
 ;;
 
 let package_closure_for_context context names =
-  let* source_packages = packages ()
-  and* candidates = Pkg_sources.candidates context in
-  let+ managed =
-    Memo.List.map candidates ~f:(fun candidate ->
-      let+ dependencies = Pkg_sources.Candidate.dependencies candidate in
-      ( Pkg_sources.Candidate.name candidate
-      , Package.Name.Set.remove dependencies Dune_pkg.Dune_dep.name ))
-    >>| Package.Name.Map.of_list_exn
-  in
+  let+ source_packages = packages ()
+  and+ managed = Pkg_sources.dependencies context in
   let rec loop acc name =
     if Package.Name.Set.mem acc name
     then acc
@@ -251,13 +244,12 @@ let package_closure_for_context context names =
         | Some depends -> depends
         | None ->
           (match Package.Name.Map.find source_packages name with
-           | None -> Package.Name.Set.empty
+           | None -> []
            | Some package ->
              Package.depends package @ Package.depopts package
-             |> Package.Name.Set.of_list_map ~f:(fun (dep : Package_dependency.t) ->
-               dep.name))
+             |> List.map ~f:(fun (dep : Package_dependency.t) -> dep.name))
       in
-      Package.Name.Set.fold depends ~init:acc ~f:(fun name acc -> loop acc name))
+      List.fold_left depends ~init:acc ~f:loop)
   in
   Package.Name.Set.fold names ~init:Package.Name.Set.empty ~f:(fun name acc ->
     loop acc name)

@@ -115,6 +115,29 @@ let candidates =
   |> Staged.unstage
 ;;
 
+let dependencies =
+  Per_context.create_by_name ~name:"mounted-package-dependencies" (fun context ->
+    Memo.lazy_ ~name:"mounted-package-dependencies" (fun () ->
+      let* candidates = candidates context in
+      (* Polling the platform runs commands; do not without a lock dir. *)
+      match candidates with
+      | [] -> Memo.return Package.Name.Map.empty
+      | _ :: _ ->
+        let+ platform = Lock_dir.Sys_vars.solver_env in
+        Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
+          ( Candidate.name candidate
+          , Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
+              (Candidate.lock_pkg candidate).depends
+              ~platform
+            |> Option.value ~default:[]
+            |> List.filter_map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) ->
+              Option.some_if
+                (not (Package.Name.equal dep.name Dune_pkg.Dune_dep.name))
+                dep.name) )))
+    |> Memo.Lazy.force)
+  |> Staged.unstage
+;;
+
 let find_candidate context name =
   let+ candidates = candidates context in
   List.find candidates ~f:(fun candidate ->

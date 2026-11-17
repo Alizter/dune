@@ -33,6 +33,11 @@ end
 
 val candidates : Context_name.t -> Candidate.t list Memo.t
 val find_candidate : Context_name.t -> Package.Name.t -> Candidate.t option Memo.t
+
+(** Each candidate's locked dependencies on this platform, in lock order and
+    without dune. Reading it touches no package source. *)
+val dependencies : Context_name.t -> Package.Name.t list Package.Name.Map.t Memo.t
+
 val source : Candidate.t -> Source_input.t Memo.t
 
 (** Every source file and directory under a package backing. *)

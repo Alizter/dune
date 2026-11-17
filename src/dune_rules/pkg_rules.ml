@@ -2995,28 +2995,26 @@ let resolve_pkg_dep context (loc, package_name) =
 let mounted_paths context candidate =
   let ({ Lock_dir.Pkg.info; _ } as lock_pkg) = Pkg_sources.Candidate.lock_pkg candidate in
   let paths = Paths.map_path (candidate_paths candidate) ~f:Path.build in
-  let rec depends_on_marker seen = function
-    | [] -> Memo.return false
-    | name :: names ->
-      if is_relocatable_compiler_marker name
-      then Memo.return true
-      else if Package.Name.Set.mem seen name
-      then depends_on_marker seen names
-      else (
-        let seen = Package.Name.Set.add seen name in
-        Pkg_sources.find_candidate context name
-        >>= function
-        | None -> depends_on_marker seen names
-        | Some candidate ->
-          let* depends = Pkg_sources.Candidate.dependencies candidate in
-          depends_on_marker seen (Package.Name.Set.to_list depends @ names))
-  in
   let+ relocatable =
     if
       (not (Pkg_toolchain.is_compiler_package_with_toolchains_enabled info.name))
       || is_compiler_version_relocatable info
     then Memo.return true
-    else depends_on_marker Package.Name.Set.empty [ info.name ]
+    else
+      let+ dependencies = Pkg_sources.dependencies context in
+      let rec depends_on_marker seen = function
+        | [] -> false
+        | name :: names ->
+          if is_relocatable_compiler_marker name
+          then true
+          else if Package.Name.Set.mem seen name
+          then depends_on_marker seen names
+          else
+            depends_on_marker
+              (Package.Name.Set.add seen name)
+              (Option.value (Package.Name.Map.find dependencies name) ~default:[] @ names)
+      in
+      depends_on_marker Package.Name.Set.empty [ info.name ]
   in
   if relocatable
   then paths
@@ -3287,22 +3285,9 @@ let workspace_dependencies =
       "locked-packages-workspace-dependencies"
       ~input:(module Context_name)
       (fun context ->
-         let+ lock_dir = Lock_dir.get_exn context
-         and+ platform = Lock_dir.Sys_vars.solver_env
+         let+ depends = Pkg_sources.dependencies context
          and+ { Dune_load_workspace.packages = workspace; _ } =
            Dune_load_workspace.load ()
-         in
-         let depends =
-           Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform
-           |> Package.Name.Map.map ~f:(fun (pkg : Lock_dir.Pkg.t) ->
-             Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
-               pkg.depends
-               ~platform
-             |> Option.value ~default:[]
-             |> List.filter_map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) ->
-               Option.some_if
-                 (not (Package.Name.equal dep.name Dune_pkg.Dune_dep.name))
-                 dep.name))
          in
          let step reached =
            Package.Name.Map.filter_map depends ~f:(fun depends ->
@@ -3327,9 +3312,7 @@ let workspace_dependencies =
          in
          loop Package.Name.Map.empty)
   in
-  fun context ->
-    let* active = Lock_dir.lock_dir_active context in
-    if active then Memo.exec memo context else Memo.return Package.Name.Map.empty
+  Memo.exec memo
 ;;
 
 let ocamlpath universe =
