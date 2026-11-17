@@ -317,9 +317,7 @@ end = struct
     (match Path.Build.extract_build_context dir with
      | None -> Memo.return None
      | Some (ctx, _) ->
-       let* loaded_project = Dune_load.find_loaded_project ~dir in
-       Loaded_project.source_tree_dir loaded_project dir
-       >>| Option.map ~f:(fun st_dir -> ctx, st_dir))
+       Dune_load.source_tree_dir ~dir >>| Option.map ~f:(fun st_dir -> ctx, st_dir))
     >>= function
     | None -> group_component_or ~dir Generated
     | Some (ctx, st_dir) ->
