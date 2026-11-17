@@ -507,9 +507,8 @@ module Eval = struct
           let source_file = Path.Local.relative_fname eval.dir Source.Dune_file.fname in
           let origin = Loaded_project.output_path eval.loaded_project source_file in
           let root =
-            if Loaded_project.is_workspace eval.loaded_project
-            then None
-            else Some (Loaded_project.partition_root eval.loaded_project)
+            Loaded_project.owner eval.loaded_project
+            |> Option.map ~f:(fun _ -> Loaded_project.partition_root eval.loaded_project)
           in
           let include_context = Include_stanza.in_build_file origin ~root in
           collect_dynamic eval ~registry ~context include_context dynamic

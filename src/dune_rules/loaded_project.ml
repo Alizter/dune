@@ -38,8 +38,7 @@ let build_context t = t.build_context
 let partition_root t = t.partition_root
 let output_root t = t.output_root
 let stanza_mask t = t.stanza_mask
-let is_workspace t = Option.is_none t.mounted_package
-let visible_packages t = if is_workspace t then None else t.stanza_mask
+let visible_packages t = Option.bind t.mounted_package ~f:(fun _ -> t.stanza_mask)
 
 let vendored_warnings t =
   match t.mounted_package with

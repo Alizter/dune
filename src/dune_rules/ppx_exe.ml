@@ -75,9 +75,9 @@ end = struct
           let+ loaded_project =
             Dune_load.find_loaded_project ~dir:(Scope.root consumer_scope)
           in
-          if Loaded_project.is_workspace loaded_project
-          then Path.Source.root
-          else Path.Source.of_local (Loaded_project.source_root loaded_project)
+          (match Loaded_project.owner loaded_project with
+           | None -> Path.Source.root
+           | Some _ -> Path.Source.of_local (Loaded_project.source_root loaded_project))
       in
       { pps; scope_dir; opaque_packages }
     ;;
