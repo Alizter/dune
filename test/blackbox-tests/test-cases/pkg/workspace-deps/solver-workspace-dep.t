@@ -96,7 +96,7 @@ restore the previous solution from an action keyed only by missing packages.
 
   $ sed 's/(version 2.0)/(version 1.2)/' dune-project > dune-project.new
   $ mv dune-project.new dune-project
-  $ mv dune.lock saved-lock
+  $ rm -r dune.lock
   $ echo '(pkg enabled)' >> dune-workspace
   $ dune build result
   $ sed 's/(version 1.2)/(version 2.0)/' dune-project > dune-project.new

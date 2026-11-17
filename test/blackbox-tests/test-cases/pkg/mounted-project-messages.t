@@ -7,10 +7,7 @@ path, since that is where its files are.
   > (rule (alias use) (deps (package foo)) (action (echo used)))
   > EOF
   $ mkdir _foo
-  $ lock() {
-  > make_dune_source_lockpkg native foo "$PWD/_foo"
-  > }
-  $ lock
+  $ make_dune_source_lockpkg native foo "$PWD/_foo"
 
 A stanza that could belong to several packages lists their opam files.
 

@@ -23,7 +23,6 @@ disabling the download of the source a second time. [build_pkg] first runs
 [dune pkg print-digest], which does not fetch the source; it only stores the
 lock directory copy, so that store is not counted below.
 
-  $ target=_build/default/.pkg/test/_install
   $ build_pkg test
 
 We see no cache store errors and the cache store events for the fetched dir,
@@ -40,4 +39,4 @@ into hardlinks:
 
   $ dune clean
   $ export DUNE_CACHE=enabled
-  $ dune build $target
+  $ build_pkg test

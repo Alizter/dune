@@ -3,18 +3,18 @@ A ppx driver of a nested project can link dune-build-info.
   $ make_dune_project 3.25
   $ mkdir -p sub/driver
   $ (cd sub && make_dune_project 3.25)
-  $ cat > sub/dune <<'EOF2'
+  $ cat > sub/dune <<'EOF'
   > (library (name bar) (preprocess (pps identity)))
-  > EOF2
+  > EOF
   $ echo 'let value = 3' > sub/bar.ml
-  $ cat > sub/driver/dune <<'EOF2'
+  $ cat > sub/driver/dune <<'EOF'
   > (library
   >  (name identity)
   >  (kind ppx_rewriter)
   >  (libraries dune-build-info)
   >  (ppx.driver (main Identity.main)))
-  > EOF2
-  $ cat > sub/driver/identity.ml <<'EOF2'
+  > EOF
+  $ cat > sub/driver/identity.ml <<'EOF'
   > let main () =
   >   ignore (Build_info.V1.version ());
   >   let rec find flag = function
@@ -29,5 +29,5 @@ A ppx driver of a nested project can link dune-build-info.
   >   let output = open_out_bin (find "-o" args) in
   >   output_string output contents;
   >   close_out output
-  > EOF2
+  > EOF
   $ dune build sub/bar.cma
