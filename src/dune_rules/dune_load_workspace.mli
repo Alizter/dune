@@ -6,8 +6,7 @@ type t =
   { dune_files :
       (Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t) Appendable_list.t
   ; packages : Package.t Package.Name.Map.t
-  ; projects : Dune_project.t list
-  ; project_dirs : Source_tree.Rules.Dir.t Path.Local.Map.t
+  ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
   ; mask : Only_packages.t
   }
 

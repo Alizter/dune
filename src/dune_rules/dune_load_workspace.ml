@@ -5,8 +5,7 @@ type t =
   { dune_files :
       (Source_tree.Rules.Dir.t * Dune_project.t * Source.Dune_file.t) Appendable_list.t
   ; packages : Package.t Package.Name.Map.t
-  ; projects : Dune_project.t list
-  ; project_dirs : Source_tree.Rules.Dir.t Path.Local.Map.t
+  ; projects : (Dune_project.t * Source_tree.Rules.Dir.t) list
   ; mask : Only_packages.t
   }
 
@@ -127,11 +126,7 @@ let load () =
   let packages =
     Package.Name.Map.map ~f:fst all_packages |> Only_packages.filter_packages mask
   in
-  let project_dirs =
-    Path.Local.Map.of_list_map_exn projects ~f:(fun (_, project, dir) ->
-      Dune_project.root project, dir)
-  in
-  let projects = List.rev_map projects ~f:(fun (_, project, _) -> project) in
+  let projects = List.rev_map projects ~f:(fun (_, project, dir) -> project, dir) in
   let (_ : Package.Name.t Path.Local.Map.t) =
     match
       Package.Name.Map.values all_packages
@@ -153,7 +148,7 @@ let load () =
         ; Pp.textf "It already belongs to package %s" (name p2)
         ]
   in
-  { dune_files; mask; packages; projects; project_dirs }
+  { dune_files; mask; packages; projects }
 ;;
 
 let load =

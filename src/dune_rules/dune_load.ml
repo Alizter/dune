@@ -135,12 +135,11 @@ let workspace =
         | `Set names -> Some names
       in
       let projects =
-        List.map workspace.projects ~f:(fun project ->
+        List.map workspace.projects ~f:(fun (project, dir) ->
           Loaded_project.create
             ~project
             ~mounted_package:None
-            ~source_tree_root:
-              (Path.Local.Map.find_exn workspace.project_dirs (Dune_project.root project))
+            ~source_tree_root:dir
             ~context
             ~partition_root:(Context.build_dir context)
             ~stanza_mask)
@@ -388,5 +387,5 @@ let vendored_warnings ~dir =
 
 let projects () =
   let+ t = load () in
-  t.projects
+  List.map t.projects ~f:fst
 ;;
