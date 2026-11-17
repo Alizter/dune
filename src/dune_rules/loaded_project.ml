@@ -50,6 +50,13 @@ let vendored_warnings t =
      | Normal | Data_only -> false)
 ;;
 
+let visible_project t =
+  match visible_packages t with
+  | None -> t.project
+  | Some packages ->
+    Dune_project.filter_packages t.project ~f:(Package.Name.Set.mem packages)
+;;
+
 let owner t = t.mounted_package
 
 let packages t =

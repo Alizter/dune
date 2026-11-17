@@ -22,7 +22,7 @@ val build_context : t -> Build_context.t
 val partition_root : t -> Path.Build.t
 val is_workspace : t -> bool
 val output_root : t -> Path.Build.t
-val visible_packages : t -> Package.Name.Set.t option
+val visible_project : t -> Dune_project.t
 
 (** Build selection is separate from admitted package definitions: for example,
     disabled packages still need their opam metadata generated. *)

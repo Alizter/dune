@@ -523,13 +523,7 @@ let gen_rules sctx ~dir ~loaded_project ~src_dir =
   match loaded_project with
   | None -> Gen_rules.no_rules
   | Some loaded_project ->
-    let project =
-      let project = Loaded_project.project loaded_project in
-      match Loaded_project.visible_packages loaded_project with
-      | None -> project
-      | Some packages ->
-        Dune_project.filter_packages project ~f:(Package.Name.Set.mem packages)
-    in
+    let project = Loaded_project.visible_project loaded_project in
     let project_root = Dune_project.root project in
     (match Path.Local.is_descendant src_dir ~of_:project_root with
      | false -> Gen_rules.no_rules

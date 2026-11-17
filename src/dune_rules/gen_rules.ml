@@ -413,13 +413,7 @@ let duplicate_deps =
 let gen_project_rules =
   let rules sctx loaded_project =
     let* sctx = sctx in
-    let project = Loaded_project.project loaded_project in
-    let project =
-      match Loaded_project.visible_packages loaded_project with
-      | None -> project
-      | Some packages ->
-        Dune_project.filter_packages project ~f:(Package.Name.Set.mem packages)
-    in
+    let project = Loaded_project.visible_project loaded_project in
     let dune_version = Dune_project.dune_version project in
     let vendored = Loaded_project.vendored_warnings loaded_project in
     let+ () = Install_rules.gen_project_rules sctx project
