@@ -2689,10 +2689,6 @@ let setup_rules ~components ~dir ctx =
     let* db = DB.get package_universe in
     setup_package_rules db ~package_universe (Package.Name.Map.keys db.pkg_table)
   | true, [ ".dev-tool" ] -> Gen_rules.make_empty ~dir Subdir_set.all |> Memo.return
-  | _, [ ".pkg" ] ->
-    (* A context's lock packages are all mounted at [.pkg/<name>] in the
-       context itself, so nothing is built here. *)
-    Memo.return @@ Gen_rules.make (Memo.return Rules.empty)
   | _, ".pkg" :: _ :: _ ->
     Memo.return (Gen_rules.Redirect_to_parent Gen_rules.Rules.empty)
   | true, ".dev-tool" :: _ :: _ :: _ ->
