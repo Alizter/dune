@@ -58,10 +58,7 @@ from the invocation directory or the package root.
   $ echo '(plugin.generate)' > _source/use/dune
   $ echo original > _source/tools/generator/input.txt
   $ echo overlay > _overlay/input.txt
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.26)
-  > (package (name main) (depends foo))
-  > EOF
+  $ make_named_package_project main 3.26 foo
   $ cat > dune-workspace <<'EOF'
   > (lang dune 3.26)
   > (pkg enabled)
@@ -150,13 +147,8 @@ failures still print the complete output.
   >  (name generate)
   >  (executable ./compiled.exe))
   > EOF
-  $ source_lock_dir=host.lock make_lockpkg_file foo update.patch <<'EOF'
-  > --- a/tools/generator/input.txt
-  > +++ b/tools/generator/input.txt
-  > @@ -1 +1 @@
-  > -overlay
-  > +host-prepared
-  > EOF
+  $ sed s/+patched/+host-prepared/ dune.lock/foo.files/update.patch \
+  >   > host.lock/foo.files/update.patch
   $ test ! -e _source/tools/generator/compiled.exe
   $ dune build _build/target/.pkg/foo/use/result > compile-output 2>&1 ||
   >   { cat compile-output; false; }
