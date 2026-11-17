@@ -2,30 +2,21 @@ The same library can be consumed through native rules or an opaque recipe.
 Both cases use the same source and consumer, in independent build roots.
 
   $ make_external_mypkg_lib_source 'let x = 42'
-  $ cat > external_sources/dune <<'EOF'
-  > (library
-  >  (public_name mypkg.lib)
-  >  (name test_lib)
-  >  (modules test_lib))
-  > (executable (name tool) (modules tool))
-  > EOF
+  $ sed -i 's/(name test_lib)/& (modules test_lib)/' external_sources/dune
+  $ echo '(executable (name tool) (modules tool))' >> external_sources/dune
   $ echo 'let () = ()' > external_sources/tool.ml
-  $ mkdir _consumer native opaque
-  $ (cd _consumer && make_dune_project 3.11)
-  $ cat > _consumer/dune <<'EOF'
+  $ mkdir native
+  $ (cd native && make_dune_project 3.11)
+  $ cat > native/dune <<'EOF'
+  > (executable (name main) (modules main) (libraries foo))
   > (library
   >  (name foo)
   >  (modules foo)
   >  (libraries mypkg.lib))
-  > (executable
-  >  (name main)
-  >  (modules main)
-  >  (libraries foo))
   > EOF
-  $ echo 'let x = Test_lib.x' > _consumer/foo.ml
-  $ echo 'let () = Printf.printf "%d\n" Foo.x' > _consumer/main.ml
-  $ cp _consumer/* native/
-  $ cp _consumer/* opaque/
+  $ echo 'let x = Test_lib.x' > native/foo.ml
+  $ echo 'let () = Printf.printf "%d\n" Foo.x' > native/main.ml
+  $ cp -R native opaque
   $ make_backend_lockdirs mypkg "$PWD/external_sources"
 
 Describe the cold workspace before compilation. The consumer's executable and
