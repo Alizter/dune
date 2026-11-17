@@ -32,15 +32,6 @@ We could potentially resolve them during the copy.
   -> required by _build/default/.pkg/foo/_install
   [1]
 
-The failed copy leaves the original directory and symlink intact:
-
-  $ ls _src_local
-  link_to_dir
-  real_dir
-
-The failing package stays in the lock directory: building another package
-does not prepare its source.
-
 --------------------------------------------------------------------------------
 
 Case 2: Tarball source containing a directory symlink.
