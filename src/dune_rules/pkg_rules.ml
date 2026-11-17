@@ -3040,7 +3040,8 @@ let mounted_paths context candidate =
 ;;
 
 let dependency context candidate =
-  let+ paths = mounted_paths context candidate in
+  let open Action_builder.O in
+  let* paths = Action_builder.of_memo (mounted_paths context candidate) in
   let { Lock_dir.Pkg.info; exported_env; _ } = Pkg_sources.Candidate.lock_pkg candidate in
   Dependency.load paths ~variables:(Pkg_info.variables info) ~exported_env
 ;;
@@ -3052,8 +3053,7 @@ let find_opaque context name =
   | Some (mounted, `Opam) ->
     let candidate = Pkg_sources.Mounted.candidate mounted in
     let root = (candidate_paths candidate).target_dir in
-    let+ dependency = dependency context candidate in
-    Some (root, dependency)
+    Memo.return (Some (root, dependency context candidate))
 ;;
 
 let gen_mounted_rule context candidate ~dependencies =

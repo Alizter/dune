@@ -11,11 +11,7 @@ let materialize_ordered context names =
       in
       match mounted with
       | Some (mounted, `Opam) ->
-        let* dependency =
-          Action_builder.of_memo
-            (Pkg_rules.dependency context (Pkg_sources.Mounted.candidate mounted))
-        in
-        dependency
+        Pkg_rules.dependency context (Pkg_sources.Mounted.candidate mounted)
       | Some (mounted, `Dune) ->
         let candidate = Pkg_sources.Mounted.candidate mounted in
         let { Dune_pkg.Lock_dir.Pkg.info; exported_env; _ } =

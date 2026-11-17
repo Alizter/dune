@@ -132,7 +132,7 @@ val find_package
 val dependency
   :  Context_name.t
   -> Pkg_sources.Candidate.t
-  -> Dependency.t Action_builder.t Memo.t
+  -> Dependency.t Action_builder.t
 
 val find_opaque
   :  Context_name.t
