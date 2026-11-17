@@ -601,12 +601,17 @@ module DB = struct
           , Some
               (if include_owner then visible else Package.Name.Set.remove visible owner) ))
     in
-    let visible_candidates candidates =
+    let visible name =
       let+ _, visible = Memo.Lazy.force visible_packages in
-      List.filter_map candidates ~f:(fun (owner, candidate) ->
-        match owner, visible with
-        | Some owner, Some visible when not (Package.Name.Set.mem visible owner) -> None
-        | _ -> Some candidate)
+      match visible with
+      | None -> true
+      | Some visible -> Package.Name.Set.mem visible name
+    in
+    let visible_candidates candidates =
+      Memo.List.filter_map candidates ~f:(fun (owner, candidate) ->
+        match owner with
+        | None -> Memo.return (Some candidate)
+        | Some owner -> visible owner >>| fun v -> Option.some_if v candidate)
     in
     let resolve_in (public : Public_libs.t) name =
       Lib_name.Map.find public.by_name name
@@ -628,12 +633,6 @@ module DB = struct
         Code_error.raise
           "Scope.DB.owner_db: no partition"
           [ "owner", Dyn.option Package.Name.to_dyn owner ]
-    in
-    let visible name =
-      let+ _, visible = Memo.Lazy.force visible_packages in
-      match visible with
-      | None -> true
-      | Some visible -> Package.Name.Set.mem visible name
     in
     (* A locked package the requester sees: the public libraries of its mount
        when it is a dune package, or the fact that it is opaque. [`None] for
@@ -670,13 +669,9 @@ module DB = struct
     in
     (* The visible locked packages, by lock metadata. *)
     let candidate_names () =
-      let+ candidates = Pkg_sources.candidates context
-      and+ _, visible = Memo.Lazy.force visible_packages in
-      List.filter_map candidates ~f:(fun candidate ->
-        let name = Pkg_sources.Candidate.name candidate in
-        match visible with
-        | Some visible when not (Package.Name.Set.mem visible name) -> None
-        | _ -> Some name)
+      Pkg_sources.candidates context
+      >>| List.map ~f:Pkg_sources.Candidate.name
+      >>= Memo.List.filter ~f:visible
     in
     let kinds names =
       Memo.parallel_map names ~f:(fun name ->
