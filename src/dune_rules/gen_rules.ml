@@ -360,7 +360,7 @@ let gen_common_directory_rules sctx ~dir source_dir =
   let+ () = Format_rules.setup_alias sctx ~dir
   and+ () =
     (* Cram tests of mounted packages are not run. *)
-    match Option.bind source_dir ~f:Source_tree.Dir.as_source with
+    match Source_tree.Dir.as_source source_dir with
     | None -> Memo.return ()
     | Some source_dir -> Cram_rules.rules source_dir ~sctx ~dir
   and+ () = Revdep_rules.add ~sctx ~dir in
@@ -370,14 +370,14 @@ let gen_common_directory_rules sctx ~dir source_dir =
 let gen_rules_source_only sctx ~dir source_dir =
   Rules.collect_unit (fun () ->
     let* sctx = sctx in
-    let+ () = gen_common_directory_rules sctx ~dir (Some source_dir)
+    let+ () = gen_common_directory_rules sctx ~dir source_dir
     and+ () =
       define_all_alias ~dir ~js_targets:[] ~project:(Source_tree.Dir.project source_dir)
     in
     ())
 ;;
 
-let gen_rules_group_part_or_root sctx dir_contents cctxs ~source_dir ~project ~dir
+let gen_rules_group_part_or_root sctx dir_contents cctxs ~source_dir ~dir
   : Compilation_context.t option Compilation_mode.Per_mode.t Loc.Map.t Memo.t
   =
   let+ () = gen_common_directory_rules sctx ~dir source_dir
@@ -389,6 +389,7 @@ let gen_rules_group_part_or_root sctx dir_contents cctxs ~source_dir ~project ~d
       Super_context.expander sctx ~dir
       >>= gen_rules_for_stanzas sctx dir_contents cctxs ~dune_file ~dir
     | None ->
+      let project = Source_tree.Dir.project source_dir in
       let+ () = define_all_alias ~dir ~js_targets:[] ~project in
       Loc.Map.empty
   in
@@ -533,7 +534,7 @@ let has_rules ~dir subdirs f =
        rules)
 ;;
 
-let gen_rules_standalone_or_root sctx ~dir ~project =
+let gen_rules_standalone_or_root sctx ~dir ~source_dir =
   let* sctx = sctx in
   let* standalone_or_root =
     Dir_contents.triage ~dir sctx
@@ -545,26 +546,18 @@ let gen_rules_standalone_or_root sctx ~dir ~project =
   let* rules' =
     Rules.collect_unit (fun () ->
       let* dir_contents = Dir_contents.Standalone_or_root.root standalone_or_root in
-      let source_dir = Dir_contents.source_dir dir_contents in
       let* cctxs =
-        gen_rules_group_part_or_root
-          sctx
-          dir_contents
-          Loc.Map.empty
-          ~source_dir
-          ~project
-          ~dir
+        gen_rules_group_part_or_root sctx dir_contents Loc.Map.empty ~source_dir ~dir
       in
       Dir_contents.Standalone_or_root.subdirs standalone_or_root
       >>= Memo.parallel_iter ~f:(fun dc ->
-        let source_dir = Dir_contents.source_dir dc in
+        let source_dir = Option.value_exn (Dir_contents.source_dir dc) in
         let+ (_ : Compilation_context.t option Compilation_mode.Per_mode.t Loc.Map.t) =
           gen_rules_group_part_or_root
             sctx
             dir_contents
             cctxs
             ~source_dir
-            ~project
             ~dir:(Dir_contents.dir dc)
         in
         ()))
@@ -691,13 +684,9 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
           Gen_rules.Rules (make_rules (gen_rules_source_only sctx ~dir source_dir))
         | Generated | Is_component_of_a_group_but_not_the_root _ ->
           Gen_rules.Redirect_to_parent (make_rules (Memo.return Rules.empty))
-        | Standalone (_, dune_file) | Group_root { dune_file; _ } ->
+        | Standalone (source_dir, _) | Group_root { source_dir; _ } ->
           Gen_rules.Rules
-            (make_rules
-               (gen_rules_standalone_or_root
-                  sctx
-                  ~dir
-                  ~project:(Dune_file.project dune_file)))
+            (make_rules (gen_rules_standalone_or_root sctx ~dir ~source_dir))
       in
       let opam_rules =
         Opam_create.gen_rules
