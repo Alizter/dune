@@ -138,12 +138,11 @@ module Inherit = struct
       Memo.create
         (sprintf "%s-root" name)
         ~input:(module Path.Build)
-        (fun output_root ->
-           let* loaded_project = Dune_load.find_loaded_project ~dir:output_root
+        (fun dir ->
+           let* loaded_project = Dune_load.find_loaded_project ~dir
            and* envs = Memo.Lazy.force for_context in
            let project = Loaded_project.project loaded_project in
            let root = root context project in
-           let dir = Loaded_project.output_root loaded_project in
            List.fold_left envs ~init:root ~f:(fun acc env -> f ~parent:acc ~dir env))
       |> Memo.exec
     in
@@ -166,9 +165,8 @@ module Inherit = struct
               | None -> Code_error.raise "invalid path" []
               | Some parent ->
                 let+ project = Dune_load.find_loaded_project ~dir:path in
-                let project_output_root = Loaded_project.output_root project in
-                if Path.Build.equal project_output_root path
-                then `Root project_output_root
+                if Path.Build.equal (Loaded_project.output_root project) path
+                then `Root path
                 else `Parent parent
             in
             match parent_path with
