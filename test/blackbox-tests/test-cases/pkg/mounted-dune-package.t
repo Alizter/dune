@@ -143,6 +143,30 @@ Dune-file decoding errors are deferred as well, not just dune-project errors.
   Error: Unknown constructor broken-stanza
   [1]
 
+A missing library in a workspace package still reports an unrelated native
+package's stored error. Availability remains false rather than raising. Remove
+the unrelated failing opaque sentinel just for this miss.
+
+  $ mv dune.lock/unrelated.pkg unrelated.pkg
+  $ cat > dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name main) (dir .) (depends foo))
+  > EOF
+  $ cat > dune <<'EOF'
+  > (executable (name main) (libraries absent))
+  > (rule
+  >  (target absent-available)
+  >  (action (write-file %{target} %{lib-available:absent})))
+  > EOF
+  $ dune build absent-available
+  $ cat _build/default/absent-available
+  false
+  $ dune build main.exe
+  File "_build/default/.pkg/broken/dune", line 1, characters 1-14:
+  Error: Unknown constructor broken-stanza
+  [1]
+  $ mv unrelated.pkg dune.lock/unrelated.pkg
+
 A library lookup in a consumer of the failed package reports that package's
 error rather than claiming its library does not exist.
 
