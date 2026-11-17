@@ -26,15 +26,14 @@ Because the script wrote into the private copy, the next build makes the copy
 again. A script that writes nothing leaves it alone.
 
   $ copy=_build/_private/default/.dune-source/foo/source/dune-project
-  $ inode() { ls -i "$1" | awk '{ print $1 }'; }
-  $ before=$(inode $copy)
+  $ ln $copy before
   $ dune build _build/default/.pkg/foo/out
-  $ test "$before" != "$(inode $copy)"
+  $ test ! $copy -ef before
   $ cat > _source/dune <<'EOF2'
   > (* -*- tuareg -*- *)
   > let () = Jbuild_plugin.V1.send {|(rule (with-stdout-to out (echo generated)))|}
   > EOF2
   $ dune build _build/default/.pkg/foo/out
-  $ before=$(inode $copy)
+  $ ln -f $copy before
   $ dune build _build/default/.pkg/foo/out
-  $ test "$before" = "$(inode $copy)"
+  $ test $copy -ef before
