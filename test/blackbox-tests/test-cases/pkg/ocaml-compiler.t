@@ -122,10 +122,7 @@ ambient OCaml installation.
   > printf 'let source = "managed parser"\n' > "${1%.mly}.ml"
   > printf 'val source : string\n' > "${1%.mly}.mli"
   > EOF
-  $ cat >mycamlsources/ocaml <<'EOF'
-  > #!/bin/sh
-  > echo managed toplevel
-  > EOF
+  $ printf '#!/bin/sh\necho managed toplevel\n' >mycamlsources/ocaml
   $ cp mycamlsources/ocaml mycamlsources/compiler-private-tool
   $ chmod +x mycamlsources/ocamllex mycamlsources/ocamlyacc \
   >   mycamlsources/ocaml mycamlsources/compiler-private-tool
@@ -142,10 +139,7 @@ ambient OCaml installation.
   > (source (copy $PWD/mycamlsources))
   > (build (write-file mycaml.install "bin: [ \"ocamlc\" ]"))
   > EOF
-  $ make_lockpkg unrelated <<'EOF'
-  > (version 1)
-  > (build (run false))
-  > EOF
+  $ printf '(version 1)\n(build (run false))\n' | make_lockpkg unrelated
 
 Keep only the tools needed to build the fake compiler on PATH.
 
@@ -191,20 +185,16 @@ generator inputs before each build so all four rules must run again.
   >   cat _build/default/lexer.ml _build/default/parser.ml \
   >     _build/default/toplevel-output _build/default/private-available
   > }
-  $ cat >dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty) (dir .))
-  > EOF
+  $ make_dune_project 3.25
+  $ echo '(package (name main) (allow_empty) (dir .))' >>dune-project
   $ rebuild
   3
   let source = "managed lexer"
   let source = "managed parser"
   managed toplevel
   true
-  $ cat >dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty))
-  > EOF
+  $ make_dune_project 3.25
+  $ echo '(package (name main) (allow_empty))' >>dune-project
   $ rebuild
   3
   let source = "managed lexer"
