@@ -79,9 +79,8 @@ So does a library that nothing provides:
   built other
   built second
 
-A package-owned workspace requester currently falls back to undeclared opaque
-providers. Record both a named lookup and a differently named provider before
-the symmetric-discovery spike removes this fallback.
+A package-owned workspace requester does not build undeclared opaque providers,
+whether the library is named like the provider or requires a fallback scan.
 
   $ cat > dune-project <<'EOF'
   > (lang dune 3.25)
@@ -90,17 +89,15 @@ the symmetric-discovery spike removes this fallback.
   $ echo 'let () = print_endline "selected"' > main.with.ml
   $ echo 'let () = print_endline "fallback"' > main.without.ml
   $ try '(select main.ml from (first -> main.with.ml) (-> main.without.ml))'
-  built first
   $ _build/default/main.exe
-  selected
-  $ test -e _build/default/.pkg/first/_install/cookie
+  fallback
+  $ test ! -e _build/default/.pkg/first/_install/cookie
   $ try '(select main.ml from (mismatch -> main.with.ml) (-> main.without.ml))'
-  built first
-  built other
-  built second
   $ _build/default/main.exe
-  selected
-  $ test -e _build/default/.pkg/other/_install/cookie
+  fallback
+  $ test ! -e _build/default/.pkg/first/_install/cookie
+  $ test ! -e _build/default/.pkg/other/_install/cookie
+  $ test ! -e _build/default/.pkg/second/_install/cookie
 
 An absolute findlib configuration must not provide a second route around the
 requester's opaque eligibility, either cold or after explicit installation.
@@ -108,14 +105,12 @@ requester's opaque eligibility, either cold or after explicit installation.
   $ touch findlib.conf
   $ export OCAMLFIND_CONF="$PWD/findlib.conf"
   $ try '(select main.ml from (first -> main.with.ml) (-> main.without.ml))'
-  built first
   $ _build/default/main.exe
-  selected
-  $ test -e _build/default/.pkg/first/_install/cookie
+  fallback
+  $ test ! -e _build/default/.pkg/first/_install/cookie
   $ try '(select main.ml from (mismatch -> main.with.ml) (-> main.without.ml))'
-  built second
   $ _build/default/main.exe
-  selected
+  fallback
   $ test ! -e _build/default/.pkg/other/_install/cookie
   $ build_pkg first > warm-first.log 2>&1
   $ build_pkg second > warm-second.log 2>&1
@@ -124,11 +119,11 @@ requester's opaque eligibility, either cold or after explicit installation.
   $ echo '(executable (name main) (libraries (select main.ml from (first -> main.with.ml) (-> main.without.ml))))' > dune
   $ dune build main.exe
   $ _build/default/main.exe
-  selected
+  fallback
   $ echo '(executable (name main) (libraries (select main.ml from (mismatch -> main.with.ml) (-> main.without.ml))))' > dune
   $ dune build main.exe
   $ _build/default/main.exe
-  selected
+  fallback
 
 Compiler libraries remain available with the same findlib configuration.
 

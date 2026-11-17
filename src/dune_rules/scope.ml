@@ -264,8 +264,8 @@ module DB = struct
   (* The public libraries one partition defines, resolving into its scopes. *)
   module Public_libs = struct
     type t =
-      { by_name : (Package.Name.t option * redirect_to) list Lib_name.Map.t
-      ; by_id : (Package.Name.t option * redirect_to) Lib_id.Map.t
+      { by_name : redirect_to list Lib_name.Map.t
+      ; by_id : redirect_to Lib_id.Map.t
       ; scopes : partition Fdecl.t
       }
 
@@ -305,8 +305,6 @@ module DB = struct
             match candidate with
             | None -> by_name, by_id
             | Some (public_name, r2, lib_id2) ->
-              let owner = Loaded_project.owner (Dune_file.loaded_project dune_file) in
-              let r2 = owner, r2 in
               let by_name =
                 Lib_name.Map.update by_name public_name ~f:(function
                   | None -> Some [ r2 ]
@@ -358,9 +356,7 @@ module DB = struct
           let+ installed_libs =
             let* active = Pkg_rules.lock_dir_active context_name in
             if active
-            then
-              let* paths = Context.default_ocamlpath context in
-              Lib.DB.of_paths context ~paths
+            then Lib.DB.of_paths context ~paths:[ lib_config.stdlib_dir ]
             else Lib.DB.installed context
           in
           { context
@@ -569,64 +565,33 @@ module DB = struct
     in
     package_scopes
 
-  (* The libraries a requester sees. The workspace's public libraries come
-     first, then those of the locked package named like the library, then
-     the compiler's, then the opaque packages the requester declares, then
-     the remaining visible ones. [owner] is the requester's package; [None]
-     sees everything. *)
+  (* Public dune libraries are independent of the requester. Opaque libraries
+     are discovered by building their eligible package, in its own scope. *)
   and owner_db (ctx : Context_libs.t) ~package_scopes ~owner ~include_owner =
     let context = Context.name ctx.context in
-    let visible_packages =
-      Memo.lazy_ ~name:"library-visible-packages" (fun () ->
+    let opaque_packages =
+      Memo.lazy_ ~name:"opaque-library-packages" (fun () ->
         match owner with
-        | None -> Memo.return (None, None)
+        | None -> Memo.return None
         | Some owner ->
-          let* visible =
+          let+ packages =
             Dune_load.package_closure_for_context
               context
               (Package.Name.Set.singleton owner)
-          and* workspace = Dune_load.packages () in
-          let declared =
-            if include_owner then visible else Package.Name.Set.remove visible owner
           in
-          let+ visible =
-            if not (Package.Name.Map.mem workspace owner)
-            then Memo.return visible
-            else
-              let+ managed = Pkg_sources.candidates context in
-              List.fold_left managed ~init:visible ~f:(fun visible candidate ->
-                let name = Pkg_sources.Candidate.name candidate in
-                if Package.Name.Map.mem workspace name
-                then visible
-                else Package.Name.Set.add visible name)
-          in
-          ( Some declared
-          , Some
-              (if include_owner then visible else Package.Name.Set.remove visible owner) ))
+          Some
+            (if include_owner then packages else Package.Name.Set.remove packages owner))
     in
-    let visible name =
-      let+ _, visible = Memo.Lazy.force visible_packages in
-      match visible with
+    let eligible_opaque name =
+      let+ packages = Memo.Lazy.force opaque_packages in
+      match packages with
       | None -> true
-      | Some visible -> Package.Name.Set.mem visible name
-    in
-    let visible_candidates candidates =
-      Memo.List.filter_map candidates ~f:(fun (owner, candidate) ->
-        match owner with
-        | None -> Memo.return (Some candidate)
-        | Some owner -> visible owner >>| fun v -> Option.some_if v candidate)
+      | Some packages -> Package.Name.Set.mem packages name
     in
     let resolve_in (public : Public_libs.t) name =
       Lib_name.Map.find public.by_name name
       |> Option.value ~default:[]
-      |> visible_candidates
-      >>= Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
-    in
-    let visible_names (public : Public_libs.t) =
-      Lib_name.Map.to_list public.by_name
-      |> Memo.List.filter_map ~f:(fun (name, candidates) ->
-        let+ candidates = visible_candidates candidates in
-        Option.some_if (List.is_non_empty candidates) name)
+      |> Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
     in
     let partition owner =
       Memo.exec (Lazy.force partition) (context, owner)
@@ -637,28 +602,23 @@ module DB = struct
           "Scope.DB.owner_db: no partition"
           [ "owner", Dyn.option Package.Name.to_dyn owner ]
     in
-    (* A locked package the requester sees: the public libraries of its mount
-       when it is a dune package, or the fact that it is opaque. [`None] for
-       one that is not mounted, not visible or fails to load. *)
     let mounted_libs package =
-      let* visible = visible package in
-      if not visible
-      then Memo.return `None
-      else
-        let* mounted = Pkg_sources.find_mounted context package in
-        match mounted with
-        | None -> Memo.return `None
-        | Some mounted ->
-          (match Pkg_sources.Mounted.kind mounted with
-           | Error _ -> Memo.return `None
-           | Ok `Opam -> Memo.return `Opaque
-           | Ok `Dune ->
-             let* errors = Dune_load.package_errors context package in
-             if List.is_non_empty errors
-             then Memo.return `None
-             else
-               let+ public = partition (Some package) in
-               `Native public)
+      let* mounted = Pkg_sources.find_mounted context package in
+      match mounted with
+      | None -> Memo.return `None
+      | Some mounted ->
+        (match Pkg_sources.Mounted.kind mounted with
+         | Error _ -> Memo.return `None
+         | Ok `Opam ->
+           let+ eligible = eligible_opaque package in
+           if eligible then `Opaque else `None
+         | Ok `Dune ->
+           let* errors = Dune_load.package_errors context package in
+           if List.is_non_empty errors
+           then Memo.return `None
+           else
+             let+ public = partition (Some package) in
+             `Native public)
     in
     (* The locked package named like a library. A dune package defines only
        libraries named after it. *)
@@ -670,11 +630,8 @@ module DB = struct
       | `None -> `None
       | `Native public -> `Native public
     in
-    (* The visible locked packages, by lock metadata. *)
     let candidate_names () =
-      Pkg_sources.candidates context
-      >>| List.map ~f:Pkg_sources.Candidate.name
-      >>= Memo.List.filter ~f:visible
+      Pkg_sources.candidates context >>| List.map ~f:Pkg_sources.Candidate.name
     in
     let kinds names =
       Memo.parallel_map names ~f:(fun name ->
@@ -684,20 +641,18 @@ module DB = struct
     (* Scanning a package builds it. One that needs the workspace is only
        scanned for a requester that declares it and that it does not need. *)
     let opaque names =
+      let* names = Memo.List.filter names ~f:eligible_opaque in
       if List.is_empty names
       then Memo.return []
       else
-        let* reverse = Pkg_rules.workspace_dependencies context
-        and* declared, _ = Memo.Lazy.force visible_packages in
+        let* reverse = Pkg_rules.workspace_dependencies context in
         List.filter names ~f:(fun name ->
           match Package.Name.Map.find reverse name with
           | None -> true
           | Some reached ->
-            (match owner, declared with
-             | Some owner, Some declared ->
-               Package.Name.Set.mem declared name
-               && not (Package.Name.Set.mem reached owner)
-             | None, _ | _, None -> false))
+            (match owner with
+             | Some owner -> not (Package.Name.Set.mem reached owner)
+             | None -> false))
         |> kinds
         >>| List.filter_map ~f:(fun (name, kind) ->
           match kind with
@@ -712,6 +667,20 @@ module DB = struct
         | Some (Error messages) -> Memo.return messages
         | Some (Ok `Dune) -> Dune_load.package_errors context name)
       >>| List.map ~f:Lib.DB.Resolve_result.invalid
+    in
+    let errors_for name candidates =
+      let* eligible = Memo.List.filter candidates ~f:eligible_opaque in
+      let* failed = errors eligible in
+      if List.is_non_empty failed
+      then Memo.return failed
+      else (
+        match owner with
+        | None -> Memo.return []
+        | Some owner ->
+          let* workspace = Dune_load.packages () in
+          if Package.Name.Map.mem workspace owner
+          then errors candidates
+          else errors [ Lib_name.package_name name ])
     in
     let search name packages =
       Memo.parallel_map packages ~f:(fun package ->
@@ -745,26 +714,11 @@ module DB = struct
           if installed
           then Memo.return []
           else
-            let* candidates = candidate_names ()
-            and* declared, _ = Memo.Lazy.force visible_packages in
-            let preferred, other =
-              match declared with
-              | None -> candidates, []
-              | Some declared ->
-                List.partition candidates ~f:(Package.Name.Set.mem declared)
-            in
-            let* results = opaque preferred >>= search name in
+            let* candidates = candidate_names () in
+            let* results = opaque candidates >>= search name in
             if List.is_non_empty results
             then Memo.return results
-            else
-              let* failed = errors preferred in
-              if List.is_non_empty failed
-              then Memo.return failed
-              else
-                let* results = opaque other >>= search name in
-                if List.is_non_empty results
-                then Memo.return results
-                else errors candidates
+            else errors_for name candidates
     in
     let resolve_lib_id (lib_id : Lib_id.t) =
       match lib_id with
@@ -787,28 +741,30 @@ module DB = struct
          | Some public ->
            (match Lib_id.Map.find public.by_id lib_id with
             | None -> Memo.return Lib.DB.Resolve_result.not_found
-            | Some rt ->
-              let+ results =
-                visible_candidates [ rt ]
-                >>= Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
-              in
-              List.hd_opt results |> Option.value ~default:Lib.DB.Resolve_result.not_found))
+            | Some rt -> Public_libs.resolve_redirect_to public rt))
     in
     let all () =
-      let* workspace = partition None >>= visible_names in
+      let* workspace =
+        partition None >>| fun public -> Lib_name.Map.keys public.by_name
+      in
       let+ locked =
         candidate_names ()
         >>= kinds
         >>= Memo.List.concat_map ~f:(fun (name, kind) ->
           match kind with
           | None | Some (Error _) -> Memo.return []
-          | Some (Ok `Dune) -> partition (Some name) >>= visible_names
+          | Some (Ok `Dune) ->
+            partition (Some name) >>| fun public -> Lib_name.Map.keys public.by_name
           | Some (Ok `Opam) ->
-            Memo.exec (Lazy.force opaque_libs) (context, name)
-            >>= (function
-             | None -> Memo.return []
-             | Some (findlib, _) ->
-               Findlib.all_packages findlib >>| List.map ~f:Dune_package.Entry.name))
+            let* eligible = eligible_opaque name in
+            if not eligible
+            then Memo.return []
+            else
+              Memo.exec (Lazy.force opaque_libs) (context, name)
+              >>= (function
+               | None -> Memo.return []
+               | Some (findlib, _) ->
+                 Findlib.all_packages findlib >>| List.map ~f:Dune_package.Entry.name))
       in
       List.sort_uniq (workspace @ locked) ~compare:Lib_name.compare
     in

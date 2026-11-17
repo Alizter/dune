@@ -232,7 +232,7 @@ materialised and b-provider's installation directory becomes a direct
 dependency, along with the installed files of its native dependency d.
 Package c is not in this closure.
 
-  $ echo '(package (name a))' >>dune-project
+  $ echo '(package (name a) (depends b-provider))' >>dune-project
   $ mkdir workspace-a
   $ cat >workspace-a/dune <<'EOF'
   > (library
