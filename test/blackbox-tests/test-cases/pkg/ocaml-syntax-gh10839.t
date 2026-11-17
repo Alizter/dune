@@ -88,13 +88,7 @@ must not be needed to materialize that compiler for the first time.
   > EOF
   $ make_lockdir
   $ echo '(ocaml script-compiler)' >> dune.lock/lock.dune
-  $ make_lockpkg script-compiler <<EOF
-  > (version 1.0)
-  > (install
-  >  (progn
-  >   (system "mkdir -p %{bin}")
-  >   (run cp $(command -v ocamlc) $(command -v ocaml) %{bin})))
-  > EOF
+  $ cp ../compiler-for-script/dune.lock/script-compiler.pkg dune.lock/
   $ dune build result
   $ cat _build/default/result
   workspace-evaluated

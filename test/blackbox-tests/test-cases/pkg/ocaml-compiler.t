@@ -184,17 +184,19 @@ generator inputs before each build so all four rules must run again.
   >   printf '#!/bin/sh\nexit 42\n' >"_path/$tool"
   >   chmod +x "_path/$tool"
   > done
+  $ rebuild() {
+  >   echo >>lexer.mll && echo >>parser.mly
+  >   dune build lexer.ml parser.ml toplevel-output private-available
+  >   dune trace cat | grep -c '"name":"start".*mycaml-tools/_install/bin/ocaml'
+  >   cat _build/default/lexer.ml _build/default/parser.ml \
+  >     _build/default/toplevel-output _build/default/private-available
+  > }
   $ cat >dune-project <<'EOF'
   > (lang dune 3.25)
   > (package (name main) (allow_empty) (dir .))
   > EOF
-  $ echo >>lexer.mll
-  $ echo >>parser.mly
-  $ dune build lexer.ml parser.ml toplevel-output private-available
-  $ dune trace cat | grep -c '"name":"start".*mycaml-tools/_install/bin/ocaml'
+  $ rebuild
   3
-  $ cat _build/default/lexer.ml _build/default/parser.ml \
-  >   _build/default/toplevel-output _build/default/private-available
   let source = "managed lexer"
   let source = "managed parser"
   managed toplevel
@@ -203,13 +205,8 @@ generator inputs before each build so all four rules must run again.
   > (lang dune 3.25)
   > (package (name main) (allow_empty))
   > EOF
-  $ echo >>lexer.mll
-  $ echo >>parser.mly
-  $ dune build lexer.ml parser.ml toplevel-output private-available
-  $ dune trace cat | grep -c '"name":"start".*mycaml-tools/_install/bin/ocaml'
+  $ rebuild
   3
-  $ cat _build/default/lexer.ml _build/default/parser.ml \
-  >   _build/default/toplevel-output _build/default/private-available
   let source = "managed lexer"
   let source = "managed parser"
   managed toplevel
