@@ -892,35 +892,18 @@ module DB = struct
   ;;
 
   let libs_for_package context name =
-    let* packages = Dune_load.packages () in
-    if Package.Name.Map.mem packages name
-    then
-      let+ scopes = workspace context in
-      Package.Name.Map.find scopes.by_package name
-      |> Option.map ~f:(fun scope -> scope.db)
-    else
-      let* candidate = Pkg_sources.find_candidate context name in
-      match candidate with
-      | None -> Memo.return None
-      | Some _ ->
-        let* mounted = Pkg_sources.find_mounted context name in
-        (match Option.map mounted ~f:Pkg_sources.Mounted.kind with
-         | Some (Ok `Dune) ->
-           partition context (Some name)
-           >>| (function
-            | Some (scopes, _) ->
-              Package.Name.Map.find scopes.by_package name
-              |> Option.map ~f:(fun scope -> scope.db)
-            | None -> None)
-         | Some (Ok `Opam | Error _) | None ->
-           let* ctx = Context_libs.get context in
-           let+ candidates = Pkg_sources.candidates context in
-           Some
-             (owner_db
-                ctx
-                ~package_scopes:(package_scopes ctx candidates)
-                ~owner:(Some name)
-                ~include_owner:true))
+    let* package = Pkg_rules.find_opaque context name in
+    match package with
+    | None -> Memo.return None
+    | Some _ ->
+      let* ctx = Context_libs.get context in
+      let+ candidates = Pkg_sources.candidates context in
+      Some
+        (owner_db
+           ctx
+           ~package_scopes:(package_scopes ctx candidates)
+           ~owner:(Some name)
+           ~include_owner:true)
   ;;
 
   module Lib_entry = struct
