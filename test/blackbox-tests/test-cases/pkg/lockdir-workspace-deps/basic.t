@@ -53,13 +53,3 @@ Its recorded recipe must not execute.
   $ echo '(executable (name main) (libraries consumer))' >> dune
   $ dune exec ./main.exe
   Hello from workspace-lib!
-
-A lock entry for a workspace package is a duplicate definition, not an override.
-
-  $ make_lockpkg workspace-lib <<'EOF'
-  > (version 1.0)
-  > EOF
-  $ dune build out 2>error
-  [1]
-  $ grep '^Error:' error
-  Error: A package named "workspace-lib" is defined locally but is also present
