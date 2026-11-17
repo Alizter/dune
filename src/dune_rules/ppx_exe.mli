@@ -6,14 +6,9 @@ open Import
 
 module Key : sig
   module Decoded : sig
-    type scope = private
-      { project : Path.Local.t
-      ; dir : Path.Local.t
-      }
-
     type t = private
       { pps : Lib_name.t list
-      ; scope : scope option
+      ; scope_dir : Path.Source.t
       ; opaque_packages : Package.Name.t Lib_name.Map.t
       }
   end

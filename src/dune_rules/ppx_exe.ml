@@ -6,14 +6,9 @@ module Key : sig
   type encoded = Digest.t
 
   module Decoded : sig
-    type scope = private
-      { project : Path.Local.t
-      ; dir : Path.Local.t
-      }
-
     type t = private
       { pps : Lib_name.t list
-      ; scope : scope option
+      ; scope_dir : Path.Source.t
       ; opaque_packages : Package.Name.t Lib_name.Map.t
       }
 
@@ -26,36 +21,19 @@ end = struct
   type encoded = Digest.t
 
   module Decoded = struct
-    type scope =
-      { project : Path.Local.t
-      ; dir : Path.Local.t
-      }
-
     type t =
       { pps : Lib_name.t list
-      ; scope : scope option
+      ; scope_dir : Path.Source.t
       ; opaque_packages : Package.Name.t Lib_name.Map.t
       }
 
-    let equal_scope x y =
-      Path.Local.equal x.project y.project && Path.Local.equal x.dir y.dir
-    ;;
-
-    let scope_repr =
-      Repr.record
-        "ppx-scope"
-        [ Repr.field "project" Path.Local.repr ~get:(fun t -> t.project)
-        ; Repr.field "dir" Path.Local.repr ~get:(fun t -> t.dir)
-        ]
-    ;;
-
     let equal x y =
       List.equal Lib_name.equal x.pps y.pps
-      && Option.equal equal_scope x.scope y.scope
+      && Path.Source.equal x.scope_dir y.scope_dir
       && Lib_name.Map.equal ~equal:Package.Name.equal x.opaque_packages y.opaque_packages
     ;;
 
-    let to_string { pps; scope; opaque_packages } =
+    let to_string { pps; scope_dir; opaque_packages } =
       let s =
         List.map pps ~f:(fun name ->
           match Lib_name.Map.find opaque_packages name with
@@ -67,14 +45,7 @@ end = struct
               (Package.Name.to_string package))
         |> String.enumerate_and
       in
-      match scope with
-      | None -> s
-      | Some { project; dir } ->
-        sprintf
-          "%s (in scope: %s at %s)"
-          s
-          (Path.Local.to_string_maybe_quoted project)
-          (Path.Local.to_string_maybe_quoted dir)
+      sprintf "%s (in scope: %s)" s (Path.Source.to_string_maybe_quoted scope_dir)
     ;;
 
     let of_libs ~context libs ~scope:consumer_scope =
@@ -97,70 +68,32 @@ end = struct
          List.sort libs ~compare)
         |> List.map ~f:Lib.name
       in
-      let* private_scope =
-        Memo.List.fold_left libs ~init:None ~f:(fun acc lib ->
-          let info = Lib.info lib in
-          match Lib_info.status info with
-          | Installed_private _ | Installed _ | Public _ -> Memo.return acc
-          | Private (_, _) ->
-            let output_dir = Path.as_in_build_dir_exn (Lib_info.src_dir info) in
-            let+ loaded_project = Dune_load.find_loaded_project ~dir:output_dir in
-            let dir =
-              Path.Local.descendant
-                (Dune_project.dir_in_context output_dir)
-                ~of_:(Loaded_project.source_root loaded_project)
-              |> Option.value_exn
-            in
-            let scope = { project = Loaded_project.source_root loaded_project; dir } in
-            Option.merge acc (Some scope) ~f:(fun a b ->
-              if not (Path.Local.equal a.project b.project)
-              then
-                Code_error.raise
-                  "Private PPX libraries belong to different loaded projects"
-                  [ "first", Path.Local.to_dyn a.project
-                  ; "second", Path.Local.to_dyn b.project
-                  ];
-              { a with dir = Ordering.min Path.Local.compare a.dir b.dir }))
-      and* consumer_loaded_project =
-        Dune_load.find_loaded_project ~dir:(Scope.root consumer_scope)
+      let+ scope_dir =
+        match Lib.L.scope_dir libs with
+        | Some dir -> Memo.return (Path.Build.drop_build_context_exn dir)
+        | None ->
+          let+ loaded_project =
+            Dune_load.find_loaded_project ~dir:(Scope.root consumer_scope)
+          in
+          if Loaded_project.is_workspace loaded_project
+          then Path.Source.root
+          else Path.Source.of_local (Loaded_project.source_root loaded_project)
       in
-      let consumer_scope =
-        if Loaded_project.is_workspace consumer_loaded_project
-        then None
-        else
-          Some
-            { project = Loaded_project.source_root consumer_loaded_project
-            ; dir = Path.Local.root
-            }
-      in
-      let scope =
-        match consumer_scope, private_scope with
-        | None, scope | scope, None -> scope
-        | Some consumer, Some private_ ->
-          if not (Path.Local.equal consumer.project private_.project)
-          then
-            Code_error.raise
-              "Private PPX library is outside the consuming mounted project"
-              [ "consumer", Path.Local.to_dyn consumer.project
-              ; "private", Path.Local.to_dyn private_.project
-              ];
-          Some private_
-      in
-      Memo.return { pps; scope; opaque_packages }
+      { pps; scope_dir; opaque_packages }
     ;;
   end
 
   let reverse_table : (Digest.t, Decoded.t) Table.t = Table.create (module Digest) 128
 
-  let encode ({ Decoded.pps; scope; opaque_packages } as x) =
+  let encode ({ Decoded.pps; scope_dir; opaque_packages } as x) =
     let y =
       Digest.repr
         Repr.(
           triple
             (list Lib_name.repr)
-            (option Decoded.scope_repr)
+            Path.Source.repr
             (list (pair Lib_name.repr Package.Name.repr)))
-        (pps, scope, Lib_name.Map.to_list opaque_packages)
+        (pps, scope_dir, Lib_name.Map.to_list opaque_packages)
     in
     match Table.find reverse_table y with
     | None ->
@@ -195,17 +128,11 @@ let ppx_driver_exe (ctx : Context.t) ~scope libs =
   let* host = Context.host ctx in
   let* decoded = Key.Decoded.of_libs ~context:(Context.name host) libs ~scope in
   let key = Digest.to_string (Key.encode decoded) in
-  let+ root =
-    match decoded.scope with
-    | None -> Memo.return (Context.build_dir host)
-    | Some { project; _ } ->
-      let+ loaded_project =
-        Dune_load.find_loaded_project
-          ~dir:(Path.Build.append_local (Context.build_dir host) project)
-      in
-      Loaded_project.partition_root loaded_project
+  let+ loaded_project =
+    Dune_load.find_loaded_project
+      ~dir:(Path.Build.append_source (Context.build_dir host) decoded.scope_dir)
   in
-  ppx_exe_path root ~key
+  ppx_exe_path (Loaded_project.partition_root loaded_project) ~key
 ;;
 
 let get_ppx_exe ctx ~scope pps =
