@@ -855,25 +855,23 @@ let visible_packages t =
   then Memo.return Package.Name.Selection.All
   else
     let* project = Partitions.find_loaded_project ~dir:t.dir in
-    match Loaded_project.owner project with
+    let dir = Dune_project.dir_in_context t.dir in
+    match
+      Option.first_some
+        (Loaded_project.owner project)
+        (Dune_project.exclusive_package t.project ~dir |> Option.map ~f:Package.Id.name)
+    with
+    | None -> Memo.return Package.Name.Selection.All
     | Some name ->
-      let+ closure = Partitions.package_closure_for_context context name in
-      Package.Name.Selection.Only closure
-    | None ->
-      let dir = Dune_project.dir_in_context t.dir in
-      (match Dune_project.exclusive_package t.project ~dir with
-       | None -> Memo.return Package.Name.Selection.All
-       | Some pkg_id ->
-         let name = Package.Id.name pkg_id in
-         let+ closure = Partitions.package_closure_for_context context name
-         and+ reverse = Pkg_rules.workspace_dependencies context in
-         (* A locked package that needs this package cannot be built while
-            generating this package's rules. *)
-         Package.Name.Selection.Only
-           (Package.Name.Set.filter closure ~f:(fun dep ->
-              match Package.Name.Map.find reverse dep with
-              | None -> true
-              | Some reached -> not (Package.Name.Set.mem reached name))))
+      let+ closure = Partitions.package_closure_for_context context name
+      and+ reverse = Pkg_rules.workspace_dependencies context in
+      (* A locked package that needs this package cannot be built while
+         generating this package's rules. *)
+      Package.Name.Selection.Only
+        (Package.Name.Set.filter closure ~f:(fun dep ->
+           match Package.Name.Map.find reverse dep with
+           | None -> true
+           | Some reached -> not (Package.Name.Set.mem reached name)))
 ;;
 
 let expand_pform_macro
