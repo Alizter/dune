@@ -6,7 +6,7 @@ val create
   :  project:Dune_project.t
   -> mounted_package:Package.Name.t option
   -> source_tree_root:Source_tree.Dir.t
-  -> context:Context.t
+  -> build_context:Build_context.t
   -> partition_root:Path.Build.t
   -> stanza_mask:Package.Name.Set.t option
   -> t

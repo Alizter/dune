@@ -4,7 +4,7 @@ type t =
   { project : Dune_project.t
   ; mounted_package : Package.Name.t option
   ; source_tree_root : Source_tree.Dir.t
-  ; context : Context.t
+  ; build_context : Build_context.t
   ; partition_root : Path.Build.t
   ; output_root : Path.Build.t
   ; stanza_mask : Package.Name.Set.t option
@@ -14,18 +14,18 @@ let create
       ~project
       ~mounted_package
       ~source_tree_root
-      ~context
+      ~build_context
       ~partition_root
       ~stanza_mask
   =
+  let { Build_context.build_dir; _ } = build_context in
   let output_root =
-    Source_tree.Dir.source_path source_tree_root
-    |> Path.Build.append_local (Context.build_dir context)
+    Source_tree.Dir.source_path source_tree_root |> Path.Build.append_local build_dir
   in
   { project
   ; mounted_package
   ; source_tree_root
-  ; context
+  ; build_context
   ; partition_root
   ; output_root
   ; stanza_mask
@@ -34,7 +34,7 @@ let create
 
 let project t = t.project
 let source_root t = Source_tree.Dir.source_path t.source_tree_root
-let build_context t = Context.build_context t.context
+let build_context t = t.build_context
 let partition_root t = t.partition_root
 let output_root t = t.output_root
 let stanza_mask t = t.stanza_mask
@@ -68,7 +68,8 @@ let packages t =
 ;;
 
 let output_path t source_path =
-  Path.Build.append_local (Context.build_dir t.context) source_path
+  let { Build_context.build_dir; _ } = t.build_context in
+  Path.Build.append_local build_dir source_path
 ;;
 
 let source_tree_dir t output_path =

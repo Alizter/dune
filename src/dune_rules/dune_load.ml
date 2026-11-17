@@ -111,7 +111,7 @@ let load_mount context mounted =
             ~project
             ~mounted_package:(Some owner)
             ~source_tree_root
-            ~context
+            ~build_context:(Context.build_context context)
             ~partition_root:artifact_root
             ~stanza_mask:(Some visible_packages)
           |> Memo.return)
@@ -155,7 +155,7 @@ let workspace =
             ~project
             ~mounted_package:None
             ~source_tree_root:dir
-            ~context
+            ~build_context:(Context.build_context context)
             ~partition_root:(Context.build_dir context)
             ~stanza_mask)
       in
