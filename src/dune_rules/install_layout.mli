@@ -9,15 +9,12 @@ val set_entry_resolver
 (** Root of the materialized install layout for the package set. *)
 val root : Context_name.t -> Package.Name.Set.t -> Path.Build.t
 
-(** Depend on every file the layout produces for the package set. *)
-val deps : Context_name.t -> Package.Name.Set.t -> unit Action_builder.t
-
-(** Files of one package inside the layout at [root], by install section. *)
-val files_by_section
+(** Depend on every install entry and return its layout path, grouped by
+    owning package and section. Packages without entries are absent. *)
+val deps
   :  Context_name.t
-  -> root:Path.Build.t
-  -> Package.Name.t
-  -> Path.t list Section.Map.t Memo.t
+  -> Package.Name.Set.t
+  -> Path.t list Section.Map.t Package.Name.Map.t Action_builder.t
 
 (** Engine dispatch for [_build/_private/<context>/.packages/<rest>]. Called
     from [Gen_rules]; the layout dir is owned by this module. Resolves to:

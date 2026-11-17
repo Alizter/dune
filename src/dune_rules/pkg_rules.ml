@@ -519,14 +519,14 @@ module Layout = struct
       Package.Name.Set.of_list_map dependencies ~f:(fun (dep : Dependency.t) ->
         dep.paths.name)
     in
-    let* () = Install_layout.deps context packages in
+    let+ files_by_package = Install_layout.deps context packages in
     let root = Install_layout.root context packages in
     let prefix = Path.build root in
-    let+ dependencies =
-      Action_builder.List.map dependencies ~f:(fun (dependency : Dependency.t) ->
-        let+ files =
-          Action_builder.of_memo
-            (Install_layout.files_by_section context ~root dependency.paths.name)
+    let dependencies =
+      List.map dependencies ~f:(fun (dependency : Dependency.t) ->
+        let files =
+          Package.Name.Map.find files_by_package dependency.paths.name
+          |> Option.value ~default:Section.Map.empty
         in
         { dependency with paths = Paths.with_prefix dependency.paths prefix; files })
     in

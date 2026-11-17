@@ -70,7 +70,7 @@ let compute_entries context_name root packages =
   >>| List.concat
   >>| Path.Build.Map.of_list
   >>| function
-  | Ok m -> Path.Build.Map.map m ~f:snd
+  | Ok m -> m
   | Error (_, (pkg_a, entry_a), (pkg_b, _)) ->
     User_error.raise
       ~hints:[ Pp.text "Rename one of the install entries." ]
@@ -93,7 +93,7 @@ let entries =
       Path.Build.Map.foldi
         entries
         ~init:(Path.Build.Map.empty, Dep.Set.empty)
-        ~f:(fun dst (entry : Path.t Install.Entry.Expanded.t) (dirs, deps) ->
+        ~f:(fun dst (_, (entry : Path.t Install.Entry.Expanded.t)) (dirs, deps) ->
           let is_lib_entry =
             match (entry.section : Section.t) with
             | Lib | Libexec -> true
@@ -160,25 +160,20 @@ let entries =
 let files context_name packages =
   let open Memo.O in
   let+ entries, _ = entries context_name packages in
-  Path.Build.Map.keys entries |> List.map ~f:Path.build
+  Path.Build.Map.to_list entries
+  |> List.map ~f:(fun (dst, (package, (entry : _ Install.Entry.Expanded.t))) ->
+    package, (entry.section, Path.build dst))
 ;;
 
 let deps context_name packages =
   let open Action_builder.O in
   let* files = Action_builder.of_memo (files context_name packages) in
-  Action_builder.paths files
+  let+ () = Action_builder.paths (List.map files ~f:(fun (_, (_, path)) -> path)) in
+  Package.Name.Map.of_list_multi files
+  |> Package.Name.Map.map ~f:Section.Map.of_list_multi
 ;;
 
 let root context_name packages = dir ~context:context_name ~key:(Key.encode packages)
-
-let files_by_section context_name ~root package =
-  let open Memo.O in
-  let+ entries = compute_entries context_name root (Package.Name.Set.singleton package) in
-  Path.Build.Map.to_list entries
-  |> List.map ~f:(fun (dst, (entry : _ Install.Entry.Expanded.t)) ->
-    entry.section, Path.build dst)
-  |> Section.Map.of_list_multi
-;;
 
 let make_dispatch ~dir ~directory_targets subdirs f =
   let rules = Rules.collect_unit f in
@@ -205,14 +200,14 @@ let gen_rules context_name ~dir rest =
      | Some packages ->
        let+ entries, _ = entries context_name packages in
        let directory_targets =
-         Path.Build.Map.filter_map entries ~f:(fun entry ->
+         Path.Build.Map.filter_map entries ~f:(fun (_, entry) ->
            match (entry.kind : Install.Entry.Expanded.kind) with
            | File -> None
            | Directory -> Some Loc.none)
        in
        make_dispatch ~dir ~directory_targets Subdir_set.empty (fun () ->
          Path.Build.Map.to_seq entries
-         |> Memo.parallel_iter_seq ~f:(fun (dst, { Install.Entry.kind; src; _ }) ->
+         |> Memo.parallel_iter_seq ~f:(fun (dst, (_, { Install.Entry.kind; src; _ })) ->
            let { Action_builder.With_targets.build; targets } =
              match (kind : Install.Entry.Expanded.kind) with
              | File -> Action_builder.symlink ~src ~dst
