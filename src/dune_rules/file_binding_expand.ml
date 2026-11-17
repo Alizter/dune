@@ -25,14 +25,12 @@ let validate_dst_for_install_stanza
   | true ->
     (* A mounted package cannot be asked to fix a deprecation, so its
        installed files are never allowed to leave its install directories. *)
-    (match
-       match
-         ( Option.bind dir ~f:Pkg_sources.package_of_dir_in_context
-         , relative_dst_path_starts_with_parent_error_when )
-       with
-       | Some _, _ | None, `Always_error -> `Always_error
-       | None, `Deprecation_warning_from_3_11 -> `Deprecation_warning_from_3_11
-     with
+    let relative_dst_path_starts_with_parent_error_when =
+      match Option.bind dir ~f:Pkg_sources.package_of_dir_in_context with
+      | Some _ -> `Always_error
+      | None -> relative_dst_path_starts_with_parent_error_when
+    in
+    (match relative_dst_path_starts_with_parent_error_when with
      | `Deprecation_warning_from_3_11 ->
        Warning_emit.emit
          escaping_paths_in_install_stanza
