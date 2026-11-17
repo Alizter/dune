@@ -537,7 +537,7 @@ module Pkg = struct
   type t =
     { id : Id.t
     ; context : Context_name.t
-    ; kind : [ `Dune | `Opam ] Memo.Lazy.t
+    ; mounted : bool
     ; build_command : Build_command.t option
     ; install_command : Dune_lang.Action.t option
     ; depends : t list
@@ -588,7 +588,15 @@ module Pkg = struct
       Layout.dependencies layout
   ;;
 
-  let kind t = Memo.Lazy.force t.kind
+  let kind t =
+    match t.mounted with
+    | false -> Memo.return `Opam
+    | true ->
+      Pkg_sources.find_mounted_kind t.context t.info.name
+      >>| (function
+       | None -> `Opam
+       | Some (_, kind) -> kind)
+  ;;
 
   let classify packages =
     Memo.parallel_map packages ~f:(fun t ->
@@ -1828,15 +1836,6 @@ end = struct
              Option.some_if (Pkg_digest.equal pkg_digest selected) candidate)
       in
       let context = Package_universe.context_name package_universe in
-      let kind =
-        Memo.lazy_ ~name:"pkg-kind" (fun () ->
-          match mounted with
-          | None -> Memo.return `Opam
-          | Some candidate ->
-            Pkg_sources.find_mounted_kind context (Pkg_sources.Candidate.name candidate)
-            >>| Option.map ~f:snd
-            >>| Option.value ~default:`Opam)
-      in
       let id = Pkg.Id.gen () in
       let write_paths =
         match mounted with
@@ -1886,7 +1885,7 @@ end = struct
       let t =
         { Pkg.id
         ; context
-        ; kind
+        ; mounted = Option.is_some mounted
         ; build_command
         ; install_command
         ; depends
