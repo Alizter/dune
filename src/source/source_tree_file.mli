@@ -12,12 +12,9 @@ module Backing : sig
   val path : t -> Path.t
   val append_local : t -> Path.Local.t -> t
   val relative_fname : t -> Filename.t -> t
-  val parent_exn : t -> t
   val equal : t -> t -> bool
   val hash : t -> int
   val to_dyn : t -> Dyn.t
-  val file_exists : t -> bool Memo.t
-  val read_file : t -> string Memo.t
 
   (** Built listings are unfiltered; external listings use package source
       filtering. Missing directories, including virtual subdirectories,
@@ -41,8 +38,6 @@ end
 module File : sig
   type t
 
-  val workspace : Path.Source.t -> t
-  val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Backing.t -> t
   val source_path : t -> Path.Local.t
 
   (** The logical path used by source semantics and diagnostics. *)
@@ -62,7 +57,7 @@ module File : sig
 end
 
 module Dir : sig
-  type t
+  type t = File.t
 
   val workspace : Path.Source.t -> t
   val mounted : mount:Mount.t -> logical:Path.Build.t -> backing:Backing.t -> t
@@ -71,7 +66,6 @@ module Dir : sig
   val as_workspace : t -> Path.Source.t option
   val basename : t -> Filename.t
   val file : t -> Filename.t -> File.t
-  val sub_dir : t -> Filename.t -> t
   val append_local : t -> Path.Local.t -> File.t
 
   (** Workspace listings are read as in the workspace tree; mounted listings

@@ -266,8 +266,6 @@ module Dir = struct
         ~backing:(Backing.relative_fname backing filename)
   ;;
 
-  let sub_dir = file
-
   let append_local t local =
     match t with
     | Workspace path -> Workspace (Path.Source.append_local path local)

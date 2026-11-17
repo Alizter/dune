@@ -166,7 +166,7 @@ let rec physical
                Memo.lazy_ ~name:"mounted-sub-dir" (fun () ->
                  find_dir_raw
                    ~default_vcs
-                   ~dir:(Source_tree_file.Dir.sub_dir dir fn)
+                   ~dir:(Source_tree_file.Dir.file dir fn)
                    ~basename:fn
                    ~virtual_:false
                    ~dirs_visited
@@ -214,7 +214,7 @@ and virtual_ ~project ~sub_dirs ~parent_status ~dune_file ~init ~dir =
                        Memo.lazy_ ~name:"mounted-virtual-sub-dir" (fun () ->
                          find_dir_raw
                            ~default_vcs:Dir0.Vcs.Ancestor_vcs
-                           ~dir:(Source_tree_file.Dir.sub_dir dir fn)
+                           ~dir:(Source_tree_file.Dir.file dir fn)
                            ~basename:fn
                            ~virtual_:true
                            ~dune_file
