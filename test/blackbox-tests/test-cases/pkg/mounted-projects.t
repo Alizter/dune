@@ -235,15 +235,7 @@ Disabling the package hides its directory without affecting private libraries
 outside it. A lookup of the scoped library must still complete without a missing
 package scope; its availability result is not the property tested here.
 
-  $ cat > _bundle/vendor/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (using unreleased 0.1)
-  > (package
-  >  (name disabled)
-  >  (dir d)
-  >  (allow_empty)
-  >  (enabled_if false))
-  > EOF
+  $ sed -i 's/(enabled_if true)/(enabled_if false)/' _bundle/vendor/dune-project
   $ cat >> _bundle/vendor/dune <<'EOF'
   > (rule
   >  (target disabled-query)
