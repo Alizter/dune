@@ -843,27 +843,26 @@ module Action_expander = struct
         | None -> Package_variable_name.Map.empty, None
         | Some (var, paths) -> var, Some paths
       in
-      match
-        Option.first_some
-          (Package_variable_name.Map.find variables variable_name)
-          (Lock_dir.default_package_variable
-             ~present:(Option.is_some paths)
-             variable_name)
-      with
-      | Some value -> Memo.return (Ok (Variable.dune_value value))
+      match Package_variable_name.Map.find variables variable_name with
+      | Some v -> Memo.return @@ Ok (Variable.dune_value v)
       | None ->
-        (match paths with
-         | None -> Memo.return (Error (`Undefined_pkg_var variable_name))
-         | Some paths ->
-           (match
-              Pform.Var.Pkg.Section.of_string
-                (Package_variable_name.to_string variable_name)
-            with
+        let present = Option.is_some paths in
+        (* TODO we should be looking it up in all packages now *)
+        (match Lock_dir.default_package_variable ~present variable_name with
+         | Some v -> Memo.return @@ Ok (Variable.dune_value v)
+         | None ->
+           (match paths with
             | None -> Memo.return (Error (`Undefined_pkg_var variable_name))
-            | Some section ->
-              let section = dune_section_of_pform section in
-              let install_paths = Paths.install_paths paths in
-              Memo.return (Ok [ Value.Dir (Install.Paths.get install_paths section) ])))
+            | Some paths ->
+              (match
+                 Pform.Var.Pkg.Section.of_string
+                   (Package_variable_name.to_string variable_name)
+               with
+               | None -> Memo.return (Error (`Undefined_pkg_var variable_name))
+               | Some section ->
+                 let section = dune_section_of_pform section in
+                 let install_paths = Paths.install_paths paths in
+                 Memo.return @@ Ok [ Value.Dir (Install.Paths.get install_paths section) ])))
     ;;
 
     let expand_pform
