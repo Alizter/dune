@@ -43,7 +43,7 @@ without making that library's variables a direct recipe dependency.
   $ mkdir _leaf
   $ (cd _leaf && make_dune_project_with_package 3.25 leaf)
   $ echo '(library (public_name leaf) (modes byte))' > _leaf/dune
-  $ echo 'let greeting = "native leaf"' > _leaf/leaf.ml
+  $ echo 'let greeting = "dune leaf"' > _leaf/leaf.ml
   $ make_dune_source_lockpkg native leaf "$PWD/_leaf"
   $ make_lockpkg consumer <<'EOF'
   > (version 0.0.1)
@@ -54,9 +54,19 @@ without making that library's variables a direct recipe dependency.
   > EOF
   $ dune build out
   $ cat "$result"
-  native leaf
+  dune leaf
+  $ test ! -e $pkg_root/leaf/_install/opaque-recipe
 
-Builder choice does not change the crossing: make the leaf an opaque package.
+The same leaf source built by an opaque recipe crosses the same way:
+
+  $ make_dune_source_lockpkg opaque leaf "$PWD/_leaf"
+  $ dune build out
+  $ cat "$result"
+  dune leaf
+  $ cat $pkg_root/leaf/_install/opaque-recipe
+  opaque
+
+So does a hand-written opaque recipe without a Dune project:
 
   $ make_lockpkg leaf <<'EOF'
   > (version 1.0)
