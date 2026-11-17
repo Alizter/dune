@@ -4,10 +4,7 @@ its backing, without first copying a snapshot into _build/_fetch.
   $ make_foo_consumer
   $ mkdir -p _source/sub _source/empty _source/_build _source/.git
   $ (cd _source && make_dune_project_with_package 3.25 foo)
-  $ cat > _source/dune <<'EOF2'
-  > (library (public_name foo))
-  > (include stanzas.inc)
-  > EOF2
+  $ printf '(library (public_name foo))\n(include stanzas.inc)\n' > _source/dune
   $ echo '(rule (target included) (action (write-file %{target} included)))' > _source/stanzas.inc
   $ echo 'let message = "original"' > _source/foo.ml
   $ echo '(rule (target out) (action (write-file %{target} sub)))' > _source/sub/dune
@@ -143,9 +140,7 @@ an external backing. Only file links retain the main copy semantics.
   $ mkdir _source _outside
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(include link/secret.inc)' > _source/dune
-  $ cat > _outside/secret.inc <<'EOF2'
-  > (rule (target escaped) (action (write-file %{target} outside)))
-  > EOF2
+  $ echo '(rule (target escaped) (action (write-file %{target} outside)))' > _outside/secret.inc
   $ ln -s ../_outside _source/link
   $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ dune build _build/default/.pkg/foo/escaped 2>&1
@@ -166,9 +161,7 @@ A synthetic subdirectory must not make that directory link traversable either.
 Repeated separators and parent components must select the same file in the
 logical mount and the external backing, without reading through the link.
 
-  $ cat > _source/secret.inc <<'EOF2'
-  > (rule (target normalized) (action (write-file %{target} inside)))
-  > EOF2
+  $ echo '(rule (target normalized) (action (write-file %{target} inside)))' > _source/secret.inc
   $ echo '(include link//../secret.inc)' > _source/dune
   $ dune build _build/default/.pkg/foo/normalized
   $ cat _build/default/.pkg/foo/normalized
