@@ -13,13 +13,8 @@ A workspace package that is also an opaque package in the lock directory:
   > (version 0.0.1)
   > (build (run echo building foo))
   > EOF
-  $ cat > dune-project <<EOF
-  > (lang dune 3.20)
-  > (package (name foo) (allow_empty))
-  > EOF
-  $ cat > dune <<EOF
-  > (rule (target x) (action (with-stdout-to x (echo x))))
-  > EOF
+  $ make_named_package_project foo 3.20
+  $ echo '(rule (target x) (action (with-stdout-to x (echo x))))' > dune
 
 Requesting the opaque package's install target directly, before anything
 else has been built:
@@ -76,18 +71,14 @@ The same two problems with the lock directory's compiler package, which is
 resolved when the build context is created:
 
   $ rm -rf _build
-  $ cat >> ${source_lock_dir}/lock.dune <<EOF
-  > (ocaml mycaml)
-  > EOF
+  $ echo '(ocaml mycaml)' >> ${source_lock_dir}/lock.dune
   $ make_lockpkg mycaml <<EOF
   > (version 0.0.1)
   > (depends missing)
   > (build (run echo building mycaml))
   > EOF
   $ rm ${source_lock_dir}/foo.pkg
-  $ cat > dune <<EOF
-  > (rule (alias foo) (action (echo foo)))
-  > EOF
+  $ echo '(rule (alias foo) (action (echo foo)))' > dune
   $ dune build @foo 2>&1 | first_error
   Error: At least one package dependency is itself not present
   [1]
@@ -96,10 +87,7 @@ resolved when the build context is created:
   > (version 0.0.1)
   > (build (run echo building mycaml))
   > EOF
-  $ cat > dune-project <<EOF
-  > (lang dune 3.20)
-  > (package (name mycaml) (allow_empty))
-  > EOF
+  $ make_named_package_project mycaml 3.20
   $ rm -rf _build
   $ dune build @foo 2>&1 | first_error
   Error: A package named "mycaml" is defined locally but is al
