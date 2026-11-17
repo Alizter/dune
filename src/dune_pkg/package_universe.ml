@@ -45,17 +45,6 @@ let version_by_package_name local_packages lock_packages =
   Package_name.Map.union_exn from_local_packages from_lock_dir
 ;;
 
-let resolve_local_dependencies local_package ~env ~with_test ~packages =
-  Lock_pkg.local_package_dependencies
-    (Local_package.for_solver local_package)
-    ~env:(Solver_env.to_env env)
-    ~with_test
-    ~packages
-    ~dune_version:(Package_version.of_opam_package_version Dune_dep.version)
-  |> Result.map_error ~f:(fun (`Formula_could_not_be_satisfied hints) ->
-    List.map hints ~f:Resolve_opam_formula.Unsatisfied_formula_hint.pp)
-;;
-
 let lock_dir_filter_env t =
   Solver_stats.Expanded_variable_bindings.to_solver_env
     t.lock_dir.expanded_solver_variable_bindings

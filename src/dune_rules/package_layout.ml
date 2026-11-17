@@ -109,35 +109,31 @@ let materialize_dependencies context owner =
            (Dune_pkg.Solver_env.extend Dune_pkg.Solver_env.with_defaults polled)
            recorded
        in
-       let provided name = Package.Name.Map.mem versions name in
        let system_dune name = Package.Name.equal name Dune_pkg.Dune_dep.name in
        let dependencies name =
          match Package.Name.Map.find workspace name with
          | Some package ->
-           let required =
-             match
-               Dune_pkg.Package_universe.resolve_local_dependencies
-                 (Dune_pkg.Local_package.of_package package)
-                 ~env:solver_env
-                 ~with_test:false
-                 ~packages:versions
-             with
-             | Ok required -> required
-             | Error hints ->
-               User_error.raise
-                 ~loc:(Package.loc package)
-                 (Pp.textf
-                    "The dependencies of package %S could not be satisfied:"
-                    (Package.Name.to_string name)
-                  :: hints)
-           in
-           let optional =
-             List.filter_map
-               (Package.depopts package)
-               ~f:(fun (dep : Package_dependency.t) ->
-                 Option.some_if (provided dep.name) dep.name)
-           in
-           required @ optional
+           (match
+              Dune_pkg.Lock_pkg.local_package_dependencies_with_depopts
+                (Dune_pkg.Local_package.of_package package
+                 |> Dune_pkg.Local_package.for_solver)
+                ~env:(Dune_pkg.Solver_env.to_env solver_env)
+                ~with_test:false
+                ~packages:versions
+                ~dune_version:
+                  (Dune_pkg.Package_version.of_opam_package_version
+                     Dune_pkg.Dune_dep.version)
+            with
+            | Ok dependencies -> dependencies
+            | Error (`Formula_could_not_be_satisfied hints) ->
+              User_error.raise
+                ~loc:(Package.loc package)
+                (Pp.textf
+                   "The dependencies of package %S could not be satisfied:"
+                   (Package.Name.to_string name)
+                 :: List.map
+                      hints
+                      ~f:Dune_pkg.Resolve_opam_formula.Unsatisfied_formula_hint.pp))
          | None ->
            (match Package.Name.Map.find candidates name with
             | None ->

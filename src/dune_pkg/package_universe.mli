@@ -37,14 +37,6 @@ val selected_dependencies_of_local_package
 (** Reject duplicate definitions across the workspace and the lock directory. *)
 val check_package_names : Lock_dir.t -> local_packages:Loc.t Package_name.Map.t -> unit
 
-(** Resolve workspace dependencies against supplied package versions. *)
-val resolve_local_dependencies
-  :  Local_package.t
-  -> env:Solver_env.t
-  -> with_test:bool
-  -> packages:Package_version.t Package_name.Map.t
-  -> (Package_name.t list, User_message.Style.t Pp.t list) result
-
 (** Check requirements and any supplied workspace metadata referenced by the
     lockdir. Hand-written lockdirs without a dependency hash remain accepted. *)
 val up_to_date : Local_package.t Package_name.Map.t -> Lock_dir.t -> [ `Valid | `Invalid ]
