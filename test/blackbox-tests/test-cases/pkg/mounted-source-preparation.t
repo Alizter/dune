@@ -54,14 +54,7 @@ Changing an extra source invalidates the prepared view and native build.
 
 Without the extra source at that path, the lock file wins over the snapshot.
 
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (extra_sources
-  >  (dune-project (copy $PWD/_overlay/dune-project))
-  >  (dune (copy $PWD/_overlay/dune)))
-  > (build (run false))
-  > EOF
+  $ dune_cmd delete 'version\.ml' dune.lock/foo.pkg
   $ dune build main.exe
   $ _build/default/main.exe
   lock file
@@ -347,12 +340,7 @@ must restore the deleted file and executable from the original source view.
   $ dune build result
   $ cat _build/default/result
   updated/patched/false
-  $ make_lockpkg nested <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (extra_sources (tools/version/dune (copy $PWD/_script-overlay)))
-  > (build (run false))
-  > EOF
+  $ dune_cmd delete 'prepare\.patch' dune.lock/nested.pkg
   $ dune build result
   $ cat _build/default/result
   updated/original/true
