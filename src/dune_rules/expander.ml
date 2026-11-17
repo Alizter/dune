@@ -857,9 +857,7 @@ let visible_packages t =
     let* project = Partitions.find_loaded_project ~dir:t.dir in
     match Loaded_project.owner project with
     | Some name ->
-      let+ closure =
-        Partitions.package_closure_for_context context (Package.Name.Set.singleton name)
-      in
+      let+ closure = Partitions.package_closure_for_context context name in
       Package.Name.Selection.Only closure
     | None ->
       let dir = Dune_project.dir_in_context t.dir in
@@ -867,10 +865,7 @@ let visible_packages t =
        | None -> Memo.return Package.Name.Selection.All
        | Some pkg_id ->
          let name = Package.Id.name pkg_id in
-         let+ closure =
-           Partitions.package_closure_for_context
-             context
-             (Package.Name.Set.singleton name)
+         let+ closure = Partitions.package_closure_for_context context name
          and+ reverse = Pkg_rules.workspace_dependencies context in
          (* A locked package that needs this package cannot be built while
             generating this package's rules. *)

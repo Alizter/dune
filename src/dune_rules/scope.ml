@@ -579,11 +579,7 @@ module DB = struct
         match owner with
         | None -> Memo.return None
         | Some owner ->
-          let+ packages =
-            Partitions.package_closure_for_context
-              context
-              (Package.Name.Set.singleton owner)
-          in
+          let+ packages = Partitions.package_closure_for_context context owner in
           Some
             (if include_owner then packages else Package.Name.Set.remove packages owner))
     in

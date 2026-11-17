@@ -57,5 +57,5 @@ val find_package : Context_name.t -> Package.Name.t -> Package.t option Memo.t
     narrowing. *)
 val package_closure_for_context
   :  Context_name.t
-  -> Package.Name.Set.t
+  -> Package.Name.t
   -> Package.Name.Set.t Memo.t

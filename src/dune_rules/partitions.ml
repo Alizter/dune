@@ -219,7 +219,7 @@ let stanzas_in_dir dir =
       Path.Build.Map.find dune_file_by_dir dir)
 ;;
 
-let package_closure_for_context context names =
+let package_closure_for_context context name =
   let+ source_packages = Dune_load.packages ()
   and+ managed = Pkg_sources.dependencies context in
   let rec loop acc name =
@@ -239,8 +239,7 @@ let package_closure_for_context context names =
       in
       List.fold_left depends ~init:acc ~f:loop)
   in
-  Package.Name.Set.fold names ~init:Package.Name.Set.empty ~f:(fun name acc ->
-    loop acc name)
+  loop Package.Name.Set.empty name
 ;;
 
 let dune_files context =
@@ -286,13 +285,12 @@ let stanzas_of_package =
   in
   fun context package ->
     let* { Dune_load.packages; _ } = Dune_load.load () in
-    if Package.Name.Map.mem packages package
-    then
-      let+ stanzas = Memo.exec memo context in
-      Package.Name.Map.Multi.find stanzas package
-    else
-      let+ dune_files = dune_files_of_package context package in
-      Package.Name.Map.Multi.find (stanzas_by_package dune_files) package
+    let+ stanzas =
+      if Package.Name.Map.mem packages package
+      then Memo.exec memo context
+      else dune_files_of_package context package >>| stanzas_by_package
+    in
+    Package.Name.Map.Multi.find stanzas package
 ;;
 
 let source_tree_root ~dir =
