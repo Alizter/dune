@@ -534,9 +534,7 @@ module Pkg = struct
     | false -> Memo.return `Opam
     | true ->
       Pkg_sources.find_mounted_kind t.context t.info.name
-      >>| (function
-       | None -> `Opam
-       | Some (_, kind) -> kind)
+      >>| fun m -> snd (Option.value_exn m)
   ;;
 
   let classify packages =
@@ -626,41 +624,10 @@ module Pkg = struct
       List.fold_left t.exported_env ~init:env ~f:Env_update.set)
   ;;
 
-  let build_env_of_classified classified =
-    let native_roots =
-      match partition classified |> fst with
-      | [] -> None
-      | first :: _ as native ->
-        let names = Package.Name.Set.of_list_map native ~f:(fun t -> t.info.name) in
-        let prefix = Install_layout.root first.context names |> Path.build in
-        Some (Install.Roots.opam_from_prefix prefix ~relative:Path.relative)
-    in
-    List.fold_left
-      classified
-      ~init:(Env.Map.empty, native_roots)
-      ~f:(fun (env, native_roots) (t, kind) ->
-        let roots, native_roots =
-          match kind with
-          | `Dune -> native_roots, None
-          | `Opam -> Some (install_roots t), native_roots
-        in
-        let env =
-          match roots with
-          | None -> env
-          | Some roots ->
-            let init = Value_list_env.add_path env Env_path.var roots.bin in
-            let vars = Install.Roots.to_env_without_path roots ~relative:Path.relative in
-            List.fold_left vars ~init ~f:(fun acc (var, path) ->
-              Value_list_env.add_path acc var path)
-        in
-        List.fold_left t.exported_env ~init:env ~f:Env_update.set, native_roots)
-    |> fst
-  ;;
-
   (* [build_env t] returns an env containing paths containing all the
      tools and libraries required to build the package [t] inside the
      faux opam directory contained in the _build dir. *)
-  let build_env t = classify (deps_closure t) >>| build_env_of_classified
+  let build_env t = build_env_of_deps @@ deps_closure t
 
   let base_env t =
     Env.Map.of_list_exn
@@ -676,12 +643,12 @@ module Pkg = struct
       ]
   ;;
 
-  let package_env t = build_env t >>| Env.Map.superpose (base_env t)
+  let package_env t = build_env t |> Env.Map.superpose (base_env t)
 
   (* [exported_value_env t] returns the complete env that will be used
      to build the package [t] *)
   let exported_value_env t =
-    let+ package_env = package_env t in
+    let package_env = package_env t in
     (* TODO: Run actions in a constrained environment. [Global.env ()] is the
        environment from which dune was executed, and some of the environment
        variables may affect builds in unintended ways and make builds less
@@ -692,7 +659,7 @@ module Pkg = struct
     Value_list_env.extend_concat_path (Lazy.force Value_list_env.global) package_env
   ;;
 
-  let exported_env t = exported_value_env t >>| Value_list_env.to_env
+  let exported_env t = Value_list_env.to_env @@ exported_value_env t
 end
 
 module Action_expander = struct
@@ -1265,9 +1232,7 @@ module Action_expander = struct
     ;;
   end
 
-  (* Expanding a package's variables does not read [env]; only [withenv]
-     and the recipe's own environment do. *)
-  let expander context (pkg : Pkg.t) ~env =
+  let expander context (pkg : Pkg.t) =
     let closure =
       Memo.lazy_
         ~name:"package-dependency-closure"
@@ -1277,6 +1242,7 @@ module Action_expander = struct
             (Package.Name.to_string pkg.info.name))
         (fun () -> Pkg.deps_closure pkg |> Artifacts_and_deps.of_closure)
     in
+    let env = Pkg.exported_value_env pkg in
     let depends =
       Memo.Lazy.map
         ~name:"package-dependency-info"
@@ -1308,8 +1274,7 @@ module Action_expander = struct
 
   let expand context (pkg : Pkg.t) action =
     let+ action =
-      let* env = Pkg.exported_value_env pkg in
-      let expander = expander context pkg ~env in
+      let expander = expander context pkg in
       expand action ~expander >>| Action.chdir pkg.paths.source_dir
     in
     (* TODO copying is needed for build systems that aren't dune and those
@@ -1658,7 +1623,9 @@ end = struct
         }
       in
       let+ exported_env =
-        let expander = Action_expander.expander context t ~env:Env.Map.empty in
+        let expander =
+          Action_expander.expander (Package_universe.context_name package_universe) t
+        in
         Memo.parallel_map exported_env ~f:(Action_expander.exported_env expander)
       in
       Some { t with exported_env }
@@ -2487,7 +2454,6 @@ let gen_prepared_source_rules context ~dir components =
 ;;
 
 let build_rule context_name ~source_deps (pkg : Pkg.t) =
-  let* exported_env = Pkg.exported_env pkg in
   let+ build_action =
     let+ copy_action, build_action, install_action =
       let+ copy_action =
@@ -2591,10 +2557,9 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
   let open Action_builder.With_targets.O in
   (let deps =
      let open Action_builder.O in
-     let+ source_deps = source_deps
-     and+ package_env = Action_builder.of_memo (Pkg.package_env pkg) in
+     let+ source_deps = source_deps in
      let deps =
-       Env.Map.foldi package_env ~init:source_deps ~f:(fun var _ deps ->
+       Env.Map.foldi (Pkg.package_env pkg) ~init:source_deps ~f:(fun var _ deps ->
          Dep.Set.add deps (Dep.env var))
      in
      let deps =
@@ -2606,7 +2571,7 @@ let build_rule context_name ~source_deps (pkg : Pkg.t) =
    in
    Action_builder.O.(Action_builder.dyn_deps deps >>> Pkg.package_deps pkg)
    |> Action_builder.with_no_targets)
-  >>> add_env exported_env build_action
+  >>> add_env (Pkg.exported_env pkg) build_action
   |> Action_builder.With_targets.map ~f:(fun action ->
     Action.Full.add_sandbox Action_expander.sandbox action
     |> Action.Full.disable_sandbox_policy)
@@ -2914,8 +2879,7 @@ let ocaml_toolchain context =
         Action_builder.List.fold_left
           ~init:(Global.env (), Path.Set.empty)
           ~f:(fun (env, binaries) pkg ->
-            let* pkg_env = Action_builder.of_memo (Pkg.exported_env pkg) in
-            let env = Env.extend_env env pkg_env in
+            let env = Env.extend_env env (Pkg.exported_env pkg) in
             let+ cookie = Install_cookie.read pkg.paths in
             let binaries =
               Section.Map.find cookie.files Bin
@@ -3087,7 +3051,7 @@ let dev_tool_env tool =
   @@ fun () ->
   let package_universe = Package_universe.Dev_tool tool in
   let* db = DB.get package_universe in
-  let* pkg = Resolve.resolve db Loc.none package_name package_universe in
+  let+ pkg = Resolve.resolve db Loc.none package_name package_universe in
   Pkg.exported_env pkg
 ;;
 
@@ -3183,7 +3147,7 @@ let resolve_installed_file ~loc ~context_name ~pkg_name ~section ~file =
 let all_filtered_depexts context =
   let* all_project_deps = all_project_deps context in
   Memo.List.map all_project_deps ~f:(fun (pkg : Pkg.t) ->
-    let expander = Action_expander.expander context pkg ~env:Env.Map.empty in
+    let expander = Action_expander.expander context pkg in
     Action_expander.Expander.filtered_depexts expander)
   >>| List.concat
   >>| List.sort_uniq ~compare:String.compare
