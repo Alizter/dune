@@ -85,22 +85,12 @@ let load () =
       ~init:(Package.Name.Map.empty, Package.Name.Set.empty)
       ~f:(fun (acc_packages, vendored) (status, (project : Dune_project.t), _) ->
         let+ packages =
-          let packages = Dune_project.including_hidden_packages project in
-          let+ disabled =
-            Package.Name.Map.values packages
-            |> Memo.List.map ~f:(fun package ->
-              package_enabled package
-              >>| function
-              | true -> None
-              | false -> Some package)
-            >>| List.filter_opt
-            >>| Package.Name.Map.of_list_map_exn ~f:(fun pkg -> Package.name pkg, ())
-          in
-          Package.Name.Map.merge packages disabled ~f:(fun _key package disabled ->
-            match package, disabled with
-            | Some p, Some () -> Some (p, `Disabled)
-            | Some p, None -> Some (p, `Enabled)
-            | None, None | None, Some _ -> assert false)
+          Dune_project.including_hidden_packages project
+          |> Package.Name.Map.to_list
+          |> Memo.List.map ~f:(fun (name, package) ->
+            let+ enabled = package_enabled package in
+            name, (package, if enabled then `Enabled else `Disabled))
+          >>| Package.Name.Map.of_list_exn
         in
         let vendored =
           match status with
