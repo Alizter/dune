@@ -165,6 +165,11 @@
  (deps %{bin:menhir}))
 
 (cram
+ (applies_to mounted-cinaps.t)
+ (deps
+  (package cinaps)))
+
+(cram
  (applies_to mounted-rocqproject.t)
  (deps %{bin:rocq})
  (enabled_if
