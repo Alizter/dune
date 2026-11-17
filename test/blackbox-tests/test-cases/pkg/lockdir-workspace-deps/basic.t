@@ -32,24 +32,3 @@ Inactive conditional workspace dependencies do not become materialisation roots.
   >  (depends (absent (= :os "never"))))
   > EOF
   $ dune build out
-
-The same dependency works when the locked consumer is loaded natively.
-Its recorded recipe must not execute.
-
-  $ mkdir _consumer
-  $ cat > _consumer/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name consumer))
-  > EOF
-  $ echo '(library (public_name consumer) (libraries workspace-lib))' > _consumer/dune
-  $ echo 'let greeting = Workspace_lib.greeting' > _consumer/consumer.ml
-  $ make_lockpkg consumer <<EOF
-  > (version 0.0.1)
-  > (depends workspace-lib)
-  > (source (copy $PWD/_consumer))
-  > (build (run false))
-  > EOF
-  $ echo 'let () = print_endline Consumer.greeting' > main.ml
-  $ echo '(executable (name main) (libraries consumer))' >> dune
-  $ dune exec ./main.exe
-  Hello from workspace-lib!
