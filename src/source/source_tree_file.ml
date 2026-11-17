@@ -49,11 +49,6 @@ module Backing = struct
     | Build path -> Build (Path.Build.relative_fname path name)
   ;;
 
-  let parent_exn = function
-    | External path -> External (Path.External.parent_exn path)
-    | Build path -> Build (Path.Build.parent_exn path)
-  ;;
-
   let fs_path path = Path.Outside_build_dir.External path
 
   let file_exists = function
@@ -101,6 +96,9 @@ module Mount = struct
     ; logical_root : Path.Build.t
     ; backing_root : Backing.t
     }
+
+  let logical_path { logical_root; _ } local = Path.Build.append_local logical_root local
+  let backing { backing_root; _ } local = Backing.append_local backing_root local
 end
 
 module File = struct
@@ -108,26 +106,25 @@ module File = struct
     | Workspace of Path.Source.t
     | Mounted of
         { mount : Mount.t
-        ; logical : Path.Build.t
-        ; backing : Backing.t
+        ; local : Path.Local.t
         }
 
   let workspace path = Workspace path
-  let mounted ~mount ~logical ~backing = Mounted { mount; logical; backing }
 
   let source_path = function
     | Workspace path -> Path.Source.to_local path
-    | Mounted { logical; _ } -> Dune_project.dir_in_context logical
+    | Mounted { mount; local } ->
+      Mount.logical_path mount local |> Dune_project.dir_in_context
   ;;
 
   let path = function
     | Workspace path -> Path.source path
-    | Mounted { logical; _ } -> Path.build logical
+    | Mounted { mount; local } -> Mount.logical_path mount local |> Path.build
   ;;
 
   let backing_path = function
     | Workspace path -> Path.source path
-    | Mounted { backing; _ } -> Backing.path backing
+    | Mounted { mount; local } -> Mount.backing mount local |> Backing.path
   ;;
 
   let as_workspace = function
@@ -137,49 +134,27 @@ module File = struct
 
   let parent_exn = function
     | Workspace file -> Workspace (Path.Source.parent_exn file)
-    | Mounted { mount; logical; backing } ->
-      Mounted
-        { mount
-        ; logical = Path.Build.parent_exn logical
-        ; backing = Backing.parent_exn backing
-        }
+    | Mounted { mount; local } -> Mounted { mount; local = Path.Local.parent_exn local }
   ;;
 
   let relative t loc path =
     match t with
     | Workspace dir -> Workspace (Path.Source.relative ~error_loc:loc dir path)
-    | Mounted { mount; logical; backing = _ } ->
-      let { Mount.logical_root; backing_root; loc = _ } = mount in
-      let local =
-        match
-          Option.bind (Path.Local_gen.descendant logical ~of_:logical_root) ~f:(fun l ->
-            Path.Local.relative_result l path |> Result.to_option)
-        with
-        | Some local -> local
-        | None ->
-          User_error.raise
-            ~loc
-            [ Pp.textf "Included path %S is outside the mounted source tree." path ]
-      in
-      Mounted
-        { mount
-        ; logical = Path.Build.append_local logical_root local
-        ; backing = Backing.append_local backing_root local
-        }
+    | Mounted { mount; local } ->
+      (match Path.Local.relative_result local path with
+       | Ok local -> Mounted { mount; local }
+       | Error _ ->
+         User_error.raise
+           ~loc
+           [ Pp.textf "Included path %S is outside the mounted source tree." path ])
   ;;
 
   let exists = function
     | Workspace path -> Fs_memo.file_exists (Path.Outside_build_dir.In_source_dir path)
-    | Mounted { backing = Build _ as backing; _ } -> Backing.file_exists backing
-    | Mounted { mount; logical; backing = External _ as file } ->
-      let local =
-        match Path.Local_gen.descendant logical ~of_:mount.logical_root with
-        | Some local -> local
-        | None ->
-          Code_error.raise
-            "Mounted file is outside its logical root"
-            [ "file", Path.Build.to_dyn logical ]
-      in
+    | Mounted { mount = { backing_root = Build _; _ } as mount; local } ->
+      Backing.file_exists (Mount.backing mount local)
+    | Mounted { mount; local } ->
+      let file = Mount.backing mount local in
       (* Resolve parent directories through the inventory, not through links. *)
       let rec lookup directory = function
         | [] -> Memo.return false
@@ -210,7 +185,7 @@ module File = struct
         match t with
         | Workspace path ->
           Fs_memo.file_contents (Path.Outside_build_dir.In_source_dir path)
-        | Mounted { backing; _ } -> Backing.read_file backing
+        | Mounted { mount; local } -> Backing.read_file (Mount.backing mount local)
       in
       Some contents
   ;;
@@ -218,8 +193,11 @@ module File = struct
   let equal a b =
     match a, b with
     | Workspace a, Workspace b -> Path.Source.equal a b
-    | Mounted a, Mounted b ->
-      Path.Build.equal a.logical b.logical && Backing.equal a.backing b.backing
+    | Mounted { mount; local }, Mounted { mount = other_mount; local = other_local } ->
+      Path.Build.equal
+        (Mount.logical_path mount local)
+        (Mount.logical_path other_mount other_local)
+      && Backing.equal (Mount.backing mount local) (Mount.backing other_mount other_local)
     | Workspace _, Mounted _ | Mounted _, Workspace _ -> false
   ;;
 
@@ -240,36 +218,26 @@ module Dir = struct
   include File
 
   let mounted ~loc ~logical_root ~backing_root =
-    File.mounted
-      ~mount:{ Mount.loc; logical_root; backing_root }
-      ~logical:logical_root
-      ~backing:backing_root
+    Mounted { mount = { Mount.loc; logical_root; backing_root }; local = Path.Local.root }
   ;;
 
   let basename = function
     | Workspace path -> Path.Source.basename path
-    | Mounted { logical; _ } -> Path.Build.basename logical
+    | Mounted { mount; local } -> Mount.logical_path mount local |> Path.Build.basename
   ;;
 
   let file t filename =
     match t with
     | Workspace path -> Path.Source.relative_fname path filename |> File.workspace
-    | Mounted { mount; logical; backing } ->
-      File.mounted
-        ~mount
-        ~logical:(Path.Build.relative_fname logical filename)
-        ~backing:(Backing.relative_fname backing filename)
+    | Mounted { mount; local } ->
+      Mounted { mount; local = Path.Local.relative_fname local filename }
   ;;
 
-  let append_local t local =
+  let append_local t suffix =
     match t with
-    | Workspace path -> Workspace (Path.Source.append_local path local)
-    | Mounted { mount; logical; backing } ->
-      Mounted
-        { mount
-        ; logical = Path.Build.append_local logical local
-        ; backing = Backing.append_local backing local
-        }
+    | Workspace path -> Workspace (Path.Source.append_local path suffix)
+    | Mounted { mount; local } ->
+      Mounted { mount; local = Path.Local.append local suffix }
   ;;
 
   let contents = function
@@ -278,7 +246,8 @@ module Dir = struct
       >>| (function
        | Ok dir -> dir
        | Error _ -> Dir_contents.empty)
-    | Mounted { mount; backing; _ } ->
+    | Mounted { mount; local } ->
+      let backing = Mount.backing mount local in
       Backing.dir_contents backing
       >>| (function
        | Ok None -> Dir_contents.empty
