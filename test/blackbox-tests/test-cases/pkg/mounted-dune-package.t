@@ -80,10 +80,7 @@ unrelated provider. Its actions use the mounted project root.
   > (build (run false))
   > EOF
   $ mkdir _bar
-  $ cat > _bar/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name bar))
-  > EOF
+  $ (cd _bar && make_dune_project_with_package 3.25 bar)
   $ cat > _bar/dune <<'EOF'
   > (library (public_name bar) (libraries opaque))
   > (rule
@@ -146,10 +143,7 @@ Merely declaring such a rule must not force it.
 
 Dune-file decoding errors are deferred as well, not just dune-project errors.
 
-  $ cat > _broken/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name broken))
-  > EOF
+  $ (cd _broken && make_dune_project_with_package 3.25 broken)
   $ echo '(broken-stanza)' > _broken/dune
   $ dune build main.exe
   $ dune build _build/default/.pkg/broken/broken.cma
@@ -221,10 +215,7 @@ through %{lib:...}. This must not require installing the whole package.
   $ echo '(executable (name main) (libraries foo))' > dune
   $ echo 'let () = print_endline Foo.message' > main.ml
   $ mkdir -p _foo/src _foo/support
-  $ cat > _foo/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _foo && make_dune_project_with_package 3.25 foo)
   $ cat > _foo/src/dune <<'EOF'
   > (library (public_name foo))
   > (rule
@@ -386,10 +377,7 @@ the dependency's stubs archive to show that it was built first.
   $ make_dune_project 3.25
   $ make_lockdir
   $ mkdir _native
-  $ cat > _native/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name native))
-  > EOF
+  $ (cd _native && make_dune_project_with_package 3.25 native)
   $ cat > _native/dune <<'EOF'
   > (library
   >  (public_name native)
@@ -445,16 +433,10 @@ make selection observable without depending on a particular JSOO version.
   $ echo 'let () = print_int Foo.value' > main.ml
   $ mkdir -p _workspace/foo _workspace/compiler _ambient
   $ cp dune-project dune main.ml _workspace/
-  $ cat > _workspace/foo/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _workspace/foo && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _workspace/foo/dune
   $ echo 'let value = 42' > _workspace/foo/foo.ml
-  $ cat > _workspace/compiler/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name js_of_ocaml-compiler))
-  > EOF
+  $ (cd _workspace/compiler && make_dune_project_with_package 3.25 js_of_ocaml-compiler)
   $ cat > _workspace/compiler/dune <<'EOF'
   > (executable
   >  (name driver)
@@ -476,10 +458,7 @@ make selection observable without depending on a particular JSOO version.
   >     in
   >     output args
   > EOF
-  $ cat > _ambient/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name ambient))
-  > EOF
+  $ (cd _ambient && make_dune_project_with_package 3.25 ambient)
   $ cat > _ambient/dune <<'EOF'
   > (executable (name wrong) (public_name js_of_ocaml) (package ambient))
   > EOF
@@ -734,10 +713,7 @@ must not contribute singleton layouts to the context environment.
   $ mkdir package-set-layout
   $ cd package-set-layout
   $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name local))
-  > EOF
+  $ make_dune_project_with_package 3.25 local
   $ mkdir local
   $ echo '(library (public_name local))' > local/dune
   $ echo 'let value = 1' > local/local.ml

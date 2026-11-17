@@ -394,10 +394,7 @@ unusable lock recipe ensures the mounted build uses ordinary native rules.
   > (package (name main) (depends dep))
   > EOF
   $ mkdir -p _source/warning _source/alert _source/modules
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name dep))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 dep)
   $ cat > _source/warning/dune <<'EOF'
   > (library (name warning) (public_name dep.warning))
   > EOF
@@ -468,19 +465,13 @@ Older projects use a different set of default development warning flags. The
 workspace still rejects the warning; the mounted project still receives the
 vendored override.
 
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.20)
-  > (package (name dep))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.20 dep)
   $ (cd _source && dune build --root . warning/warning.cma) 2>workspace-warning-old
   [1]
   $ grep '^Error' workspace-warning-old
   Error (warning 26 [unused-var]): unused variable unused.
   $ dune build "$mounted/warning/warning.cma"
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name dep))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 dep)
 
 The dependency warning context also applies while decoding stanzas, not only
 when compiling OCaml. no_keep_locs is a warning whose producer raises an error
@@ -534,10 +525,7 @@ root. Rule dependencies and install entries must traverse the same input tree.
   $ make_lockdir
   $ mkdir -p _source/project/sub _source/data/nested
   $ echo '(lang dune 3.25)' > _source/dune-project
-  $ cat > _source/project/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _source/project && make_dune_project_with_package 3.25 foo)
   $ echo first > _source/data/first.txt
   $ echo second > _source/data/nested/second.txt
   $ cat > _source/project/sub/dune <<'EOF'
@@ -623,10 +611,7 @@ Enabling ordinary project targets does not grant writeback into their inputs.
 An error about a mounted directory names it by its build path.
 
   $ mkdir _dup
-  $ cat > _dup/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name dup))
-  > EOF
+  $ (cd _dup && make_dune_project_with_package 3.25 dup)
   $ echo '(library (public_name dup))' > _dup/dune
   $ touch _dup/x.ml _dup/X.ml
   $ make_lockpkg dup <<EOF
@@ -642,10 +627,7 @@ A copy_files glob cannot leave the mounted package.
 
   $ mkdir -p _esc/sub ws
   $ echo secret > ws/secret.txt
-  $ cat > _esc/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name esc))
-  > EOF
+  $ (cd _esc && make_dune_project_with_package 3.25 esc)
   $ echo '(copy_files ../../../ws/*.txt)' > _esc/sub/dune
   $ make_lockpkg esc <<EOF
   > (version 1.0)

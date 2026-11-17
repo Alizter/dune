@@ -22,10 +22,7 @@ Dune configuration supplied only by extra sources is discovered natively.
   $ echo 'let message = Version.value' > _source/foo.ml
   $ echo 'let value = "source"' > _source/version.ml
   $ mkdir _overlay
-  $ cat > _overlay/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _overlay && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _overlay/dune
   $ echo 'let value = "extra"' > _overlay/version.ml
   $ make_lockpkg foo <<EOF
@@ -76,10 +73,7 @@ Patches apply after the overlays, without mutating the source or extra source.
   $ mkdir _patch
   $ cd _patch
   $ make_consumer
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune
   $ echo 'let message = "original"' > _source/foo.ml
   $ mkdir _overlay
@@ -116,10 +110,7 @@ missing patch.
   $ mkdir _conditional
   $ cd _conditional
   $ make_consumer
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune
   $ echo 'let message = "original"' > _source/foo.ml
   $ make_lockpkg metadata <<'EOF'
@@ -164,10 +155,7 @@ executes the patched script, while the original input stays unchanged.
   $ mkdir _executable
   $ cd _executable
   $ make_consumer
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name foo))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo 'let message = Script.value' > _source/foo.ml
   $ cat > _source/dune <<'EOF'
   > (library (public_name foo))
@@ -284,10 +272,7 @@ overlaid script.
   $ cd nested-script
   $ make_dune_project 3.25
   $ mkdir -p _source/tools/version _source/ignored
-  $ cat > _source/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name nested))
-  > EOF
+  $ (cd _source && make_dune_project_with_package 3.25 nested)
   $ cat > _source/dune <<'EOF'
   > (dirs :standard \ ignored)
   > (install (section share) (files (tools/version/answer as answer)))
