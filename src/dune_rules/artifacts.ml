@@ -155,6 +155,21 @@ let binary t ?hint ?(where = Original_path) ~dir ~loc name =
      | Original_path -> origin_original_path origin >>| Result.ok)
 ;;
 
+let binary_deps { context; _ } binary =
+  Action_builder.of_memo_join
+  @@
+  let context = Context.name context in
+  let* prefixes = Pkg_rules.package_prefixes context in
+  match
+    List.find_map prefixes ~f:(fun (prefix, package) ->
+      Option.map (Path.drop_prefix binary ~prefix) ~f:(fun _ -> package))
+  with
+  | None -> Memo.return (Action_builder.return ())
+  | Some package ->
+    let+ deps = Pkg_rules.find_package context package in
+    Option.value deps ~default:(Action_builder.return ())
+;;
+
 let local_binary t ~dir name =
   analyze_binary t ~dir name
   >>= function

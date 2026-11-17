@@ -233,7 +233,18 @@ let resolve_program_memo t ~dir ?where ?hint ~loc bin =
 ;;
 
 let resolve_program t ~dir ?where ?hint ~loc bin =
-  Action_builder.of_memo @@ resolve_program_memo t ~dir ?where ?hint ~loc bin
+  let open Action_builder.O in
+  let* prog =
+    Action_builder.of_memo @@ resolve_program_memo t ~dir ?where ?hint ~loc bin
+  in
+  let+ () =
+    match prog with
+    | Error _ -> Action_builder.return ()
+    | Ok binary ->
+      let* artifacts = Action_builder.of_memo (artifacts_host t ~dir) in
+      Artifacts.binary_deps artifacts binary
+  in
+  prog
 ;;
 
 let fire_hooks env ~profile =

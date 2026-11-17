@@ -39,6 +39,10 @@ val binary
   -> string
   -> Action.Prog.t Memo.t
 
+(** Depend on the installation and transitive dependencies of the lock-directory
+    package owning [binary]. Other binaries add no dependencies. *)
+val binary_deps : t -> Path.t -> unit Action_builder.t
+
 (** Return the installed filename when the selected binary is from a local
     package. *)
 val local_binary : t -> dir:Path.Build.t -> string -> (Path.t * Filename.t) option Memo.t

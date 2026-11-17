@@ -39,8 +39,8 @@ beside that executable changes.
   >   (with-stdout-to %{target} (run mybin))))
   > EOF
 
-Both lookups depend on the executable, but not its runtime installation or
-transitive dependencies. Check the graph directly: lock digests can change
+Both lookups must depend on the runtime installation and its transitive
+dependencies. Check the graph directly: lock digests can change
 the executable path and invalidate the rule without these dependencies.
 
   $ dune build out literal-out
@@ -50,8 +50,8 @@ the executable path and invalidate the rule without these dependencies.
   >     .[] | { executable: ruleHasDepFile($provider + "/bin/mybin"),
   >             provider: ruleHasDepFile($provider),
   >             runtime: ruleHasDepFile($runtime) }'
-  {"executable":true,"provider":false,"runtime":false}
-  {"executable":true,"provider":false,"runtime":false}
+  {"executable":true,"provider":true,"runtime":true}
+  {"executable":true,"provider":true,"runtime":true}
 
   $ cat _build/default/out
   one
@@ -65,8 +65,8 @@ Change only runtime data in the package's .files directory.
   two
   $ cmp mybin.before "$provider_target/bin/mybin"
 
-CR-someday alizter: This should print "two". The consuming rule depends only on
-the unchanged executable, rather than its package runtime dependencies.
+The consumer tracks the runtime installation even when the executable
+bytes and its digest-qualified path are unchanged.
 
   $ cat _build/default/out
-  one
+  two

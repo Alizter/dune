@@ -410,7 +410,7 @@ end = struct
         let dir = Path.build env.dir in
         let loc = loc sw in
         let* prog, args = Expander.expand env sw ~mode:At_least_one in
-        let+ prog =
+        let* prog =
           match prog with
           | Value.Dir p ->
             User_error.raise
@@ -446,9 +446,11 @@ end = struct
         let args = Value.L.to_strings ~dir args in
         match prog with
         | Ok prog ->
+          let* artifacts = Action_builder.of_memo (Expander.artifacts env.expander) in
+          let+ () = Artifacts.binary_deps artifacts prog in
           let dep, prog, args = Expander.map_exe ~force_host env.expander prog args in
           Ok prog, args, [ dep ]
-        | Error _ as v -> v, args, []
+        | Error _ as v -> Action_builder.return (v, args, [])
       in
       register_deps b env acc ~f:(function _, _, deps -> deps)
     ;;

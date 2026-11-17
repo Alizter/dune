@@ -92,9 +92,11 @@ The rules depend on the ocamllex and menhir binaries from the tool_provider
 lockdir package:
 
   $ dune rules --format=json foo.ml | jq_dune '.[] | ruleDepFilePaths' | censor
+  "_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target"
   "_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target/bin/ocamllex"
   "_build/default/foo.mll"
   $ dune rules --format=json bar.ml | jq_dune '.[] | ruleDepFilePaths' | censor
+  "_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target"
   "_build/_private/default/.pkg/tool_provider.0.0.1-$DIGEST/target/bin/menhir"
   "_build/default/bar.mly"
 

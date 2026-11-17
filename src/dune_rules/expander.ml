@@ -901,17 +901,18 @@ let expand_pform_macro
     Need_full_expander
       (fun t ->
         With
-          (let* prog =
+          (let* artifacts_host = Action_builder.of_memo t.artifacts_host in
+           let* prog =
              Action_builder.of_memo
-               (let open Memo.O in
-                let* artifacts_host = t.artifacts_host in
-                Artifacts.binary
+               (Artifacts.binary
                   ~loc:(Some (Dune_lang.Template.Pform.loc source))
                   ~dir:t.dir
                   artifacts_host
                   s)
            in
-           dep (Action.Prog.ok_exn prog)))
+           let prog = Action.Prog.ok_exn prog in
+           let* () = Artifacts.binary_deps artifacts_host prog in
+           dep prog))
   | Lib { lib_exec; lib_private } ->
     Need_full_expander
       (fun t ->
