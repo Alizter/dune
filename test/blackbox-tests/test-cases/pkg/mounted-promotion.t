@@ -50,31 +50,27 @@ untouched.
 
 A missing diff operand is not permission to invent a workspace promotion path.
 
-  $ dune build _build/default/.pkg/foo/checked > diff-output 2>&1
-  [1]
-  $ grep '^+corrected' diff-output
+  $ dune build _build/default/.pkg/foo/checked 2>&1 | grep '^+corrected'
   +corrected
+  [1]
   $ dune promotion list
 
 A mounted action cannot promote into the workspace either.
 
-  $ dune build _build/default/.pkg/foo/external-checked > external-diff-output 2>&1
-  [1]
-  $ grep '^+corrected' external-diff-output
+  $ dune build _build/default/.pkg/foo/external-checked 2>&1 | grep '^+corrected'
   +corrected
+  [1]
   $ dune promotion list
 
 Neither manual nor automatic promotion can override these boundaries.
 
   $ dune promote
-  $ dune build --auto-promote _build/default/.pkg/foo/checked > auto-diff-output 2>&1
-  [1]
-  $ grep '^+corrected' auto-diff-output
+  $ dune build --auto-promote _build/default/.pkg/foo/checked 2>&1 | grep '^+corrected'
   +corrected
-  $ dune build --auto-promote _build/default/.pkg/foo/external-checked > auto-external-output 2>&1
   [1]
-  $ grep '^+corrected' auto-external-output
+  $ dune build --auto-promote _build/default/.pkg/foo/external-checked 2>&1 | grep '^+corrected'
   +corrected
+  [1]
   $ dune promotion list
   $ test ! -e .pkg
   $ cat expected
@@ -110,10 +106,9 @@ promotions, including file deletion and creation.
   >    (system "rm check.txt; echo fresh > new-file")
   >    (write-file %{target} done))))
   > EOF
-  $ dune build --auto-promote _build/default/.pkg/foo/corrected-ok > correction-output 2>&1
-  [1]
-  $ grep '^+corrected' correction-output
+  $ dune build --auto-promote _build/default/.pkg/foo/corrected-ok 2>&1 | grep '^+corrected'
   +corrected
+  [1]
   $ dune promotion list
   $ dune build --auto-promote _build/default/.pkg/foo/patched-ok > patch-back-output 2>&1
   [1]
@@ -135,16 +130,14 @@ diff must still be reported without registering or applying a promotion.
   >    (write-file alias-expected.corrected corrected)
   >    (diff? alias-expected alias-expected.corrected))))
   > EOF
-  $ dune build @_build/default/.pkg/foo/mounted-check > alias-output 2>&1
-  [1]
-  $ grep '^+corrected' alias-output
+  $ dune build @_build/default/.pkg/foo/mounted-check 2>&1 | grep '^+corrected'
   +corrected
+  [1]
   $ dune promotion list
   $ dune promote
-  $ dune build --auto-promote @_build/default/.pkg/foo/mounted-check > auto-alias-output 2>&1
-  [1]
-  $ grep '^+corrected' auto-alias-output
+  $ dune build --auto-promote @_build/default/.pkg/foo/mounted-check 2>&1 | grep '^+corrected'
   +corrected
+  [1]
   $ dune promotion list
   $ test ! -e .pkg
 
@@ -206,33 +199,29 @@ registering promotions, whether the interface is missing or outdated.
   > (library (name foo))
   > EOF
   $ echo 'let value = 42' > _source/inferred/foo.ml
-  $ dune ocaml inferred-mli .pkg/foo/inferred/foo.ml > inferred-output 2>&1
-  [1]
-  $ grep '^+val' inferred-output
+  $ dune ocaml inferred-mli .pkg/foo/inferred/foo.ml 2>&1 | grep '^+val'
   +val value : int
+  [1]
   $ dune promotion list
   $ dune promote
   $ test ! -e .pkg
-  $ dune ocaml inferred-mli --auto-promote .pkg/foo/inferred/foo.ml > auto-inferred-output 2>&1
-  [1]
-  $ grep '^+val' auto-inferred-output
+  $ dune ocaml inferred-mli --auto-promote .pkg/foo/inferred/foo.ml 2>&1 | grep '^+val'
   +val value : int
+  [1]
   $ dune promotion list
   $ test ! -e .pkg
 
   $ echo 'val value : string' > _source/inferred/foo.mli
-  $ dune ocaml inferred-mli .pkg/foo/inferred/foo.ml > outdated-output 2>&1
-  [1]
-  $ grep '^[-+]val' outdated-output
+  $ dune ocaml inferred-mli .pkg/foo/inferred/foo.ml 2>&1 | grep '^[-+]val'
   -val value : string
   +val value : int
+  [1]
   $ dune promotion list
   $ dune promote
-  $ dune ocaml inferred-mli --auto-promote .pkg/foo/inferred/foo.ml > auto-outdated-output 2>&1
-  [1]
-  $ grep '^[-+]val' auto-outdated-output
+  $ dune ocaml inferred-mli --auto-promote .pkg/foo/inferred/foo.ml 2>&1 | grep '^[-+]val'
   -val value : string
   +val value : int
+  [1]
   $ dune promotion list
   $ test ! -e .pkg
   $ cat _source/inferred/foo.mli
@@ -249,10 +238,9 @@ The invariant is not tied to a context named default.
   $ dune build --auto-promote _build/target/.pkg/foo/source.txt
   $ cat _build/target/.pkg/foo/source.txt
   generated
-  $ dune build --auto-promote _build/host/.pkg/foo/checked > host-output 2>&1
-  [1]
-  $ grep '^+corrected' host-output
+  $ dune build --auto-promote _build/host/.pkg/foo/checked 2>&1 | grep '^+corrected'
   +corrected
+  [1]
   $ dune promotion list
   $ dune promote
   $ test ! -e .pkg

@@ -32,8 +32,7 @@ Describe the cold workspace before compilation. The consumer's executable and
 library, and the native dependency's library/modules, are included; the
 provider's unrelated executable is not part of the workspace description.
 
-  $ (cd native && dune describe workspace) > native-description
-  $ grep -E 'names|\(name ' native-description
+  $ (cd native && dune describe workspace) | grep -E 'names|\(name '
     ((names (main))
       (((name Main)
     ((name foo)
@@ -53,8 +52,7 @@ The opaque recipe performs a harmless substitution before building the same
 Dune project. Its marker and cookie prove this really exercised installation,
 not another native build.
 
-  $ (cd opaque && dune describe workspace) > opaque-description
-  $ grep -E 'names|\(name ' opaque-description
+  $ (cd opaque && dune describe workspace) | grep -E 'names|\(name '
     ((names (main))
       (((name Main)
     ((name foo)
