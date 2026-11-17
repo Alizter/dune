@@ -406,13 +406,14 @@ module DB = struct
         ( loaded_project
         , Staged.unstage (create_db_from_stanzas stanzas ~lib_config ~loaded_project) ))
     in
+    let scope_db make_db owner =
+      let public_libs = owner_libs owner in
+      public_libs, make_db ~scopes ~owner ~public_libs ~instrument_with ~package_scopes
+    in
     let db_by_project_dir =
       Path.Build.Map.map make_db_by_project_dir ~f:(fun (project, make_db) ->
-        let owner = Loaded_project.owner project in
-        let public_libs = owner_libs owner in
-        ( project
-        , public_libs
-        , make_db ~scopes ~owner ~public_libs ~instrument_with ~package_scopes ))
+        let public_libs, db = scope_db make_db (Loaded_project.owner project) in
+        project, public_libs, db)
     in
     let rocq_scopes =
       Rocq_scope.make
@@ -436,15 +437,7 @@ module DB = struct
         let scope = Path.Build.Map.find_exn by_dir dir in
         Loaded_project.packages project
         |> Package.Name.Map.to_list_map ~f:(fun name _ ->
-          let public_libs = owner_libs (Some name) in
-          let db =
-            make_db
-              ~scopes
-              ~owner:(Some name)
-              ~public_libs
-              ~instrument_with
-              ~package_scopes
-          in
+          let public_libs, db = scope_db make_db (Some name) in
           name, { scope with db; public_libs }))
       |> Package.Name.Map.of_list_exn
     in
@@ -508,6 +501,17 @@ module DB = struct
               in
               Fdecl.set scopes value;
               Some (value, public)))
+
+  and partition_exn context owner =
+    Memo.exec (Lazy.force partition) (context, owner)
+    >>| function
+    | Some partition -> partition
+    | None ->
+      Code_error.raise
+        "Scope.DB: no partition"
+        [ "context", Context_name.to_dyn context
+        ; "owner", Dyn.option Package.Name.to_dyn owner
+        ]
 
   (* An opaque package reveals its libraries once it is installed, so looking
      in one builds it. *)
@@ -594,15 +598,7 @@ module DB = struct
       |> Option.value ~default:[]
       |> Memo.List.map ~f:(Public_libs.resolve_redirect_to public)
     in
-    let partition owner =
-      Memo.exec (Lazy.force partition) (context, owner)
-      >>| function
-      | Some (_, public) -> public
-      | None ->
-        Code_error.raise
-          "Scope.DB.owner_db: no partition"
-          [ "owner", Dyn.option Package.Name.to_dyn owner ]
-    in
+    let partition owner = partition_exn context owner >>| snd in
     let mounted_libs package =
       let* mounted = Pkg_sources.find_mounted context package in
       match mounted with
@@ -771,14 +767,7 @@ module DB = struct
   ;;
 
   let partition context owner = Memo.exec (Lazy.force partition) (context, owner)
-
-  let workspace context =
-    partition context None
-    >>| function
-    | Some (scopes, _) -> scopes
-    | None ->
-      Code_error.raise "Scope.DB.workspace" [ "context", Context_name.to_dyn context ]
-  ;;
+  let workspace context = partition_exn context None >>| fst
 
   (* The partition holding a build directory: a mount with projects, or the
      workspace. *)
