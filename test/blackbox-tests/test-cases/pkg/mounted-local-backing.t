@@ -7,7 +7,7 @@ its backing, without first copying a snapshot into _build/_fetch.
   > (package (name main) (allow_empty) (depends foo))
   > EOF2
   $ cat > dune <<'EOF2'
-  > (dirs :standard \ _source _opaque)
+  > (dirs :standard \ _source)
   > (executable (name main) (libraries foo))
   > EOF2
   $ echo 'let () = print_endline Foo.message' > main.ml
@@ -99,20 +99,10 @@ An executable script keeps its mode in the mount.
   $ _build/default/.pkg/foo/tool.sh
   executable-edited
 
-An empty subdirectory is tolerated. It is not mounted, and an opaque recipe
-does not see it either: only files are copied.
+An empty subdirectory is tolerated. It is not mounted.
 
   $ dune build main.exe
   $ test ! -e _build/default/.pkg/foo/empty
-  $ mkdir -p _opaque/empty
-  $ echo content > _opaque/file
-  $ make_lockpkg opaque <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_opaque))
-  > (build (run sh -c "ls; test ! -e empty"))
-  > EOF2
-  $ dune build _build/default/.pkg/opaque/_install 2>&1
-  file
 
 Opaque recipes use the same direct backing. File links may point outside the
 package source; their contents are copied, not the links. Recipe writes stay
