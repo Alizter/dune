@@ -7,20 +7,14 @@ configuration is recipe input, not configuration for the outer build.
   $ echo '(' > _sources/dune-project
   $ echo '(include missing)' > _sources/dune
   $ echo original > _sources/input
-  $ cat > _sources/build.sh <<'EOF'
-  > #!/bin/sh
-  > set -eu
-  > cat input > result
-  > echo modified > input
-  > printf 'share: [ "result" ]\n' > "$1.install"
-  > EOF
   $ for package in first second; do
   >   make_lockpkg "$package" <<EOF
   > (version 1.0)
   > (source (copy $PWD/_sources))
   > (build
   >  (progn
-  >   (run sh build.sh %{pkg-self:name})
+  >   (system "cat input > result && echo modified > input")
+  >   (run sh -c "printf 'share: [ \"result\" ]\n' > %{pkg-self:name}.install")
   >   (substitute result prepared)))
   > EOF
   > done
