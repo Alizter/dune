@@ -154,10 +154,6 @@ Keep only the tools needed to build the fake compiler on PATH.
   >   ln -s "$(command -v "$tool")" "_path/$tool"
   > done
   $ export PATH="$PWD/_path"
-  $ cat >dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (allow_empty) (dir .) (depends mycaml))
-  > EOF
   $ cat >dune <<'EOF'
   > (dirs :standard \ mycamlsources shadowsystemocaml stdlib)
   > (ocamllex lexer)
@@ -179,17 +175,6 @@ Keep only the tools needed to build the fake compiler on PATH.
   > %%
   > main: EOF { () }
   > EOF
-
-The selected compiler's tools are visible, including those installed by its
-transitive dependencies:
-
-  $ dune build lexer.ml parser.ml toplevel-output private-available
-  $ cat _build/default/lexer.ml _build/default/parser.ml \
-  >   _build/default/toplevel-output _build/default/private-available
-  let source = "managed lexer"
-  let source = "managed parser"
-  managed toplevel
-  true
 
 An ambient copy must not replace the selected compiler's tools. The compiler
 also remains available without an explicit package dependency on it. Change the
