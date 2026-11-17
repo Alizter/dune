@@ -186,15 +186,6 @@ let find_package context name =
          Package.Name.Map.find (Loaded_project.packages project) name))
 ;;
 
-let context_of_dir dir =
-  match Path.Build.extract_build_context dir with
-  | Some (context, _) -> Context_name.of_string (Filename.to_string context)
-  | None ->
-    Code_error.raise
-      "Dune_load: path is not in a build context"
-      [ "dir", Path.Build.to_dyn dir ]
-;;
-
 let mount_of_dir context ~dir =
   match Pkg_sources.package_of_artifact_path dir with
   | None -> Memo.return None
@@ -202,7 +193,7 @@ let mount_of_dir context ~dir =
 ;;
 
 let find_loaded_project ~dir =
-  let context = context_of_dir dir in
+  let context = Install.Context.of_path dir |> Option.value_exn in
   let* mount = mount_of_dir context ~dir in
   let+ projects_by_output_root =
     match mount with
@@ -332,10 +323,9 @@ let stanzas_of_package =
 ;;
 
 let source_tree_root ~dir =
-  match Path.Build.extract_build_context dir with
+  match Install.Context.of_path dir with
   | None -> Memo.return None
-  | Some (context, _) ->
-    let context = Context_name.of_string (Filename.to_string context) in
+  | Some context ->
     let* valid = Per_context.valid context in
     if not valid
     then Memo.return None
@@ -356,7 +346,8 @@ let source_tree_dir ~dir =
   | Some root ->
     let output_root =
       Source_tree.Rules.Dir.source_path root
-      |> Path.Build.append_local (Context_name.build_dir (context_of_dir dir))
+      |> Path.Build.append_local
+           (Context_name.build_dir (Install.Context.of_path dir |> Option.value_exn))
     in
     let local = Path.drop_prefix (Path.build dir) ~prefix:(Path.build output_root) in
     (match local with
