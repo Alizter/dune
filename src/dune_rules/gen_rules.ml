@@ -885,14 +885,12 @@ let gen_rules ctx ~dir components =
        of them is loaded. *)
     let* () = raise_on_lock_dir_out_of_sync ctx in
     match components with
-    | root :: name :: rest
-      when String.equal root (Filename.to_string Filename.pkg_dir_basename) ->
+    | ".pkg" :: name :: rest ->
       let* mounted = Pkg_sources.find_mounted_kind ctx (Package.Name.of_string name) in
       (match mounted with
        | Some (_, `Dune) -> gen_rules ctx (Super_context.find_exn ctx) ~dir rest
        | None | Some (_, `Opam) -> Opam_rules.gen_mounted_rules ctx ~dir (name :: rest))
-    | root :: rest when String.equal root (Filename.to_string Filename.pkg_dir_basename)
-      -> Opam_rules.gen_mounted_rules ctx ~dir rest
+    | ".pkg" :: rest -> Opam_rules.gen_mounted_rules ctx ~dir rest
     | _ ->
       let gen_pkg_alias_rule = Pkg_rules.setup_pkg_install_alias ~dir ctx in
       let+ sctx_rules = gen_rules ctx (Super_context.find_exn ctx) ~dir components in

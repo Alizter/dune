@@ -75,17 +75,6 @@ module Candidate = struct
     |> Package.Name.Set.of_list_map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) ->
       dep.name)
   ;;
-
-  let make context (lock_pkg : Dune_pkg.Lock_dir.Pkg.t) ~files_dir =
-    let artifact_root =
-      Path.Build.L.relative
-        (Context_name.build_dir context)
-        [ Filename.to_string Filename.pkg_dir_basename
-        ; Package.Name.to_string lock_pkg.info.name
-        ]
-    in
-    { lock_pkg; files_dir; artifact_root }
-  ;;
 end
 
 let candidates =
@@ -114,7 +103,14 @@ let candidates =
               ~lock_dir:lock_dir_path
             |> Path.as_in_build_dir_exn
           in
-          Candidate.make context lock_pkg ~files_dir))
+          let artifact_root =
+            Path.Build.L.relative
+              (Context_name.build_dir context)
+              [ Filename.to_string Filename.pkg_dir_basename
+              ; Package.Name.to_string lock_pkg.info.name
+              ]
+          in
+          { Candidate.lock_pkg; files_dir; artifact_root }))
     |> Memo.Lazy.force)
   |> Staged.unstage
 ;;

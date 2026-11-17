@@ -245,13 +245,11 @@ let copy_files_relative_glob ~dir ~loc src_glob =
   | None ->
     Path.relative (Path.source (Path.Source.of_local local)) src_glob ~error_loc:loc
   | Some package ->
-    let root =
-      Path.Local.L.relative
-        Path.Local.root
-        [ Filename.to_string Filename.pkg_dir_basename; Package.Name.to_string package ]
-    in
-    (match Path.Local.relative_result local src_glob with
-     | Ok glob when Path.Local.is_descendant glob ~of_:root ->
+    (match
+       Path.Local.relative_result local src_glob
+       |> Result.map ~f:Pkg_sources.package_of_dir_in_context
+     with
+     | Ok (Some owner) when Package.Name.equal owner package ->
        Path.build (Path.Build.relative dir src_glob)
      | Ok _ | Error _ ->
        User_error.raise
