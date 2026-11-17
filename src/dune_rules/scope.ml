@@ -269,6 +269,21 @@ module DB = struct
       ; scopes : partition Fdecl.t
       }
 
+    let resolve_redirect_to t rt =
+      match rt with
+      | Project { project; lib_id; enabled; _ } ->
+        let+ enabled =
+          let+ toggle = enabled in
+          Toggle.enabled toggle
+        in
+        if enabled
+        then (
+          let scope = find_by_project (Fdecl.get t.scopes) project in
+          Lib.DB.Resolve_result.redirect_by_id scope.db (Local lib_id))
+        else Lib.DB.Resolve_result.not_found
+      | Name name -> Memo.return (Lib.DB.Resolve_result.redirect_in_the_same_db name)
+    ;;
+
     let of_stanzas ~scopes stanzas =
       let by_name, by_id =
         List.fold_left
@@ -318,21 +333,6 @@ module DB = struct
               by_name, by_id)
       in
       { by_name; by_id; scopes }
-    ;;
-
-    let resolve_redirect_to t rt =
-      match rt with
-      | Project { project; lib_id; enabled; _ } ->
-        let+ enabled =
-          let+ toggle = enabled in
-          Toggle.enabled toggle
-        in
-        if enabled
-        then (
-          let scope = find_by_project (Fdecl.get t.scopes) project in
-          Lib.DB.Resolve_result.redirect_by_id scope.db (Local lib_id))
-        else Lib.DB.Resolve_result.not_found
-      | Name name -> Memo.return (Lib.DB.Resolve_result.redirect_in_the_same_db name)
     ;;
   end
 
