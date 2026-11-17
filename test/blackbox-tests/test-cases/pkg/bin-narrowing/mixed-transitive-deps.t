@@ -10,20 +10,17 @@ The lockdir package [r] is a Dune project installing [r-tool], built natively
 or by an opaque recipe:
 
   $ mkdir -p _r native opaque
-  $ cat > _r/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name r))
-  > EOF
+  $ (cd _r && make_dune_project_with_package 3.25 r)
   $ echo '(install (section bin) (files r-tool))' > _r/dune
   $ printf '#!/bin/sh\necho from r\n' > _r/r-tool
   $ chmod +x _r/r-tool
   $ make_backend_lockdirs r "$PWD/_r"
-  $ for backend in native opaque; do
-  >   mkdir -p $backend/p $backend/q
-  >   cat > $backend/p/dune <<'EOF'
+
+  $ mkdir -p p q
+  $ cat >p/dune <<'EOF'
   > (rule (with-stdout-to r-avail (echo %{bin-available:r-tool})))
   > EOF
-  > done
+  $ cp -R p q native/ && cp -R p q opaque/
   $ check() (
   >   cd "$1"
   >   make_dune_project 3.25
