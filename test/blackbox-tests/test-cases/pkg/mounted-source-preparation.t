@@ -9,6 +9,15 @@ independently.
   >   echo 'let () = print_endline Foo.message' > main.ml
   >   mkdir _source
   > }
+  $ patch_message() {
+  >   make_lockpkg_file foo update.patch <<EOF
+  > --- a/$1
+  > +++ b/$1
+  > @@ -1 +1 @@
+  > -let message = "$2"
+  > +let message = "$3"
+  > EOF
+  > }
 
 Extra sources override lock files, which override the fetched snapshot.
 Dune configuration supplied only by extra sources is discovered natively.
@@ -87,13 +96,7 @@ Patches apply after the overlays, without mutating the source or extra source.
 
 A stale hunk fails on the first demand, at the patch action in the lock file.
 
-  $ make_lockpkg_file foo update.patch <<'EOF'
-  > --- a/foo.ml
-  > +++ b/foo.ml
-  > @@ -1 +1 @@
-  > -let message = "something else"
-  > +let message = "patched"
-  > EOF
+  $ patch_message foo.ml 'something else' patched
   $ dune build main.exe
   File "dune.lock/foo.pkg", line 4, characters 21-33:
   4 | (build (progn (patch update.patch) (run false)))
@@ -110,13 +113,7 @@ The source and extra source are unchanged after failure.
 
 A patch for a missing file also fails before the consumer can build.
 
-  $ make_lockpkg_file foo update.patch <<'EOF'
-  > --- a/absent.ml
-  > +++ b/absent.ml
-  > @@ -1 +1 @@
-  > -let message = "extra"
-  > +let message = "patched"
-  > EOF
+  $ patch_message absent.ml 'extra' patched
   $ dune build main.exe
   File "dune.lock/foo.pkg", line 4, characters 21-33:
   4 | (build (progn (patch update.patch) (run false)))
@@ -126,13 +123,7 @@ A patch for a missing file also fails before the consumer can build.
 
 Fixing the patch recovers the build using the overlaid input.
 
-  $ make_lockpkg_file foo update.patch <<'EOF'
-  > --- a/foo.ml
-  > +++ b/foo.ml
-  > @@ -1 +1 @@
-  > -let message = "extra"
-  > +let message = "patched"
-  > EOF
+  $ patch_message foo.ml 'extra' patched
   $ dune build main.exe
   $ _build/default/main.exe
   patched
@@ -167,13 +158,7 @@ missing patch.
   >   (when (= %{pkg-self:version} 9.0) (patch missing.patch))
   >   (run false)))
   > EOF
-  $ make_lockpkg_file foo update.patch <<'EOF'
-  > --- a/foo.ml
-  > +++ b/foo.ml
-  > @@ -1 +1 @@
-  > -let message = "original"
-  > +let message = "conditional"
-  > EOF
+  $ patch_message foo.ml 'original' conditional
   $ dune build main.exe
   $ dune trace cat | jq -rs '
   >   [.[] | select(.cat == "log") | .args
