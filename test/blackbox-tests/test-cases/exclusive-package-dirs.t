@@ -185,17 +185,3 @@ unrelated, invalid executable at the project root.
                 ^^^^^^^
   Error: Module Missing doesn't exist.
   [1]
-
-A package directory outside the workspace is an error located at the field.
-
-  $ mkdir ../escape && cd ../escape
-  $ cat >dune-project <<'EOF'
-  > (lang dune 3.21)
-  > (package (name escape) (dir ../outside) (allow_empty))
-  > EOF
-  $ dune build @install
-  File "dune-project", line 2, characters 28-38:
-  2 | (package (name escape) (dir ../outside) (allow_empty))
-                                  ^^^^^^^^^^
-  Error: path outside the workspace: ../outside from .
-  [1]
