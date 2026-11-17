@@ -31,7 +31,7 @@ module Candidate : sig
   val dependencies : t -> Package.Name.Set.t Memo.t
 end
 
-val candidates : Context_name.t -> Candidate.t list Memo.t
+val candidates : Context_name.t -> Candidate.t Package.Name.Map.t Memo.t
 val find_candidate : Context_name.t -> Package.Name.t -> Candidate.t option Memo.t
 
 (** Each candidate's locked dependencies on this platform, in lock order and

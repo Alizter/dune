@@ -555,15 +555,13 @@ module DB = struct
   and package_scopes ctx candidates =
     let rec package_scopes =
       lazy
-        (Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
-           let name = Pkg_sources.Candidate.name candidate in
+        (Package.Name.Map.mapi candidates ~f:(fun name candidate ->
            let root =
              Pkg_rules.candidate_paths candidate
              |> Pkg_rules.Paths.target_dir
              |> Path.build
            in
-           ( name
-           , (root, owner_db ctx ~package_scopes ~owner:(Some name) ~include_owner:true) )))
+           root, owner_db ctx ~package_scopes ~owner:(Some name) ~include_owner:true))
     in
     package_scopes
 

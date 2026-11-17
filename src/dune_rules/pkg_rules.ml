@@ -3399,6 +3399,7 @@ let package_prefixes ctx =
   | false -> Memo.return []
   | true ->
     Pkg_sources.candidates ctx
+    >>| Package.Name.Map.values
     >>= Memo.parallel_map ~f:(fun candidate ->
       let+ { Paths.prefix; name; _ } = mounted_paths ctx candidate in
       prefix, name)

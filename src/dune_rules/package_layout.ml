@@ -74,9 +74,8 @@ let materialize_dependencies context owner =
            (Package.Name.Map.map workspace ~f:(fun package ->
               Package.version package
               |> Option.value ~default:Dune_pkg.Package_version.dev))
-           (Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
-              ( Pkg_sources.Candidate.name candidate
-              , (Pkg_sources.Candidate.lock_pkg candidate).info.version )))
+           (Package.Name.Map.map candidates ~f:(fun candidate ->
+              (Pkg_sources.Candidate.lock_pkg candidate).info.version))
        in
        let* polled = Lock_dir.Sys_vars.solver_env in
        let* active = Lock_dir.lock_dir_active context in

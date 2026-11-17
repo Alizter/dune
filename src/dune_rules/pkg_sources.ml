@@ -82,15 +82,14 @@ let candidates =
     Memo.lazy_ ~name:"mounted-package-candidates" (fun () ->
       let* active = Lock_dir.lock_dir_active context in
       if not active
-      then Memo.return []
+      then Memo.return Package.Name.Map.empty
       else
         let+ lock_dir = Lock_dir.get_exn context
         and+ lock_dir_path = Lock_dir.get_path context >>| Option.value_exn
         and+ platform = Lock_dir.Sys_vars.solver_env in
         Log.info "Package source candidates" [ "context", Context_name.to_dyn context ];
         Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform
-        |> Package.Name.Map.values
-        |> List.map ~f:(fun (lock_pkg : Dune_pkg.Lock_dir.Pkg.t) ->
+        |> Package.Name.Map.map ~f:(fun (lock_pkg : Dune_pkg.Lock_dir.Pkg.t) ->
           let version =
             Option.some_if
               (Dune_pkg.Lock_dir.uses_versioned_paths lock_dir)
@@ -120,28 +119,26 @@ let dependencies =
     Memo.lazy_ ~name:"mounted-package-dependencies" (fun () ->
       let* candidates = candidates context in
       (* Polling the platform runs commands; do not without a lock dir. *)
-      match candidates with
-      | [] -> Memo.return Package.Name.Map.empty
-      | _ :: _ ->
+      if Package.Name.Map.is_empty candidates
+      then Memo.return Package.Name.Map.empty
+      else
         let+ platform = Lock_dir.Sys_vars.solver_env in
-        Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
-          ( Candidate.name candidate
-          , Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
-              (Candidate.lock_pkg candidate).depends
-              ~platform
-            |> Option.value ~default:[]
-            |> List.filter_map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) ->
-              Option.some_if
-                (not (Package.Name.equal dep.name Dune_pkg.Dune_dep.name))
-                dep.name) )))
+        Package.Name.Map.map candidates ~f:(fun candidate ->
+          Dune_pkg.Lock_dir.Conditional_choice.choose_for_platform
+            (Candidate.lock_pkg candidate).depends
+            ~platform
+          |> Option.value ~default:[]
+          |> List.filter_map ~f:(fun (dep : Dune_pkg.Lock_dir.Dependency.t) ->
+            Option.some_if
+              (not (Package.Name.equal dep.name Dune_pkg.Dune_dep.name))
+              dep.name)))
     |> Memo.Lazy.force)
   |> Staged.unstage
 ;;
 
 let find_candidate context name =
   let+ candidates = candidates context in
-  List.find candidates ~f:(fun candidate ->
-    Package.Name.equal name (Candidate.name candidate))
+  Package.Name.Map.find candidates name
 ;;
 
 let listing root =
@@ -252,10 +249,7 @@ let resolve_package_variable
     | Self -> Candidate.name candidate
     | Package package -> package
   in
-  match
-    List.find candidates ~f:(fun candidate ->
-      Package.Name.equal (Candidate.name candidate) package)
-  with
+  match Package.Name.Map.find candidates package with
   | None ->
     let+ packages = Dune_load.packages ()
     and+ direct = Candidate.dependencies candidate in
@@ -415,8 +409,7 @@ end
 let preparation_of_candidate candidates candidate =
   let* direct = Candidate.dependencies candidate in
   let candidates =
-    List.filter candidates ~f:(fun other ->
-      let name = Candidate.name other in
+    Package.Name.Map.filteri candidates ~f:(fun name _ ->
       Package.Name.equal name (Candidate.name candidate)
       || Package.Name.Set.mem direct name)
   in
@@ -453,10 +446,9 @@ let preparations =
   Per_context.create_by_name ~name:"package-source-preparations" (fun context ->
     Memo.lazy_ ~name:"package-source-preparations" (fun () ->
       let+ candidates = candidates context in
-      Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
-        ( Candidate.name candidate
-        , Memo.lazy_ ~name:"package-source-preparation" (fun () ->
-            preparation_of_candidate candidates candidate) )))
+      Package.Name.Map.map candidates ~f:(fun candidate ->
+        Memo.lazy_ ~name:"package-source-preparation" (fun () ->
+          preparation_of_candidate candidates candidate)))
     |> Memo.Lazy.force)
   |> Staged.unstage
 ;;
@@ -518,13 +510,10 @@ let mounted_by_name =
   Per_context.create_by_name ~name:"mounted-packages" (fun context ->
     Memo.lazy_ ~name:"mounted-packages" (fun () ->
       let+ candidates = candidates context in
-      Package.Name.Map.of_list_map_exn candidates ~f:(fun candidate ->
-        let loaded =
-          Memo.lazy_ ~name:"prepare-mounted-package" (fun () ->
-            let+ loaded = Memo.collect_user_errors (prepare context candidate) in
-            { Mounted.candidate; loaded })
-        in
-        Candidate.name candidate, loaded))
+      Package.Name.Map.map candidates ~f:(fun candidate ->
+        Memo.lazy_ ~name:"prepare-mounted-package" (fun () ->
+          let+ loaded = Memo.collect_user_errors (prepare context candidate) in
+          { Mounted.candidate; loaded })))
     |> Memo.Lazy.force)
   |> Staged.unstage
 ;;
