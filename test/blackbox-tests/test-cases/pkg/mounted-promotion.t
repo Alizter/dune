@@ -49,29 +49,28 @@ untouched.
   $ test ! -e .pkg
 
 A missing diff operand is not permission to invent a workspace promotion path.
+[check] builds, shows the correction and lists the registered promotions.
 
-  $ dune build _build/default/.pkg/foo/checked 2>&1 | grep '^+corrected'
+  $ check() { dune build "$@" 2>&1 | grep '^+corrected'; s=$?; dune promotion list; return $s; }
+  $ check _build/default/.pkg/foo/checked
   +corrected
   [1]
-  $ dune promotion list
 
 A mounted action cannot promote into the workspace either.
 
-  $ dune build _build/default/.pkg/foo/external-checked 2>&1 | grep '^+corrected'
+  $ check _build/default/.pkg/foo/external-checked
   +corrected
   [1]
-  $ dune promotion list
 
 Neither manual nor automatic promotion can override these boundaries.
 
   $ dune promote
-  $ dune build --auto-promote _build/default/.pkg/foo/checked 2>&1 | grep '^+corrected'
+  $ check --auto-promote _build/default/.pkg/foo/checked
   +corrected
   [1]
-  $ dune build --auto-promote _build/default/.pkg/foo/external-checked 2>&1 | grep '^+corrected'
+  $ check --auto-promote _build/default/.pkg/foo/external-checked
   +corrected
   [1]
-  $ dune promotion list
   $ test ! -e .pkg
   $ cat expected
   workspace
@@ -106,10 +105,9 @@ promotions, including file deletion and creation.
   >    (system "rm check.txt; echo fresh > new-file")
   >    (write-file %{target} done))))
   > EOF
-  $ dune build --auto-promote _build/default/.pkg/foo/corrected-ok 2>&1 | grep '^+corrected'
+  $ check --auto-promote _build/default/.pkg/foo/corrected-ok
   +corrected
   [1]
-  $ dune promotion list
   $ dune build --auto-promote _build/default/.pkg/foo/patched-ok > patch-back-output 2>&1
   [1]
   $ grep -q 'should be deleted' patch-back-output
@@ -130,15 +128,13 @@ diff must still be reported without registering or applying a promotion.
   >    (write-file alias-expected.corrected corrected)
   >    (diff? alias-expected alias-expected.corrected))))
   > EOF
-  $ dune build @_build/default/.pkg/foo/mounted-check 2>&1 | grep '^+corrected'
+  $ check @_build/default/.pkg/foo/mounted-check
   +corrected
   [1]
-  $ dune promotion list
   $ dune promote
-  $ dune build --auto-promote @_build/default/.pkg/foo/mounted-check 2>&1 | grep '^+corrected'
+  $ check --auto-promote @_build/default/.pkg/foo/mounted-check
   +corrected
   [1]
-  $ dune promotion list
   $ test ! -e .pkg
 
 Cram tests of a mounted package are never run, whether requested through the
@@ -233,9 +229,8 @@ The invariant is not tied to a context named default.
   $ dune build --auto-promote _build/target/.pkg/foo/source.txt
   $ cat _build/target/.pkg/foo/source.txt
   generated
-  $ dune build --auto-promote _build/host/.pkg/foo/checked 2>&1 | grep '^+corrected'
+  $ check --auto-promote _build/host/.pkg/foo/checked
   +corrected
   [1]
-  $ dune promotion list
   $ dune promote
   $ test ! -e .pkg
