@@ -2,23 +2,22 @@
 in the (depends ...) and (depopts ...) fields and their dependencies. Binaries
 provided by packages outside that closure are not resolved.
 
-  $ make_lockdir
+The leaf [transitive] is a Dune project installing [transitive-bin], built
+natively or by an opaque recipe:
 
-A lockdir package [transitive] that installs [transitive-bin]:
-
-  $ make_lockpkg transitive <<'EOF'
-  > (version 0.0.1)
-  > (build
-  >  (progn
-  >   (system "\| cat > transitive-bin <<'EOI'
-  >           "\| #!/usr/bin/env bash
-  >           "\| echo from transitive
-  >           "\| EOI
-  >   )
-  >   (system "chmod +x transitive-bin")
-  >   (system "echo 'bin: [ \"transitive-bin\" ]' > transitive.install")
-  >  ))
+  $ mkdir -p _transitive native opaque
+  $ cat > _transitive/dune-project <<'EOF'
+  > (lang dune 3.25)
+  > (package (name transitive))
   > EOF
+  $ echo '(install (section bin) (files transitive-bin))' > _transitive/dune
+  $ printf '#!/bin/sh\necho from transitive\n' > _transitive/transitive-bin
+  $ chmod +x _transitive/transitive-bin
+  $ make_backend_lockdirs transitive "$PWD/_transitive"
+
+The rest of the setup is shared by both lock directories.
+
+  $ cd native
 
 A lockdir package [direct] that depends on [transitive] and installs [direct-bin]:
 
@@ -78,34 +77,52 @@ narrowing kicks in):
   >  (with-stdout-to other-out (echo %{bin-available:other-bin})))
   > EOF
 
-  $ dune build @all
+  $ cd ..
+  $ cp native/dune.lock/direct.pkg native/dune.lock/other.pkg opaque/dune.lock/
+  $ cp native/dune native/dune-project opaque/
 
-[direct-bin] (direct dep) is available:
+Each check prints [direct-bin] (direct dep), [transitive-bin] (through
+[direct]) and [other-bin] (package not in the deps closure):
 
-  $ cat _build/default/direct-out
+  $ check() (
+  >   cd "$1"
+  >   dune build @all
+  >   for out in direct transitive other; do
+  >     echo "$(cat _build/default/$out-out)"
+  >   done
+  > )
+
+  $ check native
   true
-
-[transitive-bin] is available through [direct]:
-
-  $ cat _build/default/transitive-out
   true
-
-[other-bin] (package not in the deps closure) is not available:
-
-  $ cat _build/default/other-out
   false
+  $ check opaque
+  true
+  true
+  false
+  $ cat opaque/$pkg_root/transitive/_install/opaque-recipe
+  opaque
+  $ test ! -e native/$pkg_root/transitive/_install/opaque-recipe
 
-The package [other] was *not* built:
+The package [other] was *not* built. A native [transitive] runs no recipe:
 
-  $ dune trace cat | jq 'select(.cat == "process" and .name == "finish" and .args.target_dirs[]?) | .args.target_dirs[]' | sort -u | censor
+  $ built() (
+  >   cd "$1"
+  >   dune trace cat | jq 'select(.cat == "process" and .name == "finish" and .args.target_dirs[]?) | .args.target_dirs[]' | sort -u | censor
+  > )
+  $ built native
+  "_build/default/.pkg/direct/_install"
+  $ built opaque
   "_build/default/.pkg/direct/_install"
   "_build/default/.pkg/transitive/_install"
 
 Only the bin directories of the declared dependencies are added to $PATH:
 
+  $ cd opaque
   $ env_added "$(cat _build/default/path-output)" "$PATH" | censor
   $PWD/_build/default/.pkg/direct/_install/bin
   $PWD/_build/default/.pkg/transitive/_install/bin
+  $ cd ..
 
 Narrowing shrinks the build-dependency set, not just the visibility and PATH
 shown above. Previously, expanding a %{bin:X}/%{bin-available:X} pform forced
@@ -114,17 +131,26 @@ every lockdir package through [Artifacts_and_deps.of_closure] (pkg_rules.ml).
 Now only [direct]'s closure is forced, so building a single pform-expanding
 target no longer pulls in [other], a package outside that closure:
 
-  $ dune clean
-  $ dune build direct-out
-  $ if test -f "$(get_build_pkg_dir other)/_install/cookie"
-  >  then echo "other *was* built"; else echo "other was not built"; fi
+  $ cold() (
+  >   cd "$1"
+  >   dune clean
+  >   dune build direct-out
+  >   if test -f "$(get_build_pkg_dir other)/_install/cookie"
+  >    then echo "other *was* built"; else echo "other was not built"; fi
+  > )
+  $ cold native
+  other was not built
+  $ cold opaque
   other was not built
 
 [transitive] (in [direct]'s closure) is built too, as it must be:
 
-  $ if test -f "$(get_build_pkg_dir transitive)/_install/cookie"
+  $ cookie="opaque/$(get_build_pkg_dir transitive)/_install/cookie"
+  $ if test -f "$cookie"
   >  then echo "transitive *was* built"; else echo "transitive was not built"; fi
   transitive *was* built
+  $ ls native/_build/_private/default/.packages/*/bin
+  transitive-bin
 
 Removing this [other] build dependency -- not merely the visibility above -- is
 what breaks the in-out cycles: [other] is not built here, while [direct] and
