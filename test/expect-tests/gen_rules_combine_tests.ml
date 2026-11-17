@@ -4,12 +4,6 @@ module Gen_rules = Build_config.Gen_rules
 
 let () = Dune_tests_common.init ()
 
-let generated_rules = function
-  | Gen_rules.Rules rules -> rules
-  | Unknown_context | Redirect_to_parent _ ->
-    Code_error.raise "Expected a normal generated-rules result" []
-;;
-
 let run rules =
   Fiber.run (Memo.run rules) ~iter:(fun () ->
     Code_error.raise "Unexpected suspension in generated rules test" [])
@@ -31,8 +25,11 @@ let%expect_test "empty generated rule combinations remain deferred" =
     ]
     ~f:(fun (name, left, right) ->
       calls := 0;
-      let { Gen_rules.Rules.rules; _ } =
-        Gen_rules.combine left right |> generated_rules
+      let rules =
+        match Gen_rules.combine left right with
+        | Rules { rules; _ } -> rules
+        | Unknown_context | Redirect_to_parent _ ->
+          Code_error.raise "Expected a normal generated-rules result" []
       in
       let deferred = !calls = 0 in
       let result = run rules in
@@ -49,6 +46,12 @@ let%expect_test "empty generated rule combinations remain deferred" =
     empty right: deferred=true calls=1 empty=true
     same effectful record: deferred=true calls=2 empty=true
     |}]
+;;
+
+let generated_rules = function
+  | Gen_rules.Rules rules -> rules
+  | Unknown_context | Redirect_to_parent _ ->
+    Code_error.raise "Expected a normal generated-rules result" []
 ;;
 
 let%expect_test "empty generated rules retain subdirectory declarations" =
@@ -126,11 +129,7 @@ let%expect_test "source file inventories are combined" =
       let dst = Path.Build.relative_fname dir file in
       Rule.make
         ~targets:(Targets.File.create dst)
-        (Action_builder.return
-           (Action.Full.make
-              (Action.copy
-                 (Path.source (Path.Source.relative_fname Path.Source.root file))
-                 dst)))
+        (Action_builder.return (Action.Full.make (Action.write_file dst "")))
     in
     Gen_rules.Rules
       (Gen_rules.Rules.create
