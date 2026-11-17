@@ -10,23 +10,20 @@ The provider is a Dune project installing [opt-tool], built natively or by an
 opaque recipe. Each requester checks the binary and runs the guarded rule.
 
   $ mkdir -p _tool native opaque
-  $ cat > _tool/dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name optional-tool))
-  > EOF
+  $ (cd _tool && make_dune_project_with_package 3.25 optional-tool)
   $ echo '(install (section bin) (files opt-tool))' > _tool/dune
   $ printf '#!/bin/sh\necho from optional-tool\n' > _tool/opt-tool
   $ chmod +x _tool/opt-tool
   $ make_backend_lockdirs optional-tool "$PWD/_tool"
-  $ for backend in native opaque; do
-  >   cat > $backend/dune <<'EOF'
+
+  $ cat >dune <<'EOF'
   > (rule
   >  (with-stdout-to avail (echo %{bin-available:opt-tool})))
   > (rule
   >  (enabled_if %{bin-available:opt-tool})
   >  (action (with-stdout-to out (run %{bin:opt-tool}))))
   > EOF
-  > done
+  $ cp dune native/ && cp dune opaque/
   $ check() (
   >   cd "$1"
   >   make_dune_project 3.25
