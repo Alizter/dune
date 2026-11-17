@@ -4,7 +4,7 @@ default/copy sandboxing, and literal/pform program lookup. The project package
 always depends on the provider; all cells share their source definitions.
 
   $ export DUNE_CACHE=disabled
-  $ mkdir _provider _consumer native opaque
+  $ mkdir _provider native
   $ (cd _provider && make_dune_project_with_package 3.25 provider)
   $ echo '(install (section bin) (files mybin))' > _provider/dune
   $ cat > _provider/mybin <<'EOF'
@@ -12,49 +12,35 @@ always depends on the provider; all cells share their source definitions.
   > printf 'from provider: %s\n' "$1"
   > EOF
   $ chmod +x _provider/mybin
-  $ cat > _consumer/dune-project <<'EOF'
+  $ cat > native/dune-project <<'EOF'
   > (lang dune 3.25)
   > (package (name main) (dir .) (allow_empty) (depends provider))
   > EOF
-  $ cat > _consumer/dune <<'EOF'
-  > (alias
-  >  (name check)
-  >  (deps with-dep-literal with-dep-pform
-  >        without-dep-literal without-dep-pform))
-  > (rule
-  >  (target with-dep-literal)
-  >  (deps (package provider) (sandbox always))
-  >  (action (with-stdout-to %{target} (run mybin literal))))
-  > (rule
-  >  (target with-dep-pform)
-  >  (deps (package provider) (sandbox always))
-  >  (action (with-stdout-to %{target} (run %{bin:mybin} pform))))
-  > (rule
-  >  (target without-dep-literal)
-  >  (deps (sandbox always))
-  >  (action (with-stdout-to %{target} (run mybin literal))))
-  > (rule
-  >  (target without-dep-pform)
-  >  (deps (sandbox always))
-  >  (action (with-stdout-to %{target} (run %{bin:mybin} pform))))
-  > EOF
+  $ rule() {
+  >   echo "(rule (target $1) (deps $2 (sandbox always))"
+  >   echo " (action (with-stdout-to %{target} (run $3))))"
+  > }
+  $ { rule with-dep-literal '(package provider)' 'mybin literal'
+  >   rule with-dep-pform '(package provider)' '%{bin:mybin} pform'
+  >   rule without-dep-literal '' 'mybin literal'
+  >   rule without-dep-pform '' '%{bin:mybin} pform'
+  > } > native/dune
 
 Both user rules require sandboxing. Prefer none for internal rules, then copy
 for the user rules; this makes copy mode effective even without a package dep.
 
-  $ cat > _consumer/copy-config <<'EOF'
+  $ cat > native/copy-config <<'EOF'
   > (lang dune 3.25)
   > (sandboxing_preference none copy)
   > EOF
-  $ cp _consumer/* native/
-  $ cp _consumer/* opaque/
+  $ cp -R native opaque
   $ make_backend_lockdirs provider "$PWD/_provider"
 
 Native provider, default sandboxing, with and without a package dependency.
 Literal and pform lookups have separate actions, so neither supplies the
 other's sandbox dependencies.
 
-  $ (cd native && dune build @check)
+  $ (cd native && dune build @all)
   $ cat native/_build/default/*-dep-*
   from provider: literal
   from provider: pform
@@ -64,7 +50,7 @@ other's sandbox dependencies.
 Native provider, copy sandboxing. Remove the outputs to rerun every action.
 
   $ rm native/_build/default/*-dep-*
-  $ (cd native && dune build @check --config-file copy-config)
+  $ (cd native && dune build @all --config-file copy-config)
   $ cat native/_build/default/*-dep-*
   from provider: literal
   from provider: pform
@@ -74,7 +60,7 @@ Native provider, copy sandboxing. Remove the outputs to rerun every action.
 
 Opaque provider, default sandboxing, with the same consumers and lookups.
 
-  $ (cd opaque && dune build @check)
+  $ (cd opaque && dune build @all)
   $ cat opaque/_build/default/*-dep-*
   from provider: literal
   from provider: pform
@@ -85,7 +71,7 @@ Opaque provider, copy sandboxing. The package directory and the executable
 inside it must not be copied twice when both dependencies are present.
 
   $ rm opaque/_build/default/*-dep-*
-  $ (cd opaque && dune build @check --config-file copy-config)
+  $ (cd opaque && dune build @all --config-file copy-config)
   $ cat opaque/_build/default/*-dep-*
   from provider: literal
   from provider: pform
