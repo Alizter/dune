@@ -92,10 +92,7 @@ Opaque recipes use the same direct backing. File links may point outside the
 package source; their contents are copied, not the links. Recipe writes stay
 inside the writable sandbox and do not change either origin.
 
-  $ mkdir _recipe
-  $ cd _recipe
-  $ make_dune_project 3.25
-  $ make_lockdir
+  $ mkdir _recipe && cd _recipe && make_dune_project 3.25 && make_lockdir
   $ mkdir _source _shared
   $ echo original > _source/input.txt
   $ echo shared > _shared/input.txt
@@ -133,10 +130,7 @@ Editing either local input rebuilds the recipe without changing its sources.
 A directory link must not become a route for reading source includes outside
 an external backing. Only file links retain the main copy semantics.
 
-  $ mkdir _include_links
-  $ cd _include_links
-  $ make_dune_project 3.25
-  $ make_lockdir
+  $ mkdir _include_links && cd _include_links && make_dune_project 3.25 && make_lockdir
   $ mkdir _source _outside
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(include link/secret.inc)' > _source/dune
