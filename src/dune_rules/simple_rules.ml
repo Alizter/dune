@@ -308,11 +308,12 @@ let copy_files sctx ~dir ~expander (def : Copy_files.t) =
     | Some dir -> Dune_load.source_tree_dir ~dir
   in
   let* exists_or_generated =
-    match source_dir, src_in_src with
-    | Some _, _ -> Memo.return true
-    | None, External ext -> Fs_memo.dir_exists (External ext)
-    | None, (In_source_tree _ | In_build_dir _) ->
-      Load_rules.is_under_directory_target src_in_build
+    match src_in_src with
+    | External ext -> Fs_memo.dir_exists (External ext)
+    | In_source_tree _ | In_build_dir _ ->
+      (match source_dir with
+       | Some _ -> Memo.return true
+       | None -> Load_rules.is_under_directory_target src_in_build)
   in
   if not exists_or_generated
   then
@@ -330,19 +331,21 @@ let copy_files sctx ~dir ~expander (def : Copy_files.t) =
   (* add rules *)
   let* only_sources = Expander.eval_blang expander def.only_sources in
   let* files =
-    (* [only_sources] reads the source tree; otherwise the glob is evaluated in
-       the build directory and sees generated files too. *)
-    match only_sources, source_dir, src_in_src with
-    | false, _, _ -> Build_system.eval_pred (File_selector.of_glob ~dir:src_in_build glob)
-    | true, None, (In_source_tree _ | External _) ->
-      Build_system.eval_pred (File_selector.of_glob ~dir:src_in_src glob)
-    | true, source_dir, _ ->
+    let dir =
+      match only_sources with
+      | true -> src_in_src
+      | false -> src_in_build
+    in
+    match only_sources, dir with
+    | true, In_build_dir _ ->
       (match source_dir with
        | Some source_dir -> Source_tree.Rules.Dir.filenames source_dir
        | None -> Filename.Array.Set.empty)
-      |> Filename_set.create ~dir:src_in_src ~filter:(fun ~basename ->
+      |> Filename_set.create ~dir ~filter:(fun ~basename ->
         Glob.test glob (Filename.to_string basename))
       |> Memo.return
+    | true, (In_source_tree _ | External _) | false, _ ->
+      Build_system.eval_pred (File_selector.of_glob ~dir glob)
   in
   if def.syntax_version >= (3, 17) && Filename_set.is_empty files
   then User_error.raise ~loc [ Pp.textf "Does not match any files" ];
