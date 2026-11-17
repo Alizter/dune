@@ -64,11 +64,9 @@ The optional [check-env] tool is unavailable and the rules stay disabled:
 
   $ dune build @all
 
-  $ test ! -e _build/default/mybin-output
-  $ test ! -e _build/default/system-mybin-output
-  $ test ! -e _build/default/path-output
-  $ test ! -e _build/default/.pkg/provider/_install
-  $ test ! -e _build/default/.pkg/check-env/_install
+  $ absent() { for f; do test ! -e "_build/default/$f" || echo "$f"; done; }
+  $ absent mybin-output system-mybin-output path-output \
+  >   .pkg/provider/_install .pkg/check-env/_install
   $ dune rules --format=json @test | jq_dune 'length'
   0
 
@@ -85,11 +83,8 @@ the same.
   $ dune clean
   $ dune build @all
 
-  $ test ! -e _build/default/mybin-output
-  $ test ! -e _build/default/system-mybin-output
-  $ test ! -e _build/default/path-output
-  $ test ! -e _build/default/.pkg/provider/_install
-  $ test ! -e _build/default/.pkg/check-env/_install
+  $ absent mybin-output system-mybin-output path-output \
+  >   .pkg/provider/_install .pkg/check-env/_install
 
 With a package defined in the project, *with a dir field, but no dependencies*,
 the program mybin is not found in PATH or via the bin pform, since the rule for
