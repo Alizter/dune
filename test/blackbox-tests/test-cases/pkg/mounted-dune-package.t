@@ -483,10 +483,7 @@ lookup must not fall back to enumerating foo's library installation entries.
   > (version 1.0)
   > (build (run false))
   > EOF
-  $ dune build \
-  >   _build/default/.pkg/foo/src/foo.cma \
-  >   _build/default/.pkg/foo/src/available \
-  >   _build/default/.pkg/foo/tool-output
+  $ dune build $pkg_root/foo/{src/foo.cma,src/available,tool-output}
   $ cat _build/default/.pkg/foo/src/available
   false
   $ cat _build/default/.pkg/foo/tool-output

@@ -21,7 +21,7 @@ directories are in the mount (workspace libraries: merlin/src-dirs-of-deps.t).
 
 The library through the mount:
 
-  $ mount=_build/default/.pkg/foo
+  $ mount=$pkg_root/foo
   $ dune build $mount/lib/.merlin-conf/lib-foo 2>&1
   $ dune ocaml merlin dump-config --format=json $PWD/$mount/lib 2>&1 | jq_dune -r 'merlinEntry("A") | merlinJsonEntryWithConfigNames(["S", "UNIT_NAME"])'
   A: _build/default/.pkg/foo/lib/a

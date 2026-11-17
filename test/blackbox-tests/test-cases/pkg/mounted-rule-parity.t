@@ -229,11 +229,7 @@ mount, without leaking a sandbox path.
   int value = 42;
   #line 1 "line-directives/input/value.c"
   int value = 42;
-  $ dune build \
-  >   _build/default/.pkg/foo/line-directives/copied.ml \
-  >   _build/default/.pkg/foo/line-directives/value.ml \
-  >   _build/default/.pkg/foo/line-directives/copied.c \
-  >   _build/default/.pkg/foo/line-directives/value.c
+  $ dune build $pkg_root/foo/line-directives/{copied,value}.{ml,c}
   $ for file in copied.ml value.ml copied.c value.c; do
   >   cat _build/default/.pkg/foo/line-directives/$file
   > done
@@ -249,9 +245,7 @@ mount, without leaking a sandbox path.
   >   any(.[]; .cat == "sandbox" and .name == "create"
   >     and ((.args.loc // "") | contains(".pkg/foo/line-directives/")))'
   true
-  $ dune build --sandbox none \
-  >   _build/default/.pkg/foo/line-directives/value.ml \
-  >   _build/default/.pkg/foo/line-directives/value.c
+  $ dune build --sandbox none $pkg_root/foo/line-directives/value.{ml,c}
   $ for file in value.ml value.c; do
   >   grep '^#' _build/default/.pkg/foo/line-directives/$file
   > done
@@ -416,7 +410,7 @@ The mounted project receives the same treatment, with no warnings or alerts.
 
   $ make_lockdir
   $ make_dune_source_lockpkg native dep "$PWD/_source"
-  $ mounted=_build/default/.pkg/dep
+  $ mounted=$pkg_root/dep
   $ dune build "$mounted/warning/warning.cma"
   $ dune build "$mounted/alert/alert.cma"
   $ dune build "$mounted/modules/modules.cma"
@@ -560,8 +554,7 @@ The mounted aliases build the same project targets without running the recipe.
 
 Enabling ordinary project targets does not grant writeback into their inputs.
 
-  $ dune build --promote-install-files=true \
-  >   _build/default/.pkg/foo/project/foo.install
+  $ dune build --promote-install-files=true $pkg_root/foo/project/foo.install
   $ test ! -e .pkg
 
 An error about a mounted directory names it by its build path.

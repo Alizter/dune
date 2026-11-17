@@ -261,7 +261,7 @@ package scope; its availability result is not the property tested here.
 Mounting the same tree uses the locked package's scope, not the disabled
 vendored package's scope, and retains the private library outside that package.
 
-  $ mount=_build/default/.pkg/bundle
+  $ mount=$pkg_root/bundle
   $ dune build $mount/bundle.cma $mount/vendor/use.exe \
   >   $mount/vendor/disabled-query
   $ $mount/vendor/use.exe

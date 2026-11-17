@@ -130,34 +130,34 @@ install-prefix layout.
 Mounted requesters use their lock metadata, not the workspace owner's
 dependencies. Both reciprocal owners must still resolve their own tool.
 
-  $ mounted_a=_build/default/.pkg/mounted-a/a
-  $ mounted_b=_build/default/.pkg/mounted-b/b
-  $ mounted_denied=_build/default/.pkg/mounted-denied/denied
+  $ mounted_a=$pkg_root/mounted-a/a
+  $ mounted_b=$pkg_root/mounted-b/b
+  $ mounted_denied=$pkg_root/mounted-denied/denied
   $ (cd native &&
   >  dune build "$mounted_a"/{available,pform-output,literal-output} \
   >   "$mounted_b"/{available,pform-output,literal-output})
-  $ cat native/_build/default/.pkg/mounted-a/a/available
+  $ cat native/$mounted_a/available
   true false
-  $ cat native/_build/default/.pkg/mounted-b/b/available
+  $ cat native/$mounted_b/available
   false true
-  $ cat native/_build/default/.pkg/mounted-a/a/{pform-output,literal-output}
+  $ cat native/$mounted_a/{pform-output,literal-output}
   from-a
   from-a
-  $ cat native/_build/default/.pkg/mounted-b/b/{pform-output,literal-output}
+  $ cat native/$mounted_b/{pform-output,literal-output}
   from-b
   from-b
 
   $ (cd opaque &&
   >  dune build "$mounted_a"/{available,pform-output,literal-output} \
   >   "$mounted_b"/{available,pform-output,literal-output})
-  $ cat opaque/_build/default/.pkg/mounted-a/a/available
+  $ cat opaque/$mounted_a/available
   true false
-  $ cat opaque/_build/default/.pkg/mounted-b/b/available
+  $ cat opaque/$mounted_b/available
   false true
-  $ cat opaque/_build/default/.pkg/mounted-a/a/{pform-output,literal-output}
+  $ cat opaque/$mounted_a/{pform-output,literal-output}
   from-a
   from-a
-  $ cat opaque/_build/default/.pkg/mounted-b/b/{pform-output,literal-output}
+  $ cat opaque/$mounted_b/{pform-output,literal-output}
   from-b
   from-b
 
@@ -185,7 +185,7 @@ mounted paths in their diagnostics.
   Hint: add a dependency on the package installing "bin-a" to this package
   [1]
   $ (cd native && dune build "$mounted_denied/available")
-  $ cat native/_build/default/.pkg/mounted-denied/denied/available
+  $ cat native/$mounted_denied/available
   false false
   $ (cd native && dune build "$mounted_denied/pform-output")
   File "_build/default/.pkg/mounted-denied/denied/dune", line 8, characters 40-52:
@@ -220,7 +220,7 @@ mounted paths in their diagnostics.
   Hint: add a dependency on the package installing "bin-a" to this package
   [1]
   $ (cd opaque && dune build "$mounted_denied/available")
-  $ cat opaque/_build/default/.pkg/mounted-denied/denied/available
+  $ cat opaque/$mounted_denied/available
   false false
   $ (cd opaque && dune build "$mounted_denied/pform-output")
   File "_build/default/.pkg/mounted-denied/denied/dune", line 8, characters 40-52:

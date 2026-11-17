@@ -7,7 +7,7 @@ behaviour of each feature is covered by the test named with it.
   $ mkdir -p _source/docs/nested _source/stubs/inc _source/escape
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ make_dune_source_lockpkg native foo "$PWD/_source"
-  $ mount=_build/default/.pkg/foo
+  $ mount=$pkg_root/foo
 
 A source tree installed by the package (install/install-source-tree.t).
 
