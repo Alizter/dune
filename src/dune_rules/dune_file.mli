@@ -6,7 +6,7 @@ open Import
 type t
 
 val dir : t -> Path.Local.t
-val loaded_dir : t -> Loaded_dir.t
+val loaded_project : t -> Loaded_project.t
 val output_dir : t -> Path.Build.t
 val stanzas : t -> Stanza.t list Memo.t
 val static_stanzas : t -> Stanza.t list

@@ -2,17 +2,18 @@ open Import
 open Memo.O
 
 type t =
-  { loaded_dir : Loaded_dir.t
+  { dir : Path.Local.t
+  ; loaded_project : Loaded_project.t
   ; stanzas : Stanza.t list Memo.Lazy.t
   ; static_stanzas : Stanza.t list
   }
 
-let loaded_dir t = t.loaded_dir
-let dir t = Loaded_dir.source_dir t.loaded_dir
-let output_dir t = Loaded_dir.output_dir t.loaded_dir
+let dir t = t.dir
+let loaded_project t = t.loaded_project
+let output_dir t = Loaded_project.output_path t.loaded_project t.dir
 let stanzas t = Memo.Lazy.force t.stanzas
 let static_stanzas t = t.static_stanzas
-let project t = Loaded_project.project (Loaded_dir.project t.loaded_dir)
+let project t = Loaded_project.project t.loaded_project
 
 module Mask = struct
   type 'a t =
@@ -181,8 +182,8 @@ let parse_stanzas ~file ~(eval : eval) sexps =
 
 let parse sexps ~file ~(eval : eval) =
   let+ stanzas, dynamic = parse_stanzas sexps ~file ~eval in
-  ( { loaded_dir =
-        Loaded_dir.create ~project:eval.loaded_project ~source_dir:(eval_source_path eval)
+  ( { dir = eval_source_path eval
+    ; loaded_project = eval.loaded_project
     ; static_stanzas = stanzas
     ; stanzas = Memo.Lazy.of_val stanzas
     }

@@ -135,9 +135,9 @@ module DB = struct
         List.fold_left
           stanzas
           ~init:(Lib_name.Map.empty, Lib_id.Map.empty, Lib_name.Map.empty)
-          ~f:(fun (by_name, by_id, libname_conflict_map) (loaded_dir, stanza) ->
-            let dir = Loaded_dir.output_dir loaded_dir in
-            let src_dir = Loaded_dir.source_dir loaded_dir in
+          ~f:(fun (by_name, by_id, libname_conflict_map) (dune_file, stanza) ->
+            let dir = Dune_file.output_dir dune_file in
+            let src_dir = Dune_file.dir dune_file in
             let lib_id, name, r2 =
               match (stanza : Library_related_stanza.t) with
               | Library_redirect s ->
@@ -277,14 +277,14 @@ module DB = struct
           ~f:
             (fun
               (by_name, by_id)
-              ((loaded_dir, stanza) : Loaded_dir.t * Library_related_stanza.t)
+              ((dune_file, stanza) : Dune_file.t * Library_related_stanza.t)
             ->
-            let dir = Loaded_dir.output_dir loaded_dir in
+            let dir = Dune_file.output_dir dune_file in
             let candidate =
               match stanza with
               | Library ({ project; visibility = Public p; _ } as conf) ->
                 let lib_id =
-                  let src_dir = Loaded_dir.source_dir loaded_dir in
+                  let src_dir = Dune_file.dir dune_file in
                   Library.to_lib_id ~src_dir conf
                 in
                 let enabled =
@@ -305,7 +305,7 @@ module DB = struct
             match candidate with
             | None -> by_name, by_id
             | Some (public_name, r2, lib_id2) ->
-              let owner = Loaded_project.owner (Loaded_dir.project loaded_dir) in
+              let owner = Loaded_project.owner (Dune_file.loaded_project dune_file) in
               let r2 = owner, r2 in
               let by_name =
                 Lib_name.Map.update by_name public_name ~f:(function
@@ -394,7 +394,7 @@ module DB = struct
     =
     let stanzas_by_project_dir =
       List.map stanzas ~f:(fun (dir, stanza) ->
-        Loaded_project.output_root (Loaded_dir.project dir), (dir, stanza))
+        Loaded_project.output_root (Dune_file.loaded_project dir), (dir, stanza))
       |> Path.Build.Map.of_list_multi
     in
     let make_db_by_project_dir =
@@ -456,16 +456,15 @@ module DB = struct
       dune_files
       ~init:([], [])
       ~f:(fun dune_file stanza (acc, rocq_acc) ->
-        let loaded_dir = Dune_file.loaded_dir dune_file in
         match Stanza.repr stanza with
         | Library.T lib ->
-          (loaded_dir, Library_related_stanza.Library lib) :: acc, rocq_acc
+          (dune_file, Library_related_stanza.Library lib) :: acc, rocq_acc
         | Deprecated_library_name.T d ->
-          (loaded_dir, Deprecated_library_name d) :: acc, rocq_acc
-        | Library_redirect.Local.T d -> (loaded_dir, Library_redirect d) :: acc, rocq_acc
+          (dune_file, Deprecated_library_name d) :: acc, rocq_acc
+        | Library_redirect.Local.T d -> (dune_file, Library_redirect d) :: acc, rocq_acc
         | Rocq_stanza.Theory.T rocq_lib ->
           ( acc
-          , (Loaded_dir.project loaded_dir, Loaded_dir.output_dir loaded_dir, rocq_lib)
+          , (Dune_file.loaded_project dune_file, Dune_file.output_dir dune_file, rocq_lib)
             :: rocq_acc )
         | _ -> acc, rocq_acc)
   ;;
