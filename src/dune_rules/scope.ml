@@ -863,16 +863,8 @@ module DB = struct
 
   let find_by_project context project =
     let+ scopes =
-      match Pkg_sources.package_of_dir_in_context (Dune_project.root project) with
-      | None -> workspace context
-      | Some package ->
-        partition context (Some package)
-        >>| (function
-         | Some (scopes, _) -> scopes
-         | None ->
-           Code_error.raise
-             "Scope.DB.find_by_project: package is not mounted"
-             [ "package", Package.Name.to_dyn package ])
+      Path.Build.append_local (Context_name.build_dir context) (Dune_project.root project)
+      |> of_dir context
     in
     find_by_project scopes project
   ;;
