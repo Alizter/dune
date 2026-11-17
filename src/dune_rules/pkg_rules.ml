@@ -1464,7 +1464,6 @@ module DB = struct
           (lock_dir : Dune_pkg.Lock_dir.t)
           ~platform
           ~system_provided
-          ~local_packages
       =
       let pkgs_by_name = Dune_pkg.Lock_dir.packages_on_platform lock_dir ~platform in
       Log.info
@@ -1506,8 +1505,6 @@ module DB = struct
                    with
                    | true, _ -> true, acc
                    | false, true -> has_dune_dep, acc
-                   | _, false when Package.Name.Set.mem local_packages name ->
-                     has_dune_dep, acc
                    | _, false ->
                      let dep_pkg = Package.Name.Map.find_exn pkgs_by_name name in
                      let dep_entry = compute_entry dep_pkg ~seen_set ~seen_list in
@@ -1535,8 +1532,8 @@ module DB = struct
       |> Pkg_digest.Map.of_list_map_exn ~f:(fun entry -> entry.pkg_digest, entry)
     ;;
 
-    let of_lock_dir lock_dir ~platform ~system_provided ~local_packages =
-      entries_by_name_of_lock_dir lock_dir ~platform ~system_provided ~local_packages
+    let of_lock_dir lock_dir ~platform ~system_provided =
+      entries_by_name_of_lock_dir lock_dir ~platform ~system_provided
       |> of_entries_by_name
     ;;
 
@@ -1551,8 +1548,10 @@ module DB = struct
            entries_by_name_of_lock_dir
              lock_dir
              ~platform
-             ~system_provided:default_system_provided
-             ~local_packages:(Package.Name.Set.of_keys packages))
+             ~system_provided:
+               (Package.Name.Set.union
+                  default_system_provided
+                  (Package.Name.Set.of_keys packages)))
     ;;
 
     (* Helper which is called when both tables have an entry with the same
@@ -1594,9 +1593,7 @@ module DB = struct
 
     let of_dev_tool_deps_if_lock_dir_exists dev_tool ~platform ~system_provided =
       let+ lock_dir_opt = Lock_dir.of_dev_tool_if_lock_dir_exists dev_tool in
-      Option.map
-        lock_dir_opt
-        ~f:(of_lock_dir ~platform ~system_provided ~local_packages:Package.Name.Set.empty)
+      Option.map lock_dir_opt ~f:(of_lock_dir ~platform ~system_provided)
     ;;
 
     let all_existing_dev_tools =
@@ -1624,16 +1621,18 @@ module DB = struct
   let equal x y = Id.equal x.id y.id
   let create ~pkg_digest_table = { id = Id.gen (); pkg_digest_table }
 
-  let pkg_digest_of_name entries_by_name pkg_name =
-    let { Pkg_table.pkg_digest; _ } =
-      Package.Name.Map.find_exn entries_by_name pkg_name
+  let pkg_digest_of_name lock_dir platform pkg_name ~system_provided =
+    let entries_by_name =
+      Pkg_table.entries_by_name_of_lock_dir lock_dir ~platform ~system_provided
     in
-    pkg_digest
+    let entry = Package.Name.Map.find_exn entries_by_name pkg_name in
+    entry.pkg_digest
   ;;
 
   let project_pkg_digest ctx pkg_name =
     let+ entries = Memo.exec Pkg_table.project_entries ctx in
-    pkg_digest_of_name entries pkg_name
+    let entry = Package.Name.Map.find_exn entries pkg_name in
+    entry.pkg_digest
   ;;
 
   let of_ctx =
@@ -1658,14 +1657,12 @@ module DB = struct
                 dependencies to be shared with the project's if it too is being
                 built in the default context. *)
              let allow_sharing = allow_sharing && Context_name.is_default ctx in
-             let* entries = Memo.exec Pkg_table.project_entries ctx in
-             let+ dev_tools =
-               if allow_sharing
-               then Memo.Lazy.force Pkg_table.all_existing_dev_tools
-               else Memo.return Pkg_table.empty
-             in
-             let pkg_digest_table =
-               Pkg_table.union (Pkg_table.of_entries_by_name entries) dev_tools
+             let+ pkg_digest_table =
+               let* entries = Memo.exec Pkg_table.project_entries ctx in
+               (if allow_sharing
+                then Memo.Lazy.force Pkg_table.all_existing_dev_tools
+                else Memo.return Pkg_table.empty)
+               >>| Pkg_table.union (Pkg_table.of_entries_by_name entries)
              in
              create ~pkg_digest_table)
     in
@@ -1694,14 +1691,11 @@ module DB = struct
       @@ fun dev_tool ->
       let+ lock_dir = Lock_dir.of_dev_tool dev_tool
       and+ platform = Lock_dir.Sys_vars.solver_env in
-      let entries =
-        Pkg_table.entries_by_name_of_lock_dir
-          lock_dir
-          ~platform
-          ~system_provided
-          ~local_packages:Package.Name.Set.empty
-      in
-      pkg_digest_of_name entries (Pkg_dev_tool.package_name dev_tool)
+      pkg_digest_of_name
+        lock_dir
+        platform
+        (Pkg_dev_tool.package_name dev_tool)
+        ~system_provided
     in
     fun dev_tool ->
       let+ db =
