@@ -6,16 +6,6 @@ let materialize_ordered context names =
   let prefix = Install_layout.root context packages |> Path.build in
   let* dependencies =
     Action_builder.List.map names ~f:(fun name ->
-      let native paths ~variables ~exported_env =
-        let paths = Pkg_rules.Paths.with_prefix paths prefix in
-        Action_builder.return
-          { Pkg_rules.Dependency.paths
-          ; variables
-          ; files = Section.Map.empty
-          ; exported_env
-          ; export_paths = paths
-          }
-      in
       let* mounted =
         Action_builder.of_memo (Pkg_sources.find_mounted_kind context name)
       in
@@ -31,12 +21,12 @@ let materialize_ordered context names =
         let paths =
           Pkg_rules.candidate_paths candidate |> Pkg_rules.Paths.map_path ~f:Path.build
         in
-        let paths =
-          { paths with
-            source_dir = Path.build (Pkg_sources.Candidate.artifact_root candidate)
-          }
-        in
-        native paths ~variables:(Dune_pkg.Lock_dir.Pkg_info.variables info) ~exported_env
+        Action_builder.return
+          (Pkg_rules.Dependency.native
+             paths
+             ~prefix
+             ~variables:(Dune_pkg.Lock_dir.Pkg_info.variables info)
+             ~exported_env)
       | None ->
         let* package = Action_builder.of_memo (Dune_load.find_package context name) in
         (match package with
@@ -63,7 +53,8 @@ let materialize_ordered context names =
                ; Package_variable_name.dev, B false
                ]
            in
-           native paths ~variables ~exported_env:[]))
+           Action_builder.return
+             (Pkg_rules.Dependency.native paths ~prefix ~variables ~exported_env:[])))
   in
   Pkg_rules.Layout.materialize context dependencies
 ;;

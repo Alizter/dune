@@ -42,6 +42,14 @@ module Dependency : sig
     ; export_paths : Path.t Paths.t
     }
 
+  (** The package's dependency in a shared install layout at [prefix]. *)
+  val native
+    :  Path.t Paths.t
+    -> prefix:Path.t
+    -> variables:OpamVariable.variable_contents Package_variable_name.Map.t
+    -> exported_env:String_with_vars.t Dune_lang.Action.Env_update.t list
+    -> t
+
   val install_entries : t -> Path.t Install.Entry.Expanded.t list
 end
 

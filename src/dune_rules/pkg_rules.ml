@@ -368,6 +368,11 @@ module Dependency = struct
     { paths; files; variables; exported_env; export_paths = paths }
   ;;
 
+  let native paths ~prefix ~variables ~exported_env =
+    let paths = Paths.with_prefix paths prefix in
+    { paths; files = Section.Map.empty; variables; exported_env; export_paths = paths }
+  ;;
+
   let install_entries { paths; files; _ } =
     Section.Map.to_list files
     |> List.concat_map ~f:(fun (section, files) ->
@@ -544,7 +549,6 @@ module Pkg = struct
     ; paths : Path.t Paths.t
     ; write_paths : Path.Build.t Paths.t
     ; files_dir : Path.Build.t
-    ; mounted : Pkg_sources.Candidate.t option
     ; exported_env : string Env_update.t list
     }
 
@@ -573,21 +577,11 @@ module Pkg = struct
       let prefix = Install_layout.root context names |> Path.build in
       let dependencies =
         List.map packages ~f:(fun t ->
-          let paths =
-            let paths = Paths.with_prefix t.paths prefix in
-            match t.mounted with
-            | None -> paths
-            | Some candidate ->
-              { paths with
-                source_dir = Path.build (Pkg_sources.Candidate.artifact_root candidate)
-              }
-          in
-          { Dependency.paths
-          ; files = Section.Map.empty
-          ; variables = Pkg_info.variables t.info
-          ; exported_env = t.lock_exported_env
-          ; export_paths = paths
-          })
+          Dependency.native
+            t.paths
+            ~prefix
+            ~variables:(Pkg_info.variables t.info)
+            ~exported_env:t.lock_exported_env)
       in
       let open Action_builder.O in
       let+ layout = Layout.materialize context dependencies in
@@ -1903,7 +1897,6 @@ end = struct
         ; write_paths
         ; info
         ; files_dir
-        ; mounted
         ; exported_env = []
         }
       in
@@ -3344,7 +3337,9 @@ let exported_env context =
     Pp.textf "lock directory environment for context %S" (Context_name.to_string context))
   @@ fun () ->
   let+ all_project_deps = all_project_deps context in
-  Pkg.build_env_of_deps all_project_deps |> Value_list_env.to_env
+  let env = Pkg.build_env_of_deps all_project_deps in
+  let vars = Env.Map.map env ~f:Value_list_env.string_of_env_values in
+  Env.extend Env.empty ~vars
 ;;
 
 let lock_dir_package_env =
@@ -3363,7 +3358,11 @@ let lock_dir_package_env =
        | false -> Memo.return Env.empty
        | true ->
          let+ deps = project_deps ~packages context in
-         Pkg.build_env_of_deps deps |> Value_list_env.to_env)
+         let vars =
+           Pkg.build_env_of_deps deps
+           |> Env.Map.map ~f:Value_list_env.string_of_env_values
+         in
+         Env.extend Env.empty ~vars)
 ;;
 
 let env_for_packages ~(packages : Package.Name.Selection.t) context =
