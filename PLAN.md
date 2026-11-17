@@ -7,10 +7,8 @@ before pursuing estimated line savings. Pending semantics remain Ali's
 decisions, not cleanup permissions. The measure of the stack is the
 absolute size of `jj diff --from main --stat` (Ali, 2026-11-17): deliver
 the decided functionality in the fewest changed lines, simplicity next.
-S17 records the older decision-gated reductions. S18 lists the current
-abstraction-audit follow-ups, including local work and its prerequisites.
-S21 lists the fifth audit's local simplifications of code and tests,
-most of them claimable without a decision.
+S17 and S21 record remaining decision-gated reductions. S18 contains
+the outstanding source-preparation correctness work and its prerequisites.
 
 1. Settle the remaining environment and load-error contracts before
    changing their expectations.
@@ -27,38 +25,41 @@ do not repeat their closed removal experiments without new evidence.
 ## The stack
 
 `snqzlotl` "prototype: flatten package builds into a single build graph"
-sits on Ali's digest removal, bookmark `remove-pkg-digest` (seven
-commits on main `51d6214a`, #17079). When Ali rewrites that branch, move
-the stack onto its new tip (`jj rebase -s snqzlotl -d remove-pkg-digest`)
-and abandon the old copies, or his commits show as divergent. Bookmark
-`prototype/flatten-dune-v3` points at it and is pushed to `origin`
-(move and push it again after squashing new work in). The 209 commits
-squashed into it on 2026-11-17 are on `origin` only, at branch
-`prototype/flatten-dune-v3-history` (`4098c409`, old base `b315a5a2`);
-they share change ids with this stack, so do not fetch that branch into
-this repo: it makes `snqzlotl` and `rlnpourw` divergent. Ali's
-`spike/symmetric-library-discovery` (`d6dc0f3f`, inside that history)
-moved to `origin` the same way. Workspaces parked on pre-squash commits
-(`dune-doc-new`, `dune-r2-backing`) must be rebased by their owners. This
-plan is the one commit above it (`rlnpourw`); plan edits are squashed
-into that commit (`jj squash --into rlnpourw PLAN.md`), not added as
-new commits. New work is a linear run of commits above the plan, ending
-at `dune3@`; it is squashed into the single commit when it is settled.
-The old 461-commit history, on the old base, is kept at bookmark
-`stack-history` (`jj log -r '::stack-history'`). Workspaces still
-parked on that history (`dune-nosp`, `dune-persource`,
-`dune-ptd`, ..) must be rebased by their owners before integrating.
+sits on Ali's `remove-pkg-digest` branch, now based on `main@upstream`
+at `0b0a43ad` (#17089). Recheck the actual base for revision-specific
+validation and size comparisons. After Ali rewrites his branch, the
+stack owner rebases the prototype onto the new tip
+(`jj rebase -s snqzlotl -d remove-pkg-digest`); verify any divergent
+copies before abandoning them. Code work is linear up to `dune3@`
+and is squashed into the prototype when settled. Keep the code backup
+bookmark `prototype/flatten-dune-v3` on `origin` in sync after squashing.
+
+The pre-squash history is on `origin` at
+`prototype/flatten-dune-v3-history` (`4098c409`, base `b315a5a2`),
+including the symmetric discovery spike (`d6dc0f3f`, also archived as
+`spike/symmetric-library-discovery`). Do not fetch these refs into this
+repo: their change IDs overlap the current stack. Use a separate clone
+for historical evidence. Older history is at the local `stack-history`
+bookmark. Owners must rebase parked workspaces before integrating.
+
+`PLAN.md` is inherited from the digest-removal base: the old plan
+change `rlnpourw` was squashed there and is no longer an edit target.
+Keep updates in one local plan-only change above the prototype rather
+than rewriting Ali's base for coordination edits. Carry the updated
+plan in that change when rebasing onto a base that does not contain it.
+Remove the plan from both submission diffs, not just from the work
+above the base.
+
 Facts from the move to the single commit, to keep in mind:
 - Fetch targets are flat: `_build/_fetch/url-<digest>-dir` and
   `checksum-<sum>-dir` (#16945). `Fetch_rules.target` is gone; use
   main's `Fetch_rules.make_target ~kind`. The kind is `Kind.t`
   (`File | Dir`), not a polymorphic variant.
-- `Lock_dir.source_kind` returns a result. A local source's kind is
-  asked inside the fetch action, so a missing local path only fails what
-  needs it.
-- The `.pkg` root under `_private` generates rules for every digest
-  except the project's (told from `DB.Pkg_table.project_entries`, no
-  resolution): project packages are mounted.
+- `Lock_dir.source_kind` returns a result. Choosing the local backing is
+  deferred to source demand; a missing path must not fail metadata lookup.
+- The digest-based private `.pkg` root is gone. Project candidates
+  mount at `_build/<ctx>/.pkg/<name>`; dev tools use separate name-keyed
+  roots (S10).
 - Rule plugins (#16760) are keyed by the project's `Path.Local.t` root.
   A plugin of a mounted package runs in the package's prepared source.
 - From dune 3.26 `(plugin ..)` is a rule plugin and the site stanza is
@@ -77,9 +78,10 @@ Facts from the move to the single commit, to keep in mind:
 - Dune runs freely in your own `/tmp` workspace (Ali, 2026-11-17). Only
   commands in the shared `/home/ali/dune3` workspace are serialized:
   reserve/release that slot here.
-  Before committing: `./dune.exe build @check @fmt`; code/test changes
-  also need affected regressions/focused tests. Docs need no tests.
-  No full suite or expectation promotion without explicit approval.
+  In private workspaces use `env -u DUNE_SOURCE_ROOT ./dune.exe ...`
+  so the check does not run in the shared tree. Before committing, run
+  `build @check @fmt`; code/test changes also need affected focused
+  tests. No full suite or expectation promotion without explicit approval.
 - Tests precede fixes in separate logical commits.
 - Integrate finished commits into the shared stack, preserving others'
   work: e.g. `jj rebase -r '<your-revset>' --insert-before 'dune3@'`.
@@ -88,10 +90,9 @@ Facts from the move to the single commit, to keep in mind:
   workspace and remove only your temporary directory. Never delete others'
   workspaces/shared data or lock files to bypass contention.
 - Report integrated hashes, checks and gaps; update this shared plan.
-  Squash plan-only changes into `rlnpourw` as soon as they are made,
-  explicitly selecting `PLAN.md`; do not add plan commits or mix them
-  into the code commit. Agents that cannot be messaged only see the
-  plan commit.
+  Use `jj log PLAN.md` to find the local plan-only change, then
+  `jj squash --into <plan-change> PLAN.md`. Do not squash plan edits
+  into code commits or into the digest-removal base.
 - A rewrite of the stack leaves other workspaces stale. `jj workspace
   update-stale` discards edits made since the last snapshot: copy
   changed files (this plan included) aside first, then restore them.
@@ -111,26 +112,22 @@ completion gate. Workspace `dune-s7-rule2`, `/tmp/dune-s7-rule2.MOvh/ws`.
 
 ## Active: S10 consumer migration (Claude)
 
-Workspace `dune-s10`, `/tmp/dune-s10`. Base question still with Ali; until
-then, on the current stack: `find_package`, `resolve_installed_file`, env,
-toolchain and binaries. Locked dependency edges and names come from
-`Pkg_sources.dependencies` and the name-keyed `Pkg_sources.candidates`.
+Workspace `dune-s10`, `/tmp/dune-s10`. The stack is on the
+digest-removal base; use S10's agreed seam and migration order. Remaining
+ordinary callers include `find_package`, `resolve_installed_file`, env,
+toolchain and binaries. Reuse the shared `Pkg_sources` metadata indexes
+without widening source or recipe demands.
 
 ## Active: install cookie duplicate entries, fix for main (dune-cookie agent)
 
-Workspace `dune-cookie`, `/tmp/dune-cookie.fu2g8G/ws`, based on an
-earlier main (`fc3ada5e`), not on the stack. Bookmark `install-cookie-once` (two
-commits: `wxlokpst` test, `rkwovvmw` fix) ports "fix(pkg): record an
-installed file once in the install cookie" to main; `@check @fmt` and
-`pkg/install-action.t`, `pkg/dep-section-variables.t` pass. On main the
-duplicate only shows in the cookie (`install-action.t`); locked packages
-do not reach the install-layout collision there, so the stack's
-self-collision case was not ported.
+Workspace `dune-cookie`, `/tmp/dune-cookie.fu2g8G/ws`; bookmark
+`install-cookie-once` is based on an earlier main, not the stack.
+The port covers cookie duplication on main; the stack's layout
+collision is only reachable with mounts.
 - [ ] Ali: push the bookmark and open the PR; then add
-  `doc/changes/fixed/<PR>.md` and remove this entry.
-- When the stack is next rebased onto main after the PR merges, drop
-  the stack's copy of the fix (`pkg_rules.ml` `declared` filter,
-  `install-file-run` version 2).
+  `doc/changes/fixed/<PR>.md`.
+- After that fix reaches the stack's base, drop the duplicate stack
+  filter in `pkg_rules.ml` (`install-file-run` v2).
 
 ## Deferred: mount stage 3, per-file patch rules (needs Ali to reopen)
 
@@ -152,12 +149,17 @@ bodies and the source-input chain belong to S8, not a separate rewrite.
 ## Deferred: directory-symlink support (needs Ali)
 
 Preserve main's local package behavior: file links are copied, while
-source directory links are not traversed. Supporting directory links is
-separate work requiring approval, not a local-backing compatibility fix.
+source directory links are not traversed. Supporting directory links
+requires approval; it is not a backing-compatibility fix.
 
-The earlier workspace `dune-r2-backing`, `/tmp/dune-r2-backing.RTgE/ws`,
-is preserved and paused. Do not integrate its scanner/readlink/symlink
-changes wholesale; they were designed for the broader, deferred policy.
+Local backing uses `Path.Outside_build_dir.t` (workspace-relative or
+external); fetched and prepared trees use `Path.Build.t`. Retain the
+typed split and existing watcher keys instead of localizing aliases
+inside `Fs_memo`. Keep logical mounts distinct from physical backing.
+
+The earlier `dune-r2-backing` workspace, `/tmp/dune-r2-backing.RTgE/ws`,
+is parked and conflicted after the rebase. Do not integrate its
+scanner/readlink changes: they were designed for the deferred policy.
 
 ## Parked: no-narrowing spike, libraries (NOT for integration)
 
@@ -240,12 +242,13 @@ In rough order of what they unblock:
   `p`'s scope for libraries and the directory's for binaries.
   The `(dir ..)` compiler-tool gap also exists on main and can be
   fixed there separately.
-- Keep compiler lookup as decided (Ali, 2026-11-14). For an opaque
-  library: the package named like it, then the compiler's libraries,
-  then the eligible opaque scan. Keep compiler priority for binaries.
-  In a locked context the library parent uses only the compiler-reported
-  standard-library directory, not a per-package findlib root or project
-  OCAMLPATH imported through an absolute OCAMLFIND_CONF.
+- Library order (Ali, 2026-11-14): workspace public libraries, the locked
+  package named like the library (native or eligible opaque), compiler
+  libraries, then the remaining eligible opaque scan. A miss can build
+  every eligible opaque provider; keep discovery separate from permission
+  to build. In a locked context the installed-library parent uses only
+  the compiler-reported stdlib, not project OCAMLPATH imported through
+  an absolute OCAMLFIND_CONF. Compiler priority for binaries is unchanged.
 - Locked packages may depend on workspace packages (the `dune_pkg`
   changes, about 500 lines plus tests): stays bundled in this change.
   Dune's own lock needs it (`dune-configurator`, `dune-build-info`,
@@ -304,9 +307,9 @@ In rough order of what they unblock:
   context root).
   Sandbox dependency linking is back to main; reproduce renewed
   directory-overlap failures before changing it.
-- No `doc/` changes. The `dune-project` `depends` move is separate on
-  main (`kvonvwnn`, not pushed); those files match main here.
-- Keep compile-commands changes until #16977 merges and we rebase.
+- No `doc/` changes in the prototype itself. The digest-removal base has
+  its own changelog fragments. The `dune-project` `depends` move stays
+  separate. Keep compile-commands changes until #16977 merges and we rebase.
 
 # Open work
 
@@ -334,11 +337,12 @@ Keep the build-only root (`With_sources { build_only_sub_dirs }`,
 loading the locked compiler must not first load workspace root rules
 that need that compiler to evaluate their OCaml-syntax dune file.
 
-Keep the supplied `source_files` / `source_sub_dirs` inventory and
-`directory_target_contents_opt`. Mounted files are ordinary rules but
-still need source-versus-rule arbitration for fallback/promote rules and
-directory targets. Folding source directories into build-only directories
-would reject valid directory targets over mounted source directories.
+Keep `Build_config.Gen_rules.Rules.sources` (file copy rules and source
+subdirectories under one directory key) and `directory_target_contents_opt`.
+Mounted files are ordinary rules but still need source-versus-rule
+arbitration for fallback/promote rules and directory targets. Folding
+source directories into build-only directories would reject valid directory
+targets over mounted source directories.
 
 Do not repeat the inventory-removal or `print_diff.ml` E4 experiments
 without a new requirement. Separate/empty contexts remain out of scope.
@@ -368,19 +372,12 @@ may ask it of every package. Landed:
 - Env from lock metadata: PATH/OCAMLPATH etc. list every visible locked
   package's prefix without asking its kind; a native package's prefix
   is never populated.
-- A context load is the workspace; a mount is one
-node holding its projects, dune files, scopes and public libraries
-(`Dune_load.mount`, `Scope.DB`'s partitions, `Artifacts_db`'s
-per-package binaries). A library is looked up in the workspace, then in
-the locked package named like it (exact for dune packages; a
-`deprecated_library_name` is owned by its old name's package), then in
-the compiler's libraries, then by scanning eligible opaque packages
-(`pkg/library-lookup-order.t`). Native public lookup is requester-independent;
-opaque eligibility is the declared closure for a package-owned requester,
-or unrestricted for an unscoped one. The compiler's copy wins over an opaque
-package that installs a library of the same name without being named like it.
-A miss can still build every eligible opaque package; `dune exec prog`
-searches every locked package by name when the workspace does not define it.
+- `Partitions.workspace` loads the workspace per context;
+  `Partitions.mount` loads one locked package on demand. Scope and
+  binary discovery use those partitions (`Scope.DB`, `Artifacts_db`).
+  Preserve library eligibility and lookup order from "Decisions in
+  force" (`pkg/library-lookup-order.t`).
+
 Not fixed: a flat install section (`_build/install/<ctx>/bin`, `man`,
 ..) or `@default` still loads every candidate, since mounted entries
 there cannot be found by directory; so a full build still classifies
@@ -389,11 +386,10 @@ Update the saved/stored-failure prose in `mounted-dune-package.t` and
 `mounted-source-preparation.t` with this error-handling change, rather
 than as a separate cleanup.
 
-Build S11's metadata-only index before moving the remaining consumers;
-source-dependent facts must be individually demanded. Index candidates by
-package rather than repeatedly re-keying lists. Avoid duplicate loader/scope
-tables, repeated closures, linear project lookup and memos over memos as
-part of this migration, not as competing cleanup tasks.
+Use S11's existing metadata-only candidate and adjacency indexes for the
+remaining consumers. Keep source-dependent facts individually demanded.
+Avoid duplicate loader/scope tables, repeated closures and memos over memos
+as part of this migration, not as competing cleanup tasks.
 
 Traps for consumers of the lazy database: a local library id carries
 its local name, so look an id up by its directory's partition, never by
@@ -414,7 +410,7 @@ records the current behaviour and flips as the steps land:
   library-only install entries, `@install` with an unfetchable unused
   package present.
 - [ ] Then remove `Memo.collect_user_errors`,
-  `Error_handler.without_reporting`, `Dune_load.package_errors`,
+  `Error_handler.without_reporting`, `Partitions.package_errors`,
   `Mounted.kind_exn` and stored `Error _` branches (after the
   `%{lib-available}` decision).
 
@@ -430,14 +426,9 @@ Observable exit criteria:
   selection and dev-tool sharing/isolation still work.
 - Only after those consumers are lazy may the stored-error machinery go.
 
-Measured, not broken down:
-- Null build of dune itself (Ali's trace, 2026-11-12): 4.1s, of which
-  processes are about 1s; the other 3s are dune's own work and are not
-  broken down by the trace (needs profiling). All 143 locked packages
-  logged "Prepare package sources"; after S7 rule 2 only a flat install
-  section or `@default` loads every candidate (not re-measured). Install
-  cookies were loaded 520 times for 28 files before the toolchain was
-  memoized; not re-measured.
+Profile null builds on the submission revision if claiming a performance
+benefit. Record package loads, cookie reads and dune's own time separately
+from processes; pre-migration trace counts are not current measurements.
 
 ## Rules
 
@@ -450,7 +441,7 @@ Measured, not broken down:
   building dependencies, false-condition skipping of missing patch files,
   preparation order and lazy loading. Conditionality alone is not a
   reason to select the opaque backend (B4). Concrete correctness work is
-  S18.A1-A2; keep the detailed tasks there rather than duplicate them.
+  S18.A2; keep the detailed tasks there rather than duplicate them.
 - Mounted substitution waits for S7; otherwise eager loading would make
   source preparation build dependencies on every cold build.
 - OCaml-syntax dune files and mounted rule plugins still require a real
@@ -458,8 +449,6 @@ Measured, not broken down:
   immutability. Per-file patch stage 3 remains deferred.
 - Whole-package re-preparation after one changed file is an accepted cost;
   note it in the PR. No rebuild-granularity comparison test exists.
-- Rewritten `pkg/mounted-source-preparation.t` was not run against the
-  previous implementation.
 - Known limitation, not pursued (Ali, 2026-11-12): OCaml-syntax dune
   files of mounted packages are re-run on every dune invocation, as
   workspace ones are on main, once per mount (twice for two native
@@ -474,15 +463,15 @@ Measured, not broken down:
 
 ### S10. One opaque-build path instead of two
 
-This is the consumer-migration phase of S7/S11. Ordinary consumers still
-use legacy `Pkg_rules.Package_universe/Resolve/Pkg.t` adapters; they are
-not dead. Inventory their callers and choose the submission adapter seam
-before B2 restoration work. Do not restore legacy text only to replace it.
-Target: installation universes only for dev tools and unshared deps.
+This is the consumer-migration phase of S7/S11. Ordinary consumers and
+dev tools still use `Pkg_rules.Package_universe`, `DB`, `Resolve` and
+`Pkg.t`. Do not restore legacy text only to replace it. The mounted opaque
+rule already takes a candidate plus dependency layout
+(`Pkg_rules.gen_mounted_rule`); it reads the lock entry directly.
 
-Seam (Ali, 2026-11-17): no legacy path and no package digests, neither
-`.pkg/<digest>` paths nor the digest tables. Do not build on
-`Pkg_digest`, `DB`, `Resolve`, `Pkg.t` or `Package_universe`.
+Seam (Ali, 2026-11-17): no package digests or legacy executor at submission.
+Move consumers off the `Pkg_rules` adapters; keep `Dune_pkg.Package_universe`
+for lock/formula semantics.
 - Each dev tool is its own package set, mounted at
   `_private/default/.dev-tool/<tool>/<name>`. Its packages stay opaque
   recipes: native builds would need the private context threaded through
@@ -496,29 +485,26 @@ Seam (Ali, 2026-11-17): no legacy path and no package digests, neither
 - Without a project lock dir, tools are solved against the system
   compiler (a system-compiler constraint, one platform); that package is
   cheap, so each tool's set holds its own.
-- `dune pkg print-digest` is removed (Ali).
-- The stack is based on Ali's digest removal (`remove-pkg-digest`): `DB`,
-  `Resolve` and `Pkg.t` are keyed by name in isolated universes
-  (`DB.get universe`), dev-tool packages live at
-  `_private/default/.dev-tool/<tool>/<pkg>`, and nothing is shared
-  between universes. A context's `Dependencies` universe is entirely
-  mounted lock candidates, so `Resolve` takes the candidate's paths and
-  the private `.pkg` directory has no rules. The base shares no compiler
-  between tools; that rule is still to do.
-- Order: (1) candidates belong to a package set (context or dev tool)
-  that chooses the mount path; (2) the recipe rule takes a candidate and
-  its dependency layout, not a `Pkg.t`; (3) dev-tool rules,
-  `dev_tool_env` and `dev_tool_ocamlpath` use it, and the lock-time
-  compiler rule is widened; (4) ordinary consumers below; (5) delete.
-- [ ] Move mounted opaque recipe/dependency/cookie/installed-file queries
-  to selected candidates and canonical mounted paths.
-- [ ] Migrate ordinary toolchain/binary/env/OCAMLPATH/prefix/closure
-  consumers to per-context package facts.
-- [ ] Preserve dev-tool matching-digest sharing and differing-version
-  isolation, with/without project locks and non-default contexts.
-- [ ] Preserve depext reporting (`print-digest` is gone, see "Seam").
-- [ ] Only then shrink/delete legacy DB/Resolve/Pkg/`.pkg/<digest>`
-  execution machinery; report remaining callers first.
+
+The base has already removed `print-digest` and uses name-keyed,
+isolated universes, with no compiler sharing. The prototype uses
+canonical mount paths for ordinary lock candidates and package prefixes.
+Remaining work:
+- [ ] Generalize candidate ownership to the dev-tool package set, then move
+  dev-tool rules, `dev_tool_env` and `dev_tool_ocamlpath` to the candidate
+  executor. Widen the lock-time compiler rule above. Test compiler-closure
+  sharing with a project lock, isolation of all other dependencies
+  (including identical lock entries), and system-compiler operation
+  without a project lock. Retain host/target coverage.
+- [ ] Move ordinary package dep, cookie/installed-file, toolchain, binary,
+  env and OCAMLPATH queries to per-context package facts; preserve depext
+  reporting. Reuse existing selected-candidate install data.
+- Known, minor: `gen_mounted_rule` relocates the build command
+  (`relocate_build`) but executes `Prepared.rest`, computed before
+  relocation, so a prepared source's residual recipe keeps unrelocated
+  locations (error messages only).
+- [ ] Inventory remaining `Pkg_rules` callers before removing
+  `DB`/`Resolve`/`Pkg.t` and the legacy execution path.
 
 Keep the common executor in Pkg_rules and retain Dune_pkg.Package_universe
 (formulas, visibility, name checks, freshness). Validate opaque installs,
@@ -533,16 +519,18 @@ only its backing directory; preserve writable-copy semantics.
 ### S11. One package graph per context
 
 Supply the facts needed by S7 first, then migrate S10's ordinary callers.
-Index lock/workspace metadata without fetching or classifying sources.
-Demand source-dependent provider, project and installed facts individually
-per context/package; one provider query replaces repeated kind checks.
+`Pkg_sources.candidates` and `Pkg_sources.dependencies` already provide
+name-keyed, per-context lock metadata without fetching sources. Reuse them
+where appropriate; demand source-dependent provider, project and installed
+facts individually per context/package.
 
 Preserve dependency semantics, not just similar-looking code:
-`Dune_load` follows authored dependency names, while
-`Package_layout.materialize_dependencies` resolves formulas.
-Check solver environments, alternatives, optional/platform dependencies
-and workspace cycles before sharing those calculations. Do not merge them
-merely to reduce lines. Preserve dev-tool isolation and digest sharing.
+`Partitions.package_closure_for_context` follows authored workspace
+dependency names; `Package_layout.materialize_dependencies` resolves
+workspace formulas against candidate versions and the solver environment.
+Check alternatives, optional/platform dependencies and workspace cycles
+before sharing work. Retain dev-tool isolation except for S10's compiler
+closure sharing.
 
 Exit: constructing the index touches no package source, independent
 consumers reuse the demanded facts, and neither closure nor version lookup
@@ -550,10 +538,10 @@ reintroduces a context-wide classification pass.
 
 ### S13. Build-directory layout (deferred unless needed by S10)
 
-Mounts are at `_build/<ctx>/.pkg/<name>`; dev tools keep
-`_build/_private/<ctx>/.pkg/<digest>`. Still open: the prepared-source
-(`_private/<ctx>/.dune-source`) and legacy dev-tool layouts; `source`
-and `extra_source` in `Paths.of_root` are unused for mounts.
+Keep `_build/<ctx>/.pkg/<name>` for project mounts and
+`_build/_private/default/.dev-tool/<tool>/<pkg>` for dev tools. Prepared
+sources stay in `_private/<ctx>/.dune-source`. Revisit path plumbing
+only when S10 removes the legacy adapters.
 
 ### S14. Mounting model (decided) and the Menhir patch
 
@@ -565,12 +553,10 @@ so a vendored *public* library is masked out and not found
 vendored case. Vendored code without packages (private libraries, the
 common case) loads natively.
 
-Menhir is the known package with the masked shape, and it must be
-patched for dune itself to build: 7 of the 145 packages in dune's lock
-reach it (`js_of_ocaml`, `js_of_ocaml-compiler`, `lambda-term`, `logs`,
-`mdx`, `melange`, `utop`; `logs` through a satisfied optional
-dependency), so the default alias fails with `Library "vendored_pprint"
-not found`.
+Menhir releases with vendored public libraries need a patch or a
+different package split when built natively. The older lock showed
+`Library "vendored_pprint" not found`; check the source selected by the
+current solver rather than assuming this version-specific failure.
 - The patch makes Menhir's copies of `fix`, `bitsets` and `pprint`
   private libraries of Menhir's own project and drops the `vendored_`
   prefix and its alias modules; the directories stay `vendored_dirs`.
@@ -580,42 +566,32 @@ not found`.
   `git diff --no-renames 20260209 unvendor-20260209`, applied as the
   first step of the `menhir` package's build action (only that one of
   the five Menhir packages needs it).
-- Checked: with the patch in the lock, the full default `dune build` of
-  dune passes with the stack's dune (clone of the fork's
-  `package-test-dependencies` branch, dependency hash removed from
-  `lock.dune`). Under plain opam with released dune 3.25.0 and the
-  genuine `pprint` installed in the switch, the five patched packages
-  install without conflict. Not checked: tests in the clone; `fix` and
-  `bitsets` installed alongside; the `houblix` tests of Menhir.
-- [ ] Submission gate: deliver a durable overlay for dune's own lock.
-  A private checkout or relock fixup script is not completion. Plain
-  `dune pkg lock` must retain the patch and a valid dependency hash.
-  Both routes below have worked in local testing (full
-  default build passes): (a) `fixup-lock.sh` in Ali's test checkout
-  runs `dune pkg lock`, drops the dependency hash and adds the patch to
-  the `menhir` lock file; lost on every relock without the script.
-  (b) An overlay entry `packages/menhir/menhir.20260209/` (upstream's
-  opam file plus `patches`/`extra-files` and `files/unvendor.patch`):
-  plain `dune pkg lock` then yields the patched lock with its hash
-  intact. Prepared and tested against a local clone of
-  `ocaml-dune/opam-overlays` (temporary, `/tmp/opam-overlays.*`; not
-  pushed). To do: open the PR on the overlay repository. Pinning
-  `menhir` to the patched branch does not work: its `dune-project`
-  declares no dependencies, so the solver drops the sibling packages.
-- [ ] Upstream: Menhir's issue tracker
-  (gitlab.inria.fr/fpottier/menhir), mailing list, or the maintainer.
-  Releases are irregular (gaps of 6 to 14 months) and every published
-  version keeps the old shape, so upstream alone does not unblock us.
+- [ ] Submission gate: verify the selected Menhir source can be built
+  from a plain `dune pkg lock` at the submission revision. If it needs
+  the patch, deliver it through durable metadata. A private overlay,
+  edited dependency hash or `fixup-lock.sh` is not completion.
+  For the 20260209 split, use an overlay entry
+  `packages/menhir/menhir.20260209/` (upstream's opam file plus
+  `patches`/`extra-files` and `files/unvendor.patch`); the draft is in
+  the local `ocaml-dune/opam-overlays` clone (`/tmp/opam-overlays.*`).
+  Pinning Menhir to the patched branch alone drops sibling packages:
+  its `dune-project` does not declare those dependencies. If submitting
+  the patch, check coexistence with the external vendored libraries.
+  Qualify fresh-clone evidence by revision, selected metadata and exact
+  build target; an upstream `@install` pass is not a default build or
+  a benchmark run.
+- [ ] If the patch is still needed, send it to the Menhir maintainer or
+  issue tracker (`gitlab.inria.fr/fpottier/menhir`). Do not wait for a new
+  release to establish the durable lock path.
 - Note in the PR: a locked package whose source vendors a public
   library in its own package fails to build until it is patched.
 
 Considered and not pursued: sharing vendored projects between the
-mounts of one source (the source identity is free, `Candidate.
-source_root` is the `_fetch` target, but it needs a representative, a
-visibility exception and a rule for patched copies); one mount per
-source (experiment `zsuxuymo`, workspace `dune-persource`: Menhir built
-once natively, 5 `pkg/` tests failed, and a directory would no longer
-have one owning package); vendored packages private to their mount
+mounts of one source (a shared backing is available, but this needs a
+representative, a visibility exception and a rule for patched copies);
+one mount per source (experiment `zsuxuymo`, workspace `dune-persource`:
+Menhir built once natively, but a directory would no longer have one
+owning package); vendored packages private to their mount
 (experiment bookmark `exp-vendored-native`, workspace `dune-s18b`: net
 zero lines, passes `pkg/` on a fixture, not reviewed).
 In dune's lock only three sources are shared by several packages
@@ -651,7 +627,7 @@ Invariants:
    prefix themselves. A build directory's place in its context is
    `Dune_project.dir_in_context dir`, its display path
    `Pkg_sources.source_location dir`, and its loaded directory
-   `Dune_load.source_tree_dir ~dir`.
+   `Partitions.source_tree_dir ~dir`.
 2. One directory type serves both kinds (`Source_tree.Dir.t`).
 3. Looking upwards never leaves the mount.
 4. `Path.Source.t` in the rules means the user's workspace: promotion,
@@ -682,13 +658,17 @@ Remaining work, one feature per commit, test first:
   commands whose directory is in a mount, or leave it. Test:
   `pkg/mounted-source-lookups.t`, last block (and the menhir error
   location in the same style).
-- [ ] Remaining source lookup: `format_rules.gen_format_alias` still
-  asks the workspace tree; fine while mounts get no formatting rules.
-  `warning_emit`'s `Source_dir_or_enable of Path.Source.t option` is
-  workspace-only by construction since mounted escapes are errors.
-- [ ] Needs Ali: `odoc/odoc_new.ml` asks the workspace tree
-  `is_vendored` for every project, so a mounted project answers "not
-  vendored". Left out under the minimal odoc scope unless wanted.
+- Leave `format_rules.gen_format_alias`'s workspace lookup alone while
+  mounts get no formatting rules. `warning_emit`'s
+  `Source_dir_or_enable of Path.Source.t option` is workspace-only:
+  mounted escapes are errors.
+- [ ] Needs Ali: `odoc_new`'s `is_vendored` query is in workspace project
+  discovery. Whether to consult vendored status for mounted projects is
+  separate and stays outside minimal support.
+- Parked: mounted `doc-new` mld/index parity. The test/fix pair is in
+  `dune-doc-new`, `/tmp/dune-doc-new.bKsxNX/ws`, based on `snqzlotl`
+  and not integrated. The workspace owner should validate the pair on
+  the chosen tip before integration. It does not change vendored status.
 
 Leave alone:
 - `Path.Source.t` used as a context-relative name: `top_module`,
@@ -710,16 +690,18 @@ Leave alone:
   `alias_rec`, `dune_load`, `dir_status`, `cram_rules` and
   `install_rules` symlinks only read the context name.
 
-Not testable yet: mdx, cinaps and melange in a mount (a mount only sees
-libraries from the lock dir, so their runtime libraries are "not found"
-first); utop has no mounted entry point from the CLI; no rocq installed.
-Foreign `include_dirs` already works.
+Mounted cinaps, mdx and melange have tests (`pkg/mounted-{cinaps,mdx,
+melange}.t`). Named gap: their runtime libraries (`cinaps.runtime`,
+`mdx.top`, `melange`) are not found from a mount, so the tests record
+that error and only the rule paths before it (listing, `(package ..)`
+mask, emission with `(emit_stdlib false)`). A mounted `melange.emit`
+output repeats the mount path (`out/.pkg/foo/main.js`), as a workspace
+subdirectory does. Utop has no established mounted CLI entry point.
 
-Done when: `grep -rnE 'Source_tree\.(find_dir|files_of|nearest_dir|is_vendored)|drop_build_context' src/dune_rules`
-lists only the "leave alone" files; every generalised feature has a
-mounted test. State on 2026-11-16: the grep lists the leave-alone files,
-`format_rules` and `warning_emit` (both above), `source_deps` and
-`melange_rules` (mount-aware), and `odoc_new` (needs Ali).
+Done when the remaining workspace lookups are intentional and every
+generalised feature has mounted coverage or a named gap. Audit
+`Source_tree` lookups and `drop_build_context` when moving consumers;
+do not use the old grep snapshot as the current inventory.
 
 #### Path model follow-ups (unclaimed unless marked; ask the dune3 agent)
 
@@ -740,9 +722,8 @@ Four read-only reviewers read the whole `src/` diff against main.
 Every item below was verified in the current code, not from hunk
 headers. Savings are changed lines against main. Restore main's text
 where the item says so, keep each change its own commit and validate
-with the tests named; no full suite. Nothing unblocked is left: the
-listed items (A3, A11, D3, about 65 lines) need Ali, and the "blocked"
-lists need their named decision or a fresh audit against the accepted
+with the named tests; no full suite. Remaining items need their named
+decision, the owning migration or a fresh audit against the accepted
 contracts; old estimates are not permission to remove required plumbing.
 Labels are local to S17: cite them as `S17.A3`. A bare `A6`, `A9`,
 `A10`, `A11`, `B1`, `B2`, `B4`, `C2` or `D11`-`D13` anywhere else in
@@ -758,12 +739,11 @@ Packages (`pkg_rules.ml`, `package_layout.ml`, `pkg_sources.ml`):
   shows it. Either restore main's value (superpose `Pkg.base_env pkg`,
   -12, a fix with a test printing the variable) or keep it (superpose
   plus one `Env.add`, -8).
-Blocked: `Expander.path` field and substitute version 5 (~22) on P5;
-`Mounted.loaded`, `kind_exn`,
-`collect_user_errors` in `pkg_sources` (~25) on the S7 stored-error
-step; `Pkg.deps` as `dependencies >>| ignore` (~13) changes opaque deps
-from the target directory to cookie+files, owner's call; the
-`install-file-run` v2 filter goes at the rebase (dune-cookie).
+Blocked: `Expander.path` and substitute version 5 on P5;
+`Mounted.loaded`, `kind_exn` and `collect_user_errors` on the S7
+stored-error step. Replacing `Pkg.dep` with installed-file facts can
+change opaque dependency coverage; migrate it in S10, not as a cleanup.
+Keep the `install-file-run` v2 filter until the cookie fix reaches the base.
 
 Library and binary resolution (`scope.ml`, `lib.ml`, `artifacts*.ml`):
 Re-audit any proposed removal of `Scope.DB.for_package`,
@@ -781,7 +761,7 @@ local-before-native precedence).
 Loading, project model, source tree:
 Blocked: the stored-error machinery in this area
 (`Memo.collect_user_errors`, `Error_handler.without_reporting`,
-`Dune_load.package_errors`, `main.ml` opaque check, ~50) on the S7
+`Partitions.package_errors`, opaque checks, ~50) on the S7
 step; `Package_mask` by-id precompute (~20) conflicts with the
 build-path message decision, needs Ali.
 
@@ -808,27 +788,21 @@ build-only root; the action-marker promotion property through
 install-entry `~source_tree_root` (mount-confined globs); `merlin`/
 `ocaml_index` `~owner` (F8); `Backing` hash/equal, `File.parent_exn`/
 `relative`, `Include_stanza` mount-root checks; `Dune_load`'s
-reserved `.pkg` check; `Loaded_project.visible_packages`; `Dune_project`
-`display_root`/`name_hum`; `Source_file_dir.rules`; `Context_libs` over
-`default_ocamlpath`; `lib.ml`'s by-name closure check and `src_dir`
-comparison (A10); `Findlib.create_for_package`; `resolve_command_line_
-program`; `Install.Entry.Expanded.make`; `Paths.of_root`, `Layout.
-materialize`, `layout_env`, `workspace_dependencies`, `compiler_packages`,
-`DB.Pkg_table.project_entries`; `Copy_source`; the recipe executor seam
-(S10); the `dune_pkg` bundle and the `Path.Local` type change (parked).
+reserved `.pkg` check; `Loaded_project`'s masks; `Dune_project`
+`display_root`/`name_hum`; `Source_file_dir.rules`; `lib.ml`'s by-name
+closure check and `src_dir` comparison (A10);
+`Findlib.create_for_package`; `resolve_command_line_program`;
+`Install.Entry.Expanded.make`; `Paths.of_root`; `Layout.materialize`;
+`layout_env`; `workspace_dependencies`; `compiler_packages`;
+`Copy_source`; the recipe executor seam (S10); the `dune_pkg` bundle
+and the `Path.Local` type change (parked).
 
 ### S18. Abstraction audit follow-ups (Astra; unclaimed)
 
-Static audit of the pre-library-discovery-integration source tree against
-the actual stack base, not the moving `main` bookmark. Exact base/tip and
-audit provenance are in the plan commit message. Source anchors below are
-from that snapshot: re-read the current implementation and all callers
-before claiming an item, especially after the library integration.
-Three independent reviewers and a consolidator read the code; neither
-suspected bug has an executed reproduction. These are tasks to validate,
-not a verified deletion budget or permission to change semantics.
-Feature-rule adapters received less exhaustive scrutiny than the central
-loading and package interfaces.
+The remaining correctness tasks are supported by static reading of the
+current source; neither has an executed reproduction recorded here.
+Re-read the implementation and callers before claiming an item. These
+are not deletion estimates or permission to change policy.
 
 Keep one bounded change per task/workspace. Bug regressions must precede
 their fixes in separate commits. Preserve all existing observations;
@@ -836,28 +810,12 @@ focused validation is proposed below, not recorded as already passing.
 
 #### Correctness first
 
-- [ ] S18.A1: preserve environment scopes in residual recipes.
-  Classification: suspected bug; high static confidence; bounded scope.
-  Anchors: `src/dune_rules/pkg_sources.ml:284-288` (`flatten_progn`) and
-  `src/dune_rules/pkg_rules.ml:3012-3014` (prepared recipe execution).
-  Flattening removes `Withenv` wrappers, but the resulting residual AST
-  is executed for opaque prepared sources. An overlay alone can select
-  this path, so adding a lock-directory file or extra source can silently
-  remove a recipe's environment. OPAM `build-env` uses this wrapper too.
-  Preserve scopes while separating leading preparation actions from the
-  residual program; classification must not discard executable semantics.
-  Do not fix this by abandoning native conditional patches, replaying
-  already-applied patches, or changing source/overlay ordering.
-  First extend `pkg/withenv.t` with an otherwise identical opaque recipe
-  plus an overlay and assert its environment value. Cover lock files and
-  extra sources, and retain origin immutability. Then check the OPAM
-  build-env cases and `pkg/mounted-source-preparation.t`.
 
 - [ ] S18.A2: propagate unresolved condition inputs before Boolean coercion.
   Classification: suspected bug/new S8 evidence; high static confidence;
   medium scope because dependency staging must be designed.
-  Anchors: `src/dune_rules/pkg_sources.ml:292-340` and
-  `src/dune_rules/slang_expand.ml:81-96`.
+  Anchors: `Pkg_sources.eval_source_condition` and
+  `Slang_expand.eval_blang`.
   Early expansion substitutes `""` for an unavailable value and checks an
   `unsupported` flag only after evaluation. A direct Boolean input such
   as `%{pkg:dep:feature}` can therefore fail coercion before that flag can
@@ -876,8 +834,8 @@ focused validation is proposed below, not recorded as already passing.
 
 - [ ] S18.A8: assess explicitly context-bound file evaluation with S7.
   Classification: loading interface; high confidence; no established
-  changed-line saving. Anchors: `src/dune_rules/dune_file.ml:538-584`
-  and its caller at `src/dune_rules/dune_load.ml:43-54`.
+  changed-line saving. Anchors: `Dune_file.eval` and its caller
+  `Partitions.Partition.make`.
   The evaluator returns a context-taking function whose sole caller
   immediately supplies an already-bound context. A direct context argument
   could remove that stage, but this factory is inherited from main.
@@ -892,8 +850,8 @@ focused validation is proposed below, not recorded as already passing.
 - [ ] S18.A9: consider explicit absence of a parsed opaque partition.
   Classification: duplicate absence representation; medium confidence;
   small scope only after error/fallback prerequisites are established.
-  Anchors: `src/dune_rules/dune_load.ml:67-139` and
-  `src/dune_rules/scope.ml:837-846`.
+  Anchors: `Partitions.load_mount` / `partition_of_dir` and
+  `Scope.DB`'s `of_dir`.
   Opaque packages receive empty parsed partitions, requiring empty-map
   handling in loading and scope lookup. Consider `None` for no parsed
   Dune partition instead of constructing empty facts.
@@ -939,8 +897,7 @@ focused validation is proposed below, not recorded as already passing.
   #16977/rebase. Environment/PATH, mask and documentation policy choices
   are not mechanical simplifications.
 
-Recommended bounded order: S18.A1 reproduction/fix; S18.A2 through S8.
-Take A7-A9 only with their named prerequisites.
+Next independent correctness task: S18.A2, through S8; A8 and A9 wait for their S7 prerequisites.
 All test paths above are relative to `test/blackbox-tests/test-cases/`
 unless they begin with `test/`. Re-estimate savings after validation;
 do not add overlapping estimates or promise a large deletion budget.
@@ -957,12 +914,15 @@ expectations wait for the named decision.
 ### `pkg/` tests that record wrong behaviour
 
 Each has a note in the test; fix and flip:
-- S7 eagerness: lost "required by" lines in `unused-locked-packages.t`,
-  `unavailable-package-source.t` and `source-with-directory-symlink.t`
-  (a demanded source or load error names no requester).
-- Narrowing (A9, Ali): `sites-plugin.t`, a natively loaded locked app
-  cannot see `dune-site`, which is not in the lock directory. Fixture
-  changed to a scoped package in `package-deps-run-binary.t`.
+- S7: demanded source/load errors lose "required by" in
+  `unused-locked-packages.t` and `unavailable-package-source.t`. Keep
+  `source-with-directory-symlink.t` as a control that already prints
+  the copy/install dependency chain.
+- `sites-plugin.t`: keep the unscoped binary control awaiting the S7
+  rule 2 decision. The positive case still lacks `dune-site.plugins`
+  and reports an unknown package in the mount. This is not the removed
+  native-public visibility restriction; inspect the fixture's providers
+  and package mask before changing the expectation.
 - S14 (Ali, accepted): `mounted-projects.t`, a source vendoring a
   public library in its own package fails natively with "Library .. not
   found". Fixed in the package (Menhir patch), not in dune.
@@ -1005,10 +965,11 @@ remaining expected output of a file must not change.
 - D11 (needs Ali): the remaining host/target cases each cover a
   different thing and are kept for now: RP's PPX driver in the host
   partition (now confined to its case), PM's promotion in non-default
-  contexts, DP's jsoo host compiler (T24) and DP's package layout
-  materialised in the host context. "Single user context" was read by
-  the audit as "no host/target", but cross-compilation exists on main
-  (`bin-narrowing/cross-compilation.t`). Delete only on Ali's word.
+  contexts, `jsoo/compiler-identity.t`'s host compiler (T24) and DP's
+  package layout materialised in the host context. "Single user context"
+  was read by the audit as "no host/target", but cross-compilation
+  exists on main (`bin-narrowing/cross-compilation.t`). Delete only on
+  Ali's word.
 - [ ] D12.a after #16977 merges/rebase: remove the superseded
   compile-command source/test changes together (`lifecycle.t`,
   `namespace.t`, `copy-files.t` and CC's extra cases). Do not drop
@@ -1026,43 +987,23 @@ remaining expected output of a file must not change.
   A fixture merger must preserve independent cold metadata requests in
   `library-enabled_if-with-package.t` and cold package materialization in
   `single-package.t`; do not warm one entrypoint with the other.
-- [ ] D13 after fixture behaviour stabilises: split DP by fixture, RP into
-  directory rules, warning policy and install parity, and move the
-  standalone jsoo cases into `jsoo/` (keep their two output checks).
-  Preserve controls and output. DP is eight independent fixtures, one
-  nesting `package-set-layout` under the jsoo fixture; RP's middle
-  cases run in `_build/host` only because an earlier case replaced the
-  contexts.
+- [ ] D13 after fixture behaviour stabilises: split the remaining DP
+  cases by fixture, including moving the scoped JS compiler-selection
+  case to `jsoo/`. Keep its workspace and mounted controls in standard
+  `runtest`. Split RP into directory rules, warning policy and install
+  parity without changing output. RP's middle cases run in `_build/host`
+  only because an earlier case replaced the contexts.
 
-#### Backend-fixture conversion candidates
+#### Backend-fixture boundaries
 
 Use explicit stable matrices, not blanket native/opaque parity. Keep
 requester roles, cold/warm controls and backend-specific assertions.
-No helper options or generic runner are planned. Ranked static audit:
+No helper options or generic runner are planned.
 
-- [ ] BM3 `lockdir-workspace-deps/compile-against-workspace-lib.t`:
-  common leaf payload through both backends; retain the opaque
-  requester, workspace library, transitive linking, section checks and
-  edit/backend-switch invalidation. No scenario deletion established.
-- [ ] BM4 remaining installed-file cases: `pkg-pform/installed.t`
-  overlaps the positive control in `installed-missing-file.t`, but both
-  are unchanged on main; deleting one would enlarge this stack's diff.
-  Retain external-prefix/OCAMLPATH discovery, rename/error/dependency
-  assertions.
-  Consider managed providers for the all-section pkg pforms in
-  `artifacts.t`, without replacing external-prefix controls. Directory
-  pforms differ by backend (directory entries versus installed leaves);
-  do not impose parity when sharing producer fixtures.
-- [ ] BM5 `dep-section-variables.t`: provider backend x section x
-  system/run expansion with opaque requesters. Keep relative/absolute
-  paths, lib/libexec, direct installs, pkg-self and collision controls.
-  Share payload construction, not the distinct scenarios.
-- [ ] BM6 `bin-narrowing/depopts.t`: backend x depends/depopts; preserve
-  the hard-dependency control and guarded optional execution.
-- [ ] BM7 `bin-narrowing/{mixed-transitive-deps,transitive-deps}.t`:
-  vary a locked leaf, retain boundary direction, opaque requesters and
-  outside-closure non-build checks. Mixed-chain prose contradicts its
-  recorded true result; do not change semantics from the prose.
+- Retain the external-prefix/OCAMLPATH controls in `pkg-pform/installed.t`
+  and `installed-missing-file.t`; managed providers do not cover that
+  lookup. Directory pforms differ by backend (directory entries versus
+  installed leaves); do not impose parity when sharing producer fixtures.
 - Deferred: CLI companion PATH (`exec-dependency-binaries.t`,
   `bin-narrowing/dune-exec.t`) needs the environment/discovery contract.
   E2E explicit/autolock tests need a repository fixture selector: their
@@ -1087,22 +1028,13 @@ Tests first, in their own commits; a test that exposes a bug records the
 current output and a plan item, it does not fix the bug.
 
 New cases:
-- [ ] N11 mounted coverage for mdx, cinaps, utop and melange (one small
-  case each, only where `src/` changed for it). rocq is covered by
-  `pkg/mounted-rocqproject.t`.
 
-### S21. Fifth simplification audit (2026-11-17, unclaimed unless marked)
+### S21. Remaining follow-ups from the fifth simplification audit
 
-Thirteen read-only readers over the stack's diff against `5a68b191`.
-Nothing here removes a behaviour or the only assertion of one. Nothing
-was built or run: every item needs `@check @fmt` and its named tests.
-Line numbers are those of tip `srsutqlx` and will drift; find the site
-by the names given. Items already in S17-S20 or the audit notes are not
-repeated. Savings are estimates in lines; "P" marks an item that changes
-expected output and so needs Ali before promotion. Totals: about 250
-source lines and 430 test lines.
-
-Order within a group is by value. One item is one commit unless said.
+The independent items are exhausted. The remaining items are coupled to
+the named migration or decision below. Preserve behavior and unique
+assertions, re-estimate against the current base, and validate each
+logical change with `@check @fmt` plus focused tests.
 
 Measured and not worth it, do not redo (2026-11-17): C7 is not
 behaviour-preserving (a broken-symlink `dune-project` or `*.opam` in a
@@ -1136,16 +1068,9 @@ reshaped.
   written twice (`pkg_rules.ml`). Fold over the value-list map and
   convert once. Tests: `pkg/exported-env.t`,
   `pkg/default-exported-env.t`, `pkg/withenv.t`.
-- [ ] C27 in S10 step 5 (legacy path deleted): `Expander.artifacts` and
-  `Expander.depends` are `_ Memo.t` only for the legacy expander, both
-  stack constructors wrap plain maps in `Memo.return`; make them plain
-  and delete the `expand_action` alias (-8).
-- [ ] C28 if S17.D3 is not taken: `Fs_memo.canonical_path` (39 lines)
-  re-implements `Path.Expert.try_localize_external` (-30). Low
-  confidence: main's helper localises a sibling `/ws-foo` of root `/ws`
-  and may raise on a non-normalised path; check what
-  `Candidate.source_root` can produce. Tests:
-  `pkg/local-source-relative-watch.t`, `watching/`.
+- [ ] C27 after S10 removes the legacy path: `Expander.artifacts` and
+  `Expander.depends` can become plain maps once their legacy callers
+  are gone; re-check the `expand_action` alias then.
 - [ ] C31 at D12.a: `Loaded_project.build_context` exists for the
   compile-commands hunk only; delete it and store `build_dir` (-4).
 - Not worth a commit alone (only if a further caller appears): a
@@ -1154,25 +1079,48 @@ reshaped.
   building workspace package variables in `package_layout.ml` with
   `Lock_dir.Pkg_info.variables` (S11 rewrites that function).
 
-#### Tests: independent, no expected output changes
+#### Tests: gated on expected output (S19)
 
+- [ ] S23 output-changing ideas (P; Ali), each with its surviving
+  assertion named by the S23 agents: `mounted-projects.t` cut the
+  undeclared-provider and vendored diagnostics to their `Error:` line
+  (-8) and drop the workspace control before the disabled-vendored check
+  (-3); `bin-narrowing/multi-package.t` print the identical native/opaque
+  `show_denied` output once (-20); `bin-narrowing/transitive-deps.t`
+  compare opaque against native (-5); `package-deps-run-binary.t`
+  `sort -u` the four identical "from provider" lines per cell (-8..-12).
 
-#### Tests: change expected output or drop a case (P; Ali)
-
-For each, the surviving assertion is named. Check S19's rule first.
-
-- [ ] V5 (-14) `pkg/bin-narrowing/mixed-transitive-deps.t`: block 2
-  ("declare directly") was the contrast to block 1 on main; both now
-  print `true` and the file says so. Its fact is asserted by
-  `transitive-deps.t` (`direct-out`) and `lockdir-deps.t`. Delete it
-  and fix the header. Decide with BM7. Enlarges the diff against main
-  by about 8 lines.
 - [ ] V7 (-11, after T19) `pkg/portable-lockdirs/
   portable-lockdirs-dedup-manifest-errors.t`: the unconditional
   `mkpkg foo` case used to test error deduplication; it now succeeds
   and asserts what `workspace-deps/solver-workspace-dep.t` and
   `pin-stanza/cycle.t` assert. Keep the macos-only case (the only
   solver-level platform-conditional workspace dependency).
+
+### S22. Sixth simplification audit (2026-11-18, source only)
+
+Done: A1-A4, B1, B2, B4, D1-D4, D6, E1-E4, C2 (source diff 8413 -> 8198
+changed lines against `remove-pkg-digest`). Measured and dropped: B5 (the
+diff realigns, saves 0), C1 (nets -4 after ocamlformat).
+- Note: restoring base's leading `let* () = Memo.return ()` in
+  `Source_deps.files_with_filter` makes `watching/batch-mode.t` and
+  `watch-mode.t` rerun a failing action (counter 2, not 1), every time.
+  E1 keeps the stack's version without it; why Memo ordering changes the
+  caching of a failed action is not investigated.
+- [ ] B3 (-6, needs Ali) restore base `Lib.Error.overlap`; the by-name
+  conflict message would lose the first library's "required by" path.
+- Rejected: D5 (`Rules.create ?sources`, -7) adds an optional argument
+  (AGENTS.md). C1 measured -4 (a first-order per-candidate table
+  helper costs ~16 lines; call sites keep ~7 each). Reviewers' rejected lists (kept so they are not
+  re-audited): moving relocate helpers back into `Resolve` (S10 deletes
+  it), the dead `Dependencies` branch of `Paths.make` (grows the diff),
+  inlining `execute` (executor seam), `install_rules.ml` `~dir` of the
+  dune-package/META/odoc-config rules (needs a test run to judge),
+  the `Path.Local` and `Dune_load`->`Partitions` call-site churn
+  (needed), compile-commands hunks (D12.a).
+- Note (not a saving): the ppx key stores a mount's directory as a
+  `Path.Source.t`, against the path-model decision that a mount never
+  gets one.
 
 ## Supporting audit notes (not an independent work queue)
 
@@ -1229,13 +1177,11 @@ or the ppx key's `opaque_packages`.
 Every added site was read; the reachable ones are fixed with tests.
 Unsure, to read: `Build_system.directory_target_contents_opt` raises a
 code error when its directory is not under a directory target (callers
-in `pkg_sources.ml`, `source_tree.ml`); `find_loaded_project` for a
-directory in `_build/_private` or `_build/_fetch` now raises "invalid
-context" where main fell back to the root project (about 40 callers
-unaudited).
-- Unsure: `pkg_sources.ml:72-73` with `(pkg enabled)`
-  and an opam context (main has the same error, but `Scope.DB.create`
-  now reaches it for every context).
+in `pkg_sources.ml`, `source_tree.ml`); `Partitions.find_loaded_project`
+expects a context path and does not fall back to the root project for
+`_build/_private` or `_build/_fetch`. Check callers when moving them.
+- Check the `(pkg enabled)` / opam-context boundary when moving calls to
+  `Lock_dir.lock_dir_active`; do not make invalid-context errors eager.
 
 ### L. Loading and the project model (read by an agent)
 
@@ -1247,13 +1193,12 @@ marked each item verified-by-reading or plausible; that is kept here.
   would print `.pkg/n/d`; S16 decided on the full build path.
 - L8 (closed). Trap: the dune-project existence check stays guarded
   inside its body.
-- L9 (closed). Traps: `Loaded_project.source_tree_dir` and
-  `Dune_load.source_tree_dir` are not duplicates (the latter returns
-  `None` for an invalid context and loads one package).
+- L9 (closed). `Loaded_project.source_tree_dir` and
+  `Partitions.source_tree_dir` are not duplicates (the latter resolves
+  the enclosing tree by context and mount and handles invalid contexts).
 
-Checked and found necessary: `Package_name.file`; the logical/backing pair in
-`Source_tree_file`; `Dune_load.source_tree_dir`; `bin/alias.ml` and
-`bin/target.ml`.
+Checked and found necessary: `Package_name.file`; the logical/backing pair
+in `Source_tree_file`; `bin/alias.ml` and `bin/target.ml`.
 
 ### P. Package rules (read by an agent)
 
@@ -1271,8 +1216,8 @@ was compiled. Savings are changed lines under `src/`.
 
 Refinements to existing items:
 - S10: the binaries map is built twice (the env chain is S17.A3).
-- S11: `package_layout.ml:84-164` re-implements
-  `package_universe.ml:127-163` and `Candidate.dependencies`.
+- S11: reuse shared locked adjacency; keep workspace formula resolution
+  distinct from the authored-name closure.
 
 Checked and found necessary: the `Log.info` calls a test asserts;
 `Dependency.export_paths`; `Install.Entry.Expanded.make`; native branches
@@ -1367,22 +1312,18 @@ checked by the planning agent against the files. Abbreviations under
 `mounted-compile-commands.t`.
 
 Need Ali (expectations that pin an undecided or surprising behaviour):
-- T21 (V). `pkg/bin-narrowing/ambient-path-fallback.t:168-180` expects
-  `%{bin:mybin}` = "from system" but `(system mybin)` = "from lockdir"
-  because an earlier command happened to build the provider: an
-  undeclared dependency on build state. `resolve-program.t:86-127`
-  extends T1 to stanza tools (unscoped `(ocamllex)`/`(menhir)` no longer
-  use lock-directory tools).
+- T21 (V). In `pkg/bin-narrowing/ambient-path-fallback.t`'s warm case,
+  `%{bin:mybin}` prints "from system" but `(system mybin)` prints
+  "from lockdir" after an explicit dependency builds the provider.
+  `resolve-program.t` extends T1 to unscoped `(ocamllex)`/`(menhir)`.
 - T22 (remainder). SL's type-error case expects
   `File ".pkg/foo/bad/bad.ml"`, which cannot be opened from the
   workspace root; goes with S16.F4.
-- T24. jsoo. DP 540-542 is the only line behind `Config.compiler` and
-  the `~compiler` threading in `jsoo_rules.ml` (167 changed lines); DP
-  718-730 behind the `build_config@digest` directories; DP 738-747
-  justifies nothing. The compiler identity is needed by scoped and
-  mounted directories and by per-directory `(env (binaries))`: main
-  re-resolves `js_of_ocaml` in each rule's own directory. It stays; move
-  DP 545-554 and 650-769 to `jsoo/` (D13).
+- T24. Keep DP's scoped JS compiler-selection checks and
+  `jsoo/compiler-identity.t`'s per-directory `(env (binaries))` checks.
+  Preserve compiler selection, separate archives, shapes and shared
+  runtimes, and host-tool selection when reworking D13 or
+  `jsoo_rules.ml`.
 
 Vacuous assertions (delete or replace):
 - T25. "No writeback" checked in the `(source (copy ..))` origin, where a
@@ -1432,14 +1373,10 @@ seam and moving consumers; do not restore text solely to match main.
 - B1 (A9/F8): keep the package-specific opaque/provider scopes required by
   the accepted visibility policy. Several-provider checks (A10) and jsoo
   compiler identity (T24) remain required.
-- B2: retain the mounted `Pkg.t` seam while ordinary consumers use it,
-  and the adapters needed for dev-tool sharing of native dependencies.
-  Inventory `find_package`, installed-file/dependency queries,
-  `of_closure`, toolchain and install-alias callers before removal.
-  - B2.3 waits for S10's seam: preserve workspace-dependency handling and
-    `DB.Pkg_table.project_entries`, including its use to skip project
-    digests under the private `.pkg` root and the index-evaluation test.
-  - B2.5 is P5's PATH-policy decision, not a mechanical field deletion.
+- B2: digest-era restoration proposals are superseded by S10. Inventory
+  remaining `Pkg_rules` adapters before removal; preserve workspace
+  dependencies and the agreed dev-tool compiler sharing/isolation.
+  B2.5 still depends on P5's PATH decision.
 
 ## Validation and submission
 
@@ -1451,11 +1388,15 @@ seam and moving consumers; do not restore text solely to match main.
 - [ ] With Ali's approval, serialize one final
   `./dune.exe build @check @fmt @runtest` on that code revision.
   Documentation-only plan edits need `@check @fmt`, not the full suite.
-- [ ] Confirm the behavioural gates in S7, plus dev-tool
-  sharing/isolation and host/target regressions after S10/S11.
-- [ ] Validate external package backings on macOS/FSEvents and Windows,
-  including relative local URLs and absolute build-directory aliases.
-- [ ] S14's durable Menhir overlay (its "Submission gate" item).
+- [ ] Confirm S7's behavioral gates, S10's dev-tool isolation/compiler
+  sharing and host/target regressions. Retain the upstream #17089
+  host-context export checks when adapting `pkg/exported-env.t`.
+- [ ] Validate local package backings on macOS/FSEvents and Windows:
+  relative workspace URLs, absolute external sources, configured build
+  directories and file-link vs directory-link behavior.
+- [ ] Re-lock and build fresh clones with the final binary (S14). Record
+  source and lock revisions, any overlays, edits or fixups, and cache use.
+  Report the exact target and whether benchmarks were built or run.
 
 `bin-pform/windows-install-names.t` and `wasmoo/build-info.t` are outside
 the default alias here; earlier checks found the same failures on main.
@@ -1464,9 +1405,9 @@ coverage.
 
 Report source size against main separately from tests and this plan:
 it is the stack's measure (Direction), after the gates above pass.
-Keep check logs and historical metrics
-in commit messages. Follow the PR template and remove `PLAN.md` before
-final submission.
+Keep check logs and historical metrics in commit messages. Follow the
+PR template; neither the digest-removal nor the prototype submission
+should contain `PLAN.md`.
 
 Note in the PR: empty-provider PPX driver hashes change (one key
 encoding); `(package (dir ../x))` escaping its project is now rejected
