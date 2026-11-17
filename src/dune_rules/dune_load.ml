@@ -367,21 +367,11 @@ let vendored_warnings ~dir =
   let* project = find_loaded_project ~dir in
   if Loaded_project.vendored_warnings project
   then Memo.return true
-  else (
-    let rec loop dir =
-      let* source_dir = Loaded_project.source_tree_dir project dir in
-      match source_dir with
-      | Some dir ->
-        Memo.return
-          (match Source_tree.Dir.status dir with
-           | Vendored -> true
-           | Normal | Data_only -> false)
-      | None ->
-        (match Path.Build.parent dir with
-         | None -> Memo.return false
-         | Some dir -> loop dir)
-    in
-    loop dir)
+  else
+    Loaded_project.source_tree_dir project dir
+    >>| function
+    | None -> false
+    | Some d -> Source_tree.Dir.status d = Vendored
 ;;
 
 let projects () =
