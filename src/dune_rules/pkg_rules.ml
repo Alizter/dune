@@ -2264,10 +2264,13 @@ module Install_action = struct
           | `No_install_action -> Section.Map.empty
           | `Has_install_action ->
             let install_paths =
-              let roots =
-                Install.Roots.opam_from_prefix ~relative:Path.relative target_dir
-              in
-              Install.Paths.make ~relative:Path.relative ~package ~roots
+              Paths.of_root
+                package
+                ~root:(Path.parent_exn target_dir)
+                ~source_dir:"source"
+                ~install_dir:(Filename.to_string (Path.basename target_dir))
+                ~relative:Path.relative
+              |> Paths.install_paths
             in
             section_map_of_dir install_paths
         in
