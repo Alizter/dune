@@ -245,17 +245,15 @@ let copy_files_relative_glob ~dir ~loc src_glob =
   | None ->
     Path.relative (Path.source (Path.Source.of_local local)) src_glob ~error_loc:loc
   | Some package ->
-    let mount, in_mount = Path.Local.split_first_component local |> Option.value_exn in
-    let name, in_mount = Path.Local.split_first_component in_mount |> Option.value_exn in
-    (match Path.Local_gen.L.relative_result in_mount (String.split src_glob ~on:'/') with
-     | Ok in_mount ->
-       let context = Path.Build.split_first_component dir |> Option.value_exn |> fst in
-       Path.Build.L.relative
-         Path.Build.root
-         [ Filename.to_string context; Filename.to_string mount; Filename.to_string name ]
-       |> Fun.flip Path.Build.append_local in_mount
-       |> Path.build
-     | Error `Outside_the_workspace ->
+    let root =
+      Path.Local.L.relative
+        Path.Local.root
+        [ Filename.to_string Filename.pkg_dir_basename; Package.Name.to_string package ]
+    in
+    (match Path.Local.relative_result local src_glob with
+     | Ok glob when Path.Local.is_descendant glob ~of_:root ->
+       Path.build (Path.Build.relative dir src_glob)
+     | Ok _ | Error _ ->
        User_error.raise
          ~loc
          [ Pp.textf
