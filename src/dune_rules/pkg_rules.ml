@@ -3169,24 +3169,25 @@ module Context_and_packages = struct
   let hash = Tuple.T2.hash Context_name.hash Package.Name.Selection.hash
 end
 
+let compiler_packages =
+  Memo.create
+    "compiler-packages"
+    ~input:(module Context_name)
+    (fun context ->
+       let* lock_dir = Lock_dir.get_exn context in
+       match lock_dir.ocaml with
+       | None -> Memo.return Package.Name.Set.empty
+       | Some ocaml ->
+         let+ pkg = resolve_pkg_dep context ocaml in
+         Package.Name.Set.of_list_map
+           (pkg :: Pkg.deps_closure pkg)
+           ~f:(fun (pkg : Pkg.t) -> pkg.info.name))
+;;
+
 (* [packages] with the package installing the compiler and its dependencies.
    Their binaries are visible from every directory, whatever it declares. *)
 let declared_packages context (packages : Package.Name.Selection.t) =
-  let memo =
-    Memo.create
-      "compiler-packages"
-      ~input:(module Context_name)
-      (fun context ->
-         let* lock_dir = Lock_dir.get_exn context in
-         match lock_dir.ocaml with
-         | None -> Memo.return Package.Name.Set.empty
-         | Some ocaml ->
-           let+ pkg = resolve_pkg_dep context ocaml in
-           Package.Name.Set.of_list_map
-             (pkg :: Pkg.deps_closure pkg)
-             ~f:(fun (pkg : Pkg.t) -> pkg.info.name))
-  in
-  let+ compiler = Memo.exec memo context in
+  let+ compiler = Memo.exec compiler_packages context in
   match packages with
   | All -> compiler
   | Only packages -> Package.Name.Set.union packages compiler
