@@ -96,9 +96,12 @@ val lock_dir_path : Context_name.t -> Path.t option Memo.t
 val lock_dir_active : Context_name.t -> bool Memo.t
 val ocaml_toolchain : Context_name.t -> Ocaml_toolchain.t Action_builder.t option Memo.t
 
-(** The package installing the compiler and its dependencies. Their binaries
-    are visible from every directory, whatever it declares. *)
-val compiler_packages : Context_name.t -> Package.Name.Set.t Memo.t
+(** [packages] with the package installing the compiler and its dependencies.
+    Their binaries are visible from every directory, whatever it declares. *)
+val declared_packages
+  :  Context_name.t
+  -> Package.Name.Selection.t
+  -> Package.Name.Set.t Memo.t
 
 (** [which ~packages context program] looks [program] up among the binaries
     installed by opaque [packages] in the lock directory. Native declarations

@@ -3179,9 +3179,9 @@ module Context_and_packages = struct
   let hash = Tuple.T2.hash Context_name.hash Package.Name.Selection.hash
 end
 
-(* The package installing the compiler and its dependencies. Their binaries
-   are visible from every directory, whatever it declares. *)
-let compiler_packages =
+(* [packages] with the package installing the compiler and its dependencies.
+   Their binaries are visible from every directory, whatever it declares. *)
+let declared_packages context (packages : Package.Name.Selection.t) =
   let memo =
     Memo.create
       "compiler-packages"
@@ -3196,7 +3196,10 @@ let compiler_packages =
              (pkg :: Pkg.deps_closure pkg)
              ~f:(fun (pkg : Pkg.t) -> pkg.info.name))
   in
-  Memo.exec memo
+  let+ compiler = Memo.exec memo context in
+  match packages with
+  | All -> compiler
+  | Only packages -> Package.Name.Set.union packages compiler
 ;;
 
 let lock_dir_binaries =
@@ -3212,12 +3215,7 @@ let lock_dir_binaries =
     (fun (context, packages) ->
        (* A lookup never builds an opaque package to see what it installs:
           only those the directory declares, and the compiler. *)
-       let* compiler = compiler_packages context in
-       let declared =
-         match (packages : Package.Name.Selection.t) with
-         | All -> compiler
-         | Only packages -> Package.Name.Set.union packages compiler
-       in
+       let* declared = declared_packages context packages in
        let* packages = project_deps ~packages:(Only declared) context in
        let* _, opaque = Pkg.classify packages >>| Pkg.partition in
        let+ { binaries; dep_info = _ } =

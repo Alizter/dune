@@ -132,12 +132,7 @@ let native_bins context ~packages name =
   if not active
   then Memo.return []
   else
-    let* compiler = Pkg_rules.compiler_packages context in
-    let declared =
-      match (packages : Package.Name.Selection.t) with
-      | All -> compiler
-      | Only packages -> Package.Name.Set.union packages compiler
-    in
+    let* declared = Pkg_rules.declared_packages context packages in
     Package.Name.Set.to_list declared
     |> Memo.List.concat_map ~f:(fun package ->
       let* mounted = Pkg_sources.find_mounted_kind context package in
