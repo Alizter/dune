@@ -5,6 +5,9 @@
 
 open Import
 
+(** A memo key for a package in a context. *)
+module Context_and_package : Memo.Input with type t = Context_name.t * Package.Name.t
+
 (** The projects and dune files of one partition of a context: the workspace,
     or one mounted package. *)
 module Partition : sig

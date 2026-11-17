@@ -381,14 +381,6 @@ module DB = struct
     let hash = Tuple.T2.hash Context_name.hash (Option.hash Package.Name.hash)
   end
 
-  module Context_and_package = struct
-    type t = Context_name.t * Package.Name.t
-
-    let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn Package.Name.to_dyn
-    let equal = Tuple.T2.equal Context_name.equal Package.Name.equal
-    let hash = Tuple.T2.hash Context_name.hash Package.Name.hash
-  end
-
   let scopes_by_dir
         ~scopes
         ~package_scopes
@@ -526,7 +518,7 @@ module DB = struct
     lazy
       (Memo.create
          "opaque-package-libraries"
-         ~input:(module Context_and_package)
+         ~input:(module Dune_load.Context_and_package)
          (fun (context, name) ->
             let* package = Pkg_rules.find_opaque context name in
             match package with
@@ -1031,14 +1023,7 @@ module DB = struct
     let entries =
       Memo.create
         "package-library-entries"
-        ~input:
-          (module struct
-            type t = Context_name.t * Package.Name.t
-
-            let equal = Tuple.T2.equal Context_name.equal Package.Name.equal
-            let hash = Tuple.T2.hash Context_name.hash Package.Name.hash
-            let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn Package.Name.to_dyn
-          end)
+        ~input:(module Dune_load.Context_and_package)
         (fun (ctx, pkg_name) ->
            let* public_libs = public_libs ctx
            and* stanzas = Dune_load.stanzas_of_package ctx pkg_name in

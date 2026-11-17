@@ -115,14 +115,7 @@ let package_binaries =
   let memo =
     Memo.create
       "package-binaries"
-      ~input:
-        (module struct
-          type t = Context_name.t * Package.Name.t
-
-          let to_dyn = Tuple.T2.to_dyn Context_name.to_dyn Package.Name.to_dyn
-          let equal = Tuple.T2.equal Context_name.equal Package.Name.equal
-          let hash = Tuple.T2.hash Context_name.hash Package.Name.hash
-        end)
+      ~input:(module Dune_load.Context_and_package)
       (fun (context, package) ->
          let+ binaries =
            Dune_load.stanzas_of_package context package >>= get_installed_binaries
