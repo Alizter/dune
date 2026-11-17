@@ -27,7 +27,6 @@ module Paths : sig
     -> 'a t
 
   val map_path : 'a t -> f:('a -> 'b) -> 'b t
-  val with_prefix : Path.t t -> Path.t -> Path.t t
   val install_roots : 'a t -> 'a Install.Roots.t
 end
 
