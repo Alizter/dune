@@ -6,27 +6,25 @@ module Map_reduce =
     (Memo)
     (Monoid.Product (Monoid.Union (Path.Set)) (Monoid.Union (Path.Set)))
 
-let files_with_filter path ~filter =
-  let* source_dir =
-    match Path.as_in_source_tree path with
-    | Some dir -> Source_tree.find_dir dir
-    | None -> Partitions.source_tree_dir ~dir:(Path.as_in_build_dir_exn path)
+let files_with_filter dir ~filter =
+  let prefix_with, dir =
+    match (dir : Path.t) with
+    | In_source_tree dir -> Path.root, Source_tree.find_dir dir
+    | otherwise ->
+      let prefix_with, _ = Path.extract_build_context_dir_exn otherwise in
+      prefix_with, Partitions.source_tree_dir ~dir:(Path.as_in_build_dir_exn otherwise)
   in
-  match source_dir with
+  dir
+  >>= function
   | None -> Memo.return (Dep.Set.empty, Path.Set.empty)
-  | Some source_dir ->
-    let root = Source_tree.Dir.source_path source_dir in
+  | Some dir ->
     let+ files, empty_directories =
       Map_reduce.map_reduce
-        source_dir
+        dir
         ~traverse:Source_dir_status.Set.all
         ~trace_event_name:"Source deps"
         ~f:(fun dir ->
-          let relative =
-            Path.Local.descendant (Source_tree.Dir.source_path dir) ~of_:root
-            |> Option.value_exn
-          in
-          let path = Path.append_local path relative in
+          let path = Path.append_local prefix_with @@ Source_tree.Dir.source_path dir in
           let files =
             Source_tree.Dir.filenames dir
             |> Filename.Array.Set.to_list
