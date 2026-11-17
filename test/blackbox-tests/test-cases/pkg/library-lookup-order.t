@@ -82,10 +82,10 @@ So does a library that nothing provides:
 A package-owned workspace requester does not build undeclared opaque providers,
 whether the library is named like the provider or requires a fallback scan.
 
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name app) (dir .))
-  > EOF
+  $ app() {
+  >   printf '(lang dune 3.25)\n(package (name app) (dir .) (depends %s))\n' "$*" \
+  >     > dune-project; }
+  $ app
   $ echo 'let () = print_endline "selected"' > main.with.ml
   $ echo 'let () = print_endline "fallback"' > main.without.ml
   $ try '(select main.ml from (first -> main.with.ml) (-> main.without.ml))'
@@ -135,10 +135,7 @@ Compiler libraries remain available with the same findlib configuration.
 A declared transitive dependency still permits the differently named provider.
 The unrelated packages need not be built to discover it.
 
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name app) (dir .) (depends bridge))
-  > EOF
+  $ app bridge
   $ make_lockpkg bridge <<'EOF'
   > (version 1.0)
   > (depends second)
@@ -155,21 +152,10 @@ The unrelated packages need not be built to discover it.
 An opaque library's requirements use its provider's scope, not the consumer's.
 The consumer declares both first and second, but first does not declare second.
 
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name app) (dir .) (depends first second))
-  > EOF
-  $ make_lockpkg first <<'EOF'
-  > (version 1.0)
-  > (build
-  >  (progn
-  >   (run echo built first)
-  >   (write-file first.ml "let v = \"first\"")
-  >   (run ocamlc -a -o first.cma first.ml)
-  >   (run ocamlopt -a -o first.cmxa first.ml)
-  >   (write-file META "requires = \"mismatch\"\narchive(byte) = \"first.cma\"\narchive(native) = \"first.cmxa\"\n")
-  >   (write-file first.install "lib: [ \"META\" \"first.cmi\" \"first.cma\" \"first.cmx\" \"first.cmxa\" \"first.a\" ]")))
-  > EOF
+  $ app first second
+  $ lib first first |
+  >   dune_cmd subst 'archive\(byte\)' 'requires = \"mismatch\"\narchive(byte)' |
+  >   make_lockpkg first
   $ echo '(executable (name main) (libraries first))' > dune
   $ echo 'let () = print_endline First.v' > main.ml
   $ rm -rf _build
@@ -194,10 +180,7 @@ Two eligible opaque packages exporting the same differently named library still
 report the duplicate provider, rather than selecting one by lookup order.
 
   $ dune_cmd subst second third < dune.lock/second.pkg > dune.lock/third.pkg
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name app) (dir .) (depends second third))
-  > EOF
+  $ app second third
   $ echo '(executable (name main) (libraries mismatch))' > dune
   $ echo 'let () = print_endline Mismatch.v' > main.ml
   $ dune build main.exe > duplicate.log 2>&1
@@ -220,10 +203,7 @@ scope; it is not borrowed from the consumer's declarations.
   $ make_dune_source_lockpkg native native "$PWD/_native"
   $ dune_cmd subst 'archive\(byte\)' 'requires = \"native\"\narchive(byte)' < dune.lock/second.pkg > second.pkg
   $ mv second.pkg dune.lock/second.pkg
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name app) (dir .) (depends second))
-  > EOF
+  $ app second
   $ dune build main.exe
   built second
   $ grep '^requires' _build/default/.pkg/second/_install/lib/mismatch/META
