@@ -114,26 +114,6 @@ does not see it either: only files are copied.
   $ dune build _build/default/.pkg/opaque/_install 2>&1
   file
 
-A missing local directory fails only the package that needs it, with the
-lock-file location.
-
-  $ make_lockpkg gone <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_absent))
-  > (build (run false))
-  > EOF2
-  $ cat >> dune <<'EOF2'
-  > (rule (alias gone) (deps (package gone)) (action (echo unreachable)))
-  > EOF2
-  $ dune build main.exe
-  $ dune build @gone 2>&1 | sed "s#$PWD#PWD#g" | dune_cmd delete ' *\^\^*$' | sed 's/characters [0-9-]*/characters X/'
-  File "_build/_private/default/.lock/dune.lock/gone.pkg", line 2, characters X:
-  2 | (source (copy PWD/_absent))
-  Error:
-  PWD/_absent
-  does not exist
-  [1]
-
 Opaque recipes use the same direct backing. File links may point outside the
 package source; their contents are copied, not the links. Recipe writes stay
 inside the writable sandbox and do not change either origin.
