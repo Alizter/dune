@@ -12,11 +12,7 @@ Its contents are not sources of the build.
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune
   $ echo 'let message = "mounted"' > _source/foo.ml
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
 
 Files in the workspace directory, including ones that shadow the package's
 files and a dune file with a failing rule.

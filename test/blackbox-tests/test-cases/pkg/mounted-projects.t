@@ -21,11 +21,7 @@ package. Cram test fixtures are data-only before project parsing.
   $ echo '(library (public_name right))' > _shared/sub/dune
   $ echo 'let message = "right"' > _shared/sub/right.ml
   $ for package in left right; do
-  >   make_lockpkg "$package" <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_shared))
-  > (build (run false))
-  > EOF
+  >   make_dune_source_lockpkg native "$package" "$PWD/_shared"
   > done
 
   $ dune build main.exe
@@ -145,11 +141,7 @@ left's libraries.
 A declared transitive dependency makes the native provider visible without
 building the metadata-only intermediate package.
 
-  $ make_lockpkg right <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_shared))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native right "$PWD/_shared"
   $ make_lockpkg bridge <<'EOF'
   > (version 1.0)
   > (depends right)

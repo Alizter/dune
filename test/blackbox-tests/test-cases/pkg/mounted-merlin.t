@@ -17,11 +17,7 @@ directories are in the mount (workspace libraries: merlin/src-dirs-of-deps.t).
   $ echo 'let x = 1' > _source/lib/a.ml
   $ echo 'val x : int' > _source/lib/a.mli
   $ echo 'let y = A.x' > _source/lib/b.ml
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ cat > bin/dune <<'EOF2'
   > (executable (name main) (libraries foo))
   > EOF2

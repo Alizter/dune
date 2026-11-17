@@ -50,11 +50,7 @@ without making that library's variables a direct recipe dependency.
   > EOF
   $ echo '(library (public_name leaf) (modes byte))' > _leaf/dune
   $ echo 'let greeting = "native leaf"' > _leaf/leaf.ml
-  $ make_lockpkg leaf <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_leaf))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native leaf "$PWD/_leaf"
   $ make_lockpkg consumer <<'EOF'
   > (version 0.0.1)
   > (depends workspace-lib)

@@ -27,11 +27,7 @@ its backing, without first copying a snapshot into _build/_fetch.
   $ echo junk > _source/_build/junk.txt
   $ echo junk > _source/.git/config
   $ echo junk > '_source/.#editor.ml'
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
 
 Building a consumer does not need a snapshot of the source under _build/_fetch.
 
@@ -160,11 +156,7 @@ an external backing. Only file links retain the main copy semantics.
   > (rule (target escaped) (action (write-file %{target} outside)))
   > EOF2
   $ ln -s ../_outside _source/link
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ dune build _build/default/.pkg/foo/escaped 2>&1
   File "_build/default/.pkg/foo/dune", line 1, characters 0-25:
   Error: File _build/default/.pkg/foo/link/secret.inc doesn't exist.

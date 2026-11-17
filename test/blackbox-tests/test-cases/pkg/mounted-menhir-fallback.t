@@ -14,11 +14,7 @@ mounted from a lock directory must behave like a workspace project
   > (using menhir 3.0)
   > (package (name foo) (dir .))
   > EOF2
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ cat > _source/fallback/dune <<'EOF2'
   > (menhir
   >  (modules parser)

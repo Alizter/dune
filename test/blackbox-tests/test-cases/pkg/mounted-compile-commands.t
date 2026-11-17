@@ -48,11 +48,7 @@ its private test library.
   > EOF
   $ echo 'let value = 1' > _dep/tests/test_bindings.ml
   $ echo 'void test_stub(void) {}' > _dep/tests/test_stubs.c
-  $ make_lockpkg dep <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_dep))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native dep "$PWD/_dep"
 
 Building the application succeeds without the dependency's test requirements.
 

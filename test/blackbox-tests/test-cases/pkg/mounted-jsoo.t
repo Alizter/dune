@@ -23,11 +23,7 @@ library's META names them in jsoo_runtime.
   > //Provides: foo_prim
   > function foo_prim(unit) { return 42; }
   > EOF2
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_foo))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_foo"
 
 [bar] is built by its recipe and installs a findlib package whose META names
 the runtime file.

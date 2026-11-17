@@ -13,11 +13,7 @@ selected nested project.
   > EOF
   $ echo '(library (public_name foo))' > _source/project/dune
   $ echo 'let value = 42' > _source/project/foo.ml
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ (cd _source && dune build --root . --only-packages foo project/foo.install)
   $ dune build _build/default/.pkg/foo/project/foo.install
 

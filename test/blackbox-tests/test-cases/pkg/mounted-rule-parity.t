@@ -45,11 +45,7 @@ Mount the identical source. The lock recipe is deliberately unusable, so the
 same rules must be generated in the current graph. Workspace package selection
 must not replace the mounted project's configuration.
 
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ dune build --only-packages main _build/default/.pkg/foo/verified
   $ cat _build/default/.pkg/foo/verified
   verified
@@ -83,11 +79,7 @@ Internal outputs must use the build partition, not the nested source root.
   >   close_out output
   > EOF
   $ (cd _source && dune build --root . --only-packages bar nested/bar.cma)
-  $ make_lockpkg bar <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native bar "$PWD/_source"
 
   $ dune build _build/default/.pkg/bar/nested/bar.cma
   $ test -f _build/default/.pkg/bar/nested/bar.cma
@@ -432,11 +424,7 @@ and tolerates private modules omitted from the modules field.
 The mounted project receives the same treatment, with no warnings or alerts.
 
   $ make_lockdir
-  $ make_lockpkg dep <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native dep "$PWD/_source"
   $ mounted=_build/default/.pkg/dep
   $ dune build "$mounted/warning/warning.cma"
   $ dune build "$mounted/alert/alert.cma"
@@ -523,11 +511,7 @@ root. Rule dependencies and install entries must traverse the same input tree.
   $ cat _source/_build/default/project/sub/result
   first
   second
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ cat > dune <<'EOF'
   > (rule
   >  (target installed)
@@ -595,11 +579,7 @@ An error about a mounted directory names it by its build path.
   $ (cd _dup && make_dune_project_with_package 3.25 dup)
   $ echo '(library (public_name dup))' > _dup/dune
   $ touch _dup/x.ml _dup/X.ml
-  $ make_lockpkg dup <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_dup))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native dup "$PWD/_dup"
   $ dune build _build/default/.pkg/dup/dup.cma 2>&1 | grep "Too many"
   Error: Too many files for module X in _build/default/.pkg/dup:
   [1]
@@ -610,11 +590,7 @@ A copy_files glob cannot leave the mounted package.
   $ echo secret > ws/secret.txt
   $ (cd _esc && make_dune_project_with_package 3.25 esc)
   $ echo '(copy_files ../../../ws/*.txt)' > _esc/sub/dune
-  $ make_lockpkg esc <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_esc))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native esc "$PWD/_esc"
   $ dune build _build/default/.pkg/esc/sub/secret.txt 2>&1 | head -8
   File "_build/default/.pkg/esc/sub/dune", line 1, characters 12-29:
   Error: ../../../ws/*.txt is outside the package esc. A locked package can
@@ -630,11 +606,7 @@ An error from the project model names a mounted directory by its build path.
   > EOF
   $ touch _excl/x
   $ echo '(install (package excl) (section share) (files x))' > _excl/dune
-  $ make_lockpkg excl <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_excl))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native excl "$PWD/_excl"
   $ dune build _build/default/.pkg/excl/excl.install 2>&1 | grep "must exist"
   That package must exist in _build/default/.pkg/excl/sub
   [1]

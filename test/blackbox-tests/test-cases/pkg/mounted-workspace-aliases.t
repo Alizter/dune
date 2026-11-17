@@ -23,11 +23,7 @@ that reached it would fail.
   >   (rule (alias   badly-formatted) (action (run false)))
   > EOF2
   $ echo 'let x : int = "not an int"' > _source/foo.ml
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
 
   $ dune build
   $ dune build @default @all @check @install @fmt @doc

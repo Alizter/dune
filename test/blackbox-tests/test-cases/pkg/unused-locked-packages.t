@@ -17,11 +17,7 @@ project does not load.
   $ mkdir _good _broken
   $ (cd _good && make_dune_project_with_package 3.25 good)
   $ echo '(library (public_name good))' > _good/dune
-  $ make_lockpkg good <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_good))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native good "$PWD/_good"
   $ make_lockpkg unfetchable <<EOF
   > (version 1.0)
   > (source (copy $PWD/_absent))
@@ -29,11 +25,7 @@ project does not load.
   > EOF
   $ (cd _broken && make_dune_project_with_package 3.25 broken)
   $ echo '(library (public_name broken) (unknown_field))' > _broken/dune
-  $ make_lockpkg broken <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_broken))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native broken "$PWD/_broken"
 
 The unrelated target builds and no package is fetched.
 

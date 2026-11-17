@@ -22,11 +22,7 @@ version of the included file, without modifying the origin.
   $ (cd _source && dune build --root . project/sub/result)
   $ cat _source/_build/default/project/sub/result
   original
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ make_lockpkg_file foo shared.inc <<'EOF'
   > (rule (target result) (action (write-file %{target} prepared)))
   > EOF

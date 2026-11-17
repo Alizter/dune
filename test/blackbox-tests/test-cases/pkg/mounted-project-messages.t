@@ -11,11 +11,7 @@ path, since that is where its files are.
   > EOF
   $ mkdir _foo
   $ lock() {
-  > make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_foo))
-  > (build (run false))
-  > EOF
+  > make_dune_source_lockpkg native foo "$PWD/_foo"
   > }
   $ lock
 

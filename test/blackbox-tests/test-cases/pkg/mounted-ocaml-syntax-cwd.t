@@ -17,11 +17,7 @@ run in the fetched source, which is shared by every package built from it.
   >   close_out (open_out "written-by-script");
   >   Jbuild_plugin.V1.send {|(rule (with-stdout-to out (echo generated)))|}
   > EOF2
-  $ make_lockpkg foo <<EOF2
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF2
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ dune build _build/default/.pkg/foo/out
   $ cat _build/default/.pkg/foo/out
   generated

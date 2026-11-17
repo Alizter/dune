@@ -20,11 +20,7 @@ directory is its build directory, and a mount is never promoted into.
   >  (generate_project_file))
   > EOF
   $ touch _source/thy/foo.v
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ mount=_build/default/.pkg/foo
 
 The mounted file is written in the build directory only, which is also the

@@ -37,11 +37,7 @@ promotions. Promotion controls on the command line must not override this.
   >    (diff? ../../expected external.corrected)
   >    (write-file %{target} checked))))
   > EOF
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
 
 Rule promotion produces only build artifacts, leaving the original inputs
 untouched.

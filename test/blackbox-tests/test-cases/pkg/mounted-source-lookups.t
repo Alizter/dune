@@ -12,11 +12,7 @@ behaviour of each feature is covered by the test named with it.
   > (lang dune 3.25)
   > (package (name foo) (dir .))
   > EOF
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ mount=_build/default/.pkg/foo
 
 A source tree installed by the package (install/install-source-tree.t).

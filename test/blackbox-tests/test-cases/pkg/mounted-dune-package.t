@@ -227,11 +227,7 @@ through %{lib:...}. This must not require installing the whole package.
   > (library (name support) (public_name foo.support))
   > EOF
   $ echo 'let message = "mounted library file"' > _foo/support/support.ml
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_foo))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_foo"
 
 The file resolves to its mounted producer, without demanding unrelated install
 entries or the opaque recipe.
@@ -418,16 +414,8 @@ make selection observable without depending on a particular JSOO version.
   $ cat _workspace/_build/default/main.bc.js
   selected JS compiler
   $ make_lockdir
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_workspace/foo))
-  > (build (run false))
-  > EOF
-  $ make_lockpkg js_of_ocaml-compiler <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_workspace/compiler))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_workspace/foo"
+  $ make_dune_source_lockpkg native js_of_ocaml-compiler "$PWD/_workspace/compiler"
   $ dune build main.bc.js
   $ cat _build/default/main.bc.js
   selected JS compiler
@@ -492,11 +480,7 @@ lookup must not fall back to enumerating foo's library installation entries.
 
   $ make_dune_project 3.25
   $ make_lockdir
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ make_dune_source_lockpkg native foo "$PWD/_source"
   $ make_lockpkg unrelated <<'EOF'
   > (version 1.0)
   > (build (run false))
@@ -670,11 +654,7 @@ must not contribute singleton layouts to the context environment.
   >   printf '(lang dune 3.25)\n(package (name %s))\n' "$package" > "_$package/dune-project"
   >   printf '(library (public_name %s))\n' "$package" > "_$package/dune"
   >   echo 'let value = 2' > "_$package/$package.ml"
-  >   make_lockpkg "$package" <<EOF
-  > (version 1.0)
-  > (source (copy $PWD/_$package))
-  > (build (run false))
-  > EOF
+  >   make_dune_source_lockpkg native "$package" "$PWD/_$package"
   > done
   $ cat >> _unused/dune <<'EOF'
   > (rule (target unavailable) (action (run false)))
