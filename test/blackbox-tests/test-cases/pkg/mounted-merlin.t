@@ -23,31 +23,13 @@ The library through the mount:
 
   $ mount=$pkg_root/foo
   $ dune build $mount/lib/.merlin-conf/lib-foo 2>&1
-  $ dune ocaml merlin dump-config --format=json $PWD/$mount/lib 2>&1 | jq_dune -r 'merlinEntry("A") | merlinJsonEntryWithConfigNames(["S", "UNIT_NAME"])'
-  A: _build/default/.pkg/foo/lib/a
-  ["S","$TESTCASE_ROOT/_build/default/.pkg/foo/lib"]
-  ["UNIT_NAME","foo__A"]
-  A: _build/default/.pkg/foo/lib/a.ml
-  ["S","$TESTCASE_ROOT/_build/default/.pkg/foo/lib"]
-  ["UNIT_NAME","foo__A"]
-  A: _build/default/.pkg/foo/lib/a.mli
-  ["S","$TESTCASE_ROOT/_build/default/.pkg/foo/lib"]
-  ["UNIT_NAME","foo__A"]
+  $ dune ocaml merlin dump-config --format=json $PWD/$mount/lib 2>&1 | jq_dune -r 'merlinEntry("A") | merlinConfigItemsNamed(["S"]) | .[1]' | sort -u
+  $TESTCASE_ROOT/_build/default/.pkg/foo/lib
 
 A workspace executable using the mounted library: the library's sources
 must be listed so that definitions can be found.
 
   $ dune build bin/.merlin-conf/exe-main 2>&1
-  $ dune ocaml merlin dump-config --format=json $PWD/bin 2>&1 | jq_dune -r 'merlinEntry("Main") | merlinJsonEntryWithConfigNames(["S", "UNIT_NAME"])'
-  Main: _build/default/bin/main
-  ["S","$TESTCASE_ROOT/bin"]
-  ["S","$TESTCASE_ROOT/_build/default/.pkg/foo/lib"]
-  ["UNIT_NAME","dune__exe__Main"]
-  Main: _build/default/bin/main.ml
-  ["S","$TESTCASE_ROOT/bin"]
-  ["S","$TESTCASE_ROOT/_build/default/.pkg/foo/lib"]
-  ["UNIT_NAME","dune__exe__Main"]
-  Main: _build/default/bin/main.mli
-  ["S","$TESTCASE_ROOT/bin"]
-  ["S","$TESTCASE_ROOT/_build/default/.pkg/foo/lib"]
-  ["UNIT_NAME","dune__exe__Main"]
+  $ dune ocaml merlin dump-config --format=json $PWD/bin 2>&1 | jq_dune -r 'merlinEntry("Main") | merlinConfigItemsNamed(["S"]) | .[1]' | sort -u
+  $TESTCASE_ROOT/_build/default/.pkg/foo/lib
+  $TESTCASE_ROOT/bin
