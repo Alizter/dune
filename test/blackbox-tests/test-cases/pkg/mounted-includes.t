@@ -6,9 +6,7 @@ project root. They must not leave either the logical mount or its backing tree.
   $ mkdir -p _source/project/sub
   $ echo '(lang dune 3.25)' > _source/dune-project
   $ (cd _source/project && make_dune_project_with_package 3.25 foo)
-  $ cat > _source/project/sub/dune <<'EOF'
-  > (include ../../shared.inc)
-  > EOF
+  $ echo '(include ../../shared.inc)' > _source/project/sub/dune
   $ cat > _source/shared.inc <<'EOF'
   > (rule (target result) (action (write-file %{target} original)))
   > EOF
@@ -121,9 +119,7 @@ A dynamic include cannot load a workspace file outside the mount.
 The boundary is retained when a generated include loads another include.
 
   $ echo '(dynamic_include ../../generated.inc)' > _source/project/sub/dune
-  $ make_lockpkg_file foo shared.inc <<'EOF'
-  > (dynamic_include ../../outside.inc)
-  > EOF
+  $ echo '(dynamic_include ../../outside.inc)' > dune.lock/foo.files/shared.inc
   $ dune build "$result"
   File "_build/default/.pkg/foo/generated.inc", line 1, characters 0-35:
   1 | (dynamic_include ../../outside.inc)
@@ -135,9 +131,7 @@ The boundary is retained when a generated include loads another include.
 Include-loop diagnostics continue to use the logical paths inside the mount.
 
   $ echo '(include ../../shared.inc)' > _source/project/sub/dune
-  $ make_lockpkg_file foo shared.inc <<'EOF'
-  > (include project/sub/dune)
-  > EOF
+  $ echo '(include project/sub/dune)' > dune.lock/foo.files/shared.inc
   $ dune build "$result"
   File "_build/default/.pkg/foo/project/sub/dune", line 1, characters 0-26:
   Error: Recursive inclusion of dune files detected:
