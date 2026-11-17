@@ -1,13 +1,7 @@
 Editing a lock file changes how its package is built without leaving stale
 results behind.
 
-  $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (dir .) (depends foo))
-  > EOF
-  $ echo '(executable (name main) (libraries foo))' > dune
-  $ echo 'let () = print_endline Foo.message' > main.ml
+  $ make_foo_consumer
   $ mkdir _source
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune

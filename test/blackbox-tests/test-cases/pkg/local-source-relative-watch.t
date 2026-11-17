@@ -1,13 +1,7 @@
 Relative local package URLs keep tracking workspace filesystem events after
 their backing has been represented as an absolute external package location.
 
-  $ make_lockdir
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package (name main) (dir .) (depends foo))
-  > EOF
-  $ echo '(executable (name main) (libraries foo))' > dune
-  $ echo 'let () = print_endline Foo.message' > main.ml
+  $ make_foo_consumer
   $ mkdir _source
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune

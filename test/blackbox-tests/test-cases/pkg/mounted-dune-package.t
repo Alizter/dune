@@ -2,12 +2,7 @@ An eligible locked Dune project builds in the current graph. The recorded
 opaque recipe must not run, and the fetched inputs must not own the artifact
 root.
 
-  $ make_lockdir
-  $ make_named_package_project main 3.25 foo
-  $ cat > dune <<'EOF'
-  > (executable (name main) (libraries foo))
-  > EOF
-  $ echo 'let () = print_endline Foo.message' > main.ml
+  $ make_foo_consumer
   $ mkdir _foo
   $ cat > _foo/dune-project <<'EOF'
   > (lang dune 3.25)
@@ -217,10 +212,7 @@ through %{lib:...}. This must not require installing the whole package.
 
   $ mkdir lib-pform
   $ cd lib-pform
-  $ make_lockdir
-  $ make_named_package_project main 3.25 foo
-  $ echo '(executable (name main) (libraries foo))' > dune
-  $ echo 'let () = print_endline Foo.message' > main.ml
+  $ make_foo_consumer
   $ mkdir -p _foo/src _foo/support
   $ (cd _foo && make_dune_project_with_package 3.25 foo)
   $ cat > _foo/src/dune <<'EOF'

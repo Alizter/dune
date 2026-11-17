@@ -612,6 +612,13 @@ make_lockdir() {
 	EOF
 }
 
+make_foo_consumer() {
+  make_lockdir
+  make_named_package_project main 3.25 foo
+  echo '(executable (name main) (libraries foo))' > dune
+  echo 'let () = print_endline Foo.message' > main.ml
+}
+
 make_named_package_project() {
   local name="$1"
   local version="$2"

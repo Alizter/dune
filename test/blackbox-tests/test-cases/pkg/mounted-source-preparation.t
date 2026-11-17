@@ -2,13 +2,6 @@ Each preparation scenario has its own project so that precedence, patch
 ordering, condition evaluation and executable permissions are observed
 independently.
 
-  $ make_consumer() {
-  >   make_lockdir
-  >   make_named_package_project main 3.25 foo
-  >   echo '(executable (name main) (libraries foo))' > dune
-  >   echo 'let () = print_endline Foo.message' > main.ml
-  >   mkdir _source
-  > }
   $ patch_message() {
   >   make_lockpkg_file foo update.patch <<EOF
   > --- a/$1
@@ -24,7 +17,7 @@ Dune configuration supplied only by extra sources is discovered natively.
 
   $ mkdir _precedence
   $ cd _precedence
-  $ make_consumer
+  $ make_foo_consumer && mkdir _source
   $ echo 'let message = Version.value' > _source/foo.ml
   $ echo 'let value = "source"' > _source/version.ml
   $ mkdir _overlay
@@ -78,7 +71,7 @@ Patches apply after the overlays, without mutating the source or extra source.
 
   $ mkdir _patch
   $ cd _patch
-  $ make_consumer
+  $ make_foo_consumer && mkdir _source
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune
   $ echo 'let message = "original"' > _source/foo.ml
@@ -139,7 +132,7 @@ missing patch.
 
   $ mkdir _conditional
   $ cd _conditional
-  $ make_consumer
+  $ make_foo_consumer && mkdir _source
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune
   $ echo 'let message = "original"' > _source/foo.ml
@@ -178,7 +171,7 @@ executes the patched script, while the original input stays unchanged.
 
   $ mkdir _executable
   $ cd _executable
-  $ make_consumer
+  $ make_foo_consumer && mkdir _source
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo 'let message = Script.value' > _source/foo.ml
   $ cat > _source/dune <<'EOF'

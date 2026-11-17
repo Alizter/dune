@@ -1,10 +1,7 @@
 A workspace may contain a directory with the name used for mounted packages.
 Its contents are not sources of the build.
 
-  $ make_lockdir
-  $ make_named_package_project main 3.25 foo
-  $ echo '(executable (name main) (libraries foo))' > dune
-  $ echo 'let () = print_endline Foo.message' > main.ml
+  $ make_foo_consumer
   $ mkdir _source
   $ (cd _source && make_dune_project_with_package 3.25 foo)
   $ echo '(library (public_name foo))' > _source/dune
