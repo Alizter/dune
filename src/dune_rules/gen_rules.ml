@@ -584,12 +584,13 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
   let* source_tree_dir = Loaded_project.source_tree_dir loaded_project dir in
   (* The engine finds the sources of a workspace directory itself. Those of a
      mounted package are not in the workspace, so it is told. *)
-  let source_files, source_sub_dirs =
+  let sources =
     match Pkg_sources.package_of_artifact_path dir, source_tree_dir with
-    | None, _ | Some _, None -> Path.Build.Map.empty, Path.Build.Map.empty
+    | None, _ | Some _, None -> Path.Build.Map.empty
     | Some (_ : Package.Name.t), Some source_dir ->
-      ( Path.Build.Map.singleton dir (Source_file_dir.rules ~dir source_dir)
-      , Path.Build.Map.singleton dir (Source_tree.Dir.sub_dir_names source_dir) )
+      Path.Build.Map.singleton
+        dir
+        (Source_file_dir.rules ~dir source_dir, Source_tree.Dir.sub_dir_names source_dir)
   in
   match dir_status with
   | Lock_dir _ -> Memo.return Gen_rules.no_rules
@@ -663,8 +664,7 @@ let gen_rules_regular_directory (sctx : Super_context.t Memo.t) ~src_dir ~compon
                 (Gen_rules.Build_only_sub_dirs.singleton
                    ~dir
                    (Subdir_set.of_set allowed_subdirs))
-              ~source_sub_dirs
-              ~source_files
+              ~sources
               ~directory_targets
               rules
         in

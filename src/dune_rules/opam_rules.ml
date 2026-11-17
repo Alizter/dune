@@ -45,11 +45,10 @@ let gen_mounted_rules context ~dir components =
      | None -> Memo.return no_rules
      | Some candidate ->
        let+ inventory = source_inventory context candidate ~dir rest in
-       let source_files, source_sub_dirs =
+       let sources =
          match inventory with
-         | None -> Path.Build.Map.empty, Path.Build.Map.empty
-         | Some (files, dirs) ->
-           Path.Build.Map.singleton dir files, Path.Build.Map.singleton dir dirs
+         | None -> Path.Build.Map.empty
+         | Some inventory -> Path.Build.Map.singleton dir inventory
        in
        (match rest, inventory with
         | [], _ ->
@@ -69,14 +68,9 @@ let gen_mounted_rules context ~dir components =
           Rules
             (Rules.create
                ~directory_targets:(Path.Build.Map.singleton target_dir Loc.none)
-               ~source_sub_dirs
-               ~source_files
+               ~sources
                rules)
         | _ :: _, None -> no_rules
         | _ :: _, Some _ ->
-          Rules
-            (Rules.create
-               ~source_sub_dirs
-               ~source_files
-               (Memo.return Dune_engine.Rules.empty))))
+          Rules (Rules.create ~sources (Memo.return Dune_engine.Rules.empty))))
 ;;

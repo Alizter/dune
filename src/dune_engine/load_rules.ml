@@ -483,29 +483,17 @@ end = struct
   module Normal = struct
     type t =
       { build_dir_only_sub_dirs : Build_only_sub_dirs.t
-      ; source_sub_dirs : Filename.Array.Set.t Path.Build.Map.t
-      ; source_files : Rule.t Filename.Map.t Path.Build.Map.t
+      ; sources : (Rule.t Filename.Map.t * Filename.Array.Set.t) Path.Build.Map.t
       ; directory_targets : Loc.t Path.Build.Map.t
       ; rules : Rules.t Memo.Lazy.t
       }
 
-    let combine_exn
-          r
-          { build_dir_only_sub_dirs
-          ; source_sub_dirs
-          ; source_files
-          ; directory_targets
-          ; rules
-          }
-      =
+    let combine_exn r { build_dir_only_sub_dirs; sources; directory_targets; rules } =
       { build_dir_only_sub_dirs =
           Build_only_sub_dirs.union r.build_dir_only_sub_dirs build_dir_only_sub_dirs
-      ; source_sub_dirs =
-          Path.Build.Map.union r.source_sub_dirs source_sub_dirs ~f:(fun _ a b ->
-            Some (Filename.Array.Set.union a b))
-      ; source_files =
-          Path.Build.Map.union r.source_files source_files ~f:(fun _ a b ->
-            Some (Filename.Map.union_exn a b))
+      ; sources =
+          Path.Build.Map.union r.sources sources ~f:(fun _ (f, d) (f', d') ->
+            Some (Filename.Map.union_exn f f', Filename.Array.Set.union d d'))
       ; directory_targets = Path.Build.Map.union_exn r.directory_targets directory_targets
       ; rules =
           Memo.lazy_ ~name:"union-rules" (fun () ->
@@ -568,12 +556,7 @@ end = struct
 
     let make_rules_gen_result
           ~of_
-          { Gen_rules.Rules.build_dir_only_sub_dirs
-          ; source_sub_dirs
-          ; source_files
-          ; directory_targets
-          ; rules
-          }
+          { Gen_rules.Rules.build_dir_only_sub_dirs; sources; directory_targets; rules }
       =
       check_all_directory_targets_are_descendant ~of_ directory_targets;
       check_all_sub_dirs_rule_dirs_are_descendant ~of_ build_dir_only_sub_dirs;
@@ -583,7 +566,7 @@ end = struct
           check_all_rules_are_descendant ~of_ rules;
           rules)
       in
-      { build_dir_only_sub_dirs; source_sub_dirs; source_files; directory_targets; rules }
+      { build_dir_only_sub_dirs; sources; directory_targets; rules }
     ;;
   end
 
@@ -667,9 +650,10 @@ end = struct
         let+ parent_rules = Gen_rules.gen_rules parent in
         (match parent_rules with
          | Under_directory_target _ -> Filename.Array.Set.empty
-         | Normal { source_sub_dirs; _ } ->
-           Path.Build.Map.find source_sub_dirs dir
-           |> Option.value ~default:Filename.Array.Set.empty)
+         | Normal { sources; _ } ->
+           (match Path.Build.Map.find sources dir with
+            | None -> Filename.Array.Set.empty
+            | Some (_, dirs) -> dirs))
     in
     Filename.Array.Set.union in_source_tree declared
   ;;
@@ -867,13 +851,7 @@ end = struct
     >>= function
     | Under_directory_target { directory_target_ancestor } ->
       Memo.return (Loaded.Build_under_directory_target { directory_target_ancestor })
-    | Normal
-        { rules
-        ; build_dir_only_sub_dirs
-        ; directory_targets
-        ; source_sub_dirs
-        ; source_files
-        } ->
+    | Normal { rules; build_dir_only_sub_dirs; directory_targets; sources } ->
       let build_dir_only_sub_dirs =
         Path.Build.Map.find build_dir_only_sub_dirs dir
         |> Option.value ~default:Subdir_set.empty
@@ -891,24 +869,19 @@ end = struct
       in
       let collected = Rules.Dir_rules.consume rules in
       let rules = collected.rules in
-      let source_files = Path.Build.Map.find source_files dir in
+      let sources = Path.Build.Map.find sources dir in
       let* source_files_and_dirs =
-        match source_files with
-        | Some files ->
+        match sources with
+        | Some (files, source_dirs) ->
           Memo.return
             { Source_files_and_dirs.source_filenames =
                 Filename.Map.keys files |> Filename.Array.Set.of_sorted_list
-            ; source_dirs = Filename.Array.Set.empty
+            ; source_dirs
             }
         | None ->
           (match context_type with
            | Empty -> Memo.return Source_files_and_dirs.empty
            | With_sources _ -> source_files_and_dirs sub_dir)
-      in
-      let source_dirs =
-        Path.Build.Map.find source_sub_dirs dir
-        |> Option.value ~default:Filename.Array.Set.empty
-        |> Filename.Array.Set.union source_files_and_dirs.source_dirs
       in
       let source_paths_to_ignore =
         source_paths_to_ignore ~dir build_dir_only_sub_dirs rules
@@ -919,11 +892,13 @@ end = struct
           source_paths_to_ignore.filenames
       in
       let source_dirs =
-        Filename.Array.Set.diff source_dirs source_paths_to_ignore.dirnames
+        Filename.Array.Set.diff
+          source_files_and_dirs.source_dirs
+          source_paths_to_ignore.dirnames
       in
       let copy_rules =
-        match source_files with
-        | Some files ->
+        match sources with
+        | Some (files, _) ->
           Filename.Array.Set.to_list_map source_filenames ~f:(Filename.Map.find_exn files)
         | None ->
           let ctx_dir = Context_name.build_dir context_name in

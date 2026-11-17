@@ -17,16 +17,14 @@ module Gen_rules = struct
   module Rules = struct
     type nonrec t =
       { build_dir_only_sub_dirs : Build_only_sub_dirs.t
-      ; source_sub_dirs : Filename.Array.Set.t Path.Build.Map.t
-      ; source_files : Rule.t Filename.Map.t Path.Build.Map.t
+      ; sources : (Rule.t Filename.Map.t * Filename.Array.Set.t) Path.Build.Map.t
       ; directory_targets : Loc.t Path.Build.Map.t
       ; rules : Rules.t Memo.t
       }
 
     let empty =
       { build_dir_only_sub_dirs = Path.Build.Map.empty
-      ; source_sub_dirs = Path.Build.Map.empty
-      ; source_files = Path.Build.Map.empty
+      ; sources = Path.Build.Map.empty
       ; directory_targets = Path.Build.Map.empty
       ; rules = Memo.return Rules.empty
       }
@@ -35,21 +33,15 @@ module Gen_rules = struct
     let create
           ?(build_dir_only_sub_dirs = empty.build_dir_only_sub_dirs)
           ?(directory_targets = empty.directory_targets)
-          ~source_sub_dirs
-          ~source_files
+          ~sources
           rules
       =
-      { build_dir_only_sub_dirs; source_sub_dirs; source_files; directory_targets; rules }
+      { build_dir_only_sub_dirs; sources; directory_targets; rules }
     ;;
 
     let combine_exn
           r
-          ({ build_dir_only_sub_dirs
-           ; source_sub_dirs
-           ; source_files
-           ; directory_targets
-           ; rules
-           } as other)
+          ({ build_dir_only_sub_dirs; sources; directory_targets; rules } as other)
       =
       match phys_equal r empty with
       | true -> other
@@ -59,12 +51,9 @@ module Gen_rules = struct
          | false ->
            { build_dir_only_sub_dirs =
                Build_only_sub_dirs.union r.build_dir_only_sub_dirs build_dir_only_sub_dirs
-           ; source_sub_dirs =
-               Path.Build.Map.union r.source_sub_dirs source_sub_dirs ~f:(fun _ a b ->
-                 Some (Filename.Array.Set.union a b))
-           ; source_files =
-               Path.Build.Map.union r.source_files source_files ~f:(fun _ a b ->
-                 Some (Filename.Map.union_exn a b))
+           ; sources =
+               Path.Build.Map.union r.sources sources ~f:(fun _ (f, d) (f', d') ->
+                 Some (Filename.Map.union_exn f f', Filename.Array.Set.union d d'))
            ; directory_targets =
                Path.Build.Map.union_exn r.directory_targets directory_targets
            ; rules =
@@ -88,8 +77,7 @@ module Gen_rules = struct
       (Rules.create
          ?build_dir_only_sub_dirs
          ?directory_targets
-         ~source_sub_dirs:Path.Build.Map.empty
-         ~source_files:Path.Build.Map.empty
+         ~sources:Path.Build.Map.empty
          rules)
   ;;
 

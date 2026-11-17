@@ -32,14 +32,13 @@ module Gen_rules : sig
         (** Sub-directories that don't exist in the source tree but exists in
         the build directory. This is for internal directories such as
         [.dune] or [.ppx]. *)
-      ; source_sub_dirs : Filename.Array.Set.t Path.Build.Map.t
-        (** Authored source sub-directories, indexed by their parent build
-            directory. These children can be loaded without evaluating the
-            parent's [rules]. They participate in source selection, conflict
-            checks and artifact retention, not internal-directory reservation. *)
-      ; source_files : Rule.t Filename.Map.t Path.Build.Map.t
-        (** Authored file inventories with their copy rules. Only the rules of
-            files retained by source selection are used. *)
+      ; sources : (Rule.t Filename.Map.t * Filename.Array.Set.t) Path.Build.Map.t
+        (** Authored file inventories with their copy rules, and authored source
+            sub-directories, indexed by their build directory. Only the rules of
+            files retained by source selection are used. The sub-directories
+            can be loaded without evaluating the parent's [rules]. They
+            participate in source selection, conflict checks and artifact
+            retention, not internal-directory reservation. *)
       ; directory_targets : Loc.t Path.Build.Map.t
         (** Directories that are target of a rule. For each directory target,
         give the location of the rule that generates it. The keys in this
@@ -54,8 +53,7 @@ module Gen_rules : sig
     val create
       :  ?build_dir_only_sub_dirs:Build_only_sub_dirs.t
       -> ?directory_targets:Loc.t Path.Build.Map.t
-      -> source_sub_dirs:Filename.Array.Set.t Path.Build.Map.t
-      -> source_files:Rule.t Filename.Map.t Path.Build.Map.t
+      -> sources:(Rule.t Filename.Map.t * Filename.Array.Set.t) Path.Build.Map.t
       -> rules Memo.t
       -> t
 

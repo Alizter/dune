@@ -86,11 +86,11 @@ let%expect_test "source subdirectory metadata is combined without evaluating rul
   let declared name =
     Gen_rules.Rules
       (Gen_rules.Rules.create
-         ~source_sub_dirs:
+         ~sources:
            (Path.Build.Map.singleton
               dir
-              (Filename.Array.Set.singleton (Filename.of_string_exn name)))
-         ~source_files:Path.Build.Map.empty
+              ( Filename.Map.empty
+              , Filename.Array.Set.singleton (Filename.of_string_exn name) ))
          (Memo.of_thunk (fun () ->
             incr calls;
             Memo.return Rules.empty)))
@@ -103,11 +103,12 @@ let%expect_test "source subdirectory metadata is combined without evaluating rul
     ; "both declared", left, right
     ]
     ~f:(fun (name, left, right) ->
-      let { Gen_rules.Rules.source_sub_dirs; _ } =
+      let { Gen_rules.Rules.sources; _ } =
         Gen_rules.combine left right |> generated_rules
       in
       let subdirs =
-        Path.Build.Map.find_exn source_sub_dirs dir
+        Path.Build.Map.find_exn sources dir
+        |> snd
         |> Filename.Array.Set.to_list
         |> List.map ~f:Filename.to_string
         |> String.concat ~sep:","
@@ -133,14 +134,16 @@ let%expect_test "source file inventories are combined" =
     in
     Gen_rules.Rules
       (Gen_rules.Rules.create
-         ~source_sub_dirs:Path.Build.Map.empty
-         ~source_files:(Path.Build.Map.singleton dir (Filename.Map.singleton file rule))
+         ~sources:
+           (Path.Build.Map.singleton
+              dir
+              (Filename.Map.singleton file rule, Filename.Array.Set.empty))
          (Memo.return Rules.empty))
   in
-  let { Gen_rules.Rules.source_files; _ } =
+  let { Gen_rules.Rules.sources; _ } =
     Gen_rules.combine (declared "left") (declared "right") |> generated_rules
   in
-  let files = Path.Build.Map.find_exn source_files dir in
+  let files, _ = Path.Build.Map.find_exn sources dir in
   printfn
     "files=%s"
     (Filename.Map.keys files |> Filename.L.to_string |> String.concat ~sep:",");
