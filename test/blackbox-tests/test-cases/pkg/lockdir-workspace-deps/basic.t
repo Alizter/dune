@@ -23,10 +23,5 @@ The workspace package supplies the missing dependency without a lock entry.
 
 Inactive conditional workspace dependencies do not become materialisation roots.
 
-  $ cat > dune-project <<'EOF'
-  > (lang dune 3.25)
-  > (package
-  >  (name workspace-lib)
-  >  (depends (absent (= :os "never"))))
-  > EOF
+  $ make_named_package_project workspace-lib 3.25 '(absent (= :os "never"))'
   $ dune build out
