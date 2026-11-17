@@ -499,12 +499,7 @@ matches. That fallback must not enumerate the native library's installs either.
   >   (write-file %{bin}/scoped-opaque-tool "#!/bin/sh\necho opaque tool")
   >   (run chmod +x %{bin}/scoped-opaque-tool)))
   > EOF
-  $ make_lockpkg foo <<EOF
-  > (version 1.0)
-  > (depends provider)
-  > (source (copy $PWD/_source))
-  > (build (run false))
-  > EOF
+  $ echo '(depends provider)' | append_to_lockpkg foo
   $ cat >> _source/dune <<'EOF'
   > (rule (with-stdout-to opaque-output (run %{bin:scoped-opaque-tool})))
   > EOF
