@@ -934,20 +934,35 @@ with the following values for ``<rocq_fields>``:
 - ``(rocqdoc_footer <file>)``: The default HTML footer passed to ``rocq doc``
   via the ``--with-footer`` flag. Values set here become the ``:standard``
   value in the ``(rocq.theory (rocqdoc_footer <file>))`` field.
-- ``(timing <bool>)``: When ``true``, compiling ``foo.v`` also outputs
-  per-command timing information to ``foo.v.timing``, using the
-  ``-time-file`` option of ``rocq compile``. The default is ``false``.
-
-  .. versionadded:: 3.26
-- ``(profiling <bool>)``: When ``true``, compiling ``foo.v`` also outputs
-  profiling information to ``foo.vo.prof.json`` (``foo.vos.prof.json`` in
-  ``vos`` mode), using the ``-profile`` option of ``rocq compile``. The
-  default is ``false``.
+- ``(timing <blang expression>)`` controls whether ``rocq compile`` writes
+  per-command timing information for ``foo.v`` to ``foo.v.timing`` using
+  ``-time-file``. The :doc:`Boolean expression </reference/boolean-language>`
+  defaults to ``false``.
 
   .. versionadded:: 3.26
 
-These files are targets of the rule compiling ``foo.v``: they can be built
-directly, and they are kept in the build directory. Enabling these fields in a
-``dune-workspace`` file, for instance one passed with ``DUNE_WORKSPACE``,
-enables them for all the theories of the workspace, including when building
-packages with ``dune build -p``.
+- ``(profiling <blang expression>)`` controls whether ``rocq compile`` writes
+  profiling information for ``foo.v`` to ``foo.vo.prof.json``
+  (``foo.vos.prof.json`` in ``vos`` mode) using ``-profile``. The
+  :doc:`Boolean expression </reference/boolean-language>` defaults to ``false``.
+
+  .. versionadded:: 3.26
+
+The output files are targets of the rule compiling ``foo.v``. You can build
+them directly, and Dune keeps them in the build directory. When enabled,
+Dune's timing and profiling options take precedence over conflicting Rocq
+flags.
+
+Set these fields in ``dune-workspace``, or in a workspace file selected by
+``DUNE_WORKSPACE``, to provide defaults for the entire workspace, including
+when building packages with ``dune build -p``. A nearer ``env`` stanza can
+turn off either output by setting the corresponding field to ``false``. For
+example, to enable profiling only when the ``ROCQ_PROFILING`` environment
+variable is set to ``true``:
+
+.. code:: dune
+
+   (env
+    (_
+     (rocq
+      (profiling (= %{env:ROCQ_PROFILING=false} true)))))
